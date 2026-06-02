@@ -222,5 +222,12 @@ flowchart LR
 - ✅ **Half-day leave** = not in v1 (full days only).
 - ✅ **Delegate** = informational/notified (no enforced coverage).
 
+**Resolved (2026-05-31) — coverage & UX, from design review:**
+- ✅ **Coverage model (domain separation):** *Placement* (E3) = long-term site assignment; *delegation* (E6) = an occasional, **informational suggestion** by the agent; *coverage* of a leave gap = **scheduling (E4)** — approved leave clears the agent's shifts → those become **open/uncovered slots** the **shift leader backfills** by re-rostering an already-placed **same-company + service-line** agent. The delegate is shown to the leader as a **non-binding suggested** backfill.
+- ✅ **Uncovered-post flag:** the team leave calendar (F6.5) **and** the E4 schedule surface the resulting uncovered slots ("perlu pengganti"). **No auto-substitution and no cross-company borrowing in v1** — the leader decides.
+- ✅ **Coverage clash = service-line-aware** (F6.5 LV-4): flag a day only when ≥2 agents of the *same* service line are off at one site.
+- ✅ **Delegate eligibility:** agent self-service at request time; **not constrained** to company/line in v1.
+- ✅ **Quota grant UX:** annual quota auto-grants at period start (LQ-1); HR also has a **manual "Terbitkan Kuota Tahunan"** trigger/repair (period · default entitlement per type · pro-rata · preview count) and a per-employee **adjust modal requiring a reason** (LQ-6, audited).
+
 **Still open (confirm with SWP):**
 1. Exact "working day" definition for 24/7 shift workers (rostered days vs standard business days) used in duration counting.

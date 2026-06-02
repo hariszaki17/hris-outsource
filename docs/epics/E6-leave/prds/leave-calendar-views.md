@@ -38,10 +38,11 @@ Agent (self), Shift Leader (own company), HR/Super Admin (all), System (query, s
 | LV-1 | **Scope:** agent sees only own; leader sees own company; HR/Super Admin see all. |
 | LV-2 | Agent view shows current balance(s) by leave type/period + history with statuses. |
 | LV-3 | Team calendar shows **approved** (and optionally **pending**) leave by date, per agent, for coverage planning. |
-| LV-4 | Calendar highlights **clashes** (multiple agents off the same day at one site). |
+| LV-4 | Calendar highlights **coverage clashes** — **≥2 agents of the *same service line* off the same day at one site** (resolved 2026-05-31: clash is service-line-aware, not raw headcount; different-line absences are not a clash). The highlight names the affected service line. |
 | LV-5 | Filters: date range, leave type, status, service line, company. |
 | LV-6 | Exports (Excel/PDF) reflect filters and are audited. |
 | LV-7 | Read-only; deep-links to the request (F6.2) / approval (F6.3). |
+| LV-8 | **Uncovered-post flag** (resolved 2026-05-31): for approved leave, the team calendar + the E4 schedule surface the resulting **open/uncovered shift slots** ("perlu pengganti") so the shift leader can backfill (re-roster an already-placed same-company/service-line agent). The agent's named **delegate** is shown as a **non-binding suggested** backfill. No auto-substitution and no cross-company borrowing in v1 — the leader decides. Coverage lives in **E4 scheduling**, not in leave. |
 
 ## 6. Data model
 
