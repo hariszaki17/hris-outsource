@@ -16,7 +16,6 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
-	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 )
 
 // Repository is the data dependency, defined by this consumer (Go idiom) so it
@@ -49,18 +48,24 @@ type NewRefreshToken struct {
 	ExpiresAt   time.Time
 }
 
+// TxRunner is a thin interface over db.TxManager so tests can inject a fake.
+// Production code passes *db.TxManager (which satisfies this interface).
+type TxRunner interface {
+	InTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+}
+
 // Clock is injectable for deterministic tests; defaults to time.Now.
 type Clock func() time.Time
 
 type Service struct {
 	repo       Repository
-	txm        *db.TxManager
+	txm        TxRunner
 	issuer     *auth.Issuer
 	refreshTTL time.Duration
 	now        Clock
 }
 
-func NewService(repo Repository, txm *db.TxManager, issuer *auth.Issuer, refreshTTL time.Duration) *Service {
+func NewService(repo Repository, txm TxRunner, issuer *auth.Issuer, refreshTTL time.Duration) *Service {
 	return &Service{repo: repo, txm: txm, issuer: issuer, refreshTTL: refreshTTL, now: time.Now}
 }
 
