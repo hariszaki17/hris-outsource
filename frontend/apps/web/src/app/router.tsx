@@ -57,6 +57,10 @@ import {
   CorrectionsScreen,
   type CorrectionsSearch,
 } from '@/features/e5-attendance/corrections-screen.tsx';
+import { LeaveApprovalsScreen } from '@/features/e6-leave/leave-approvals-screen.tsx';
+import { LeaveCalendarScreen } from '@/features/e6-leave/leave-calendar-screen.tsx';
+import { LeaveDetailScreen } from '@/features/e6-leave/leave-detail-screen.tsx';
+import { LeaveQuotasScreen } from '@/features/e6-leave/leave-quotas-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -476,6 +480,31 @@ const correctionsRoute = createRoute({
   },
 });
 
+// E6 — Cuti (leave approvals queue, detail, quotas, calendar)
+const leaveApprovalsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/leave',
+  component: LeaveApprovalsScreen,
+});
+const leaveDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/leave/$leaveRequestId',
+  component: function LeaveDetailRoute() {
+    const { leaveRequestId } = leaveDetailRoute.useParams();
+    return <LeaveDetailScreen leaveRequestId={leaveRequestId} />;
+  },
+});
+const leaveQuotasRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/leave/quotas',
+  component: LeaveQuotasScreen,
+});
+const leaveCalendarRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/leave/calendar',
+  component: LeaveCalendarScreen,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -587,7 +616,10 @@ const routeTree = rootRoute.addChildren([
     attendanceVerificationRoute,
     attendanceDetailRoute,
     correctionsRoute,
-    placeholder('/leave', 'Cuti'),
+    leaveApprovalsRoute,
+    leaveDetailRoute,
+    leaveQuotasRoute,
+    leaveCalendarRoute,
     placeholder('/overtime', 'Lembur'),
     placeholder('/reports', 'Laporan'),
     settingsRoute.addChildren([

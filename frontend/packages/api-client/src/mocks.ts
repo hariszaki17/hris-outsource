@@ -32,6 +32,9 @@ import { getAttendanceRecordsMock } from './gen/e5/attendance-records/attendance
 import { getAttendanceVerificationMock } from './gen/e5/attendance-verification/attendance-verification.msw.ts';
 import { getClockInOutMock } from './gen/e5/clock-in-out/clock-in-out.msw.ts';
 import { getCorrectionsMock as getE5CorrectionsMock } from './gen/e5/corrections/corrections.msw.ts';
+import { getLeaveCalendarMock } from './gen/e6/leave-calendar/leave-calendar.msw.ts';
+import { getLeaveQuotasMock } from './gen/e6/leave-quotas/leave-quotas.msw.ts';
+import { getLeaveRequestsMock } from './gen/e6/leave-requests/leave-requests.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
@@ -59,4 +62,8 @@ export const handlers: RequestHandler[] = [
   ...getAttendanceRecordsMock(),
   ...getAttendanceVerificationMock(),
   ...getE5CorrectionsMock(),
+  // E6 Leave / Cuti (leave-types served by E2 master-data; omitted here to avoid a path clash)
+  ...getLeaveQuotasMock(),
+  ...getLeaveRequestsMock(),
+  ...getLeaveCalendarMock(),
 ];

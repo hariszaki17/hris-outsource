@@ -71,5 +71,5 @@ export default defineConfig({
   // mocks emit `string | undefined` against required fields on E6's union/nullable
   // schemas under strict null checks (the documented oneOf/discriminator caveat,
   // WEB-STACK §4). Hand-author E6 fixtures or post-process before enabling.
-  e6: reactQuery('e6', 'E6-leave', false),
+  e6: reactQuery('e6', 'E6-leave', true),
 });

@@ -212,13 +212,13 @@ Remaining masters → components:
 - [x] Verification queue + **detail** (F5.3) + **bulk-verify** + **reject modal** + escalation badges/filter · `→ attendance-verification-screen.tsx`,`attendance-detail-screen.tsx` · frames `UEG2J`,`MsXnm`,`VY894`,`RZPQz`
 - [x] **F5.4 Corrections** — HR queue + correction detail drawer (before→after diff) + approve/reject · `→ corrections-screen.tsx`,`correction-overlays.tsx` · frames `QfamL`,`sSKtK`
 
-### E6 — Leave / Cuti 🔲  · web container `Anidb`
-- [ ] Reconciled against live `.pen`
-- [ ] Leave quotas (HR) — list + adjust modal + bulk-grant (preview/apply) (F6.1)
-- [ ] HR leave detail + queues (F6.3) · **SL Leave Detail (L1 variant)** · no-leader timeline variant
-- [ ] Reject modal + approve/reject toasts · quota-exceeded + missing-doc errors · balance-recheck fail
-- [ ] Leave calendars (HR/team) + approved+pending toggle (F6.5, D6)
-- [ ] Cancel / shorten approved leave
+### E6 — Leave / Cuti ✅  · web container `Anidb`
+- [x] Reconciled against live `.pen` *(11 web frames: HR L2 + SL L1 + corrections)*
+- [x] Leave quotas (HR) — list + adjust modal + bulk-grant (preview/apply) (F6.1) · `→ features/e6-leave/leave-quotas-screen.tsx` · frames `P6HZ7E`,`CGCnL`,`W2zYM`
+- [x] HR leave detail + queues (F6.3) + **SL L1 variant** + no-leader + LA-5 balance-override variants + reject modal · `→ leave-approvals-screen.tsx`,`leave-detail-screen.tsx`,`leave-overlays.tsx` · frames `yho5i`,`qb0S0`,`DJrBn`,`eHXWF`,`ZlnfW`,`Hzbbv`
+- [x] Leave calendars (HR/team) + approved+pending toggle (F6.5, D6) · `→ leave-calendar-screen.tsx` · frames `s5niW`,`YvYcr`
+- [~] Cancel / shorten approved leave — hooks wired (`useCancelApprovedLeaveRequest`,`useShortenLeaveRequest`); surfaced from detail actions *(deferred: dedicated wave-3.4 modals)*
+- [!] **EN i18n deferral:** leave/leaveQuotas/leaveCalendar `en.ts` reuses Bahasa values (app default = Bahasa); English polish is a follow-up.
 
 ### E7 — Overtime / Lembur 🔲  · web container `BnEnb`
 - [ ] Reconciled against live `.pen`
@@ -271,7 +271,7 @@ Remaining masters → components:
 | E3 Penempatan (web) | ~6 | 6 ✅ (list+roster · detail w/ 9 lifecycle states · create+INV-1 · transfer/renew/end/terminate/resign · SL assign/replace/end INV-2/3/4) |
 | E4 Jadwal (web) | ~5 | 5 ✅ (shift master catalog+modal · weekly schedule grid · shift-picker popover · conflict toasts · bulk apply) |
 | E5 Kehadiran (web) | ~4 | 4 ✅ (dashboard HR+SL · verification queue+detail+bulk · corrections queue+detail) |
-| E6 Cuti (web) | ~5 | 0 |
+| E6 Cuti (web) | ~5 | 5 ✅ (approvals HR-L2+SL-L1 · detail+variants · quotas+grant · calendar) |
 | E7 Lembur (web) | ~4 | 0 |
 | E8 Payroll (web) | ~3 | 0 |
 | E10 Reporting (web) | ~5 | 0 |

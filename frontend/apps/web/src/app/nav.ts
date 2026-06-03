@@ -1,7 +1,9 @@
 import type { Role } from '@swp/shared';
 import {
   Building2,
+  CalendarCheck,
   CalendarClock,
+  CalendarDays,
   ChartColumn,
   ClipboardCheck,
   Clock,
@@ -52,6 +54,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/attendance', labelKey: 'nav.attendance', icon: ClipboardCheck, roles: ALL_WEB },
   { to: '/corrections', labelKey: 'nav.corrections', icon: FilePenLine, roles: ALL_WEB },
   { to: '/leave', labelKey: 'nav.leave', icon: Plane, roles: ALL_WEB },
+  { to: '/leave/quotas', labelKey: 'nav.leaveQuotas', icon: CalendarCheck, roles: ADMIN },
+  { to: '/leave/calendar', labelKey: 'nav.leaveCalendar', icon: CalendarDays, roles: ALL_WEB },
   { to: '/overtime', labelKey: 'nav.overtime', icon: Timer, roles: ALL_WEB },
   { to: '/reports', labelKey: 'nav.reports', icon: ChartColumn, roles: ADMIN },
 ];
