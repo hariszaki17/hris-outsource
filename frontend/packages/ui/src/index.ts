@@ -63,6 +63,16 @@ export {
   type ModalTone,
   type ConfirmTone,
 } from './molecules/modal.tsx';
+export {
+  Drawer,
+  DrawerHeader,
+  DrawerBody,
+  DrawerFooter,
+  type DrawerProps,
+  type DrawerHeaderProps,
+  type DrawerBodyProps,
+  type DrawerFooterProps,
+} from './molecules/drawer.tsx';
 
 // Molecules — data tables & pagination
 export {

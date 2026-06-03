@@ -23,8 +23,18 @@ import {
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { MoreVertical, UserPlus } from 'lucide-react';
-import { useState } from 'react';
+import type * as React from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  ChangeRoleModal,
+  CreateUserModal,
+  DeactivateUserConfirm,
+  EditUserDrawer,
+  ReactivateUserConfirm,
+  SendResetConfirm,
+  UserRowActionsMenu,
+} from './user-overlays.tsx';
 
 /**
  * E1 · Pengguna & Peran — RBAC user management list (F1.2 / rbac-roles.md). Built from `.pen`
@@ -53,12 +63,57 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
+// ---------------------------------------------------------------------------
+// Overlay state types
+// ---------------------------------------------------------------------------
+
+type OverlayKind =
+  | 'create'
+  | 'edit'
+  | 'change-role'
+  | 'send-reset'
+  | 'deactivate'
+  | 'reactivate'
+  | null;
+
 export function UsersScreen() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const search = useSearch({ from: '/authed/settings/users' });
   // Cursor history for the Prev button (cursors are forward-only).
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
+
+  // ---------------------------------------------------------------------------
+  // Overlay state
+  // ---------------------------------------------------------------------------
+  const [overlayKind, setOverlayKind] = useState<OverlayKind>(null);
+  const [activeUser, setActiveUser] = useState<User | null>(null);
+  // Per-row menu anchor management
+  const [openMenuUserId, setOpenMenuUserId] = useState<string | null>(null);
+  // Ref map for kebab button anchors — one ref per rendered row
+  const kebabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Wrap anchor as a RefObject shape for UserRowActionsMenu
+  const activeMenuAnchorRef = useRef<HTMLElement | null>(null);
+
+  function openOverlay(kind: Exclude<OverlayKind, null>, user?: User) {
+    setOverlayKind(kind);
+    setActiveUser(user ?? null);
+  }
+
+  function closeOverlay() {
+    setOverlayKind(null);
+    // Do not clear activeUser immediately so closing animations can finish.
+  }
+
+  function handleDone() {
+    closeOverlay();
+    void query.refetch();
+  }
+
+  // ---------------------------------------------------------------------------
+  // List query
+  // ---------------------------------------------------------------------------
 
   const params: ListUsersParams = {
     limit: PAGE_SIZE,
@@ -79,6 +134,10 @@ export function UsersScreen() {
     });
     setPrevCursors([]);
   };
+
+  // ---------------------------------------------------------------------------
+  // Columns
+  // ---------------------------------------------------------------------------
 
   const columns: Column<User>[] = [
     {
@@ -134,14 +193,18 @@ export function UsersScreen() {
     },
   ];
 
+  // ---------------------------------------------------------------------------
+  // Title band
+  // ---------------------------------------------------------------------------
+
   const titleBand = (
     <div className="flex items-start justify-between">
       <div className="flex flex-col gap-1">
         <h1 className="font-bold text-3xl text-text">{t('users.title')}</h1>
         <p className="max-w-[640px] text-sm text-text-3">{t('users.subtitle')}</p>
       </div>
-      <Button>
-        <UserPlus />
+      <Button type="button" onClick={() => openOverlay('create')}>
+        <UserPlus aria-hidden />
         {t('users.add')}
       </Button>
     </div>
@@ -233,15 +296,61 @@ export function UsersScreen() {
             />
           )
         }
-        rowActions={() => (
-          <button
-            type="button"
-            aria-label={t('users.rowActions')}
-            className="flex size-[30px] items-center justify-center rounded-md text-text-3 hover:bg-surface-2"
-          >
-            <MoreVertical className="size-4" aria-hidden />
-          </button>
-        )}
+        rowActions={(u) => {
+          const isOpen = openMenuUserId === u.id;
+
+          // Build a stable anchor ref holder for this row
+          const setRef = (el: HTMLButtonElement | null) => {
+            if (el) {
+              kebabRefs.current.set(u.id, el);
+            } else {
+              kebabRefs.current.delete(u.id);
+            }
+          };
+
+          // Wrap the per-row button ref as a RefObject so we can pass it to the menu
+          const anchorRef: React.RefObject<HTMLElement | null> = {
+            get current() {
+              return kebabRefs.current.get(u.id) ?? null;
+            },
+          };
+
+          return (
+            <div className="relative">
+              <button
+                ref={setRef}
+                type="button"
+                aria-label={t('users.rowActions')}
+                aria-expanded={isOpen}
+                aria-haspopup="menu"
+                className="flex size-[30px] items-center justify-center rounded-md text-text-3 hover:bg-surface-2"
+                onClick={() => {
+                  if (isOpen) {
+                    setOpenMenuUserId(null);
+                  } else {
+                    activeMenuAnchorRef.current = kebabRefs.current.get(u.id) ?? null;
+                    setOpenMenuUserId(u.id);
+                  }
+                }}
+              >
+                <MoreVertical className="size-4" aria-hidden />
+              </button>
+
+              <UserRowActionsMenu
+                user={u}
+                open={isOpen}
+                anchorRef={anchorRef}
+                onClose={() => setOpenMenuUserId(null)}
+                onEdit={() => openOverlay('edit', u)}
+                onChangeRole={() => openOverlay('change-role', u)}
+                onSendReset={() => openOverlay('send-reset', u)}
+                onToggleStatus={() =>
+                  openOverlay(u.status === UserStatus.DISABLED ? 'reactivate' : 'deactivate', u)
+                }
+              />
+            </div>
+          );
+        }}
         footer={
           rows.length > 0 ? (
             <CursorPagination
@@ -271,6 +380,67 @@ export function UsersScreen() {
             />
           ) : undefined
         }
+      />
+
+      {/* ---------------------------------------------------------------------------
+          Overlays — rendered once, driven by overlayKind + activeUser state
+          --------------------------------------------------------------------------- */}
+
+      <CreateUserModal
+        open={overlayKind === 'create'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        onDone={handleDone}
+      />
+
+      <EditUserDrawer
+        open={overlayKind === 'edit'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        user={activeUser}
+        onDone={handleDone}
+        onRequestChangeRole={(u) => openOverlay('change-role', u)}
+        onRequestToggleStatus={(u) =>
+          openOverlay(u.status === UserStatus.DISABLED ? 'reactivate' : 'deactivate', u)
+        }
+      />
+
+      <ChangeRoleModal
+        open={overlayKind === 'change-role'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        user={activeUser}
+        onDone={handleDone}
+      />
+
+      <SendResetConfirm
+        open={overlayKind === 'send-reset'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        user={activeUser}
+        onDone={handleDone}
+      />
+
+      <DeactivateUserConfirm
+        open={overlayKind === 'deactivate'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        user={activeUser}
+        onDone={handleDone}
+      />
+
+      <ReactivateUserConfirm
+        open={overlayKind === 'reactivate'}
+        onOpenChange={(open) => {
+          if (!open) closeOverlay();
+        }}
+        user={activeUser}
+        onDone={handleDone}
       />
     </div>
   );

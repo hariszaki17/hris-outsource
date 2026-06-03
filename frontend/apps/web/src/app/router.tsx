@@ -4,7 +4,14 @@ import { ResetPasswordScreen } from '@/features/auth/reset-password-screen.tsx';
 import { DashboardScreen } from '@/features/dashboard/dashboard-screen.tsx';
 import { ComponentGallery } from '@/features/dev/component-gallery.tsx';
 import { DataComponentsGallery } from '@/features/dev/data-components-gallery.tsx';
+import { AuditLogScreen } from '@/features/e1-foundations/audit-log-screen.tsx';
+import {
+  NoPermissionScreen,
+  SessionExpiredScreen,
+} from '@/features/e1-foundations/global-states.tsx';
+import { SettingsGeneralScreen } from '@/features/e1-foundations/settings-general-screen.tsx';
 import { SettingsLayout } from '@/features/e1-foundations/settings-layout.tsx';
+import { SettingsOverviewScreen } from '@/features/e1-foundations/settings-overview-screen.tsx';
 import { UsersScreen } from '@/features/e1-foundations/users-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
@@ -66,6 +73,19 @@ const devDataGalleryRoute = createRoute({
   component: DataComponentsGallery,
 });
 
+// Global auth states (public — reachable without the authed shell, e.g. after a 401).
+const sessionExpiredRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/session-expired',
+  component: SessionExpiredScreen,
+});
+
+const forbiddenRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/forbidden',
+  component: NoPermissionScreen,
+});
+
 // Authenticated layout — guards every child. Client guard is convenience only; the API
 // is the real gate (ENGINEERING.md C1).
 const authedRoute = createRoute({
@@ -101,7 +121,7 @@ const settingsRoute = createRoute({
 const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/',
-  component: () => <PlaceholderScreen title="Ringkasan" />,
+  component: SettingsOverviewScreen,
 });
 const usersRoute = createRoute({
   getParentRoute: () => settingsRoute,
@@ -134,12 +154,38 @@ const usersRoute = createRoute({
 const settingsAuditRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: 'audit-log',
-  component: () => <PlaceholderScreen title="Audit Log" />,
+  component: AuditLogScreen,
+  // Typed filter/cursor search params for the audit-log screen (D1).
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): {
+    q?: string;
+    entity_type?: string;
+    action?: string;
+    date_preset?: string;
+    cursor?: string;
+  } => {
+    const out: {
+      q?: string;
+      entity_type?: string;
+      action?: string;
+      date_preset?: string;
+      cursor?: string;
+    } = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (typeof search.entity_type === 'string' && search.entity_type)
+      out.entity_type = search.entity_type;
+    if (typeof search.action === 'string' && search.action) out.action = search.action;
+    if (typeof search.date_preset === 'string' && search.date_preset)
+      out.date_preset = search.date_preset;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
 });
 const settingsGeneralRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: 'general',
-  component: () => <PlaceholderScreen title="Umum" />,
+  component: SettingsGeneralScreen,
 });
 
 const routeTree = rootRoute.addChildren([
@@ -148,6 +194,8 @@ const routeTree = rootRoute.addChildren([
   resetPasswordRoute,
   devGalleryRoute,
   devDataGalleryRoute,
+  sessionExpiredRoute,
+  forbiddenRoute,
   authedRoute.addChildren([
     indexRoute,
     placeholder('/employees', 'Karyawan'),

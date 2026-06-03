@@ -12,7 +12,7 @@
     "./query-client": "./src/query-client.ts"
   },
   "scripts": {
-    "gen": "orval --config ./orval.config.ts && biome format --write ./src/gen >/dev/null 2>&1 || true",
+    "gen": "orval --config ./orval.config.ts && node ./scripts/patch-msw-action-paths.mjs && biome format --write ./src/gen >/dev/null 2>&1 || true",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

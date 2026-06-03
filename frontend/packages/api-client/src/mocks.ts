@@ -5,32 +5,23 @@
  *
  * Add a line here when a new epic spec is wired in orval.config.ts.
  *
- * CAVEAT: the user `{userId}:action` sub-resource endpoints (deactivate / reactivate /
- * change-role / send-password-reset / bulk-deactivate) generate MSW paths of the form
- * "(prefix)/users/:userId:deactivate", which MSW's path-to-regexp matcher cannot parse (the
- * back-to-back ":param:action" form) — a single malformed handler throws during matching and
- * 500s every request. We therefore include only the valid-path user handlers (list/create/
- * get/update) explicitly. Re-include the action handlers once the generated paths are
- * post-processed to escape the action colon.
+ * Action endpoints: CONVENTIONS models actions as `{id}:action` sub-resources, so Orval emits
+ * MSW paths of the form "(prefix)/users/:userId:deactivate". The back-to-back ":param:action"
+ * form is unparseable by MSW's matcher, so the `pnpm gen` post-gen step
+ * (scripts/patch-msw-action-paths.mjs) rewrites those into anchored RegExp paths. With that fix
+ * in place we include the full generated handler set (incl. the action mutations) via
+ * `getUsersMock()`.
  */
 import type { RequestHandler } from 'msw';
 import { getAuditLogMock } from './gen/e1/audit-log/audit-log.msw.ts';
 import { getAuthenticationMock } from './gen/e1/authentication/authentication.msw.ts';
 import { getPlatformMock } from './gen/e1/platform/platform.msw.ts';
-import {
-  getCreateUserMockHandler,
-  getGetUserMockHandler,
-  getListUsersMockHandler,
-  getUpdateUserMockHandler,
-} from './gen/e1/users/users.msw.ts';
+import { getUsersMock } from './gen/e1/users/users.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
   ...getAuthenticationMock(),
-  getListUsersMockHandler(),
-  getCreateUserMockHandler(),
-  getGetUserMockHandler(),
-  getUpdateUserMockHandler(),
+  ...getUsersMock(),
   ...getAuditLogMock(),
   ...getPlatformMock(),
 ];

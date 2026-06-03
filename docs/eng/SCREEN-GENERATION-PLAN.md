@@ -76,8 +76,15 @@ Built so far (✅): Button, Input, Checkbox, StatusBadge, IdChip, DateText, Form
 StateView (loading/empty/error/no-permission), Banner, **Avatar, Sidebar, Topbar, Toast (+provider),
 Skeleton, EmptyState, Modal/ConfirmDialog** *(Phase-0 chrome & feedback batch, 2026-06-03)*,
 **SearchField, FilterSelect, Toggle, DataTable+CursorPagination, StatCard, StatusBadge `dot`,
-SettingsSubnav, AuditTrail (Viewer/Inline/Drawer)** *(Phase-0 data & form batch, 2026-06-03)*.
+SettingsSubnav, AuditTrail (Viewer/Inline/Drawer)** *(Phase-0 data & form batch, 2026-06-03)*,
+**Drawer (generic right-sheet: Drawer/Header/Body/Footer)** *(E1 batch — used by Edit-User + Audit-detail, reused E3–E8)*.
 Remaining Phase-0 (deferred): Export-modal family + Notif cards → E10; Pickers → E2/E3 forms.
+
+> **MSW action-path fix (E1, 2026-06-03):** `{id}:action` endpoints generated unparseable MSW paths
+> (`:userId:deactivate`). Fixed once for ALL epics via a post-gen step
+> (`packages/api-client/scripts/patch-msw-action-paths.mjs`, wired into `pnpm gen`) that rewrites
+> action-colon paths to anchored RegExps; all action handlers re-included in `mocks.ts`. Also
+> regenerated `public/mockServiceWorker.js` to match msw 2.7.0 (was 2.14.6 → 0 page errors).
 
 Remaining masters → components:
 
@@ -153,7 +160,7 @@ Remaining masters → components:
 > Phase 3 — deferred until `apps/mobile` is scaffolded. Each epic: tick "reconciled" after you
 > diff the list against its live `.pen` container and add any missing frame.
 
-### E1 — Foundations 🟡  · web container `teUIY`
+### E1 — Foundations ✅  · web container `teUIY`
 - [x] Reconciled against live `.pen` *(24 web frames; auth set built, admin console + global states remain)*
 - [x] Login — default + failed (see Phase 1) · frames `lKRjr`,`JRq3Z`
 - [x] Login — **Terkunci sementara** (locked) · `→ features/auth/login-screen.tsx` (search param `?error=locked`) · comp: Banner(icon) · frame `N2IdlJ`
@@ -163,12 +170,12 @@ Remaining masters → components:
 - [x] **Pengguna & Peran (users) — list** + filters + row-kebab + states · `→ features/e1-foundations/users-screen.tsx` · frame `kHNWT`
       First **data-driven** screen: `useListUsers` (generated) over MSW · DataTable · filters in typed URL search params (D1) · cursor pagination · loading/empty/filtered/error/no-permission states.
 - [x] **Settings shell + layout** — `SettingsSubnav` rail + `<Outlet>` · `→ features/e1-foundations/settings-layout.tsx` · routes `/settings`(Ringkasan)·`/users`·`/audit-log`·`/general`.
-- [ ] Tambah Pengguna (create user) — modal/form + validation · super_admin/hr_admin · comp: Modal,FormField
-- [ ] Ubah Peran / Edit user — drawer · super_admin/hr_admin · comp: Modal/Drawer,FormField
-- [ ] Audit log — list (paginated, F1.3) + **detail drawer** · super_admin/hr_admin · comp: DataTable,AuditTrailDrawer
-- [ ] Pengaturan (Settings) — Ringkasan hub + General · super_admin/hr_admin *(shell done; hub/general are placeholders)*
-- [ ] Session-expired re-auth state · all · comp: EmptySessionExpired (P-10)
-- [ ] No-permission / 403 state · all · comp: EmptyNoPermission
+- [x] Tambah Pengguna (create user) — modal/form + validation · `→ features/e1-foundations/user-overlays.tsx` · frame `iXs2R`/`FGkC2`
+- [x] Ubah Peran (modal) + Edit user (drawer) + row-kebab + send-reset + (de)activate confirms · user-overlays.tsx · frames `BWWxD`/`y4qyuS`, `K9DQR`/`xmWHa`, `Zjzvo`, `oXZNQ`, `cACO9`
+- [x] Audit log — list (F1.3) + **detail drawer** (before→after diff) · `→ features/e1-foundations/audit-log-screen.tsx`,`audit-detail-drawer.tsx` · frames `rtJRB`/`N3EBSr`, `Zxv9P`/`x5wrt`
+- [x] Pengaturan — Ringkasan hub + General (PlatformSettings) · `→ settings-overview-screen.tsx`,`settings-general-screen.tsx` · frames `fVinX`/`E7WOwh`, `m3sWh`/`tch6k`
+- [x] Session-expired re-auth state · `→ features/e1-foundations/global-states.tsx` (`/session-expired`) · comp: EmptySessionExpired `iwcgE`
+- [x] No-permission / 403 state · global-states.tsx (`/forbidden`) + per-screen inline · comp: EmptyNoPermission `MRbzz`,`TqMQ6`
 
 ### E2 — Identity / Karyawan & Master Data 🔲  · web container `G0D87V`
 - [ ] Reconciled against live `.pen`
@@ -257,9 +264,9 @@ Remaining masters → components:
 
 | Phase / Epic | Screens (approx) | Done |
 |---|---|---|
-| Phase 0 — components | ~18 groups | 24 of ~27 masters (chrome+feedback + data/form done; remaining: Export modal, Notif cards, Pickers — deferred to their epics) |
+| Phase 0 — components | ~18 groups | 25 of ~27 masters (chrome+feedback + data/form + **Drawer** done; remaining: Export modal, Notif cards, Pickers — deferred to their epics) |
 | Phase 1 — shell + login | 3 | 3 (providers, login, **app shell**) ✅ |
-| E1 Foundations (web) | 12 | 6 (auth set + Users list + Settings shell; create/edit/audit/hub remain) |
+| E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
 | E2 Karyawan (web) | ~9 features | 0 |
 | E3 Penempatan (web) | ~6 | 0 |
 | E4 Jadwal (web) | ~5 | 0 |
