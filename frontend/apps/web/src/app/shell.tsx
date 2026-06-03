@@ -1,4 +1,10 @@
-import { NAV_ITEMS, SETTINGS_ITEM, navForRole } from '@/app/nav.ts';
+import {
+  NAV_ITEMS,
+  SETTINGS_ITEM,
+  activeSection,
+  navForRole,
+  subnavForSection,
+} from '@/app/nav.ts';
 import { UserMenu } from '@/app/user-menu.tsx';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
@@ -13,19 +19,21 @@ import {
   TopbarIconButton,
   TopbarSearch,
 } from '@swp/ui';
-import { Link, Outlet, useRouterState } from '@tanstack/react-router';
+import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { Bell } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 /**
  * Authenticated app shell (DESIGN-SYSTEM §5): dark 240px sidebar · 64px white topbar
  * (breadcrumb left, user right) · app-bg content area. Composed from comp/Sidebar `iCqTB`
- * and comp/Topbar `caFkE` (packages/ui). Nav is filtered by the signed-in user's role via the
- * interim x-rbac map (ENGINEERING.md A2/C1 — client gating is defense-in-depth, not the gate).
+ * and comp/Topbar `caFkE` (packages/ui). The sidebar holds the 8 primary modules only; a section
+ * sub-nav strip surfaces a section's sub-pages under the topbar (nav.ts SECTION_SUBNAV). Nav is
+ * filtered by role via the interim x-rbac map (ENGINEERING.md A2/C1 — defense-in-depth, not the gate).
  */
 export function AppShell() {
   const { t } = useTranslation();
   const user = useCurrentUser();
+  const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Defensive: the route guard requires a token, but a session may lack a user (e.g. mid
@@ -35,9 +43,20 @@ export function AppShell() {
   const items = navForRole(NAV_ITEMS, user.role);
   const showSettings = SETTINGS_ITEM.roles.includes(user.role);
 
-  const isActive = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to));
-  const active = [...items, SETTINGS_ITEM].find((i) => isActive(i.to));
-  const crumbs = active ? [{ label: t(active.labelKey), current: true }] : [];
+  const inSettings = pathname.startsWith('/settings');
+  const section = inSettings ? '/settings' : activeSection(pathname);
+  const subnav = inSettings ? [] : subnavForSection(section, user.role);
+
+  // Active sub-nav tab = the longest sub-route that prefixes the current path.
+  const activeSub = subnav.reduce<string | null>((best, s) => {
+    const match = s.to === '/' ? pathname === '/' : pathname.startsWith(s.to);
+    if (!match) return best;
+    if (best === null || s.to.length > best.length) return s.to;
+    return best;
+  }, null);
+
+  const activePrimary = [...items, SETTINGS_ITEM].find((i) => i.to === section);
+  const crumbs = activePrimary ? [{ label: t(activePrimary.labelKey), current: true }] : [];
 
   return (
     <div className="flex h-full">
@@ -49,14 +68,14 @@ export function AppShell() {
         />
         <SidebarSectionLabel>{t('shell.menu')}</SidebarSectionLabel>
         {items.map((item) => (
-          <SidebarNavItem key={item.to} icon={item.icon} active={isActive(item.to)} asChild>
+          <SidebarNavItem key={item.to} icon={item.icon} active={item.to === section} asChild>
             <Link to={item.to}>{t(item.labelKey)}</Link>
           </SidebarNavItem>
         ))}
         <SidebarSpacer />
         {showSettings && (
           <SidebarFooter>
-            <SidebarNavItem icon={SETTINGS_ITEM.icon} active={isActive(SETTINGS_ITEM.to)} asChild>
+            <SidebarNavItem icon={SETTINGS_ITEM.icon} active={inSettings} asChild>
               <Link to={SETTINGS_ITEM.to}>{t(SETTINGS_ITEM.labelKey)}</Link>
             </SidebarNavItem>
           </SidebarFooter>
@@ -69,11 +88,39 @@ export function AppShell() {
           right={
             <>
               <TopbarSearch placeholder={t('shell.search')} aria-label={t('shell.search')} />
-              <TopbarIconButton icon={Bell} label={t('shell.notifications')} />
+              <TopbarIconButton
+                icon={Bell}
+                label={t('shell.notifications')}
+                onClick={() => navigate({ to: '/notifications' })}
+              />
               <UserMenu user={user} />
             </>
           }
         />
+        {subnav.length > 0 && (
+          <nav
+            aria-label={activePrimary ? t(activePrimary.labelKey) : undefined}
+            className="flex items-center gap-1 border-b border-border bg-surface px-6"
+          >
+            {subnav.map((s) => {
+              const isActive = s.to === activeSub;
+              return (
+                <Link
+                  key={s.to}
+                  to={s.to}
+                  className={[
+                    '-mb-px border-b-2 px-3 py-3 text-[13px] font-medium transition-colors',
+                    isActive
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-text-2 hover:text-text',
+                  ].join(' ')}
+                >
+                  {t(s.labelKey)}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
         <main className="flex-1 overflow-auto bg-app p-6">
           <Outlet />
         </main>
