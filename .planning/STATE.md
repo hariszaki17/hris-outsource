@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-stopped_at: Completed 01-test-harness-auth/01-01-PLAN.md
-last_updated: "2026-06-04T00:00:46Z"
-last_activity: 2026-06-04 — Plan 01-01 complete: @swp/e2e harness skeleton (playwright config, globalSetup, loginAs fixture, smoke spec).
+stopped_at: Completed 01-test-harness-auth/01-04-PLAN.md
+last_updated: "2026-06-04T00:38:00Z"
+last_activity: 2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport.
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 5
+  completed_plans: 3
+  percent: 8
 ---
 
 # Project State
@@ -26,27 +26,29 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 1 of 11 (Test Harness + Auth)
-Plan: 2 of 5 in current phase
+Plan: 4 of 5 in current phase (next: 01-05 E2E auth spec)
 Status: In progress
-Last activity: 2026-06-04 — Plan 01-01 complete: @swp/e2e harness skeleton (playwright config, globalSetup, loginAs fixture, smoke spec).
+Last activity: 2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport.
 
-Progress: [█░░░░░░░░░] 5%
+Progress: [█░░░░░░░░░] 8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: —
-- Total execution time: 0 hours
+- Total plans completed: 3
+- Average duration: ~35min
+- Total execution time: ~1.75 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01-test-harness-auth | 3 done / 5 total | ~105min | ~35min |
 
 ## Accumulated Context
+
 | Phase 01-test-harness-auth P02 | 2 | 2 tasks | 3 files |
+| Phase 01-test-harness-auth P04 | 2 | 2 tasks | 8 files |
 
 ### Decisions
 
@@ -60,10 +62,15 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [01-01]: webServer uses `vite dev` not `vite preview` — avoids build step; dev server reads VITE_* env vars at startup
 - [01-01]: DB isolation = TRUNCATE app tables + reseed (not per-worker transactions — incompatible with real HTTP server)
 - [01-01]: Ed25519 keypair generated fresh per run via `go run ./cmd/seed -genkeys` stdout (line1=privkey, line2=pubkey)
+- [01-04]: buildSessionUser sets companyName = scope.company_id literal for shift_leader (no company-name endpoint in Phase 1); TODO(Phase-3) to resolve via companies endpoint
+- [01-04]: credentials:'include' added to mutator.ts customFetch so ALL generated hooks send the refresh cookie cross-origin; BE sets CORS allow-origin for :4173/:5173
+- [01-04]: logout handler lives in shell.tsx (useAuthLogout) and is passed to UserMenu as onLogout prop; UserMenu stays stateless re: auth
+- [01-04]: forgot-password always advances to 'sent' even on network error (anti-enumeration, authentication.md C-2)
+- [01-04]: reset-password minLength raised from 8 to 10 to match BE platform password policy (AU-4)
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
@@ -71,6 +78,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:00:46Z
-Stopped at: Completed 01-test-harness-auth/01-01-PLAN.md
+Last session: 2026-06-04T00:38:00Z
+Stopped at: Completed 01-test-harness-auth/01-04-PLAN.md
 Resume file: None

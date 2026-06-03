@@ -37,7 +37,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
   2. `backend/cmd/seed` seeds the four personas and minimal data; the harness migrates + seeds automatically in globalSetup.
   3. A user can log in via the web login screen (real `POST /auth/login`), reach the dashboard, refresh the token, and log out; `GET /auth/me` drives the session.
   4. Forgot-password and reset-password screens call the real BE; wrong-credentials / disabled-account / RBAC errors render the correct UI states.
-**Plans:** 2/5 plans executed
+**Plans:** 3/5 plans executed
 
 Plans:
 - [ ] 01-01: Playwright harness — `frontend/e2e` package, `playwright.config.ts`, scripts (headless/headed/ui/debug/report), `docker-compose.e2e.yml`, globalSetup/Teardown booting BE+PG+migrate+seed
@@ -223,7 +223,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Harness + Auth | 2/5 | In Progress|  |
+| 1. Test Harness + Auth | 3/5 | In Progress|  |
 | 2. E1 Foundations | 0/4 | Not started | - |
 | 3. E2 Org & Master Data | 0/4 | Not started | - |
 | 4. E2 People | 0/4 | Not started | - |

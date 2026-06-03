@@ -12,10 +12,10 @@
 ### Test Harness & Auth (Phase 1)
 - [x] **HARN-01**: Playwright E2E runs the real FE against the real Go API + ephemeral Postgres (MSW off), with headless / headful / UI (`--ui`) modes and per-scenario test cases.
 - [x] **HARN-02**: `backend/cmd/seed` seeds deterministic personas (hr_admin Sari Hadi, shift_leader Rudi Wijaya @ Plaza Senayan, super_admin, agent) + minimal data.
-- [ ] **AUTH-01**: User can log in via the web login screen against the real BE (`POST /auth/login`) and reach the dashboard.
-- [ ] **AUTH-02**: Access token refresh (`POST /auth/refresh`) and logout (`POST /auth/logout`) work; `GET /auth/me` returns the principal.
+- [x] **AUTH-01**: User can log in via the web login screen against the real BE (`POST /auth/login`) and reach the dashboard.
+- [x] **AUTH-02**: Access token refresh (`POST /auth/refresh`) and logout (`POST /auth/logout`) work; `GET /auth/me` returns the principal.
 - [ ] **AUTH-03**: Forgot-password and reset-password flows call the real BE.
-- [ ] **AUTH-04**: Wrong credentials / disabled account / RBAC produce the correct error states in the UI.
+- [x] **AUTH-04**: Wrong credentials / disabled account / RBAC produce the correct error states in the UI.
 
 ### E1 Foundations & Settings (Phase 2)
 - [ ] **FND-01**: User management — list/create/update users, change role, deactivate/reactivate, send password reset.
