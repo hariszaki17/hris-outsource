@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: in_progress
-stopped_at: Completed 01-test-harness-auth/01-04-PLAN.md
-last_updated: "2026-06-04T00:38:00Z"
-last_activity: 2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport.
+status: executing
+stopped_at: Completed 01-test-harness-auth/01-03-PLAN.md
+last_updated: "2026-06-03T23:31:45.940Z"
+last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 8
 ---
 
@@ -44,6 +44,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-test-harness-auth | 3 done / 5 total | ~105min | ~35min |
+| Phase 01 P03 | 690 | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [01-04]: logout handler lives in shell.tsx (useAuthLogout) and is passed to UserMenu as onLogout prop; UserMenu stays stateless re: auth
 - [01-04]: forgot-password always advances to 'sent' even on network error (anti-enumeration, authentication.md C-2)
 - [01-04]: reset-password minLength raised from 8 to 10 to match BE platform password policy (AU-4)
+- [Phase 01-test-harness-auth]: TxRunner extracted as interface in service package to allow fake-based unit tests without testcontainers
+- [Phase 01-test-harness-auth]: Reset token plaintext not emailed in Phase 1; E2E harness obtains token by querying password_reset_tokens directly (no mailer wired)
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:38:00Z
-Stopped at: Completed 01-test-harness-auth/01-04-PLAN.md
+Last session: 2026-06-03T23:31:32.199Z
+Stopped at: Completed 01-test-harness-auth/01-03-PLAN.md
 Resume file: None
