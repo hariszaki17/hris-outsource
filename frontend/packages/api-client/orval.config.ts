@@ -47,6 +47,13 @@ export default defineConfig({
   e1: reactQuery('e1', 'E1-foundations', true),
   'e1-zod': zod('e1', 'E1-foundations'),
 
+  // E2 Identity — employees, change-requests, agreements, client-companies, service-lines/
+  // positions, master-data. Typed react-query hooks + MSW mocks. Zod DEFERRED: Orval's zod
+  // emitter mis-references a regex-pattern const (`…ServiceLineIdRegExpOne`) on the overtime-rule
+  // schemas, producing undefined identifiers (the documented Orval-zod caveat, WEB-STACK §4).
+  // Forms hand-author their zod schemas; re-enable when the spec/Orval is reconciled.
+  e2: reactQuery('e2', 'E2-identity', true),
+
   // E6 Leave — typed react-query hooks only. MSW mocks + Zod DEFERRED: Orval's faker
   // mocks emit `string | undefined` against required fields on E6's union/nullable
   // schemas under strict null checks (the documented oneOf/discriminator caveat,

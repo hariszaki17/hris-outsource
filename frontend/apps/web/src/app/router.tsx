@@ -13,9 +13,41 @@ import { SettingsGeneralScreen } from '@/features/e1-foundations/settings-genera
 import { SettingsLayout } from '@/features/e1-foundations/settings-layout.tsx';
 import { SettingsOverviewScreen } from '@/features/e1-foundations/settings-overview-screen.tsx';
 import { UsersScreen } from '@/features/e1-foundations/users-screen.tsx';
+import { AgreementDetailScreen } from '@/features/e2-identity/agreement-detail-screen.tsx';
+import { CreateAgreementScreen } from '@/features/e2-identity/agreement-form.tsx';
+import {
+  AgreementsScreen,
+  type AgreementsSearch,
+} from '@/features/e2-identity/agreements-screen.tsx';
+import { AttendanceCodesScreen } from '@/features/e2-identity/attendance-codes-screen.tsx';
+import {
+  ChangeRequestsScreen,
+  type ChangeRequestsSearch,
+} from '@/features/e2-identity/change-requests-screen.tsx';
+import {
+  ClientCompaniesScreen,
+  type ClientCompaniesSearch,
+} from '@/features/e2-identity/client-companies-screen.tsx';
+import { ClientCompanyDetailScreen } from '@/features/e2-identity/client-company-detail-screen.tsx';
+import { CreateClientCompanyScreen } from '@/features/e2-identity/client-company-form.tsx';
+import { EmployeeDetailScreen } from '@/features/e2-identity/employee-detail-screen.tsx';
+import { CreateEmployeeScreen } from '@/features/e2-identity/employee-form.tsx';
+import { EmployeesScreen, type EmployeesSearch } from '@/features/e2-identity/employees-screen.tsx';
+import { LeaveTypesScreen } from '@/features/e2-identity/leave-types-screen.tsx';
+import { MasterDataHubScreen } from '@/features/e2-identity/master-data-hub-screen.tsx';
+import { OvertimeRulesScreen } from '@/features/e2-identity/overtime-rules-screen.tsx';
+import { ServiceLineDetailScreen } from '@/features/e2-identity/service-line-detail-screen.tsx';
+import { ServiceLinesScreen } from '@/features/e2-identity/service-lines-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
+import {
+  AgreementStatus,
+  AgreementType,
+  ChangeRequestRequestType,
+  ClientCompanyStatus,
+  EmployeeStatus,
+} from '@swp/api-client/e2';
 import {
   Outlet,
   createRootRoute,
@@ -113,6 +145,196 @@ const placeholder = <P extends string>(path: P, title: string) =>
   });
 
 // E1 Settings section: a sub-layout (left SettingsSubnav rail) over its sub-pages.
+// E2 — Karyawan (employee list, detail, create)
+const employeesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/employees',
+  component: EmployeesScreen,
+  validateSearch: (search: Record<string, unknown>): EmployeesSearch => {
+    const out: EmployeesSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (search.status === EmployeeStatus.ACTIVE || search.status === EmployeeStatus.INACTIVE) {
+      out.status = search.status;
+    }
+    if (typeof search.service_line === 'string' && search.service_line)
+      out.service_line = search.service_line;
+    if (typeof search.client_company === 'string' && search.client_company)
+      out.client_company = search.client_company;
+    if (typeof search.has_login === 'boolean') out.has_login = search.has_login;
+    if (
+      search.tab === 'all' ||
+      search.tab === 'active' ||
+      search.tab === 'inactive' ||
+      search.tab === 'no-login'
+    ) {
+      out.tab = search.tab;
+    }
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
+const employeeNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/employees/new',
+  component: CreateEmployeeScreen,
+});
+
+const employeeDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/employees/$employeeId',
+  component: EmployeeDetailScreen,
+});
+
+// E2 — Lini Layanan (service lines list + detail)
+const serviceLinesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/service-lines',
+  component: ServiceLinesScreen,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { status?: 'ACTIVE' | 'INACTIVE'; cursor?: string } => {
+    const out: { status?: 'ACTIVE' | 'INACTIVE'; cursor?: string } = {};
+    if (search.status === 'ACTIVE' || search.status === 'INACTIVE') out.status = search.status;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
+const serviceLineDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/service-lines/$serviceLineId',
+  component: function ServiceLineDetailRoute() {
+    const { serviceLineId } = serviceLineDetailRoute.useParams();
+    return <ServiceLineDetailScreen serviceLineId={serviceLineId} />;
+  },
+});
+
+// E2 — Antrian Persetujuan Perubahan Data (HR change-request approval queue)
+const changeRequestsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/change-requests',
+  component: ChangeRequestsScreen,
+  validateSearch: (search: Record<string, unknown>): ChangeRequestsSearch => {
+    const out: ChangeRequestsSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (
+      typeof search.request_type === 'string' &&
+      (Object.values(ChangeRequestRequestType) as string[]).includes(search.request_type)
+    ) {
+      out.request_type = search.request_type as ChangeRequestRequestType;
+    }
+    if (search.tab === 'all' || search.tab === 'profile' || search.tab === 'bank') {
+      out.tab = search.tab;
+    }
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
+// E2 — Perjanjian Kerja (employment agreements list, detail, create)
+const agreementsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/agreements',
+  component: AgreementsScreen,
+  validateSearch: (search: Record<string, unknown>): AgreementsSearch => {
+    const out: AgreementsSearch = {};
+    if (search.type === AgreementType.PKWT || search.type === AgreementType.PKWTT) {
+      out.type = search.type;
+    }
+    if (
+      search.status === AgreementStatus.ACTIVE ||
+      search.status === AgreementStatus.EXPIRING ||
+      search.status === AgreementStatus.SUPERSEDED ||
+      search.status === AgreementStatus.CLOSED
+    ) {
+      out.status = search.status;
+    }
+    if (
+      search.tab === 'all' ||
+      search.tab === 'active' ||
+      search.tab === 'expiring' ||
+      search.tab === 'superseded' ||
+      search.tab === 'closed'
+    ) {
+      out.tab = search.tab;
+    }
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
+const agreementNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/agreements/new',
+  component: CreateAgreementScreen,
+});
+
+const agreementDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/agreements/$agreementId',
+  component: function AgreementDetailRoute() {
+    const { agreementId } = agreementDetailRoute.useParams();
+    return <AgreementDetailScreen agreementId={agreementId} />;
+  },
+});
+
+// E2 — Data Master (operational master data: leave types, attendance codes, overtime rules)
+const masterDataRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/master-data',
+  component: MasterDataHubScreen,
+});
+const leaveTypesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/master-data/leave-types',
+  component: LeaveTypesScreen,
+});
+const attendanceCodesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/master-data/attendance-codes',
+  component: AttendanceCodesScreen,
+});
+const overtimeRulesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/master-data/overtime-rules',
+  component: OvertimeRulesScreen,
+});
+
+// E2 — Perusahaan Klien (client companies list, detail, create)
+const clientCompaniesRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies',
+  component: ClientCompaniesScreen,
+  validateSearch: (search: Record<string, unknown>): ClientCompaniesSearch => {
+    const out: ClientCompaniesSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (
+      search.status === ClientCompanyStatus.ACTIVE ||
+      search.status === ClientCompanyStatus.INACTIVE
+    ) {
+      out.status = search.status;
+    }
+    if (typeof search.service_line === 'string' && search.service_line)
+      out.service_line = search.service_line;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+const clientCompanyNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies/new',
+  component: CreateClientCompanyScreen,
+});
+const clientCompanyDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies/$clientCompanyId',
+  component: function ClientCompanyDetailRoute() {
+    const { clientCompanyId } = clientCompanyDetailRoute.useParams();
+    return <ClientCompanyDetailScreen clientCompanyId={clientCompanyId} />;
+  },
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -198,7 +420,22 @@ const routeTree = rootRoute.addChildren([
   forbiddenRoute,
   authedRoute.addChildren([
     indexRoute,
-    placeholder('/employees', 'Karyawan'),
+    employeesRoute,
+    employeeNewRoute,
+    employeeDetailRoute,
+    changeRequestsRoute,
+    agreementsRoute,
+    agreementNewRoute,
+    agreementDetailRoute,
+    serviceLinesRoute,
+    serviceLineDetailRoute,
+    masterDataRoute,
+    leaveTypesRoute,
+    attendanceCodesRoute,
+    overtimeRulesRoute,
+    clientCompaniesRoute,
+    clientCompanyNewRoute,
+    clientCompanyDetailRoute,
     placeholder('/placements', 'Penempatan'),
     placeholder('/schedule', 'Jadwal'),
     placeholder('/attendance', 'Kehadiran'),

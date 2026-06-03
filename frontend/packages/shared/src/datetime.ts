@@ -23,12 +23,20 @@ export function formatInstant(
   );
 }
 
-/** Render a calendar date ("2026-06-03") with no timezone math. */
+/**
+ * Render a calendar date with no timezone math. Accepts a plain date ("2026-06-03") OR — for
+ * resilience when a full RFC 3339 instant ("2026-06-03T14:32:08Z") is passed by mistake — derives
+ * the *Asia/Jakarta calendar date* of that instant (so a UTC late-evening instant maps to the
+ * correct WIB day). This avoids the `Temporal.PlainDate.from` "Z designator not supported" throw.
+ */
 export function formatDate(
   isoDate: string,
   opts: Intl.DateTimeFormatOptions = { dateStyle: 'medium' },
 ): string {
-  const pd = Temporal.PlainDate.from(isoDate);
+  const isInstant = isoDate.includes('T');
+  const pd = isInstant
+    ? Temporal.Instant.from(isoDate).toZonedDateTimeISO(TZ).toPlainDate()
+    : Temporal.PlainDate.from(isoDate);
   return new Intl.DateTimeFormat(LOCALE_ID, { ...opts, timeZone: 'UTC' }).format(
     new Date(Date.UTC(pd.year, pd.month - 1, pd.day)),
   );

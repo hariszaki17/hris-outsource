@@ -177,16 +177,17 @@ Remaining masters → components:
 - [x] Session-expired re-auth state · `→ features/e1-foundations/global-states.tsx` (`/session-expired`) · comp: EmptySessionExpired `iwcgE`
 - [x] No-permission / 403 state · global-states.tsx (`/forbidden`) + per-screen inline · comp: EmptyNoPermission `MRbzz`,`TqMQ6`
 
-### E2 — Identity / Karyawan & Master Data 🔲  · web container `G0D87V`
-- [ ] Reconciled against live `.pen`
-- [ ] Daftar Karyawan — list + filters + row-kebab · hr_admin/super_admin · comp: DataTable
-- [ ] Karyawan Detail — Profil + 3 deep-link tabs (Penempatan/Kehadiran/Cuti&Lembur; D3) · frame `JBjBb`
-- [ ] Tambah/Edit Karyawan — form + validation · comp: FormField,Modal
-- [ ] HR change-request queue (agent edits) + detail · hr_admin
-- [ ] **F2.2 Employment Agreement** — list · create (PKWT/PKWTT) · renew · close · detail
-- [ ] **F2.3 Client Company** — list · detail (`nLN4d`) · create/edit · **geofence_radius_m editor + map placeholder** (§8) · geofence-disabled banner (`i18mZ`, D11)
-- [ ] **F2.4 Service Lines + Positions** — CRUD (nested positions under service line)
-- [ ] **F2.5 Operational Master Data** — Leave Types CRUD · Attendance Codes CRUD (color+flags) · Overtime Rules CRUD (30-min min, D4)
+### E2 — Identity / Karyawan & Master Data ✅  · web container `G0D87V`
+- [x] Reconciled against live `.pen` *(23 web frames; Admin POV + SL scoped variants)*
+- [x] **Pickers** (comp/* → generic `Combobox` in `@swp/ui` + 5 domain pickers) · `ZOZ5x`,`GpyLu`,`vkwQo`,`Nz6iR`,`fg4kI` → `features/e2-identity/pickers/*`
+- [x] Daftar Karyawan — list + stat cards + tabs + filters + row-kebab + **SL scoped** · `→ employees-screen.tsx` · frames `WElYh`,`n3wi1w`
+- [x] Karyawan Detail — Profil + cross-epic tabs (Penempatan/Kehadiran/Cuti&Lembur deep-links) + SL read-only · `→ employee-detail-screen.tsx` · frames `JBjBb`,`rtKzk`
+- [x] Tambah/Edit Karyawan — form (RHF + hand-zod) + overlays · `→ employee-form.tsx`,`employee-overlays.tsx` · frame `h6bDz`,`tNMfN`
+- [x] HR change-request queue + detail drawer + reject modal · `→ change-requests-screen.tsx`,`change-request-overlays.tsx` · frame `Ckteo`
+- [x] **F2.2 Employment Agreement** — list · detail · create (PKWT/PKWTT) · renew · close · `→ agreements-screen.tsx`,`agreement-detail-screen.tsx`,`agreement-form.tsx` · frames `mS8rP`,`Cu0qg`,`gxqjg`
+- [x] **F2.3 Client Company** — list · detail + **geofence_radius_m editor + map placeholder** + geofence-disabled banner (D11) · create · `→ client-companies-screen.tsx`,`client-company-detail-screen.tsx`,`client-company-form.tsx` · frames `qIpsj`,`OmuQT`,`ZmJnZ`,`oYgYe`
+- [x] **F2.4 Service Lines + Positions** — list · detail (nested positions) · modals · `→ service-lines-screen.tsx`,`service-line-detail-screen.tsx` · frames `vV79c`,`I8WeKy`,`IwKfo`,`hb7vL`
+- [x] **F2.5 Operational Master Data** — hub + Leave Types · Attendance Codes (color+flags) · Overtime Rules (30-min min) CRUD + modals · `→ master-data-hub-screen.tsx`,`leave-types-screen.tsx`,`attendance-codes-screen.tsx`,`overtime-rules-screen.tsx` · frames `f8mBr`,`HII8C`,`R5xoi`,`SnXpE`,`rMNJT`,`u8eXaW`,`JYmgi`
 
 ### E3 — Placement / Penempatan 🔲  · web container `j2giE`
 - [ ] Reconciled against live `.pen`
@@ -267,7 +268,7 @@ Remaining masters → components:
 | Phase 0 — components | ~18 groups | 25 of ~27 masters (chrome+feedback + data/form + **Drawer** done; remaining: Export modal, Notif cards, Pickers — deferred to their epics) |
 | Phase 1 — shell + login | 3 | 3 (providers, login, **app shell**) ✅ |
 | E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
-| E2 Karyawan (web) | ~9 features | 0 |
+| E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
 | E3 Penempatan (web) | ~6 | 0 |
 | E4 Jadwal (web) | ~5 | 0 |
 | E5 Kehadiran (web) | ~4 | 0 |

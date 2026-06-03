@@ -17,11 +17,25 @@ import { getAuditLogMock } from './gen/e1/audit-log/audit-log.msw.ts';
 import { getAuthenticationMock } from './gen/e1/authentication/authentication.msw.ts';
 import { getPlatformMock } from './gen/e1/platform/platform.msw.ts';
 import { getUsersMock } from './gen/e1/users/users.msw.ts';
+import { getAgreementsMock } from './gen/e2/agreements/agreements.msw.ts';
+import { getChangeRequestsMock } from './gen/e2/change-requests/change-requests.msw.ts';
+import { getClientCompaniesMock } from './gen/e2/client-companies/client-companies.msw.ts';
+import { getEmployeesMock } from './gen/e2/employees/employees.msw.ts';
+import { getMasterDataMock } from './gen/e2/master-data/master-data.msw.ts';
+import { getServiceLinesPositionsMock } from './gen/e2/service-lines-positions/service-lines-positions.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
+  // E1 Foundations
   ...getAuthenticationMock(),
   ...getUsersMock(),
   ...getAuditLogMock(),
   ...getPlatformMock(),
+  // E2 Identity / Karyawan & Master Data
+  ...getEmployeesMock(),
+  ...getChangeRequestsMock(),
+  ...getAgreementsMock(),
+  ...getClientCompaniesMock(),
+  ...getServiceLinesPositionsMock(),
+  ...getMasterDataMock(),
 ];

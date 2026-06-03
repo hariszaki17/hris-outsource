@@ -17,12 +17,19 @@ describe('navForRole', () => {
     }
   });
 
-  it('shift_leader is scoped: no employee master, no reports, no settings', () => {
+  it('shift_leader is scoped: no master data / reports / settings, but a scoped employee list', () => {
     const sl = labels('shift_leader');
-    expect(sl).not.toContain('nav.employees');
+    // E2 .pen `n3wi1w` — shift leaders get a SCOPED, read-only employee list for their site.
+    expect(sl).toContain('nav.employees');
+    // Master-data / admin-only modules stay hidden.
+    expect(sl).not.toContain('nav.clientCompanies');
+    expect(sl).not.toContain('nav.agreements');
+    expect(sl).not.toContain('nav.changeRequests');
+    expect(sl).not.toContain('nav.serviceLines');
+    expect(sl).not.toContain('nav.masterData');
     expect(sl).not.toContain('nav.reports');
     expect(SETTINGS_ITEM.roles.includes('shift_leader')).toBe(false);
-    // but keeps the operational modules they supervise
+    // and keeps the operational modules they supervise
     expect(sl).toEqual(
       expect.arrayContaining([
         'nav.dashboard',

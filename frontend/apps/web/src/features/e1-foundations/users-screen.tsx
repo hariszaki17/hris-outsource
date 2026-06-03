@@ -129,8 +129,9 @@ export function UsersScreen() {
   const setSearch = (patch: UsersSearch) => {
     void navigate({
       to: '/settings/users',
-      // Any filter change resets pagination.
-      search: (prev) => ({ ...prev, cursor: undefined, ...patch }),
+      // Any filter change resets pagination. Build from the typed `search` (this route's own
+      // shape) rather than the navigate `prev` (a cross-route union) to keep the result typed.
+      search: { ...search, cursor: undefined, ...patch },
     });
     setPrevCursors([]);
   };
@@ -365,7 +366,7 @@ export function UsersScreen() {
                 setPrevCursors(next);
                 void navigate({
                   to: '/settings/users',
-                  search: (prev) => ({ ...prev, cursor: cursor || undefined }),
+                  search: { ...search, cursor: cursor || undefined },
                 });
               }}
               onNext={() => {
@@ -374,7 +375,7 @@ export function UsersScreen() {
                 setPrevCursors((s) => [...s, search.cursor ?? '']);
                 void navigate({
                   to: '/settings/users',
-                  search: (prev) => ({ ...prev, cursor: nextCursor }),
+                  search: { ...search, cursor: nextCursor },
                 });
               }}
             />

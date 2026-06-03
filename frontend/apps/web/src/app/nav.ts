@@ -1,8 +1,13 @@
 import type { Role } from '@swp/shared';
 import {
+  Building2,
   CalendarClock,
   ChartColumn,
   ClipboardCheck,
+  Database,
+  FileText,
+  Inbox,
+  Layers,
   LayoutDashboard,
   type LucideIcon,
   MapPin,
@@ -33,7 +38,12 @@ const ADMIN: readonly Role[] = ['super_admin', 'hr_admin'];
 /** Primary nav (sidebar MENU section), in canvas order. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard, roles: ALL_WEB },
-  { to: '/employees', labelKey: 'nav.employees', icon: Users, roles: ADMIN },
+  { to: '/employees', labelKey: 'nav.employees', icon: Users, roles: ALL_WEB },
+  { to: '/client-companies', labelKey: 'nav.clientCompanies', icon: Building2, roles: ADMIN },
+  { to: '/agreements', labelKey: 'nav.agreements', icon: FileText, roles: ADMIN },
+  { to: '/change-requests', labelKey: 'nav.changeRequests', icon: Inbox, roles: ADMIN },
+  { to: '/service-lines', labelKey: 'nav.serviceLines', icon: Layers, roles: ADMIN },
+  { to: '/master-data', labelKey: 'nav.masterData', icon: Database, roles: ADMIN },
   { to: '/placements', labelKey: 'nav.placements', icon: MapPin, roles: ALL_WEB },
   { to: '/schedule', labelKey: 'nav.schedule', icon: CalendarClock, roles: ALL_WEB },
   { to: '/attendance', labelKey: 'nav.attendance', icon: ClipboardCheck, roles: ALL_WEB },

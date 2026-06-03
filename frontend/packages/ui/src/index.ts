@@ -74,6 +74,9 @@ export {
   type DrawerFooterProps,
 } from './molecules/drawer.tsx';
 
+// Molecules — combobox / async FK picker primitive
+export { Combobox, type ComboboxProps, type ComboboxOption } from './molecules/combobox.tsx';
+
 // Molecules — data tables & pagination
 export {
   DataTable,
