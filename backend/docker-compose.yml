@@ -1,0 +1,27 @@
+# Local dev dependencies. Postgres is the only hard dependency (River queue lives
+# in it too — no Redis). otel-collector is optional; leave OTEL endpoint empty to skip.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hris
+      POSTGRES_PASSWORD: hris
+      POSTGRES_DB: hris
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hris"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Optional: an OTLP collector for traces. Point OTEL_EXPORTER_OTLP_ENDPOINT
+  # at http://localhost:4318 to use it.
+  # otel-collector:
+  #   image: otel/opentelemetry-collector:latest
+  #   ports: ["4318:4318"]
+
+volumes:
+  pgdata:

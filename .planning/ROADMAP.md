@@ -1,0 +1,236 @@
+# Roadmap: SWP HRIS backend + full-stack E2E (v1.0-be)
+
+## Overview
+
+Make the existing web console work against a real Go backend, epic by epic, in dependency
+order. Phase 1 stands up the full-stack Playwright harness and real auth (which gates
+everything). Each subsequent phase implements the FE-used endpoints of one epic — matching
+the OpenAPI contract, following the platform-kernel patterns and the E1 auth reference
+slice — and proves them with exhaustive Playwright E2E (real FE ↔ real BE ↔ ephemeral
+Postgres). Scope is strictly the endpoints the FE calls today
+(`.planning/reference/fe-endpoint-inventory.md`). Build rules:
+`.planning/reference/backend-build-conventions.md`. E2E rules:
+`.planning/reference/e2e-harness-spec.md`.
+
+## Phases
+
+- [ ] **Phase 1: Test Harness + Auth** - Playwright full-stack harness + real login/refresh/logout/forgot/reset, FE wired to BE
+- [ ] **Phase 2: E1 Foundations** - Users, roles, audit log, platform settings
+- [ ] **Phase 3: E2 Org & Master Data** - Client companies, sites, service lines, positions, leave/attendance/overtime master data
+- [ ] **Phase 4: E2 People** - Employees, employment agreements, change requests
+- [ ] **Phase 5: E3 Placement** - Placements lifecycle + shift-leader assignments + roster
+- [ ] **Phase 6: E4 Schedule & Shifts** - Shift masters, schedule entries, conflict check, bulk apply
+- [ ] **Phase 7: E5 Attendance** - Attendance verify/reject (incl. bulk) + corrections
+- [ ] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
+- [ ] **Phase 9: E7 Overtime** - Overtime workflow + public holidays
+- [ ] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export
+- [ ] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework
+
+## Phase Details
+
+### Phase 1: Test Harness + Auth
+**Goal:** A reusable full-stack Playwright harness and working real authentication; the web app logs in against the real Go API.
+**Depends on:** Nothing (first phase)
+**Requirements:** HARN-01, HARN-02, AUTH-01, AUTH-02, AUTH-03, AUTH-04
+**Success Criteria** (what must be TRUE):
+  1. `pnpm e2e`, `pnpm e2e:headed`, and `pnpm e2e:ui` all run the real FE against the real Go API + an ephemeral Postgres (MSW off); each Gherkin scenario is its own runnable case in the Playwright UI.
+  2. `backend/cmd/seed` seeds the four personas and minimal data; the harness migrates + seeds automatically in globalSetup.
+  3. A user can log in via the web login screen (real `POST /auth/login`), reach the dashboard, refresh the token, and log out; `GET /auth/me` drives the session.
+  4. Forgot-password and reset-password screens call the real BE; wrong-credentials / disabled-account / RBAC errors render the correct UI states.
+**Plans:** 5 plans
+
+Plans:
+- [ ] 01-01: Playwright harness — `frontend/e2e` package, `playwright.config.ts`, scripts (headless/headed/ui/debug/report), `docker-compose.e2e.yml`, globalSetup/Teardown booting BE+PG+migrate+seed
+- [ ] 01-02: `backend/cmd/seed` (personas + minimal fixtures) + dev Ed25519 keygen helper (`cmd/api genkeys` or seed)
+- [ ] 01-03: Auth endpoints — extend identity slice with `forgot-password` + `reset-password`; confirm login/refresh/logout/me vs E1 spec
+- [ ] 01-04: FE wiring — login/forgot/reset screens → real `@swp/api-client` hooks; remove dev-token stub; `installAuth` against real BE
+- [ ] 01-05: Auth E2E — exhaustive per E1 auth Gherkin AC (success, bad creds, disabled, refresh, logout, forgot/reset)
+
+### Phase 2: E1 Foundations
+**Goal:** Foundations admin screens (users, audit log, settings) work against the real BE.
+**Depends on:** Phase 1
+**Requirements:** FND-01, FND-02, FND-03
+**Success Criteria** (what must be TRUE):
+  1. HR/super-admin can list, create, update users, change role, deactivate/reactivate, and trigger a password reset against the real BE.
+  2. The audit log lists entries with filters + cursor pagination and opens an entry detail; every write in this milestone produces an audit row.
+  3. Platform settings load on the settings screen.
+  4. Exhaustive Playwright E2E for E1 foundations features is green (headless).
+**Plans:** 4 plans
+
+Plans:
+- [ ] 02-01: Migrations + sqlc queries (users already exist; audit_log exists; add platform_settings, user actions)
+- [ ] 02-02: Services + handlers + RBAC/idempotency/audit for users, audit-log, settings
+- [ ] 02-03: Go contract tests vs E1 openapi examples
+- [ ] 02-04: Playwright E2E for E1 foundations (per Gherkin AC)
+
+### Phase 3: E2 Org & Master Data
+**Goal:** Client companies, sites, service lines, positions, and master data (leave types, attendance codes, overtime rules) work against the real BE.
+**Depends on:** Phase 2
+**Requirements:** ORG-01, ORG-02, ORG-03, ORG-04
+**Success Criteria** (what must be TRUE):
+  1. HR can manage client companies (list/detail/create/update/reactivate) and their sites (with geofence) against the real BE.
+  2. HR can manage service lines + positions (create/update/discontinue/soft-delete) and the master-data sets (leave types, attendance codes, overtime rules).
+  3. Picker endpoints return the picker-shaped lists the FE expects (CONVENTIONS §18).
+  4. Exhaustive Playwright E2E for E2 org/master-data features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 03-01: Migrations + sqlc queries (companies, sites, service_lines, positions, leave_types, attendance_codes, overtime_rules)
+- [ ] 03-02: Services + handlers + RBAC/scope/audit for org & master data
+- [ ] 03-03: Go contract tests vs E2 openapi examples
+- [ ] 03-04: Playwright E2E for E2 org/master-data (per Gherkin AC)
+
+### Phase 4: E2 People
+**Goal:** Employees, employment agreements, and the change-request approval queue work against the real BE.
+**Depends on:** Phase 3
+**Requirements:** PPL-01, PPL-02, PPL-03
+**Success Criteria** (what must be TRUE):
+  1. HR can manage employees (list/detail/create/update/deactivate/reactivate).
+  2. HR can manage employment agreements (create/renew/close) and upload an attachment (multipart, ≤10MB).
+  3. HR can review and approve/reject change requests; PKWT/PKWTT cross-field rules enforced (422 with field errors).
+  4. Exhaustive Playwright E2E for E2 people features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 04-01: Migrations + sqlc queries (employees, agreements, attachments, change_requests)
+- [ ] 04-02: Services + handlers (incl. multipart upload, agreement period rules, change-request workflow)
+- [ ] 04-03: Go contract tests vs E2 openapi examples
+- [ ] 04-04: Playwright E2E for E2 people (per Gherkin AC)
+
+### Phase 5: E3 Placement
+**Goal:** Placement as a first-class entity — lifecycle + shift-leader assignments + roster — works against the real BE with invariants enforced.
+**Depends on:** Phase 4
+**Requirements:** PLC-01, PLC-02, PLC-03, PLC-04
+**Success Criteria** (what must be TRUE):
+  1. HR can create placements with INV-1..4 enforced (e.g. one active placement per agent → 409 `INV_1_VIOLATION`), and list incl. expiring + detail.
+  2. Placement lifecycle actions (renew/transfer/end/resign/terminate) work and write history + audit.
+  3. Shift-leader assignment (create/replace/end) enforces exactly one leader per company (409 on violation); roster renders.
+  4. Exhaustive Playwright E2E for E3 placement features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 05-01: Migrations + sqlc queries (placements, placement_history, shift_leader_assignments)
+- [ ] 05-02: Services + handlers with INV-1..4 + lifecycle state machine + scope guards + notifications
+- [ ] 05-03: Go contract tests vs E3 openapi examples
+- [ ] 05-04: Playwright E2E for E3 placement (per Gherkin AC, incl. invariant conflicts)
+
+### Phase 6: E4 Schedule & Shifts
+**Goal:** Shift masters and scheduling (with conflict checks + bulk apply) work against the real BE.
+**Depends on:** Phase 5
+**Requirements:** SCH-01, SCH-02, SCH-03
+**Success Criteria** (what must be TRUE):
+  1. HR/leader can manage shift masters and schedule entries (create/update/delete) against the real BE.
+  2. Conflict check returns double-shift / over-leave / outside-placement-period violations with the correct codes; bulk apply reports partial success.
+  3. Schedule lists are cursor-paginated and scoped (leader sees own company).
+  4. Exhaustive Playwright E2E for E4 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 06-01: Migrations + sqlc queries (shift_masters, schedule_entries)
+- [ ] 06-02: Services + handlers (conflict engine, bulk-apply, scope guards)
+- [ ] 06-03: Go contract tests vs E4 openapi examples
+- [ ] 06-04: Playwright E2E for E4 (per Gherkin AC)
+
+### Phase 7: E5 Attendance
+**Goal:** Attendance verification (incl. bulk) and corrections work against the real BE.
+**Depends on:** Phase 6
+**Requirements:** ATT-01, ATT-02
+**Success Criteria** (what must be TRUE):
+  1. Leader can list attendance (virtualized/cursor), open detail, verify/reject single, and bulk verify/reject with partial-success reporting + idempotency.
+  2. Corrections can be listed and approved/rejected; out-of-geofence and rule violations return 422 with correct codes.
+  3. Verifications/rejections produce audit rows and notifications.
+  4. Exhaustive Playwright E2E for E5 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 07-01: Migrations + sqlc queries (attendance, corrections)
+- [ ] 07-02: Services + handlers (verify/reject, bulk, corrections) + scope/idempotency/audit/notify
+- [ ] 07-03: Go contract tests vs E5 openapi examples
+- [ ] 07-04: Playwright E2E for E5 (per Gherkin AC)
+
+### Phase 8: E6 Leave
+**Goal:** Leave requests (multi-step approval), quotas, and the calendar work against the real BE.
+**Depends on:** Phase 7
+**Requirements:** LVE-01, LVE-02, LVE-03
+**Success Criteria** (what must be TRUE):
+  1. Leave requests can be listed/detailed and moved through L1 / final / override approval and rejection, with the correct state transitions + notifications.
+  2. Quotas list, adjust, and bulk-grant work; quota-exceeded returns 422 `QUOTA_EXCEEDED` with field errors.
+  3. The leave calendar renders for the requested range.
+  4. Exhaustive Playwright E2E for E6 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 08-01: Migrations + sqlc queries (leave_requests, leave_quotas)
+- [ ] 08-02: Services + handlers (approval state machine, quota checks, calendar) + audit/notify
+- [ ] 08-03: Go contract tests vs E6 openapi examples
+- [ ] 08-04: Playwright E2E for E6 (per Gherkin AC)
+
+### Phase 9: E7 Overtime
+**Goal:** Overtime workflow and public holidays work against the real BE.
+**Depends on:** Phase 8
+**Requirements:** OVT-01, OVT-02
+**Success Criteria** (what must be TRUE):
+  1. Overtime can be listed/detailed and moved through confirm / L1 / final / reject / withdraw, plus bulk approve/reject with partial success.
+  2. Business rules (e.g. OT < 30 min) return 422 with the correct code; holidays can be listed/created/updated/deleted.
+  3. Actions produce audit rows + notifications.
+  4. Exhaustive Playwright E2E for E7 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 09-01: Migrations + sqlc queries (overtime, holidays)
+- [ ] 09-02: Services + handlers (OT workflow, rules, holidays) + audit/notify
+- [ ] 09-03: Go contract tests vs E7 openapi examples
+- [ ] 09-04: Playwright E2E for E7 (per Gherkin AC)
+
+### Phase 10: E8 Payroll
+**Goal:** Read-only payslips, audit notes, and async export work against the real BE.
+**Depends on:** Phase 9
+**Requirements:** PAY-01, PAY-02
+**Success Criteria** (what must be TRUE):
+  1. Payslips list and detail render (read-only history); audit notes can be listed and created.
+  2. Payslip export returns 202 + a job id and the job completes via the worker.
+  3. RBAC restricts payroll visibility appropriately.
+  4. Exhaustive Playwright E2E for E8 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 10-01: Migrations + sqlc queries (payslips, payslip_audit_notes, export_jobs)
+- [ ] 10-02: Services + handlers (read payslips, audit notes, async export via River) 
+- [ ] 10-03: Go contract tests vs E8 openapi examples
+- [ ] 10-04: Playwright E2E for E8 (per Gherkin AC, incl. async export)
+
+### Phase 11: E10 Reporting & Notifications
+**Goal:** Dashboard, billable report, notifications, and the export framework work against the real BE.
+**Depends on:** Phase 10
+**Requirements:** RPT-01, RPT-02, RPT-03, RPT-04
+**Success Criteria** (what must be TRUE):
+  1. The role-aware dashboard (`/dashboards/me`) and billable attendance report render against the real BE.
+  2. Notifications list and mark-read / mark-all-read work; auto-dispatched notifications from earlier phases appear.
+  3. The export framework (create/get/cancel, async) works end-to-end via the worker.
+  4. Exhaustive Playwright E2E for E10 features is green.
+**Plans:** 4 plans
+
+Plans:
+- [ ] 11-01: Migrations + sqlc queries (notifications, export_jobs shared, report queries)
+- [ ] 11-02: Services + handlers (dashboard aggregation, billable report, notifications, exports)
+- [ ] 11-03: Go contract tests vs E10 openapi examples
+- [ ] 11-04: Playwright E2E for E10 (per Gherkin AC)
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Test Harness + Auth | 0/5 | Not started | - |
+| 2. E1 Foundations | 0/4 | Not started | - |
+| 3. E2 Org & Master Data | 0/4 | Not started | - |
+| 4. E2 People | 0/4 | Not started | - |
+| 5. E3 Placement | 0/4 | Not started | - |
+| 6. E4 Schedule & Shifts | 0/4 | Not started | - |
+| 7. E5 Attendance | 0/4 | Not started | - |
+| 8. E6 Leave | 0/4 | Not started | - |
+| 9. E7 Overtime | 0/4 | Not started | - |
+| 10. E8 Payroll | 0/4 | Not started | - |
+| 11. E10 Reporting & Notifications | 0/4 | Not started | - |
