@@ -198,13 +198,13 @@ Remaining masters → components:
 - [x] Shift-Leader assignment — Assign/Replace/End + **INV-2/3/4** conflict states (`ShiftLeaderPicker`) · in `placement-overlays.tsx`
 - [x] Row-kebab actions / detail deep-links
 
-### E4 — Shift Scheduling / Jadwal 🔲  · web container `mi0kN`
-- [ ] Reconciled against live `.pen`
-- [ ] Shift master catalog — list + Tambah/Edit Shift + Deactivate
-- [ ] Schedule grid — week, by company (F4.2) · shift_leader(scope)/hr_admin
-- [ ] **Shift-picker popover** (core F4.2) + cell-edit/clear menu
-- [ ] Conflict toasts — over-leave · double-shift · beyond-placement · out-of-scope · coverage-warn
-- [ ] Bulk apply-to-range · Auto-publish toast
+### E4 — Shift Scheduling / Jadwal ✅  · web container `mi0kN`
+- [x] Reconciled against live `.pen` *(3 web frames: master shift + add modal + weekly grid)*
+- [x] Shift master catalog — list + Tambah/Edit Shift + Deactivate/Reactivate · `→ features/e4-scheduling/shift-masters-screen.tsx` · frames `O5JgF`,`Mn9ux`
+- [x] Schedule grid — week, by company (F4.2) · shift_leader(scope)/hr_admin · `→ schedule-grid-screen.tsx` · frame `Rubba`
+- [x] **Shift-picker popover** (core F4.2) + cell day-off/clear menu · `→ schedule-overlays.tsx`
+- [x] Conflict toasts — over-leave · double-shift · beyond-placement · out-of-scope · coverage-warn (via `useCheckScheduleConflicts`)
+- [x] Bulk apply-to-range (preview/apply) · Auto-publish toast
 
 ### E5 — Attendance / Kehadiran 🔲  · web container `W83QJ`
 - [ ] Reconciled against live `.pen`
@@ -270,7 +270,7 @@ Remaining masters → components:
 | E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
 | E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
 | E3 Penempatan (web) | ~6 | 6 ✅ (list+roster · detail w/ 9 lifecycle states · create+INV-1 · transfer/renew/end/terminate/resign · SL assign/replace/end INV-2/3/4) |
-| E4 Jadwal (web) | ~5 | 0 |
+| E4 Jadwal (web) | ~5 | 5 ✅ (shift master catalog+modal · weekly schedule grid · shift-picker popover · conflict toasts · bulk apply) |
 | E5 Kehadiran (web) | ~4 | 0 |
 | E6 Cuti (web) | ~5 | 0 |
 | E7 Lembur (web) | ~4 | 0 |

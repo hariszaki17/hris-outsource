@@ -26,7 +26,10 @@ test('E3 Penempatan — list + create', async ({ page }) => {
   await page.screenshot({ path: `${DIR}/01-placements.png` });
 
   // Create placement form
-  await page.getByRole('link', { name: /Buat Penempatan/ }).first().click();
+  await page
+    .getByRole('link', { name: /Buat Penempatan/ })
+    .first()
+    .click();
   await expect(page).toHaveURL(/\/placements\/new$/);
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${DIR}/02-create-placement.png` });

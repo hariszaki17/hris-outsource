@@ -26,6 +26,8 @@ import { getServiceLinesPositionsMock } from './gen/e2/service-lines-positions/s
 import { getClientCompaniesMock as getE3RosterMock } from './gen/e3/client-companies/client-companies.msw.ts';
 import { getPlacementsMock } from './gen/e3/placements/placements.msw.ts';
 import { getShiftLeaderAssignmentsMock } from './gen/e3/shift-leader-assignments/shift-leader-assignments.msw.ts';
+import { getScheduleMock } from './gen/e4/schedule/schedule.msw.ts';
+import { getShiftMastersMock } from './gen/e4/shift-masters/shift-masters.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
@@ -45,4 +47,7 @@ export const handlers: RequestHandler[] = [
   ...getPlacementsMock(),
   ...getShiftLeaderAssignmentsMock(),
   ...getE3RosterMock(),
+  // E4 Shift Scheduling / Jadwal
+  ...getShiftMastersMock(),
+  ...getScheduleMock(),
 ];

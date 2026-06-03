@@ -59,6 +59,10 @@ export default defineConfig({
   // hand-author zod, WEB-STACK §4).
   e3: reactQuery('e3', 'E3-placement', true),
 
+  // E4 Shift Scheduling — shift masters + weekly schedule grid (+ bulk-apply / conflict-check
+  // actions). Typed hooks + MSW mocks; Zod deferred (3 unions, WEB-STACK §4).
+  e4: reactQuery('e4', 'E4-shift-scheduling', true),
+
   // E6 Leave — typed react-query hooks only. MSW mocks + Zod DEFERRED: Orval's faker
   // mocks emit `string | undefined` against required fields on E6's union/nullable
   // schemas under strict null checks (the documented oneOf/discriminator caveat,

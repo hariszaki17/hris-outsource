@@ -45,6 +45,11 @@ import {
   PlacementsScreen,
   type PlacementsSearch,
 } from '@/features/e3-placement/placements-screen.tsx';
+import {
+  ScheduleGridScreen,
+  type ScheduleGridSearch,
+} from '@/features/e4-scheduling/schedule-grid-screen.tsx';
+import { ShiftMastersScreen } from '@/features/e4-scheduling/shift-masters-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -398,6 +403,28 @@ const placementDetailRoute = createRoute({
   },
 });
 
+// E4 — Jadwal Shift (weekly schedule grid — Shift Leader & HR/Admin)
+const scheduleRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/schedule',
+  component: ScheduleGridScreen,
+  validateSearch: (search: Record<string, unknown>): ScheduleGridSearch => {
+    const out: ScheduleGridSearch = {};
+    if (typeof search.company_id === 'string' && search.company_id)
+      out.company_id = search.company_id;
+    if (typeof search.week === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.week))
+      out.week = search.week;
+    return out;
+  },
+});
+
+// E4 — Master Shift catalog (HR/Admin)
+const shiftMastersRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/shifts',
+  component: ShiftMastersScreen,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -503,7 +530,8 @@ const routeTree = rootRoute.addChildren([
     placementNewRoute,
     placementDetailRoute,
     companyRosterRoute,
-    placeholder('/schedule', 'Jadwal'),
+    scheduleRoute,
+    shiftMastersRoute,
     placeholder('/attendance', 'Kehadiran'),
     placeholder('/leave', 'Cuti'),
     placeholder('/overtime', 'Lembur'),
