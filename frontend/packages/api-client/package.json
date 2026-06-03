@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./e1": "./src/e1.ts",
     "./e2": "./src/e2.ts",
+    "./e3": "./src/e3.ts",
     "./e6": "./src/e6.ts",
     "./mocks": "./src/mocks.ts",
     "./query-client": "./src/query-client.ts"

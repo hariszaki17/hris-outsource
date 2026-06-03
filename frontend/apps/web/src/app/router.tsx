@@ -38,6 +38,13 @@ import { MasterDataHubScreen } from '@/features/e2-identity/master-data-hub-scre
 import { OvertimeRulesScreen } from '@/features/e2-identity/overtime-rules-screen.tsx';
 import { ServiceLineDetailScreen } from '@/features/e2-identity/service-line-detail-screen.tsx';
 import { ServiceLinesScreen } from '@/features/e2-identity/service-lines-screen.tsx';
+import { CompanyRosterScreen } from '@/features/e3-placement/company-roster-screen.tsx';
+import { PlacementDetailScreen } from '@/features/e3-placement/placement-detail-screen.tsx';
+import { CreatePlacementScreen } from '@/features/e3-placement/placement-form.tsx';
+import {
+  PlacementsScreen,
+  type PlacementsSearch,
+} from '@/features/e3-placement/placements-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -48,6 +55,7 @@ import {
   ClientCompanyStatus,
   EmployeeStatus,
 } from '@swp/api-client/e2';
+import { PlacementLifecycleStatus } from '@swp/api-client/e3';
 import {
   Outlet,
   createRootRoute,
@@ -335,6 +343,61 @@ const clientCompanyDetailRoute = createRoute({
   },
 });
 
+// E3 — Penempatan (placements list, create)
+const placementsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/placements',
+  component: PlacementsScreen,
+  validateSearch: (search: Record<string, unknown>): PlacementsSearch => {
+    const out: PlacementsSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (typeof search.company_id === 'string' && search.company_id)
+      out.company_id = search.company_id;
+    if (typeof search.service_line_id === 'string' && search.service_line_id)
+      out.service_line_id = search.service_line_id;
+    if (
+      search.status === PlacementLifecycleStatus.PENDING_START ||
+      search.status === PlacementLifecycleStatus.ACTIVE ||
+      search.status === PlacementLifecycleStatus.EXTENDED ||
+      search.status === PlacementLifecycleStatus.EXPIRING ||
+      search.status === PlacementLifecycleStatus.ENDED ||
+      search.status === PlacementLifecycleStatus.TRANSFERRED ||
+      search.status === PlacementLifecycleStatus.TERMINATED ||
+      search.status === PlacementLifecycleStatus.RESIGNED ||
+      search.status === PlacementLifecycleStatus.SUPERSEDED
+    ) {
+      out.status = search.status;
+    }
+    if (typeof search.expiring_soon === 'boolean') out.expiring_soon = search.expiring_soon;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
+const placementNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/placements/new',
+  component: CreatePlacementScreen,
+});
+
+const companyRosterRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies/$clientCompanyId/roster',
+  component: function CompanyRosterRoute() {
+    const { clientCompanyId } = companyRosterRoute.useParams();
+    return <CompanyRosterScreen clientCompanyId={clientCompanyId} />;
+  },
+});
+
+const placementDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/placements/$placementId',
+  component: function PlacementDetailRoute() {
+    const { placementId } = placementDetailRoute.useParams();
+    return <PlacementDetailScreen placementId={placementId} />;
+  },
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -436,7 +499,10 @@ const routeTree = rootRoute.addChildren([
     clientCompaniesRoute,
     clientCompanyNewRoute,
     clientCompanyDetailRoute,
-    placeholder('/placements', 'Penempatan'),
+    placementsRoute,
+    placementNewRoute,
+    placementDetailRoute,
+    companyRosterRoute,
     placeholder('/schedule', 'Jadwal'),
     placeholder('/attendance', 'Kehadiran'),
     placeholder('/leave', 'Cuti'),

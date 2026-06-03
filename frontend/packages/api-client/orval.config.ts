@@ -54,6 +54,11 @@ export default defineConfig({
   // Forms hand-author their zod schemas; re-enable when the spec/Orval is reconciled.
   e2: reactQuery('e2', 'E2-identity', true),
 
+  // E3 Placement — placements (+ transfer/renew/end/terminate/resign actions), shift-leader
+  // assignments, company roster. Typed hooks + MSW mocks; Zod deferred (1 oneOf union + forms
+  // hand-author zod, WEB-STACK §4).
+  e3: reactQuery('e3', 'E3-placement', true),
+
   // E6 Leave — typed react-query hooks only. MSW mocks + Zod DEFERRED: Orval's faker
   // mocks emit `string | undefined` against required fields on E6's union/nullable
   // schemas under strict null checks (the documented oneOf/discriminator caveat,

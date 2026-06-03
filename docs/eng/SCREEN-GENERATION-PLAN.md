@@ -189,14 +189,14 @@ Remaining masters → components:
 - [x] **F2.4 Service Lines + Positions** — list · detail (nested positions) · modals · `→ service-lines-screen.tsx`,`service-line-detail-screen.tsx` · frames `vV79c`,`I8WeKy`,`IwKfo`,`hb7vL`
 - [x] **F2.5 Operational Master Data** — hub + Leave Types · Attendance Codes (color+flags) · Overtime Rules (30-min min) CRUD + modals · `→ master-data-hub-screen.tsx`,`leave-types-screen.tsx`,`attendance-codes-screen.tsx`,`overtime-rules-screen.tsx` · frames `f8mBr`,`HII8C`,`R5xoi`,`SnXpE`,`rMNJT`,`u8eXaW`,`JYmgi`
 
-### E3 — Placement / Penempatan 🔲  · web container `j2giE`
-- [ ] Reconciled against live `.pen`
-- [ ] Company roster / placement list + **expiring-soon** filtered list · hr_admin/shift_leader(scope)
-- [ ] Placement Detail — terminal variants: Active · Scheduled · Expiring · Ended · Terminated · **Resigned** (`MS2fi`) · Superseded · comp: StatusBadge,AuditTrailInline
-- [ ] Create Placement — form + error variants (INV-1) · comp: PickerEmployee,PickerClientCompany,PickerServiceLine
-- [ ] Transfer modal (F3.3) · Renew modal · End/Terminate confirm+reason · **Resign modal** (`ModalResign`)
-- [ ] Shift-Leader assignment — picker (`PickerShiftLeader`) + Assign / Reassign + **INV-2/3/4** states (`ModalAssign`,`ModalReassign`)
-- [ ] Row-kebab actions
+### E3 — Placement / Penempatan ✅  · web container `j2giE`
+- [x] Reconciled against live `.pen` *(5 web frames: Admin POV + SL scoped roster)*
+- [x] Placement list + **expiring-soon** filter + Company roster (HR + SL read-only) · `→ features/e3-placement/placements-screen.tsx`,`company-roster-screen.tsx` · frames `C2SSLA`,`nLN4d`,`o5Txgg`
+- [x] Placement Detail — all 9 lifecycle/terminal variants (PENDING_START/ACTIVE/EXTENDED/EXPIRING/ENDED/TRANSFERRED/TERMINATED/RESIGNED/SUPERSEDED) + AuditTrailInline · `→ placement-detail-screen.tsx` · frame `pFR79`
+- [x] Create Placement — form + INV-1 conflict variant + outside-contract warning · `→ placement-form.tsx` (+ `agreement-picker.tsx`) · frame `g3OzZz`
+- [x] Transfer · Renew · End · Terminate (type-to-confirm) · Resign modals · `→ placement-overlays.tsx`
+- [x] Shift-Leader assignment — Assign/Replace/End + **INV-2/3/4** conflict states (`ShiftLeaderPicker`) · in `placement-overlays.tsx`
+- [x] Row-kebab actions / detail deep-links
 
 ### E4 — Shift Scheduling / Jadwal 🔲  · web container `mi0kN`
 - [ ] Reconciled against live `.pen`
@@ -269,7 +269,7 @@ Remaining masters → components:
 | Phase 1 — shell + login | 3 | 3 (providers, login, **app shell**) ✅ |
 | E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
 | E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
-| E3 Penempatan (web) | ~6 | 0 |
+| E3 Penempatan (web) | ~6 | 6 ✅ (list+roster · detail w/ 9 lifecycle states · create+INV-1 · transfer/renew/end/terminate/resign · SL assign/replace/end INV-2/3/4) |
 | E4 Jadwal (web) | ~5 | 0 |
 | E5 Kehadiran (web) | ~4 | 0 |
 | E6 Cuti (web) | ~5 | 0 |

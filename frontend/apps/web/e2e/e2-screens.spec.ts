@@ -30,7 +30,10 @@ test('E2 Karyawan & Master Data — flagship screens', async ({ page }) => {
 
   await visit('Karyawan', /\/employees$/, '01-employees');
   // Employee detail — click the first table row's name link if present.
-  const firstEmp = page.getByRole('link').filter({ hasText: /SWP-EMP|@/ }).first();
+  const firstEmp = page
+    .getByRole('link')
+    .filter({ hasText: /SWP-EMP|@/ })
+    .first();
   if (await firstEmp.count()) {
     // fall back: just screenshot list; detail navigation is data-dependent
   }
@@ -40,7 +43,10 @@ test('E2 Karyawan & Master Data — flagship screens', async ({ page }) => {
   await visit('Lini Layanan', /\/service-lines$/, '05-service-lines');
   await visit('Data Master', /\/master-data$/, '06-master-data-hub');
   // Master-data sub-list via a hub card
-  await page.getByRole('link', { name: /Jenis Cuti|Kelola/ }).first().click();
+  await page
+    .getByRole('link', { name: /Jenis Cuti|Kelola/ })
+    .first()
+    .click();
   await page.waitForTimeout(1200);
   await page.screenshot({ path: `${DIR}/07-leave-types.png` });
 
