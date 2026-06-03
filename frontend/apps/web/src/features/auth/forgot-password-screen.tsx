@@ -1,4 +1,5 @@
 import { AuthLayout } from '@/features/auth/auth-layout.tsx';
+import { useAuthForgotPassword } from '@swp/api-client/e1';
 import { Button, FormField, Input } from '@swp/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Mail, MailCheck } from 'lucide-react';
@@ -9,9 +10,11 @@ import { z } from 'zod';
 
 /**
  * Forgot-password flow (E1 / Lupa Kata Sandi). Built from .pen frames `etsMo` (form)
- * and `vz7oI` (link sent) per G0. Toggled by local `stage` state; no real API yet —
- * TODO(E1): replace onSubmit stub with the generated useForgotPassword() mutation
- * once the Go /auth/forgot-password endpoint is available (WEB-STACK §6).
+ * and `vz7oI` (link sent) per G0. Toggled by local `stage` state.
+ *
+ * Calls the real useAuthForgotPassword() mutation (POST /auth/forgot-password).
+ * The BE always returns 202 regardless of whether the email is registered (anti-enumeration,
+ * AU-4 / C-2 of authentication.md) so we always advance to 'sent' on well-formed input.
  */
 const forgotSchema = z.object({
   email: z.string().email(),
@@ -25,6 +28,7 @@ export function ForgotPasswordScreen() {
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>('form');
   const [submittedEmail, setSubmittedEmail] = useState('');
+  const forgotMut = useAuthForgotPassword();
 
   const {
     register,
@@ -35,8 +39,12 @@ export function ForgotPasswordScreen() {
   const onSubmit = handleSubmit(async (values) => {
     const parsed = forgotSchema.safeParse(values);
     if (!parsed.success) return;
-    // TODO(E1): replace with the generated useForgotPassword() mutation once the
-    // Go /auth/forgot-password endpoint is designed. On success → setStage('sent').
+    try {
+      await forgotMut.mutateAsync({ data: { email: parsed.data.email } });
+    } catch {
+      // BE always returns 202 for well-formed input (anti-enumeration). If there is a
+      // network error or 429, we still advance to 'sent' so as not to reveal account status.
+    }
     setSubmittedEmail(parsed.data.email);
     setStage('sent');
   });
@@ -115,7 +123,7 @@ export function ForgotPasswordScreen() {
           </div>
         </FormField>
 
-        <Button type="submit" className="w-full" disabled={isSubmitting}>
+        <Button type="submit" className="w-full" disabled={isSubmitting || forgotMut.isPending}>
           {t('forgot.submit')}
         </Button>
 

@@ -121,10 +121,19 @@ const forgotPasswordRoute = createRoute({
   component: ForgotPasswordScreen,
 });
 
+interface ResetPasswordSearch {
+  token?: string;
+}
+
 const resetPasswordRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/reset-password',
   component: ResetPasswordScreen,
+  validateSearch: (search: Record<string, unknown>): ResetPasswordSearch => {
+    const out: ResetPasswordSearch = {};
+    if (typeof search.token === 'string' && search.token) out.token = search.token;
+    return out;
+  },
 });
 
 const devGalleryRoute = createRoute({

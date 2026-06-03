@@ -1,7 +1,9 @@
 import { AuthLayout } from '@/features/auth/auth-layout.tsx';
+import { ApiError } from '@swp/api-client';
+import { useAuthResetPassword } from '@swp/api-client/e1';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button, FormField, Input } from '@swp/ui';
-import { useNavigate } from '@tanstack/react-router';
+import { Banner, Button, FormField, Input } from '@swp/ui';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Check, Circle, Eye, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -15,10 +17,11 @@ import { z } from 'zod';
  *
  * Two local states: 'form' (default) → 'success' after submit.
  *
- * TODO(E1): replace onSubmit stub with the generated `useAuthResetPassword()` mutation.
- *   The reset token must be read from the URL search params (e.g. `?token=…`) using
- *   TanStack Router's `useSearch({ from: '/reset-password' })` once the route is typed.
- *   On success → switch to 'success'. On 400/expired-token → surface a Banner (tone="bad").
+ * Calls useAuthResetPassword() with the token from `?token=…` (typed via router.tsx
+ * validateSearch on /reset-password). Error codes:
+ *   - RESET_TOKEN_EXPIRED (401) → banner on the form
+ *   - WEAK_PASSWORD (422) → field error on newPassword
+ * Password minLength = 10 per BE policy (AU-4 / platform password policy).
  */
 
 type ScreenState = 'form' | 'success';
@@ -27,13 +30,19 @@ export function ResetPasswordScreen() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [screen, setScreen] = useState<ScreenState>('form');
+  const [tokenExpired, setTokenExpired] = useState(false);
+  const resetMut = useAuthResetPassword();
+
+  // Read the typed token from the URL search params (validated in router.tsx).
+  const { token } = useSearch({ from: '/reset-password' });
 
   // Build schema inside component so t() is in scope for the cross-field message.
+  // minLength = 10 to match the BE platform password policy (AU-4).
   const resetSchema = z
     .object({
       newPassword: z
         .string()
-        .min(8)
+        .min(10)
         .regex(/(?=.*[a-z])(?=.*[A-Z])/, 'Must contain upper and lower case')
         .regex(/[^a-zA-Z]/, 'Must contain a number or symbol'),
       confirmPassword: z.string(),
@@ -48,6 +57,7 @@ export function ResetPasswordScreen() {
   const {
     register,
     handleSubmit,
+    setError,
     watch,
     formState: { errors, isSubmitting },
   } = useForm<ResetValues>({
@@ -57,15 +67,33 @@ export function ResetPasswordScreen() {
 
   const newPasswordValue = watch('newPassword') ?? '';
 
-  // Live requirement flags
-  const reqMin = newPasswordValue.length >= 8;
+  // Live requirement flags (minLength now 10 to match BE policy)
+  const reqMin = newPasswordValue.length >= 10;
   const reqCase = /[a-z]/.test(newPasswordValue) && /[A-Z]/.test(newPasswordValue);
   const reqNum = /[^a-zA-Z]/.test(newPasswordValue);
   const allRulesMet = reqMin && reqCase && reqNum;
 
-  const onSubmit = handleSubmit(async (_values) => {
-    // TODO(E1): call useAuthResetPassword() mutation with token from URL + _values.newPassword.
-    setScreen('success');
+  const onSubmit = handleSubmit(async (values) => {
+    setTokenExpired(false);
+    try {
+      await resetMut.mutateAsync({
+        data: { reset_token: token ?? '', new_password: values.newPassword },
+      });
+      setScreen('success');
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.code === 'RESET_TOKEN_EXPIRED') {
+          setTokenExpired(true);
+        } else if (e.code === 'WEAK_PASSWORD') {
+          setError('newPassword', {
+            message: t('reset.weakPassword', { defaultValue: 'Password does not meet requirements' }),
+          });
+        } else {
+          // Generic error — surface as token-expired banner (safe fallback)
+          setTokenExpired(true);
+        }
+      }
+    }
   });
 
   if (screen === 'success') {
@@ -97,6 +125,16 @@ export function ResetPasswordScreen() {
         <h2 className="font-display font-bold text-[28px] text-text">{t('reset.title')}</h2>
         <p className="text-sm text-text-3 leading-relaxed">{t('reset.subtitle')}</p>
       </div>
+
+      {tokenExpired && (
+        <Banner
+          tone="bad"
+          title={t('reset.expiredTitle', { defaultValue: 'Link telah kedaluwarsa' })}
+          description={t('reset.expiredBody', {
+            defaultValue: 'Tautan reset kata sandi ini sudah tidak berlaku. Silakan minta tautan baru.',
+          })}
+        />
+      )}
 
       <form onSubmit={onSubmit} className="flex flex-col gap-[18px]">
         <FormField
@@ -144,7 +182,11 @@ export function ResetPasswordScreen() {
           <RequirementRow met={reqNum} label={t('reset.reqNum')} />
         </div>
 
-        <Button type="submit" className="w-full" disabled={!allRulesMet || isSubmitting}>
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={!allRulesMet || isSubmitting || resetMut.isPending}
+        >
           {t('reset.submit')}
         </Button>
       </form>
