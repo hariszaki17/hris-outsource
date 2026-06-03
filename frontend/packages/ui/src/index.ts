@@ -73,6 +73,16 @@ export {
   type DrawerBodyProps,
   type DrawerFooterProps,
 } from './molecules/drawer.tsx';
+export { NotifCard, type NotifCardProps } from './molecules/notif-card.tsx';
+export {
+  ExportModal,
+  type ExportModalProps,
+  type ExportModalLabels,
+  type ExportStep,
+  type ExportQuickRange,
+  type ExportFilterChip,
+  type ExportFileInfo,
+} from './molecules/export-modal.tsx';
 
 // Molecules — combobox / async FK picker primitive
 export { Combobox, type ComboboxProps, type ComboboxOption } from './molecules/combobox.tsx';

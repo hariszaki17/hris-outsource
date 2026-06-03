@@ -78,7 +78,7 @@ Skeleton, EmptyState, Modal/ConfirmDialog** *(Phase-0 chrome & feedback batch, 2
 **SearchField, FilterSelect, Toggle, DataTable+CursorPagination, StatCard, StatusBadge `dot`,
 SettingsSubnav, AuditTrail (Viewer/Inline/Drawer)** *(Phase-0 data & form batch, 2026-06-03)*,
 **Drawer (generic right-sheet: Drawer/Header/Body/Footer)** *(E1 batch — used by Edit-User + Audit-detail, reused E3–E8)*.
-Remaining Phase-0 (deferred): Export-modal family + Notif cards → E10; Pickers → E2/E3 forms.
+Phase-0 complete: Export-modal family + Notif cards built in E10; Pickers built in E2/E3 forms.
 
 > **MSW action-path fix (E1, 2026-06-03):** `{id}:action` endpoints generated unparseable MSW paths
 > (`:userId:deactivate`). Fixed once for ALL epics via a post-gen step
@@ -105,9 +105,11 @@ Remaining masters → components:
 - [x] **Modal family** — `ModalReject` `EnabP` · `ModalBulkApprove` `r4KZl5` · `ModalDestructive`
       `V4LG8` · `ModalDiscardChanges` `z0kH0b` → `modal.tsx`: one `Modal`(+`ModalHeader`/`Body`/`Footer`) + `ConfirmDialog`
       (Radix Dialog: focus-trap/ESC/a11y). All 4 .pen modals = ConfirmDialog usages.
-- [ ] **Export modal** family — `ModalExportStep1Format` `PN3mn` · `Step2Progress` `Q3dllJ` ·
-      `Step3Success` `lJ2iU` · `ModalExportError` `zOpT1` (multi-step; E10 owns, many consumers).
-- [ ] **Notif cards** — `NotifCardUnread` `CQBqd` · `NotifCardRead` `zTbmw` (one card + read state). *(deferred → E10)*
+- [x] **Export modal** family — `ModalExportStep1Format` `PN3mn` · `Step2Progress` `Q3dllJ` ·
+      `Step3Success` `lJ2iU` · `ModalExportError` `zOpT1` → `packages/ui/src/molecules/export-modal.tsx`:
+      one `ExportModal`(+`step` prop: format/progress/success/error) + stepper, on Radix Dialog. *(E10 batch — XLSX-only D5; Bahasa copy baked w/ `labels` override — externalise-to-i18n is a follow-up.)*
+- [x] **Notif cards** — `NotifCardUnread` `CQBqd` · `NotifCardRead` `zTbmw` → `packages/ui/src/molecules/notif-card.tsx`:
+      one `NotifCard`(+`unread` prop), renders `<button>` when `onClick` given. *(E10 batch.)*
 - [x] **AuditTrail** — `AuditTrailViewer` `jzBi0` · `AuditTrailDrawer` `BUAHW` · `AuditTrailInline` `qtz6q` →
       `audit-trail.tsx`: data-driven (`AuditEntry[]`); Drawer on Radix Dialog (right sheet — generic `Drawer` extraction is a follow-up).
 - [ ] **Pickers** — `PickerEmployee` `ZOZ5x` · `PickerClientCompany` `GpyLu` · `PickerServiceLine`
@@ -239,13 +241,15 @@ Remaining masters → components:
 - Shared: `payroll-shared.tsx` (status tone+key, IDR `formatMoney`, `formatPeriod`). Route glue: `payslip-detail-route.tsx` (drawer + export toast). i18n: full `payroll` namespace (id+en) incl. nested `common`/`errors`/`status`/`month`. Detail gained `onAddNote` prop (opens drawer). nav: `/payroll` (ADMIN).
 - [~] Screenshots deferred to the consolidated end-of-run pass.
 
-### E10 — Reporting & Notifications 🔲  · web container `JifD6`
-- [ ] Reconciled against live `.pen`
-- [ ] Dashboards (F10.2) — HR (`ETi5H`) · **Super Admin variant** (`DhzyL`, same-as-HR + label, D1) · SL
-- [ ] Notification center (F10.1) + empty + **mark-read transition** + stale-link state
-- [ ] Attendance/billable report (F10.3) + empty + pending-records callout
-- [ ] **Export framework** (owner) — format → progress → success → error (Phase-0 modal family)
-- [ ] Approval inbox + empty state
+### E10 — Reporting & Notifications ✅  · web container `JifD6`
+- [x] Reconciled against live `.pen` *(HR row: dashboard/billable/export-modal/notif-center/super-admin; SL dashboard; export + notif + dashboard-empty showcases)*
+- [x] Dashboards (F10.2) — role-branched `useGetMyDashboard` union: HR (`ETi5H`) · **Super Admin** (`DhzyL`, same data + label, D1) · SL team (`RiSPW`) · agent-fallback · `→ features/e10-reporting/dashboard-screen.tsx` · route `/` (replaces placeholder)
+- [x] **Approval-inbox panel** ("Perlu Tindakan") + empty (`biFs5`) + filtered-zero (`elJj3`) · `→ approval-inbox-panel.tsx`
+- [x] Notification center (F10.1) + filters + **mark-read transition** (optimistic + toast) + mark-all + empty (`P2CO7C`) + stale-link note · `→ notifications-screen.tsx` (uses `NotifCard`) · frames `i0qW8`,`R0d1wC` · route `/notifications`
+- [x] Attendance/billable report (F10.3) + summary KPIs + per-row table + **pending-records callout** (verified-only) + export entry · `→ billable-report-screen.tsx` · frame `EF8AZ` · route `/reports`
+- [x] **Export framework** (owner) — `ExportModal` (format → progress → success → error) driven by `useExportFlow` (createExport + poll getExport via refetchInterval → step) · `→ use-export-flow.ts` · frame `FJ6hX`
+- Shared: `e10-shared.tsx` (notif/inbox icon maps, export status tone/step). i18n: `dashboard`/`notifications`/`report` namespaces (id+en, nested common/errors). nav: `/notifications` (ALL_WEB). New primitives: `NotifCard`, `ExportModal` (Phase-0). Deep-links use a typed-navigate cast (route-table lookup is a follow-up).
+- [~] Screenshots deferred to the consolidated end-of-run pass.
 
 ---
 
@@ -270,7 +274,7 @@ Remaining masters → components:
 
 | Phase / Epic | Screens (approx) | Done |
 |---|---|---|
-| Phase 0 — components | ~18 groups | 25 of ~27 masters (chrome+feedback + data/form + **Drawer** done; remaining: Export modal, Notif cards, Pickers — deferred to their epics) |
+| Phase 0 — components | ~18 groups | 27 of ~27 masters ✅ (chrome+feedback + data/form + Drawer + **ExportModal + NotifCard** + Pickers — all built) |
 | Phase 1 — shell + login | 3 | 3 (providers, login, **app shell**) ✅ |
 | E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
 | E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
@@ -280,7 +284,7 @@ Remaining masters → components:
 | E6 Cuti (web) | ~5 | 5 ✅ (approvals HR-L2+SL-L1 · detail+variants · quotas+grant · calendar) |
 | E7 Lembur (web) | ~4 | 5 ✅ (rekap · approvals HR-L2+SL-L1+bulk · OT decision detail · OT-rules+holiday calendar CRUD · queue/detail/holiday overlays) |
 | E8 Payroll (web) | ~3 | 6 ✅ (archive list · payslip detail+decrypt-fail · audit-note drawer · export button+job card · empty/access-denied state-cards · route glue) |
-| E10 Reporting (web) | ~5 | 0 |
+| E10 Reporting (web) | ~5 | 6 ✅ (dashboards HR/Super/SL · approval-inbox panel · notification center+mark-read · billable report+callout · export framework/modal · **Phase-0 ExportModal + NotifCard**) |
 | Phase 3 — mobile | ~8 epics | 0 (deferred) |
 
 > Counts are feature-level approximations from the audit; the real number includes per-state

@@ -1,5 +1,6 @@
 import type { Role } from '@swp/shared';
 import {
+  Bell,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -60,6 +61,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/overtime', labelKey: 'nav.overtime', icon: Timer, roles: ALL_WEB },
   { to: '/payroll', labelKey: 'nav.payroll', icon: Wallet, roles: ADMIN },
   { to: '/reports', labelKey: 'nav.reports', icon: ChartColumn, roles: ADMIN },
+  { to: '/notifications', labelKey: 'nav.notifications', icon: Bell, roles: ALL_WEB },
 ];
 
 /** Footer nav (sidebar bottom) — settings/master data. */

@@ -41,6 +41,10 @@ import { getOvertimeMock } from './gen/e7/overtime/overtime.msw.ts';
 import { getPayslipAuditNotesMock } from './gen/e8/payslip-audit-notes/payslip-audit-notes.msw.ts';
 import { getPayslipExportMock } from './gen/e8/payslip-export/payslip-export.msw.ts';
 import { getPayslipsMock } from './gen/e8/payslips/payslips.msw.ts';
+import { getDashboardsMock } from './gen/e10/dashboards/dashboards.msw.ts';
+import { getExportsMock } from './gen/e10/exports/exports.msw.ts';
+import { getNotificationsMock } from './gen/e10/notifications/notifications.msw.ts';
+import { getReportsMock } from './gen/e10/reports/reports.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
@@ -80,4 +84,9 @@ export const handlers: RequestHandler[] = [
   ...getPayslipsMock(),
   ...getPayslipAuditNotesMock(),
   ...getPayslipExportMock(),
+  // E10 Reporting & Notifications
+  ...getDashboardsMock(),
+  ...getNotificationsMock(),
+  ...getReportsMock(),
+  ...getExportsMock(),
 ];

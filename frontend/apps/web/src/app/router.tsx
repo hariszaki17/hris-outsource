@@ -1,7 +1,6 @@
 import { ForgotPasswordScreen } from '@/features/auth/forgot-password-screen.tsx';
 import { LoginScreen } from '@/features/auth/login-screen.tsx';
 import { ResetPasswordScreen } from '@/features/auth/reset-password-screen.tsx';
-import { DashboardScreen } from '@/features/dashboard/dashboard-screen.tsx';
 import { ComponentGallery } from '@/features/dev/component-gallery.tsx';
 import { DataComponentsGallery } from '@/features/dev/data-components-gallery.tsx';
 import { AuditLogScreen } from '@/features/e1-foundations/audit-log-screen.tsx';
@@ -67,7 +66,9 @@ import { OvertimeRecordsScreen } from '@/features/e7-overtime/overtime-records-s
 import { OvertimeRulesScreen as OvertimeRulesHolidaysScreen } from '@/features/e7-overtime/overtime-rules-screen.tsx';
 import { PayslipArchiveScreen } from '@/features/e8-payroll/payslip-archive-screen.tsx';
 import { PayslipDetailRoute as PayslipDetailRouteView } from '@/features/e8-payroll/payslip-detail-route.tsx';
-import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
+import { BillableReportScreen } from '@/features/e10-reporting/billable-report-screen.tsx';
+import { DashboardScreen } from '@/features/e10-reporting/dashboard-screen.tsx';
+import { NotificationsScreen } from '@/features/e10-reporting/notifications-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
 import {
@@ -168,13 +169,6 @@ const indexRoute = createRoute({
   path: '/',
   component: DashboardScreen,
 });
-
-const placeholder = <P extends string>(path: P, title: string) =>
-  createRoute({
-    getParentRoute: () => authedRoute,
-    path,
-    component: () => <PlaceholderScreen title={title} />,
-  });
 
 // E1 Settings section: a sub-layout (left SettingsSubnav rail) over its sub-pages.
 // E2 — Karyawan (employee list, detail, create)
@@ -559,6 +553,18 @@ const payslipDetailRoute = createRoute({
   },
 });
 
+// E10 — Reporting & Notifications
+const reportsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/reports',
+  component: BillableReportScreen,
+});
+const notificationsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/notifications',
+  component: NotificationsScreen,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -680,7 +686,8 @@ const routeTree = rootRoute.addChildren([
     overtimeRoute,
     payslipDetailRoute,
     payrollRoute,
-    placeholder('/reports', 'Laporan'),
+    reportsRoute,
+    notificationsRoute,
     settingsRoute.addChildren([
       settingsIndexRoute,
       usersRoute,
