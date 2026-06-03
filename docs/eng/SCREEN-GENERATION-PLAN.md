@@ -220,12 +220,14 @@ Remaining masters → components:
 - [~] Cancel / shorten approved leave — hooks wired (`useCancelApprovedLeaveRequest`,`useShortenLeaveRequest`); surfaced from detail actions *(deferred: dedicated wave-3.4 modals)*
 - [!] **EN i18n deferral:** leave/leaveQuotas/leaveCalendar `en.ts` reuses Bahasa values (app default = Bahasa); English polish is a follow-up.
 
-### E7 — Overtime / Lembur 🔲  · web container `BnEnb`
-- [ ] Reconciled against live `.pen`
-- [ ] OT records / Rekap (F7.4) + export entry
-- [ ] OT approval queue (F7.3) + **bulk-approve selection** + reject modal
-- [ ] **OT detail (web)** — the central decision UI · auto-detect confirm result · worked-without-request flag · <30m skipped · holiday-beats-rest-day · withdraw
-- [ ] Create/Edit OT Rule (F7.1) · Add/Edit Holiday (HR-maintained calendar)
+### E7 — Overtime / Lembur ✅  · web container `BnEnb`
+- [x] Reconciled against live `.pen` *(5 web frames: HR rekap/approvals/detail/rules + SL L1 + overlays showcase `YGLK3`, withdraw `STI8j`)*
+- [x] OT records / Rekap (F7.4) + export entry · `→ features/e7-overtime/overtime-records-screen.tsx` · frame `JEmCk` · route `/overtime/rekap`
+- [x] OT approval queue (F7.3) HR L2 + **SL L1** (role-branched) + **bulk-approve/bulk-reject selection** + reject modal · `→ overtime-approvals-screen.tsx`,`overtime-queue-overlays.tsx` · frames `H1eBN`,`Vh2P9` · route `/overtime`
+- [x] **OT detail (web)** — central decision UI · calc block (worked/counted/min-threshold) · <30m **skipped_too_short** · tier breakdown w/ **supersedes** (holiday-beats-restday) · **worked-without-request** flag · approve L1/HR-final · reject · withdraw · auto-detect confirm · terminal read-only states · `→ overtime-detail-screen.tsx`,`overtime-detail-overlays.tsx` · frames `uG6mQ`,`YGLK3`,`STI8j` · route `/overtime/$overtimeId`
+- [x] OT Rule reference (tier-expanded, links to E2 `/master-data/overtime-rules` for CRUD) + **Add/Edit/Delete Holiday** (HR calendar, in-use guard) · `→ overtime-rules-screen.tsx`,`holiday-overlays.tsx` · frame `vd4na` · route `/overtime/aturan`
+- Shared: `overtime-shared.tsx` (status/tier/source/holiday tones+keys). New primitive: `Checkbox` now `forwardRef` (tri-state select-all indeterminate). i18n: full `overtime` namespace (id+en) incl. nested `common`/`errors` (cross-ns keys don't resolve under a sub-namespace — see carry-over).
+- [~] Screenshots deferred to the consolidated end-of-run pass.
 
 ### E8 — Payroll (read-only) 🔲  · web container `OaAdZ`
 - [ ] Reconciled against live `.pen`
@@ -272,7 +274,7 @@ Remaining masters → components:
 | E4 Jadwal (web) | ~5 | 5 ✅ (shift master catalog+modal · weekly schedule grid · shift-picker popover · conflict toasts · bulk apply) |
 | E5 Kehadiran (web) | ~4 | 4 ✅ (dashboard HR+SL · verification queue+detail+bulk · corrections queue+detail) |
 | E6 Cuti (web) | ~5 | 5 ✅ (approvals HR-L2+SL-L1 · detail+variants · quotas+grant · calendar) |
-| E7 Lembur (web) | ~4 | 0 |
+| E7 Lembur (web) | ~4 | 5 ✅ (rekap · approvals HR-L2+SL-L1+bulk · OT decision detail · OT-rules+holiday calendar CRUD · queue/detail/holiday overlays) |
 | E8 Payroll (web) | ~3 | 0 |
 | E10 Reporting (web) | ~5 | 0 |
 | Phase 3 — mobile | ~8 epics | 0 (deferred) |

@@ -61,6 +61,10 @@ import { LeaveApprovalsScreen } from '@/features/e6-leave/leave-approvals-screen
 import { LeaveCalendarScreen } from '@/features/e6-leave/leave-calendar-screen.tsx';
 import { LeaveDetailScreen } from '@/features/e6-leave/leave-detail-screen.tsx';
 import { LeaveQuotasScreen } from '@/features/e6-leave/leave-quotas-screen.tsx';
+import { OvertimeApprovalsScreen } from '@/features/e7-overtime/overtime-approvals-screen.tsx';
+import { OvertimeDetailScreen } from '@/features/e7-overtime/overtime-detail-screen.tsx';
+import { OvertimeRecordsScreen } from '@/features/e7-overtime/overtime-records-screen.tsx';
+import { OvertimeRulesScreen as OvertimeRulesHolidaysScreen } from '@/features/e7-overtime/overtime-rules-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -505,6 +509,31 @@ const leaveCalendarRoute = createRoute({
   component: LeaveCalendarScreen,
 });
 
+// E7 — Lembur (Overtime)
+const overtimeRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/overtime',
+  component: OvertimeApprovalsScreen,
+});
+const overtimeRekapRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/overtime/rekap',
+  component: OvertimeRecordsScreen,
+});
+const overtimeAturanRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/overtime/aturan',
+  component: OvertimeRulesHolidaysScreen,
+});
+const overtimeDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/overtime/$overtimeId',
+  component: function OvertimeDetailRoute() {
+    const { overtimeId } = overtimeDetailRoute.useParams();
+    return <OvertimeDetailScreen overtimeId={overtimeId} />;
+  },
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -620,7 +649,10 @@ const routeTree = rootRoute.addChildren([
     leaveDetailRoute,
     leaveQuotasRoute,
     leaveCalendarRoute,
-    placeholder('/overtime', 'Lembur'),
+    overtimeRekapRoute,
+    overtimeAturanRoute,
+    overtimeDetailRoute,
+    overtimeRoute,
     placeholder('/reports', 'Laporan'),
     settingsRoute.addChildren([
       settingsIndexRoute,

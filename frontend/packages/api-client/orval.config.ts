@@ -72,4 +72,18 @@ export default defineConfig({
   // schemas under strict null checks (the documented oneOf/discriminator caveat,
   // WEB-STACK §4). Hand-author E6 fixtures or post-process before enabling.
   e6: reactQuery('e6', 'E6-leave', true),
+
+  // E7 Overtime — OT records/rekap, approval queue (L1/final/bulk), the central OT decision
+  // detail (auto-detect/confirm/withdraw), OT rules, HR holiday calendar. Tags: overtime,
+  // overtime-internal, holidays. Typed hooks + MSW mocks; Zod deferred (unions, WEB-STACK §4).
+  e7: reactQuery('e7', 'E7-overtime', true),
+
+  // E8 Payroll (read-only) — payslip archive + detail, audit notes, Excel export. Tags:
+  // payslips, payslip-audit-notes, payslip-export. Typed hooks + MSW mocks; Zod deferred.
+  e8: reactQuery('e8', 'E8-payroll', true),
+
+  // E10 Reporting & Notifications — dashboards, notifications, billable report, export
+  // framework. Tags: dashboards, notifications, reports, exports. Typed hooks + MSW mocks;
+  // Zod deferred (unions, WEB-STACK §4).
+  e10: reactQuery('e10', 'E10-reporting', true),
 });

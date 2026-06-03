@@ -35,6 +35,9 @@ import { getCorrectionsMock as getE5CorrectionsMock } from './gen/e5/corrections
 import { getLeaveCalendarMock } from './gen/e6/leave-calendar/leave-calendar.msw.ts';
 import { getLeaveQuotasMock } from './gen/e6/leave-quotas/leave-quotas.msw.ts';
 import { getLeaveRequestsMock } from './gen/e6/leave-requests/leave-requests.msw.ts';
+import { getHolidaysMock } from './gen/e7/holidays/holidays.msw.ts';
+import { getOvertimeInternalMock } from './gen/e7/overtime-internal/overtime-internal.msw.ts';
+import { getOvertimeMock } from './gen/e7/overtime/overtime.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
@@ -66,4 +69,8 @@ export const handlers: RequestHandler[] = [
   ...getLeaveQuotasMock(),
   ...getLeaveRequestsMock(),
   ...getLeaveCalendarMock(),
+  // E7 Overtime / Lembur
+  ...getOvertimeMock(),
+  ...getOvertimeInternalMock(),
+  ...getHolidaysMock(),
 ];
