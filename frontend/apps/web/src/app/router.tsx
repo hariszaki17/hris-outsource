@@ -50,6 +50,13 @@ import {
   type ScheduleGridSearch,
 } from '@/features/e4-scheduling/schedule-grid-screen.tsx';
 import { ShiftMastersScreen } from '@/features/e4-scheduling/shift-masters-screen.tsx';
+import { AttendanceDashboardScreen } from '@/features/e5-attendance/attendance-dashboard-screen.tsx';
+import { AttendanceDetailScreen } from '@/features/e5-attendance/attendance-detail-screen.tsx';
+import { AttendanceVerificationScreen } from '@/features/e5-attendance/attendance-verification-screen.tsx';
+import {
+  CorrectionsScreen,
+  type CorrectionsSearch,
+} from '@/features/e5-attendance/corrections-screen.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -61,6 +68,7 @@ import {
   EmployeeStatus,
 } from '@swp/api-client/e2';
 import { PlacementLifecycleStatus } from '@swp/api-client/e3';
+import { CorrectionStatus, CorrectionType } from '@swp/api-client/e5';
 import {
   Outlet,
   createRootRoute,
@@ -425,6 +433,49 @@ const shiftMastersRoute = createRoute({
   component: ShiftMastersScreen,
 });
 
+// E5 — Kehadiran (attendance dashboard, verification queue, detail, corrections)
+const attendanceDashboardRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/attendance',
+  component: AttendanceDashboardScreen,
+});
+const attendanceVerificationRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/attendance/verification',
+  component: AttendanceVerificationScreen,
+});
+const attendanceDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/attendance/$attendanceId',
+  component: function AttendanceDetailRoute() {
+    const { attendanceId } = attendanceDetailRoute.useParams();
+    return <AttendanceDetailScreen attendanceId={attendanceId} />;
+  },
+});
+const correctionsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/corrections',
+  component: CorrectionsScreen,
+  validateSearch: (search: Record<string, unknown>): CorrectionsSearch => {
+    const out: CorrectionsSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (
+      typeof search.status === 'string' &&
+      (Object.values(CorrectionStatus) as string[]).includes(search.status)
+    ) {
+      out.status = search.status as CorrectionStatus;
+    }
+    if (
+      typeof search.type === 'string' &&
+      (Object.values(CorrectionType) as string[]).includes(search.type)
+    ) {
+      out.type = search.type as CorrectionType;
+    }
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -532,7 +583,10 @@ const routeTree = rootRoute.addChildren([
     companyRosterRoute,
     scheduleRoute,
     shiftMastersRoute,
-    placeholder('/attendance', 'Kehadiran'),
+    attendanceDashboardRoute,
+    attendanceVerificationRoute,
+    attendanceDetailRoute,
+    correctionsRoute,
     placeholder('/leave', 'Cuti'),
     placeholder('/overtime', 'Lembur'),
     placeholder('/reports', 'Laporan'),

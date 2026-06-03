@@ -12,7 +12,8 @@
     "./e4": "./src/e4.ts",
     "./e6": "./src/e6.ts",
     "./mocks": "./src/mocks.ts",
-    "./query-client": "./src/query-client.ts"
+    "./query-client": "./src/query-client.ts",
+    "./e5": "./src/e5.ts"
   },
   "scripts": {
     "gen": "orval --config ./orval.config.ts && node ./scripts/patch-msw-action-paths.mjs && biome format --write ./src/gen >/dev/null 2>&1 || true",

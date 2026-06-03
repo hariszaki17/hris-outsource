@@ -28,6 +28,10 @@ import { getPlacementsMock } from './gen/e3/placements/placements.msw.ts';
 import { getShiftLeaderAssignmentsMock } from './gen/e3/shift-leader-assignments/shift-leader-assignments.msw.ts';
 import { getScheduleMock } from './gen/e4/schedule/schedule.msw.ts';
 import { getShiftMastersMock } from './gen/e4/shift-masters/shift-masters.msw.ts';
+import { getAttendanceRecordsMock } from './gen/e5/attendance-records/attendance-records.msw.ts';
+import { getAttendanceVerificationMock } from './gen/e5/attendance-verification/attendance-verification.msw.ts';
+import { getClockInOutMock } from './gen/e5/clock-in-out/clock-in-out.msw.ts';
+import { getCorrectionsMock as getE5CorrectionsMock } from './gen/e5/corrections/corrections.msw.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
@@ -50,4 +54,9 @@ export const handlers: RequestHandler[] = [
   // E4 Shift Scheduling / Jadwal
   ...getShiftMastersMock(),
   ...getScheduleMock(),
+  // E5 Attendance / Kehadiran
+  ...getClockInOutMock(),
+  ...getAttendanceRecordsMock(),
+  ...getAttendanceVerificationMock(),
+  ...getE5CorrectionsMock(),
 ];

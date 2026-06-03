@@ -63,6 +63,10 @@ export default defineConfig({
   // actions). Typed hooks + MSW mocks; Zod deferred (3 unions, WEB-STACK §4).
   e4: reactQuery('e4', 'E4-shift-scheduling', true),
 
+  // E5 Attendance — clock-in/out (mobile), attendance records, verification queue, corrections.
+  // Typed hooks + MSW mocks; Zod deferred (1 union, WEB-STACK §4).
+  e5: reactQuery('e5', 'E5-attendance', true),
+
   // E6 Leave — typed react-query hooks only. MSW mocks + Zod DEFERRED: Orval's faker
   // mocks emit `string | undefined` against required fields on E6's union/nullable
   // schemas under strict null checks (the documented oneOf/discriminator caveat,

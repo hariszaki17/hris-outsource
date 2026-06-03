@@ -1,0 +1,23 @@
+import { mkdirSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
+const DIR = 'e2e/__screenshots__/e5';
+mkdirSync(DIR, { recursive: true });
+test('E5 Kehadiran — dashboard + verification + corrections', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('sari.hadi@swp.example.com');
+  await page.getByLabel('Kata Sandi').fill('password');
+  await page.getByRole('button', { name: 'Masuk' }).click();
+  await expect(page).toHaveURL('/');
+  await page.getByRole('link', { name: 'Kehadiran' }).first().click();
+  await expect(page).toHaveURL(/\/attendance$/);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${DIR}/01-dashboard.png` });
+  await page.getByRole('link', { name: 'Koreksi' }).first().click();
+  await expect(page).toHaveURL(/\/corrections$/);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${DIR}/02-corrections.png` });
+  expect(errors, `page errors:\n${errors.join('\n')}`).toEqual([]);
+});

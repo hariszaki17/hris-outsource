@@ -206,12 +206,11 @@ Remaining masters → components:
 - [x] Conflict toasts — over-leave · double-shift · beyond-placement · out-of-scope · coverage-warn (via `useCheckScheduleConflicts`)
 - [x] Bulk apply-to-range (preview/apply) · Auto-publish toast
 
-### E5 — Attendance / Kehadiran 🔲  · web container `W83QJ`
-- [ ] Reconciled against live `.pen`
-- [ ] Attendance dashboard (F5.5) — HR (cross-company) + Shift Leader (own-company) · comp: StatCard,StatusBadge
-- [ ] Verification queue + **detail** (F5.3) + **bulk-verify** (ModalBulkApprove) + **reject modal** (ModalReject)
-- [ ] HR escalation badges + filter (leaders' own records)
-- [ ] **F5.4 Corrections** — leader/HR queue · correction detail · reject · (agent tracker is mobile)
+### E5 — Attendance / Kehadiran ✅  · web container `W83QJ`
+- [x] Reconciled against live `.pen` *(8 web frames: HR + SL POVs + corrections)*
+- [x] Attendance dashboard (F5.5) — HR (cross-company) + Shift Leader (own-company) · `→ features/e5-attendance/attendance-dashboard-screen.tsx` · frames `sZCLW`,`V2QL7`
+- [x] Verification queue + **detail** (F5.3) + **bulk-verify** + **reject modal** + escalation badges/filter · `→ attendance-verification-screen.tsx`,`attendance-detail-screen.tsx` · frames `UEG2J`,`MsXnm`,`VY894`,`RZPQz`
+- [x] **F5.4 Corrections** — HR queue + correction detail drawer (before→after diff) + approve/reject · `→ corrections-screen.tsx`,`correction-overlays.tsx` · frames `QfamL`,`sSKtK`
 
 ### E6 — Leave / Cuti 🔲  · web container `Anidb`
 - [ ] Reconciled against live `.pen`
@@ -271,7 +270,7 @@ Remaining masters → components:
 | E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
 | E3 Penempatan (web) | ~6 | 6 ✅ (list+roster · detail w/ 9 lifecycle states · create+INV-1 · transfer/renew/end/terminate/resign · SL assign/replace/end INV-2/3/4) |
 | E4 Jadwal (web) | ~5 | 5 ✅ (shift master catalog+modal · weekly schedule grid · shift-picker popover · conflict toasts · bulk apply) |
-| E5 Kehadiran (web) | ~4 | 0 |
+| E5 Kehadiran (web) | ~4 | 4 ✅ (dashboard HR+SL · verification queue+detail+bulk · corrections queue+detail) |
 | E6 Cuti (web) | ~5 | 0 |
 | E7 Lembur (web) | ~4 | 0 |
 | E8 Payroll (web) | ~3 | 0 |
