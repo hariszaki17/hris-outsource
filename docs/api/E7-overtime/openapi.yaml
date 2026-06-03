@@ -1,0 +1,1584 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource · E7 Overtime Tracking API
+  version: 1.0.0
+  description: |
+    OpenAPI spec for **E7 — Overtime Tracking** (overtime requests, two-level approval,
+    auto-detection from verified attendance, and the HR-maintained public-holiday calendar
+    shared with E6).
+
+    > **Inherits from** `docs/api/CONVENTIONS.md` (v1, 2026-06-03). Anything not stated
+    > here defers to that doc (auth, pagination, error envelope, idempotency, RBAC, audit,
+    > timestamps, rate limiting). If this spec contradicts CONVENTIONS.md, **CONVENTIONS.md
+    > wins**.
+
+    ## Scope
+
+    | Resource | Endpoints |
+    |---|---|
+    | `/overtime` | Agent request, leader/HR approve, withdraw, bulk, auto-detect (internal). |
+    | `/holidays` | HR-maintained public-holiday calendar (read also consumed by E6 working-day calc). |
+
+    ## NOT in this spec
+
+    - **Overtime rule master CRUD** lives in E2 (`/overtime-rules`, `SWP-OTR-*`). E7 only
+      *consumes* rules at calculation time. See `docs/api/E2-identity/openapi.yaml`.
+    - **Verified attendance** is the source for auto-detect; see E5 `/attendance` (records
+      with `verified_status: VERIFIED` whose `clock_out_at` exceeds the scheduled shift end).
+    - **Placement context** (`SWP-PL-*`) comes from E3; OT is recorded *under* the active
+      placement on `work_date`.
+    - **Approved leave conflict** check pulls from E6 `/leave-requests`.
+
+    ## D4 decision (final 2026-06-02, EPICS.md §8 updated)
+
+    - Minimum OT counted = **30 minutes** (PRD wins; §8 line is annotated "superseded").
+    - Auto-detected OT → agent confirms → leader approves → HR approves.
+    - Worked-without-request OT is still approvable after the fact, **flagged**.
+    - **Tier precedence:** `HOLIDAY > RESTDAY > WORKDAY` — Holiday beats Rest-day.
+    - Cross-midnight OT is attributed to the **start date** of the work span.
+    - The HR public-holiday calendar is **shared with E6** for working-day calculations
+      (leave duration) and with E7 for tier resolution.
+
+    ## Calculation transparency
+
+    Every `Overtime` returns a server-computed `calculation` block at GET time (never
+    persisted stale). The block exposes worked minutes, the 30-min-rounded counted
+    minutes, the per-tier breakdown with applied multipliers and the `supersedes` cue
+    when a higher tier wins, and the applied minimum-minutes threshold. The React
+    client renders this directly — there is no client-side recomputation.
+  contact:
+    name: hris-outsource product+engineering
+    email: hris-team@swp.example.com
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: overtime
+    description: |
+      OT requests, agent confirmation, two-level approval, bulk actions.
+      Pre-approval flow per F7.2 OC-1; auto-detect per F7.2 OC-2; approval per F7.3.
+  - name: overtime-internal
+    description: |
+      Internal endpoints — invoked by cron/system, NOT by user clients. Documented for
+      completeness and contract testing. Marked `x-internal: true`.
+  - name: holidays
+    description: |
+      HR-maintained public-holiday calendar. Drives E7 day-type classification and
+      (shared) E6 working-day exclusion. F7.1 OR-5; HOL-1, HOL-2.
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # /overtime
+  # ─────────────────────────────────────────────────────────────────────────────
+  /overtime:
+    get:
+      operationId: listOvertime
+      tags: [overtime]
+      summary: List overtime requests
+      description: |
+        List OT records with filters. Returns the `calculation` block on each item
+        (computed at query time). Cursor-paginated per CONVENTIONS §8.
+
+        **Scope:**
+        - Agent sees own OT (any status).
+        - Shift leader sees OT for agents at their company (E3 SLA scope).
+        - HR / super-admin sees all.
+
+        Server filters out records the caller is not in scope for; no 403 leakage.
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: employee_id
+          in: query
+          description: Filter to one agent. Required-shape `SWP-EMP-*`.
+          schema:
+            type: string
+            example: SWP-EMP-1042
+        - name: company_id
+          in: query
+          description: Filter to one client company.
+          schema:
+            type: string
+            example: SWP-CMP-014
+        - name: status
+          in: query
+          description: |
+            Status filter. Multi-value via `status__in=PENDING_AGENT_CONFIRM,PENDING_L1`.
+          schema:
+            $ref: '#/components/schemas/OvertimeStatus'
+        - name: status__in
+          in: query
+          description: Comma-separated multi-status filter.
+          schema:
+            type: string
+            example: PENDING_AGENT_CONFIRM,PENDING_L1
+        - name: work_date__gte
+          in: query
+          schema:
+            type: string
+            format: date
+            example: '2026-06-01'
+        - name: work_date__lte
+          in: query
+          schema:
+            type: string
+            format: date
+            example: '2026-06-30'
+        - name: tier
+          in: query
+          description: Filter by computed day-type tier.
+          schema:
+            $ref: '#/components/schemas/OvertimeTier'
+        - name: flagged_no_preapproval
+          in: query
+          description: |
+            Return only records that bypassed pre-approval (worked-without-request).
+            Per EPICS §8: such OT is still approvable but flagged for HR/leader visibility.
+          schema:
+            type: boolean
+            example: true
+        - name: source
+          in: query
+          description: Filter by capture path.
+          schema:
+            $ref: '#/components/schemas/OvertimeSource'
+        - name: sort
+          in: query
+          schema:
+            type: string
+            example: work_date:desc,created_at:desc
+      responses:
+        '200':
+          description: Page of OT records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OvertimePage'
+              examples:
+                hr_pending_queue:
+                  summary: HR L2 pending queue (frame H1eBN)
+                  value:
+                    data:
+                      - id: SWP-OT-30021
+                        employee:
+                          id: SWP-EMP-1042
+                          name: Budi Hartono
+                        company:
+                          id: SWP-CMP-014
+                          name: Plaza Senayan
+                        placement_id: SWP-PL-882
+                        attendance_id: SWP-ATT-10692
+                        work_date: '2026-06-02'
+                        planned_start_time: null
+                        planned_end_time: null
+                        actual_start_time: '15:00'
+                        actual_end_time: '18:32'
+                        cross_midnight: false
+                        source: AUTO_DETECTED
+                        status: PENDING_L1
+                        tier_indicator: WORKDAY
+                        flagged_no_preapproval: false
+                        reason: null
+                        calculation:
+                          worked_minutes: 212
+                          counted_minutes: 210
+                          min_minutes_threshold: 30
+                          skipped_too_short: false
+                          tier_breakdown:
+                            - tier: WORKDAY
+                              minutes: 210
+                              multiplier: 1.5
+                              supersedes: null
+                              overtime_rule_id: SWP-OTR-001
+                        created_at: '2026-06-02T11:00:14Z'
+                        updated_at: '2026-06-02T15:32:08Z'
+                    next_cursor: null
+                    has_more: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - H1eBN  # HR · Persetujuan Lembur
+        - Vh2P9  # SL · Persetujuan Lembur
+        - nd3KT  # Agent · Lembur Saya (Riwayat)
+        - JEmCk  # HR · Rekap Lembur
+
+    post:
+      operationId: createOvertimeRequest
+      tags: [overtime]
+      summary: Agent submits a pre-approval OT request
+      description: |
+        Agent (or shift leader on their behalf) pre-requests OT. Creates a record in
+        `PENDING_L1` (skipping `PENDING_AGENT_CONFIRM` since the agent IS the requester).
+        Per OC-1.
+
+        **Business rules:**
+        - `work_date` must fall within an active placement (OC-6) → else `INV_*_VIOLATION`
+          / `OUT_OF_GEOFENCE`-style 422 with `OT_NO_SCHEDULED_SHIFT`.
+        - `planned_end_time < planned_start_time` is interpreted as **cross-midnight**
+          (date assigned per start date).
+        - If the computed duration after rounding is < 30 min → `OT_BELOW_MIN` (422).
+        - If `work_date` overlaps an approved leave (E6) → `OT_OVERLAPS_LEAVE` (409).
+        - Idempotent via `Idempotency-Key` header (CONVENTIONS §13).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OvertimeWriteRequest'
+            examples:
+              budi_request:
+                summary: Agent Budi requests 2h OT
+                value:
+                  employee_id: SWP-EMP-1042
+                  work_date: '2026-06-10'
+                  planned_start_time: '15:00'
+                  planned_end_time: '17:00'
+                  reason: 'Cover for absent colleague at front desk.'
+      responses:
+        '201':
+          description: OT request created.
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /api/v1/overtime/SWP-OT-30055
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - wDLQu  # Mobile · Agen Ajukan Lembur
+
+  /overtime/{id}:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    get:
+      operationId: getOvertime
+      tags: [overtime]
+      summary: Get one OT record with calculation
+      description: |
+        Returns the full OT record, including the `calculation` block recomputed
+        server-side (never stored stale — see schema description). The response is
+        designed to feed the OT-detail modal/screen (audit gap f1) directly: includes
+        linked attendance, tier breakdown, approval timeline, and the flagged status.
+      responses:
+        '200':
+          description: OT record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - H1eBN
+        - Vh2P9
+
+  /overtime:auto-detect:
+    post:
+      operationId: autoDetectOvertime
+      tags: [overtime-internal]
+      summary: '[INTERNAL] Cron-driven OT auto-detection sweep'
+      description: |
+        **Internal endpoint — not user-facing.** Invoked by the OT detection cron after
+        each shift verification cycle. Scans verified attendance (E5,
+        `verified_status: VERIFIED`) where `check_out_at` exceeds the scheduled shift
+        end by ≥ 30 minutes (rounded), and creates `PENDING_AGENT_CONFIRM` records
+        linked to the source attendance.
+
+        Per OC-2 / OC-8: idempotent per `(attendance_id)` — re-running the cron does not
+        create duplicates; an existing OT for the same shift/attendance is skipped.
+
+        **Why an endpoint and not a hidden job:** keeps the contract testable and lets
+        ops re-trigger after migration backfills. Restricted to `super_admin` + the
+        internal service principal.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+        - name: window_start
+          in: query
+          description: Inclusive lower bound on attendance `check_out_at`.
+          schema:
+            type: string
+            format: date-time
+            example: '2026-06-02T00:00:00Z'
+        - name: window_end
+          in: query
+          description: Exclusive upper bound on attendance `check_out_at`.
+          schema:
+            type: string
+            format: date-time
+            example: '2026-06-03T00:00:00Z'
+        - name: company_id
+          in: query
+          description: Optional company scope.
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Sweep accepted; async job created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, candidate_count]
+                properties:
+                  job_id:
+                    type: string
+                    example: SWP-EXP-otdetect-2026-06-02
+                  candidate_count:
+                    type: integer
+                    description: Number of OT records created (pre-existing skipped per OC-8).
+                    example: 23
+                  skipped_existing:
+                    type: integer
+                    example: 4
+                  skipped_too_short:
+                    type: integer
+                    description: Attendance records under 30 min — silently ignored per OC-4.
+                    example: 11
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [super_admin]
+        scope: global
+      x-internal: true
+      x-design-screens: []
+
+  /overtime/{id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    post:
+      operationId: confirmOvertime
+      tags: [overtime]
+      summary: Agent confirms an auto-detected OT
+      description: |
+        Agent confirms an auto-detected OT candidate (per OC-2 / OA-6). Transitions
+        `PENDING_AGENT_CONFIRM → PENDING_L1`. The dismiss path ("Bukan Lembur") uses
+        `:withdraw` instead — see frame mzCUA for the dual-footer pattern.
+
+        Only the OT's own agent may call this; HR/leader cannot confirm on behalf.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+                  description: Optional agent note appended to the record.
+                  example: 'Selesai bantuin renovasi ruang VIP.'
+      responses:
+        '200':
+          description: Confirmed; status now PENDING_L1.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Wrong-state transition (record not in `PENDING_AGENT_CONFIRM`) → `CONFLICT`.
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - mzCUA  # Mobile · Agen OT Terdeteksi (Konfirmasi)
+
+  /overtime/{id}:withdraw:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    post:
+      operationId: withdrawOvertime
+      tags: [overtime]
+      summary: Agent withdraws a pending OT
+      description: |
+        Agent withdraws their own pending OT request (per OA C-3). Allowed from
+        `PENDING_AGENT_CONFIRM` or `PENDING_L1` (i.e. before final HR approval).
+        Transitions to `WITHDRAWN`. **No reason required** — destructive-style Wave-3.4
+        per CONVENTIONS §13 (idempotency-keyed but no body).
+
+        Doubles as the "Bukan Lembur" dismiss action on the auto-detect confirmation
+        screen (mzCUA): the agent says it was not OT; the candidate is withdrawn and
+        the underlying attendance record is **unaffected** (per F7.3 C-1).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      responses:
+        '204':
+          description: Withdrawn.
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Not withdrawable — record is already APPROVED / REJECTED / WITHDRAWN.
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - nd3KT  # Mobile · Lembur Saya (history rows)
+        - mzCUA  # Mobile · OT Terdeteksi ("Bukan Lembur" footer)
+
+  /overtime/{id}:approve-l1:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    post:
+      operationId: approveOvertimeL1
+      tags: [overtime]
+      summary: Shift leader Level-1 approval
+      description: |
+        Shift leader approves an OT in `PENDING_L1`, transitioning to `PENDING_HR`. Per
+        OA-1, OA-2, OA-5 (no self-approval; if the OT belongs to the leader themselves,
+        it must escalate to HR per OA-2). Records an `OvertimeApproval` row at level 1.
+
+        The response includes the freshly computed `calculation` snapshot so the UI can
+        render the post-approval tier-breakdown card. Per audit f6, the client uses this
+        to drive the success toast + queue update.
+
+        **Out-of-scope guard:** if the leader's company does not match the OT's company,
+        respond `OUT_OF_SCOPE` (403).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+                  description: Optional approval note.
+                  example: 'Konfirmasi: shift leader observed Budi on-site until 18:30.'
+      responses:
+        '200':
+          description: Approved at L1.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: |
+            Forbidden — leader not in scope OR attempting self-approval (`OUT_OF_SCOPE`
+            / `FORBIDDEN` with `error.code: SELF_APPROVAL_FORBIDDEN`).
+          $ref: '#/components/responses/Forbidden'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Wrong-state transition (not in PENDING_L1).
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - Vh2P9  # SL · Persetujuan Lembur
+
+  /overtime/{id}:approve-final:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    post:
+      operationId: approveOvertimeFinal
+      tags: [overtime]
+      summary: HR Level-2 final approval
+      description: |
+        HR final-approves an OT in `PENDING_HR`. Transitions to `APPROVED`. Per OA-1.
+        HR may also bypass L1 via `is_override: true` for the F7.3 OA-8 override path
+        (reason required when overriding).
+
+        On `APPROVED`, the record is counted in F7.4 aggregations (hours by tier).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+                  example: 'Approved; aligns with monthly OT budget for Plaza Senayan.'
+                is_override:
+                  type: boolean
+                  default: false
+                  description: |
+                    Set true when HR is bypassing L1 (e.g. no leader, or escalation).
+                    Requires `note` to be non-empty (OA-8).
+              example:
+                note: 'Override: no leader assigned; HR-only escalation.'
+                is_override: true
+      responses:
+        '200':
+          description: Final-approved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: |
+            Override requested without a reason → 422 with
+            `error.code: OVERRIDE_REASON_REQUIRED`.
+          $ref: '#/components/responses/Unprocessable'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - H1eBN  # HR · Persetujuan Lembur (L2)
+
+  /overtime/{id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/overtimeId'
+    post:
+      operationId: rejectOvertime
+      tags: [overtime]
+      summary: Reject OT (leader or HR)
+      description: |
+        Reject an OT at whichever level the caller is currently authoritative for.
+        Wave-1 EnabP reject-with-reason modal — `reason` is **required** per OA-1 /
+        OA-7.
+
+        Transitions `PENDING_L1 → REJECTED` (leader rejects) or
+        `PENDING_HR → REJECTED` (HR rejects). Auto-detected candidates rejected at any
+        level leave the underlying E5 attendance record unchanged (F7.3 C-1).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  description: |
+                    Audit-visible reason shown to the agent. Required (Wave-1 EnabP).
+                  example: 'Not justified — front-desk traffic was within capacity.'
+              example:
+                reason: 'Not justified — front-desk traffic was within capacity.'
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Overtime'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - H1eBN
+        - Vh2P9
+
+  /overtime:bulk-approve:
+    post:
+      operationId: bulkApproveOvertime
+      tags: [overtime]
+      summary: Bulk approve OT records
+      description: |
+        Wave-1 r4KZl5 bulk approval (OA-9). Approves each record at whichever level the
+        caller is currently authoritative for (leader → L1, HR → L2 / override). Partial
+        success is normal: e.g. a leader's own OT in the selection is rejected with
+        `SELF_APPROVAL_FORBIDDEN` while the other rows succeed.
+
+        Bulk endpoints require `Idempotency-Key` per CONVENTIONS §14.
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                  example:
+                    - SWP-OT-30021
+                    - SWP-OT-30022
+                    - SWP-OT-30025
+                note:
+                  type: string
+                  maxLength: 500
+                  description: Optional audit note applied to every successful approval.
+                  example: 'Plaza Senayan · weekly OT review · approved.'
+      responses:
+        '200':
+          description: |
+            Bulk processed. At least one succeeded — partial-failure rows in `failed[]`
+            per CONVENTIONS §14.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: All items failed → 422 with error envelope summarizing.
+          $ref: '#/components/responses/Unprocessable'
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - H1eBN
+        - Vh2P9
+
+  /overtime:bulk-reject:
+    post:
+      operationId: bulkRejectOvertime
+      tags: [overtime]
+      summary: Bulk reject OT records
+      description: |
+        Bulk reject. The `reason` applies to **every** rejected row (audit log writes one
+        entry per affected entity per CONVENTIONS §16.1).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, reason]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                  example:
+                    - SWP-OT-30021
+                    - SWP-OT-30022
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  example: 'Duplicate of approved OT batch in May.'
+      responses:
+        '200':
+          description: Bulk processed (≥1 succeeded).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - H1eBN
+        - Vh2P9
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # /holidays  — HR-maintained public holiday calendar (shared with E6)
+  # ─────────────────────────────────────────────────────────────────────────────
+  /holidays:
+    get:
+      operationId: listHolidays
+      tags: [holidays]
+      summary: List public holidays
+      description: |
+        List public holidays. Used by:
+        - **E6** working-day calculation (leave duration excludes holidays).
+        - **E7** OT tier resolution (HOLIDAY tier).
+        - **HR console** for the calendar editor (frame vd4na, right pane tpIxx).
+        - **Picker** for any form needing holiday-aware date selection.
+
+        Per HOL-1. Returns the holiday's resolved date(s) for the queried `year`
+        (recurring holidays expanded to that year's instance). For raw masters use
+        `recurring: false` + omit `year`.
+      parameters:
+        - name: year
+          in: query
+          description: |
+            Resolve to this calendar year. Recurring holidays are projected to the year.
+          schema:
+            type: integer
+            minimum: 1900
+            maximum: 2100
+            example: 2026
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/HolidayCategory'
+        - name: service_line_id
+          in: query
+          description: Filter to holidays applicable to this service line (or global).
+          schema:
+            type: string
+            example: SWP-SVC-PARKING
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: Page of holidays.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HolidayPage'
+              examples:
+                hr_2026:
+                  summary: 2026 holiday list (frame tpIxx)
+                  value:
+                    data:
+                      - id: SWP-HOL-001
+                        name: Hari Kemerdekaan RI
+                        date: '2026-08-17'
+                        category: NATIONAL
+                        recurring: true
+                        applicable_service_lines: []
+                        in_use_by_overtime: true
+                        created_at: '2025-12-15T03:21:00Z'
+                        updated_at: '2025-12-15T03:21:00Z'
+                      - id: SWP-HOL-007
+                        name: Idul Fitri (1 Syawal)
+                        date: '2026-04-13'
+                        category: NATIONAL
+                        recurring: false
+                        applicable_service_lines: []
+                        in_use_by_overtime: false
+                        created_at: '2025-12-15T03:30:00Z'
+                        updated_at: '2025-12-15T03:30:00Z'
+                    next_cursor: null
+                    has_more: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - tpIxx  # vd4na right pane · Kalender Hari Libur
+
+    post:
+      operationId: createHoliday
+      tags: [holidays]
+      summary: HR creates a public holiday
+      description: |
+        HR adds a holiday to the master calendar (HOL-2; audit f4 fill). Recurring
+        holidays (`recurring: true`) repeat annually on the same `MM-DD` and need not be
+        re-entered each year. Movable holidays (e.g. Idul Fitri) are entered yearly with
+        `recurring: false`.
+
+        Duplicate-date guard: creating a holiday on a date that already has one with
+        the same `category` + service-line scope → `HOLIDAY_DATE_CLASH` (409).
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HolidayWriteRequest'
+            examples:
+              recurring_national:
+                summary: Add Hari Kemerdekaan (recurring)
+                value:
+                  name: Hari Kemerdekaan RI
+                  date: '2026-08-17'
+                  category: NATIONAL
+                  recurring: true
+                  applicable_service_lines: []
+              movable_yearly:
+                summary: Add Idul Fitri 2026 (movable, yearly)
+                value:
+                  name: Idul Fitri (1 Syawal)
+                  date: '2026-04-13'
+                  category: NATIONAL
+                  recurring: false
+                  applicable_service_lines: []
+              custom_regional:
+                summary: Add a custom regional holiday for Parking only
+                value:
+                  name: HUT Daerah Khusus
+                  date: '2026-09-12'
+                  category: REGIONAL
+                  recurring: true
+                  applicable_service_lines: [SWP-SVC-PARKING]
+      responses:
+        '201':
+          description: Holiday created.
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /api/v1/holidays/SWP-HOL-009
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holiday'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`HOLIDAY_DATE_CLASH` — duplicate holiday on same date+scope.'
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - vd4na  # HR · Aturan OT & Kalender Libur (+ icon oYHbH)
+
+  /holidays/{id}:
+    parameters:
+      - $ref: '#/components/parameters/holidayId'
+    get:
+      operationId: getHoliday
+      tags: [holidays]
+      summary: Get one holiday
+      responses:
+        '200':
+          description: Holiday.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holiday'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - vd4na
+
+    patch:
+      operationId: updateHoliday
+      tags: [holidays]
+      summary: HR edits a holiday
+      description: |
+        Partial update. Editing a holiday referenced by APPROVED OT does **not** retroact
+        on stored OT records — already-counted hours are not recomputed (per F7.4 OR-7;
+        late-correction policy F7.3 C-2 is "flag, don't auto-recompute").
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HolidayWriteRequest'
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Holiday'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`HOLIDAY_DATE_CLASH` if the new date+scope conflicts.'
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - vd4na
+
+    delete:
+      operationId: deleteHoliday
+      tags: [holidays]
+      summary: HR soft-deletes a holiday
+      description: |
+        Soft-delete (sets `deleted_at`) per CONVENTIONS §6 + Wave-1 V4LG8 confirm.
+        Blocked with `HOLIDAY_IN_USE` (409) if any APPROVED OT references this holiday
+        for its day-type derivation (OR-5 → tier=HOLIDAY records). HR may "deactivate
+        forward" by editing future dates instead.
+      responses:
+        '204':
+          description: Soft-deleted.
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`HOLIDAY_IN_USE` — referenced by approved OT.'
+          $ref: '#/components/responses/Conflict'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - vd4na
+
+  /holidays/next/{date}:
+    parameters:
+      - name: date
+        in: path
+        required: true
+        description: |
+          Reference date (YYYY-MM-DD). Returns the next holiday on-or-after this date.
+        schema:
+          type: string
+          format: date
+          example: '2026-06-15'
+    get:
+      operationId: getNextHoliday
+      tags: [holidays]
+      summary: Convenience — next holiday on/after a date
+      description: |
+        Returns the closest upcoming holiday at or after the reference date. Used by
+        **E6 working-day calculation** (skip to next-non-holiday) and by date-picker
+        widgets that highlight the "next holiday" hint.
+
+        Returns `null` data if no holiday is scheduled in the next 2 years.
+      parameters:
+        - name: service_line_id
+          in: query
+          description: Restrict to holidays applicable to this service line.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Next holiday or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holiday]
+                properties:
+                  holiday:
+                    oneOf:
+                      - $ref: '#/components/schemas/Holiday'
+                      - type: 'null'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: global
+      x-design-screens: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+      description: |
+        See CONVENTIONS §3. Token is opaque to the client.
+
+  parameters:
+    cursor:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor from previous page.
+      schema:
+        type: string
+    limit:
+      name: limit
+      in: query
+      description: Page size (default 50, max 200).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        UUID v4 from the client. Server caches the response by key for 24h. See
+        CONVENTIONS §13.
+      schema:
+        type: string
+        format: uuid
+        example: 3c7e9aa2-1d4f-4b18-bc01-7a9f0e2d8c45
+    overtimeId:
+      name: id
+      in: path
+      required: true
+      description: OT record ID, e.g. `SWP-OT-30021`.
+      schema:
+        type: string
+        pattern: '^SWP-OT-[0-9]+$'
+    holidayId:
+      name: id
+      in: path
+      required: true
+      description: Holiday ID, e.g. `SWP-HOL-001`.
+      schema:
+        type: string
+        pattern: '^SWP-HOL-[0-9]+$'
+
+  responses:
+    BadRequest:
+      description: 400 — validation/syntactic error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthenticated:
+      description: 401 — missing/expired bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: 403 — token valid but role/scope lacks permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: 404 — resource not found or not visible to caller.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: 409 — invariant or state-transition conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unprocessable:
+      description: 422 — semantic / business-rule violation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    # ── Common ────────────────────────────────────────────────────────────────
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                UPPER_SNAKE_CASE. E7 codes:
+                `OT_BELOW_MIN`, `OT_OVERLAPS_LEAVE`, `OT_NO_SCHEDULED_SHIFT`,
+                `HOLIDAY_DATE_CLASH`, `HOLIDAY_IN_USE`, `OUT_OF_SCOPE`,
+                `SELF_APPROVAL_FORBIDDEN`, `OVERRIDE_REASON_REQUIRED`,
+                `IDEMPOTENCY_KEY_REUSED`. Plus shared codes in CONVENTIONS §11.
+              example: OT_BELOW_MIN
+            message:
+              type: string
+              example: 'Lembur < 30 menit tidak dihitung.'
+            fields:
+              type: object
+              additionalProperties:
+                type: string
+            request_id:
+              type: string
+              example: req_01J5XK...
+
+    BulkResult:
+      type: object
+      required: [succeeded, failed]
+      properties:
+        succeeded:
+          type: array
+          items:
+            type: string
+          example: [SWP-OT-30021, SWP-OT-30022]
+        failed:
+          type: array
+          items:
+            type: object
+            required: [id, error]
+            properties:
+              id:
+                type: string
+                example: SWP-OT-30025
+              error:
+                $ref: '#/components/schemas/ErrorEnvelope/properties/error'
+
+    EmployeeRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, example: SWP-EMP-1042 }
+        name: { type: string, example: Budi Hartono }
+
+    CompanyRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, example: SWP-CMP-014 }
+        name: { type: string, example: Plaza Senayan }
+
+    # ── Overtime ──────────────────────────────────────────────────────────────
+    OvertimeStatus:
+      type: string
+      description: |
+        OT lifecycle:
+        - `PENDING_AGENT_CONFIRM` — auto-detected; awaiting agent confirmation (OC-7).
+        - `PENDING_L1` — awaiting shift-leader approval.
+        - `PENDING_HR` — leader-approved; awaiting HR final.
+        - `APPROVED` — final; counts in F7.4 totals.
+        - `REJECTED` — rejected at L1 or L2 (reason recorded).
+        - `WITHDRAWN` — agent withdrew (OA C-3) or dismissed an auto-detect.
+      enum:
+        - PENDING_AGENT_CONFIRM
+        - PENDING_L1
+        - PENDING_HR
+        - APPROVED
+        - REJECTED
+        - WITHDRAWN
+
+    OvertimeSource:
+      type: string
+      description: |
+        How the OT entered the system:
+        - `REQUESTED` — agent/leader pre-requested (OC-1).
+        - `AUTO_DETECTED` — system detected from E5 verified attendance (OC-2).
+        - `WORKED_WITHOUT_REQUEST` — pre-approval rule applied; worked OT without a
+          prior request. Still approvable; **always paired** with
+          `flagged_no_preapproval: true` (EPICS §8).
+      enum:
+        - REQUESTED
+        - AUTO_DETECTED
+        - WORKED_WITHOUT_REQUEST
+
+    OvertimeTier:
+      type: string
+      description: |
+        Day-type tier (F7.1 OR-1):
+        - `WORKDAY` — agent had a scheduled shift; OT beyond shift end.
+        - `RESTDAY` — agent had no scheduled shift on `work_date` (E4 lookup).
+        - `HOLIDAY` — `work_date` is in the HR holiday calendar.
+
+        **Precedence:** `HOLIDAY > RESTDAY > WORKDAY` — if both apply, the higher tier
+        wins (EPICS §8 lock). When a higher tier supersedes a lower one in a multi-tier
+        breakdown, the lower entry MUST carry `supersedes` pointing to the winning tier.
+      enum: [WORKDAY, RESTDAY, HOLIDAY]
+
+    OvertimeCalculation:
+      type: object
+      description: |
+        Server-computed at GET time — never persisted stale. Lets the React client
+        render the tier-breakdown card without any local arithmetic.
+
+        ## Calculation rules (D4 final 2026-06-02)
+
+        1. **Worked minutes** is taken from the linked E5 attendance
+           (`check_out_at − scheduled_shift_end`) for `AUTO_DETECTED`, or from
+           `planned_end_time − planned_start_time` for `REQUESTED`. Cross-midnight is
+           computed as a positive span; the OT is attributed to the **start date**
+           (EPICS §8 cross-midnight rule).
+        2. **`counted_minutes`** = `floor(worked_minutes / 30) × 30`. The server rounds
+           DOWN to the nearest 30-minute increment.
+        3. **`min_minutes_threshold`** = 30 (locked per EPICS §8 + D4 2026-06-02). If
+           `counted_minutes < 30`, the record is created with
+           `skipped_too_short: true` and an `OT_BELOW_MIN` (422) is returned on write
+           attempts.
+        4. **Tier resolution** uses the precedence `HOLIDAY > RESTDAY > WORKDAY`. If a
+           single OT span overlaps multiple tier-relevant intervals (e.g. cross-midnight
+           into a holiday), the breakdown lists each contributing tier with its minutes
+           and applied multiplier; the LOWER tier MUST carry `supersedes` pointing to
+           the WINNING tier (set when one calendrical span resolves to both Holiday and
+           RestDay — the RestDay entry is dropped or marked `supersedes: HOLIDAY`).
+        5. **Multipliers** come from the consumed E2 OvertimeRule master (see E2 spec).
+           V1 stores hours only — multipliers are **reference metadata** (F7.1 OR-3).
+      required:
+        - worked_minutes
+        - counted_minutes
+        - min_minutes_threshold
+        - skipped_too_short
+        - tier_breakdown
+      properties:
+        worked_minutes:
+          type: integer
+          minimum: 0
+          description: Raw minutes worked (pre-rounding).
+          example: 212
+        counted_minutes:
+          type: integer
+          minimum: 0
+          description: |
+            Worked minutes rounded down to the nearest 30. This is the figure that
+            feeds approved-OT totals.
+          example: 210
+        min_minutes_threshold:
+          type: integer
+          description: Effective minimum (locked at 30 per D4).
+          example: 30
+        skipped_too_short:
+          type: boolean
+          description: True if `counted_minutes < min_minutes_threshold`.
+          example: false
+        tier_breakdown:
+          type: array
+          description: |
+            Per-tier breakdown after precedence resolution. Sum of `minutes` ≤
+            `counted_minutes`. An entry carrying `supersedes` was downgraded by the
+            tier-precedence rule and contributes 0 effective minutes (kept for
+            display/audit).
+          items:
+            type: object
+            required: [tier, minutes, multiplier]
+            properties:
+              tier:
+                $ref: '#/components/schemas/OvertimeTier'
+              minutes:
+                type: integer
+                minimum: 0
+                example: 210
+              multiplier:
+                type: number
+                format: float
+                description: Reference multiplier from the applied OT rule (E2).
+                example: 1.5
+              overtime_rule_id:
+                type: string
+                description: The E2 rule applied to this slice.
+                example: SWP-OTR-001
+              supersedes:
+                description: |
+                  If this entry was downgraded by a higher tier, names the winner.
+                  Null when this entry is the effective tier.
+                oneOf:
+                  - $ref: '#/components/schemas/OvertimeTier'
+                  - type: 'null'
+                example: null
+
+    Overtime:
+      type: object
+      required:
+        - id
+        - employee
+        - company
+        - placement_id
+        - work_date
+        - source
+        - status
+        - tier_indicator
+        - flagged_no_preapproval
+        - calculation
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-OT-[0-9]+$'
+          example: SWP-OT-30021
+        employee:
+          $ref: '#/components/schemas/EmployeeRef'
+        company:
+          $ref: '#/components/schemas/CompanyRef'
+        placement_id:
+          type: string
+          description: E3 placement (`SWP-PL-*`) active on `work_date`.
+          example: SWP-PL-882
+        attendance_id:
+          description: |
+            Non-null when `source = AUTO_DETECTED` (the E5 record that triggered
+            detection). Null for purely requested OT.
+          oneOf:
+            - type: string
+              pattern: '^SWP-ATT-[0-9]+$'
+            - type: 'null'
+          example: SWP-ATT-10692
+        work_date:
+          type: string
+          format: date
+          description: |
+            Date the OT is attributed to. For cross-midnight spans this is the start
+            date (EPICS §8).
+          example: '2026-06-02'
+        planned_start_time:
+          description: HH:MM local (Asia/Jakarta). Null for AUTO_DETECTED.
+          oneOf:
+            - type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+            - type: 'null'
+          example: null
+        planned_end_time:
+          oneOf:
+            - type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+            - type: 'null'
+          example: null
+        actual_start_time:
+          description: |
+            Derived: the moment OT actually started. For AUTO_DETECTED = scheduled
+            shift end; for REQUESTED = `planned_start_time` (or actual if a leader
+            updated post-hoc).
+          oneOf:
+            - type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+            - type: 'null'
+          example: '15:00'
+        actual_end_time:
+          oneOf:
+            - type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+            - type: 'null'
+          example: '18:32'
+        cross_midnight:
+          type: boolean
+          description: True if `actual_end_time < actual_start_time` (span crossed 00:00).
+          example: false
+        source:
+          $ref: '#/components/schemas/OvertimeSource'
+        status:
+          $ref: '#/components/schemas/OvertimeStatus'
+        tier_indicator:
+          $ref: '#/components/schemas/OvertimeTier'
+        flagged_no_preapproval:
+          type: boolean
+          description: |
+            True when this OT bypassed pre-approval (worked-without-request).
+            Audit f8 / EPICS §8 — UI MUST surface a visible flag pill in approval
+            queues.
+          example: false
+        reason:
+          description: Free-text reason from the requester. Required for REQUESTED.
+          oneOf:
+            - type: string
+              maxLength: 500
+            - type: 'null'
+        calculation:
+          $ref: '#/components/schemas/OvertimeCalculation'
+        approvals:
+          type: array
+          description: |
+            Approval timeline (one entry per level decided). Omitted on list responses
+            for payload size; always present on `GET /overtime/{id}`.
+          items:
+            type: object
+            required: [level, decision, decided_at]
+            properties:
+              level:
+                type: integer
+                enum: [1, 2]
+              decision:
+                type: string
+                enum: [APPROVED, REJECTED, OVERRIDE_APPROVED]
+              approver:
+                $ref: '#/components/schemas/EmployeeRef'
+              reason:
+                oneOf:
+                  - type: string
+                  - type: 'null'
+              decided_at:
+                type: string
+                format: date-time
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-06-02T11:00:14Z'
+        updated_at:
+          type: string
+          format: date-time
+          example: '2026-06-02T15:32:08Z'
+
+    OvertimeWriteRequest:
+      type: object
+      required: [employee_id, work_date, planned_start_time, planned_end_time, reason]
+      properties:
+        employee_id:
+          type: string
+          description: |
+            The OT subject. Agent caller MUST equal their own id; leaders may submit
+            for any agent at their company; HR may submit for any agent.
+          example: SWP-EMP-1042
+        work_date:
+          type: string
+          format: date
+          description: |
+            Attribution date. For an intended cross-midnight OT, this is the start
+            date.
+          example: '2026-06-10'
+        planned_start_time:
+          type: string
+          pattern: '^[0-2][0-9]:[0-5][0-9]$'
+          example: '15:00'
+        planned_end_time:
+          type: string
+          pattern: '^[0-2][0-9]:[0-5][0-9]$'
+          description: |
+            HH:MM local. If `< planned_start_time` the OT is treated as cross-midnight.
+          example: '17:00'
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+          example: 'Cover for absent colleague at front desk.'
+
+    OvertimePage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Overtime'
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: 'null'
+        has_more:
+          type: boolean
+
+    # ── Holidays ──────────────────────────────────────────────────────────────
+    HolidayCategory:
+      type: string
+      description: |
+        - `NATIONAL` — Indonesian national public holiday (KemenagRI).
+        - `REGIONAL` — provincial/regional holiday (limited applicability).
+        - `CUSTOM` — SWP-specific non-working day (e.g. company-wide closure).
+      enum: [NATIONAL, REGIONAL, CUSTOM]
+
+    Holiday:
+      type: object
+      required:
+        - id
+        - name
+        - date
+        - category
+        - recurring
+        - applicable_service_lines
+        - in_use_by_overtime
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-HOL-[0-9]+$'
+          example: SWP-HOL-001
+        name:
+          type: string
+          maxLength: 120
+          example: Hari Kemerdekaan RI
+        date:
+          type: string
+          format: date
+          description: |
+            For `recurring: true`, the canonical date (used for `MM-DD` projection
+            across years). For `recurring: false`, the single calendar date.
+          example: '2026-08-17'
+        category:
+          $ref: '#/components/schemas/HolidayCategory'
+        recurring:
+          type: boolean
+          description: |
+            True = repeats annually on the same MM-DD (no need to re-enter yearly).
+            False = movable holiday entered per year (e.g. Idul Fitri).
+          example: true
+        applicable_service_lines:
+          type: array
+          description: |
+            Empty list = applies globally (all service lines). Non-empty = restricted
+            to the listed service lines (useful for REGIONAL/CUSTOM).
+          items:
+            type: string
+            example: SWP-SVC-PARKING
+        in_use_by_overtime:
+          type: boolean
+          readOnly: true
+          description: |
+            Server-computed. True if any APPROVED OT references this holiday for its
+            tier-HOLIDAY derivation; deletion will return `HOLIDAY_IN_USE` (409).
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    HolidayWriteRequest:
+      type: object
+      required: [name, date, category, recurring]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 120
+          example: Hari Kemerdekaan RI
+        date:
+          type: string
+          format: date
+          example: '2026-08-17'
+        category:
+          $ref: '#/components/schemas/HolidayCategory'
+        recurring:
+          type: boolean
+          default: false
+          example: true
+        applicable_service_lines:
+          type: array
+          description: |
+            Empty/omitted = global. Non-empty = restricted to listed service-line IDs.
+          items:
+            type: string
+          default: []
+
+    HolidayPage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Holiday'
+        next_cursor:
+          oneOf:
+            - type: string
+            - type: 'null'
+        has_more:
+          type: boolean

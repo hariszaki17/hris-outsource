@@ -1,0 +1,2285 @@
+openapi: 3.1.0
+info:
+  title: SWP HRIS — E3 Placement Management API
+  version: 1.0.0
+  description: |
+    Placement is the **product differentiator** for SWP's HRIS. This spec covers the
+    full lifecycle of a `Placement` (the work designation of an SWP agent to a client
+    company, in a service line, for a contract period) and the `ShiftLeaderAssignment`
+    that ties an agent to the leader role at a given company.
+
+    ### Invariants enforced by this API (E3 FEATURE.md §4)
+    - **INV-1** — an agent has at most one *active* placement at any moment.
+    - **INV-2** — a client company with active placements has exactly one shift leader.
+    - **INV-3** — a shift leader leads exactly one company (strict 1:1).
+    - **INV-4** — the designated shift leader must themselves be an agent actively placed at that same company.
+
+    Each invariant violation surfaces as a `409 Conflict` with a stable
+    `error.code` (`INV_1_VIOLATION` … `INV_4_VIOLATION`) and a structured
+    `INVViolationDetails` payload so the frontend can render the right
+    inline-warning state (Wave 2.3 INV variants).
+
+    Conventions inherited from `docs/api/CONVENTIONS.md` — when this spec
+    conflicts with that doc, **CONVENTIONS.md wins**.
+
+    Cross-epic dependencies:
+      - **E2** — every placement references an existing `agreement_id` (`SWP-AG-*`),
+        `employee_id` (`SWP-EMP-*`), `client_company_id` (`SWP-CMP-*`),
+        `service_line_id` (`SWP-SVC-*`), `position_id` (`SWP-POS-*`).
+      - **E4** — ending/transferring a placement cancels future schedules for the
+        agent (cache-invalidation side effect; not exposed in this spec).
+      - **E10** — every transition fires notifications (HR / agent / shift leader);
+        fire-and-forget per CONVENTIONS §16.2.
+  contact:
+    name: SWP HRIS product+architecture
+    email: hris-team@swp.example.com
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: placements
+    description: |
+      Placement CRUD + lifecycle actions (create, edit, transfer, renew,
+      end, terminate, resign). Roster reads live under the
+      `client-companies` tag (cross-resource).
+  - name: shift-leader-assignments
+    description: |
+      Per-company shift leader designation. Enforces INV-2/3/4 server-side.
+  - name: client-companies
+    description: |
+      Per-company roster projection (read-only; placement editing lives under
+      `placements`).
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Placements
+  # ─────────────────────────────────────────────────────────────────────────
+  /placements:
+    get:
+      operationId: listPlacements
+      tags: [placements]
+      summary: List placements (also serves global roster queries)
+      description: |
+        Returns placements matching the filters. Doubles as the global
+        cross-company roster source (per-company roster is a convenience
+        view at `/client-companies/{company_id}/roster`).
+
+        Cursor pagination per CONVENTIONS §8. Default sort:
+        `status_changed_at:desc` (active first via `lifecycle_status`).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          description: Exact-match on `lifecycle_status`. Use `status__in` for multi-value.
+          schema: { $ref: '#/components/schemas/PlacementLifecycleStatus' }
+        - name: status__in
+          in: query
+          description: Multi-value status filter (CSV).
+          schema:
+            type: string
+            example: ACTIVE,EXPIRING
+        - name: company_id
+          in: query
+          description: Filter by client company ID.
+          schema: { type: string, example: SWP-CMP-014 }
+        - name: service_line_id
+          in: query
+          schema: { type: string, example: SWP-SVC-003 }
+        - name: employee_id
+          in: query
+          schema: { type: string, example: SWP-EMP-1042 }
+        - name: agreement_id
+          in: query
+          description: Filter by the parent employment agreement (E2).
+          schema: { type: string, example: SWP-AG-882 }
+        - name: expiring_within_days
+          in: query
+          description: |
+            Convenience filter: returns placements whose `end_date` falls
+            within N days from today (Asia/Jakarta). Equivalent to
+            `end_date__lte=today+N AND lifecycle_status__in=ACTIVE,EXPIRING`.
+            N must be 1..365.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            example: 30
+        - name: start_date__gte
+          in: query
+          schema: { type: string, format: date, example: '2026-01-01' }
+        - name: start_date__lte
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date__gte
+          in: query
+          schema: { type: string, format: date }
+        - name: end_date__lte
+          in: query
+          schema: { type: string, format: date }
+        - name: include_history
+          in: query
+          description: |
+            When `true`, includes terminal states (ENDED, TERMINATED, RESIGNED,
+            TRANSFERRED, SUPERSEDED). Default `false` returns only
+            ACTIVE / SCHEDULED / EXPIRING / PENDING_START.
+          schema:
+            type: boolean
+            default: false
+        - name: q
+          in: query
+          description: Free-text search on agent name, agent ID, company name.
+          schema: { type: string }
+        - name: sort
+          in: query
+          description: |
+            Comma-separated `field:asc|desc`. Allowed fields:
+            `start_date`, `end_date`, `status_changed_at`, `created_at`.
+          schema:
+            type: string
+            example: 'end_date:asc'
+      responses:
+        '200':
+          description: Page of placements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - C2SSLA  # Companies list (computes counts from this)
+        - nLN4d   # HR roster
+        - o5Txgg  # SL roster (read-only)
+
+    post:
+      operationId: createPlacement
+      tags: [placements]
+      summary: Create a placement (AP-1)
+      description: |
+        Creates a placement. Per F3.1 BR-5:
+          - if `start_date <= today` (Asia/Jakarta) → `lifecycle_status = ACTIVE`
+          - if `start_date > today` → `lifecycle_status = PENDING_START` (a.k.a. Scheduled)
+
+        **Invariants enforced server-side:**
+        - INV-1 — `409 INV_1_VIOLATION` if the employee already has an
+          `ACTIVE`/`EXPIRING`/`PENDING_START` placement that overlaps the new period.
+          Response `error.details` includes the conflicting placement so the
+          frontend can render the "End or Transfer existing?" prompt
+          (PRD F3.1 Gherkin "Block double-booking").
+
+        **Business-rule validations (`422`):**
+        - `PLACEMENT_OUTSIDE_CONTRACT` — period falls outside `agreement_id` validity.
+          For `PKWT` the server **auto-caps** `end_date` to the agreement end
+          (BR-1b) — response is `201` with `auto_capped: true` and a warning;
+          only an explicitly out-of-range *start* triggers 422.
+        - `PLACEMENT_PERIOD_OVERLAP` — overlaps a prior terminal placement (rare; only
+          if a buffer rule is hit and no active conflict was found).
+        - `COMPANY_INACTIVE` — `client_company_id` is not `ACTIVE` (409 per BR-3).
+        - `INVALID_REQUEST` with `fields.end_date` — `end_date <= start_date` (BR-4).
+        - `INVALID_REQUEST` with `fields.backdate_reason` — `start_date < today`
+          without a reason (BR-6).
+
+        Soft warning (NOT an error): when the target company has no active
+        shift leader, the placement is still created (201) with
+        `warnings: ["NO_SHIFT_LEADER_AT_COMPANY"]` (BR-8).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlacementWriteRequest'
+            examples:
+              immediate:
+                summary: HR Admin Sari creates an immediate Parking placement for Budi
+                value:
+                  employee_id: SWP-EMP-1042
+                  agreement_id: SWP-AG-882
+                  client_company_id: SWP-CMP-014
+                  service_line_id: SWP-SVC-003
+                  position_id: SWP-POS-021
+                  start_date: '2026-06-03'
+                  end_date: '2026-12-31'
+                  annual_leave_entitlement_days: 12
+                  base_salary_ref_idr: 4800000
+                  notes: 'Replacement for Andi (resigned).'
+              future:
+                summary: Future-dated (PENDING_START) placement
+                value:
+                  employee_id: SWP-EMP-1042
+                  agreement_id: SWP-AG-882
+                  client_company_id: SWP-CMP-014
+                  service_line_id: SWP-SVC-003
+                  position_id: SWP-POS-021
+                  start_date: '2026-07-01'
+                  end_date: '2027-06-30'
+                  annual_leave_entitlement_days: 12
+              backdated:
+                summary: Backdated by HR Admin (requires reason)
+                value:
+                  employee_id: SWP-EMP-1042
+                  agreement_id: SWP-AG-882
+                  client_company_id: SWP-CMP-014
+                  service_line_id: SWP-SVC-003
+                  position_id: SWP-POS-021
+                  start_date: '2026-05-15'
+                  end_date: '2026-12-31'
+                  backdate_reason: 'Onboarding doc lost; agent has worked since 15 Mei per timesheets.'
+      responses:
+        '201':
+          description: |
+            Placement created. `Location` header points to the new resource.
+            May include `warnings[]` (e.g. `NO_SHIFT_LEADER_AT_COMPANY`,
+            `END_DATE_AUTO_CAPPED_TO_AGREEMENT`).
+          headers:
+            Location:
+              schema: { type: string, example: '/api/v1/placements/SWP-PL-1207' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementCreateResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Invariant or state conflict. Inspect `error.code`:
+              - `INV_1_VIOLATION` — employee already has an active placement
+                (see `error.details.current_placement`).
+              - `COMPANY_INACTIVE` — target company is not active.
+              - `IDEMPOTENCY_KEY_REUSED`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                inv1:
+                  summary: INV-1 — employee already placed
+                  value:
+                    error:
+                      code: INV_1_VIOLATION
+                      message: 'Agen sudah memiliki penempatan aktif. Akhiri atau transfer terlebih dahulu.'
+                      fields:
+                        employee_id: 'Sudah memiliki penempatan aktif di Mall Kelapa Gading.'
+                      details:
+                        invariant: INV_1
+                        current_placement:
+                          id: SWP-PL-988
+                          employee_id: SWP-EMP-1042
+                          client_company_id: SWP-CMP-009
+                          client_company_name: 'Mall Kelapa Gading'
+                          service_line_id: SWP-SVC-003
+                          lifecycle_status: ACTIVE
+                          start_date: '2025-09-01'
+                          end_date: '2026-08-31'
+                        suggested_actions: [transfer, end]
+                      request_id: req_01J5XK22YR8
+                companyInactive:
+                  summary: BR-3 — inactive company
+                  value:
+                    error:
+                      code: COMPANY_INACTIVE
+                      message: 'Perusahaan klien tidak aktif. Tidak dapat membuat penempatan.'
+                      fields:
+                        client_company_id: 'Status perusahaan: ARCHIVED.'
+                      request_id: req_01J5XK22YR9
+        '422':
+          description: |
+            Semantic validation failure. Specific `error.code`:
+              - `PLACEMENT_OUTSIDE_CONTRACT`
+              - `PLACEMENT_PERIOD_OVERLAP`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                outsideContract:
+                  value:
+                    error:
+                      code: PLACEMENT_OUTSIDE_CONTRACT
+                      message: 'Periode penempatan di luar masa berlaku perjanjian kerja.'
+                      fields:
+                        start_date: 'Sebelum perjanjian dimulai (2026-06-01).'
+                      details:
+                        agreement_id: SWP-AG-882
+                        agreement_type: PKWT
+                        agreement_start: '2026-06-01'
+                        agreement_end: '2027-05-31'
+                      request_id: req_01J5XK22YRA
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - g3OzZz  # Buat Penempatan create form
+      x-idempotent: true
+
+  /placements/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    get:
+      operationId: getPlacement
+      tags: [placements]
+      summary: Get a placement with history chain (PL-1)
+      description: |
+        Returns the placement plus the full history chain via
+        `predecessor_id`/`successor_id`. The `history_chain` field is a
+        flat ordered list (oldest → newest) of the chain this placement
+        belongs to, so the client can render the Riwayat panel without
+        N+1 fetches.
+      responses:
+        '200':
+          description: Placement detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementDetailResponse'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: company_or_global  # agent: self only; SL: own company only
+      x-design-screens:
+        - pFR79   # Detail Penempatan
+        - mqGEi   # Mobile · Penempatan Saya (agent)
+
+    patch:
+      operationId: updatePlacement
+      tags: [placements]
+      summary: Edit limited placement fields
+      description: |
+        Edits a non-terminal placement. **Read-only fields** (rejected
+        with `INVALID_REQUEST` if present in body): `employee_id`,
+        `agreement_id`, `client_company_id`, `service_line_id`,
+        `start_date`, `lifecycle_status`, `predecessor_id`, `successor_id`,
+        `created_at`, `updated_at`, `created_by`. Use action endpoints
+        (`:transfer`, `:renew`, `:end`, `:terminate`, `:resign`) for
+        anything that changes the chain or lifecycle.
+
+        Editable: `position_id`, `end_date` (within agreement / BR-1b),
+        `annual_leave_entitlement_days`, `base_salary_ref_idr`, `notes`.
+
+        Terminal-state placements (LC-1) reject all edits with
+        `409 TERMINAL_STATE_IMMUTABLE` except via Super Admin override
+        (out of scope for v1 here; flagged for E1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlacementPatchRequest'
+            examples:
+              fixNotes:
+                value:
+                  notes: 'Pindah pos parkir Lantai B2 — disesuaikan dengan supervisor site.'
+                  base_salary_ref_idr: 5000000
+      responses:
+        '200':
+          description: Updated placement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Placement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `TERMINAL_STATE_IMMUTABLE` — placement is in a terminal state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79   # Detail Penempatan (inline edit)
+
+  /placements/{id}:transfer:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: transferPlacement
+      tags: [placements]
+      summary: Transfer agent to a new company / service line (RT-1)
+      description: |
+        Atomically: (1) closes the current placement with
+        `ended_reason = TRANSFERRED` and `ended_at = effective_date − 1 day`
+        (1-day buffer, F3.1 BR-2); (2) creates a successor placement at the
+        new company/service-line/position with `predecessor_id` set; (3) if
+        the agent was the shift leader of the **old** company, vacates that
+        leadership (auto-end SLA with `vacated_reason = PLACEMENT_ENDED`)
+        and raises a vacancy (SL-6).
+
+        Both writes succeed or fail together (TR-6).
+
+        If the **new** company has no leader, the response includes
+        `warnings: ["NO_SHIFT_LEADER_AT_DESTINATION"]` (TR-5).
+
+        If the destination is the same company *and* same service line,
+        rejected `422 RULE_VIOLATION` (TR-1: must be an actual change —
+        use `:renew` instead).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+            examples:
+              transferToPlazaSenayan:
+                summary: Transfer Budi from Mall Kelapa Gading → Plaza Senayan
+                value:
+                  new_client_company_id: SWP-CMP-014
+                  new_service_line_id: SWP-SVC-002
+                  new_position_id: SWP-POS-031
+                  new_start_date: '2026-07-01'
+                  new_end_date: '2027-06-30'
+                  new_agreement_id: SWP-AG-882
+                  transfer_reason: 'Rotasi rutin — pengembangan skill Building Mgmt.'
+                  transfer_note: 'New office: Plaza Senayan tower B.'
+      responses:
+        '201':
+          description: |
+            Successor placement created; predecessor closed. Returns both.
+          headers:
+            Location:
+              schema: { type: string, example: '/api/v1/placements/SWP-PL-1208' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `COMPANY_INACTIVE` (destination archived) · `INV_1_VIOLATION`
+            (rare: agent was already in another non-terminal placement
+            outside the one being transferred) · `TERMINAL_STATE_IMMUTABLE`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79   # Transfer button on Detail
+      x-idempotent: true
+
+  /placements/{id}:renew:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: renewPlacement
+      tags: [placements]
+      summary: Renew (same company + service line) via linked successor (PL-3)
+      description: |
+        F3.2 LC-7. Creates a **successor placement** with the same
+        `employee_id`, `client_company_id`, `service_line_id`, and
+        `position_id` (overridable in the request), and sets the prior
+        placement to `SUPERSEDED` effective the successor's `start_date`.
+        Honours the 1-day buffer (F3.1 BR-2).
+
+        If a PKWT agreement has been extended in E2, the successor may
+        extend up to the new agreement end (LC-8 / BR-1b auto-cap).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenewRequest'
+            examples:
+              standardRenewal:
+                summary: Renew Budi at Plaza Senayan for 12 more months
+                value:
+                  new_start_date: '2027-01-01'
+                  new_end_date: '2027-12-31'
+                  new_agreement_id: SWP-AG-991
+                  terms_changes:
+                    annual_leave_entitlement_days: 14
+                    base_salary_ref_idr: 5200000
+                  notes: 'Renewal under new PKWT 2027.'
+      responses:
+        '201':
+          description: Successor placement created; predecessor → SUPERSEDED.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenewResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `TERMINAL_STATE_IMMUTABLE` · `COMPANY_INACTIVE`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            `PLACEMENT_PERIOD_OVERLAP` (1-day buffer hit) ·
+            `PLACEMENT_OUTSIDE_CONTRACT`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79   # Perpanjang button on Detail
+      x-idempotent: true
+
+  /placements/{id}:end:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: endPlacement
+      tags: [placements]
+      summary: End placement (PL-4) — reason capture
+      description: |
+        Used for the "end of term / soft end" path (legacy ims-system EnabP
+        reason capture, Wave-1). Closes the placement with
+        `ended_reason = ENDED` (default) or one of the explicit reasons
+        listed below. The placement transitions to `ENDED`.
+
+        If the agent was the company's shift leader, the assignment
+        auto-vacates with `vacated_reason = PLACEMENT_ENDED` (SL-6) and a
+        vacancy is raised.
+
+        For a **hard, intentional early end with stronger confirmation**
+        (HR-driven termination with company-name typed confirmation), use
+        `:terminate` instead.
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EndRequest'
+            examples:
+              endOfTerm:
+                value:
+                  reason: END_OF_TERM
+                  effective_date: '2026-12-31'
+                  notes: 'Kontrak selesai tepat waktu.'
+      responses:
+        '200':
+          description: Placement ended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Placement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: "`TERMINAL_STATE_IMMUTABLE`."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79   # Akhiri button on Detail
+      x-idempotent: true
+
+  /placements/{id}:terminate:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: terminatePlacement
+      tags: [placements]
+      summary: Terminate placement (PL-5) — strong destructive
+      description: |
+        Hard early termination with **typed company-name confirmation**
+        (per Wave-1 V4LG8 destructive-confirm pattern). Closes the
+        placement with `ended_reason = TERMINATED`, mandatory reason text
+        for audit, optional effective_date (defaults to today). Transitions
+        to `TERMINATED`.
+
+        `type_company_name_confirm` MUST exactly match the
+        `client_company.name` (case-insensitive, trimmed); otherwise
+        `400 INVALID_REQUEST` with `fields.type_company_name_confirm`.
+
+        Side effects: leader vacancy if applicable (SL-6); E4 future
+        schedules for the agent cancelled (cache-invalidation).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TerminateRequest'
+            examples:
+              misconduct:
+                value:
+                  termination_reason: 'Pelanggaran SOP: meninggalkan pos parkir tanpa izin tiga kali (terdokumentasi).'
+                  effective_date: '2026-06-15'
+                  type_company_name_confirm: 'Plaza Senayan'
+      responses:
+        '200':
+          description: Placement terminated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Placement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: "`TERMINAL_STATE_IMMUTABLE`."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79
+      x-idempotent: true
+
+  /placements/{id}:resign:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: resignPlacement
+      tags: [placements]
+      summary: Record agent resignation (LC-6)
+      description: |
+        Records an agent-initiated end. Closes the placement with
+        `ended_reason = RESIGNED` and sets `resign_at` (may be
+        future-dated — agent's last working day). Transitions to
+        `RESIGNED`. The associated employment agreement is **not** closed
+        here (that's E2); only the placement.
+
+        If the agent was the company's shift leader, auto-vacate (SL-6).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResignRequest'
+            examples:
+              immediate:
+                value:
+                  resign_at: '2026-06-30'
+                  resignation_reason: 'Pindah kerja — agen mengajukan resign 1 bulan sebelumnya.'
+                  notes: 'Surat resign diterima HR 30 Mei 2026.'
+      responses:
+        '200':
+          description: Placement marked RESIGNED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Placement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: "`TERMINAL_STATE_IMMUTABLE`."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79
+      x-idempotent: true
+
+  /placements/expiring:
+    get:
+      operationId: listExpiringPlacements
+      tags: [placements]
+      summary: Convenience filter — placements ending soon
+      description: |
+        Convenience endpoint for the E10 dashboard "Penempatan akan berakhir"
+        tile and Wave 3.4 expiring list. Equivalent to
+        `GET /placements?expiring_within_days={n}&lifecycle_status__in=ACTIVE,EXPIRING&sort=end_date:asc`
+        but cached server-side at a 5-minute granularity.
+      parameters:
+        - name: within_days
+          in: query
+          description: |
+            Window in days from today (Asia/Jakarta). Default = 30 (matches
+            the hardcoded Expiring threshold, FEATURE.md §7).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+        - name: company_id
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of expiring placements (sorted by end_date asc).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementListResponse'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - C2SSLA  # Companies list stat tile
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Shift Leader Assignments
+  # ─────────────────────────────────────────────────────────────────────────
+  /shift-leader-assignments:
+    get:
+      operationId: listShiftLeaderAssignments
+      tags: [shift-leader-assignments]
+      summary: List shift-leader assignments
+      description: |
+        Returns assignments (active + historical). To get only the *current*
+        leader for a company, use `/shift-leader-assignments/by-company/{company_id}`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: company_id
+          in: query
+          schema: { type: string, example: SWP-CMP-014 }
+        - name: employee_id
+          in: query
+          schema: { type: string, example: SWP-EMP-1042 }
+        - name: active
+          in: query
+          description: |
+            When `true`, returns only assignments where `unassigned_at` is null.
+          schema: { type: boolean, default: true }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            example: 'assigned_at:desc'
+      responses:
+        '200':
+          description: Page of assignments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftLeaderAssignmentListResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - C2SSLA  # Companies list aggregates leader chips from this
+
+    post:
+      operationId: createShiftLeaderAssignment
+      tags: [shift-leader-assignments]
+      summary: Assign a shift leader to a company
+      description: |
+        Assigns `employee_id` as the shift leader of `company_id`. Server
+        enforces the placement invariants:
+
+        - **INV-2** — if the company already has an active leader and
+          `replace: false` (default) → `409 INV_2_VIOLATION` with the
+          current leader's details. The caller may retry with
+          `replace: true` to atomically end the existing assignment
+          (`vacated_reason = REASSIGNED`) and create the new one.
+        - **INV-3** — if the employee already leads a different company
+          → `409 INV_3_VIOLATION`. Hard block; the caller must first
+          end the other assignment via `:end`.
+        - **INV-4** — if the employee has no `ACTIVE` placement at
+          `company_id` → `409 INV_4_VIOLATION`. (`PENDING_START` does not
+          satisfy SL-2; see PRD F3.4 C-2.)
+
+        - `LEADER_NOT_ELIGIBLE` (422) — employee's role is not eligible
+          (e.g., their employment status is inactive).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShiftLeaderAssignmentWriteRequest'
+            examples:
+              firstLeader:
+                summary: Assign Budi as Plaza Senayan's first leader
+                value:
+                  client_company_id: SWP-CMP-014
+                  employee_id: SWP-EMP-1042
+                  start_date: '2026-06-03'
+                  notes: 'Naik dari agen senior parkir.'
+              swap:
+                summary: Replace existing leader Citra with Budi
+                value:
+                  client_company_id: SWP-CMP-014
+                  employee_id: SWP-EMP-1042
+                  start_date: '2026-06-03'
+                  replace: true
+                  replace_reason: 'Citra dipindah ke Mall Kelapa Gading.'
+      responses:
+        '201':
+          description: 'Assignment created (and, if `replace: true`, prior assignment ended).'
+          headers:
+            Location:
+              schema: { type: string, example: '/api/v1/shift-leader-assignments/SWP-SLA-204' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftLeaderAssignmentCreateResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Invariant violation. Inspect `error.code`:
+              - `INV_2_VIOLATION` — company already has a leader.
+              - `INV_3_VIOLATION` — employee already leads another company.
+              - `INV_4_VIOLATION` — employee not actively placed at this company.
+              - `COMPANY_INACTIVE` — target company is archived.
+              - `IDEMPOTENCY_KEY_REUSED`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                inv2:
+                  summary: INV-2 — company already has a leader
+                  value:
+                    error:
+                      code: INV_2_VIOLATION
+                      message: 'Plaza Senayan sudah memiliki shift leader aktif. Konfirmasi penggantian.'
+                      fields:
+                        client_company_id: 'Sudah ada shift leader aktif.'
+                      details:
+                        invariant: INV_2
+                        current_assignment:
+                          id: SWP-SLA-198
+                          client_company_id: SWP-CMP-014
+                          employee_id: SWP-EMP-0917
+                          employee_name: 'Citra Lestari'
+                          assigned_at: '2025-12-01T08:00:00Z'
+                        suggested_actions: [replace]
+                      request_id: req_01J5XK22YRB
+                inv3:
+                  summary: INV-3 — employee already leads elsewhere
+                  value:
+                    error:
+                      code: INV_3_VIOLATION
+                      message: 'Kandidat sudah menjadi shift leader di perusahaan lain. Akhiri penugasan tersebut dulu.'
+                      fields:
+                        employee_id: 'Saat ini memimpin Mall Kelapa Gading.'
+                      details:
+                        invariant: INV_3
+                        existing_assignment:
+                          id: SWP-SLA-181
+                          client_company_id: SWP-CMP-009
+                          client_company_name: 'Mall Kelapa Gading'
+                          employee_id: SWP-EMP-1042
+                          assigned_at: '2025-06-01T08:00:00Z'
+                        suggested_actions: [end_existing_first]
+                      request_id: req_01J5XK22YRC
+                inv4:
+                  summary: INV-4 — employee not actively placed at this company
+                  value:
+                    error:
+                      code: INV_4_VIOLATION
+                      message: 'Kandidat tidak ditempatkan secara aktif di perusahaan ini.'
+                      fields:
+                        employee_id: 'Tidak memiliki penempatan aktif di Plaza Senayan.'
+                      details:
+                        invariant: INV_4
+                        company_id: SWP-CMP-014
+                        employee_id: SWP-EMP-1042
+                        employee_placements_at_company: []
+                      request_id: req_01J5XK22YRD
+        '422':
+          description: |
+            `LEADER_NOT_ELIGIBLE` — employee record is not in a state
+            eligible for the shift_leader role.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - nLN4d   # Ganti leader button on roster CompanyHeader
+        - C2SSLA  # First-time assign from companies list
+      x-idempotent: true
+
+  /shift-leader-assignments/by-company/{company_id}:
+    parameters:
+      - name: company_id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: SWP-CMP-014
+    get:
+      operationId: getCurrentLeaderForCompany
+      tags: [shift-leader-assignments]
+      summary: Convenience — current active leader for a company
+      description: |
+        Returns the single active `ShiftLeaderAssignment` for `company_id`,
+        or `404 NOT_FOUND` with `error.code: "NO_ACTIVE_LEADER"` if the
+        company has a vacancy (SL-7).
+      responses:
+        '200':
+          description: Active leader.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftLeaderAssignment' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            Company has no active leader. `error.code: "NO_ACTIVE_LEADER"`
+            (the frontend renders the "Tanpa shift leader — Tetapkan" CTA,
+            Companies-list `h22BP` pattern).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - C2SSLA
+        - nLN4d
+
+  /shift-leader-assignments/{id}:end:
+    parameters:
+      - $ref: '#/components/parameters/ShiftLeaderAssignmentId'
+    post:
+      operationId: endShiftLeaderAssignment
+      tags: [shift-leader-assignments]
+      summary: End (vacate) a leader assignment
+      description: |
+        Ends the assignment, setting `unassigned_at = now` and
+        `vacated_reason` to `MANUAL` (default) or one of the explicit
+        reasons. The company now has a vacancy until a new leader is
+        assigned. Idempotent on the assignment ID — ending an already-ended
+        assignment returns `409 ALREADY_ENDED` with the existing record.
+
+        Auto-vacation triggered by placement transitions (SL-6) goes
+        through this same code path but with `vacated_reason = PLACEMENT_ENDED`
+        and `assigned_by = system`.
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShiftLeaderAssignmentEndRequest'
+            examples:
+              manual:
+                value:
+                  reason: 'Rotasi struktur — leader baru ditunjuk dari Mall Kelapa Gading.'
+      responses:
+        '200':
+          description: Assignment ended.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftLeaderAssignment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `ALREADY_ENDED` — assignment is already inactive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - nLN4d
+      x-idempotent: true
+
+  /shift-leader-assignments/{id}:replace:
+    parameters:
+      - $ref: '#/components/parameters/ShiftLeaderAssignmentId'
+    post:
+      operationId: replaceShiftLeaderAssignment
+      tags: [shift-leader-assignments]
+      summary: Swap a leader (end + create, atomic)
+      description: |
+        Convenience for the "Ganti shift leader" UI: ends the existing
+        assignment with `vacated_reason = REASSIGNED` and creates a new
+        one for `new_employee_id` at the same company, atomically. The
+        new candidate is validated against INV-3 and INV-4 (INV-2 is
+        implicitly satisfied because the prior assignment is ended in
+        the same transaction).
+
+        Equivalent to `POST /shift-leader-assignments` with `replace: true`,
+        but addresses the assignment by ID (cleaner from the Detail page).
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShiftLeaderAssignmentReplaceRequest'
+            examples:
+              swap:
+                value:
+                  new_employee_id: SWP-EMP-1042
+                  start_date: '2026-06-03'
+                  replace_reason: 'Promosi internal — Budi naik dari senior parkir.'
+      responses:
+        '201':
+          description: Old assignment ended, new assignment created.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftLeaderAssignmentCreateResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `INV_3_VIOLATION` · `INV_4_VIOLATION` · `ALREADY_ENDED` (the
+            assignment being replaced is already inactive).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - nLN4d
+      x-idempotent: true
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Company Roster (cross-resource projection)
+  # ─────────────────────────────────────────────────────────────────────────
+  /client-companies/{company_id}/roster:
+    parameters:
+      - name: company_id
+        in: path
+        required: true
+        schema:
+          type: string
+          example: SWP-CMP-014
+    get:
+      operationId: getCompanyRoster
+      tags: [client-companies]
+      summary: Per-company placement roster (CR-1)
+      description: |
+        Returns the company's roster — active + scheduled placements by
+        default, plus terminal-state placements when `include_history=true`
+        (RO-2). Includes the company's current shift leader (resolved
+        server-side) and summary counts by service line / status (RO-5).
+
+        **RBAC scope (RO-4):**
+          - `hr_admin` / `super_admin` — any company.
+          - `shift_leader` — only the company they lead; other companies
+            return `403 OUT_OF_SCOPE`.
+      parameters:
+        - name: service_line_id
+          in: query
+          description: Filter to one service line.
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/PlacementLifecycleStatus' }
+        - name: status__in
+          in: query
+          schema:
+            type: string
+            example: ACTIVE,EXPIRING
+        - name: include_history
+          in: query
+          description: |
+            When true, includes ENDED / TERMINATED / RESIGNED /
+            TRANSFERRED / SUPERSEDED rows (RO-2).
+          schema:
+            type: boolean
+            default: false
+        - name: period_start
+          in: query
+          description: Period overlap filter — lower bound.
+          schema: { type: string, format: date }
+        - name: period_end
+          in: query
+          description: Period overlap filter — upper bound.
+          schema: { type: string, format: date }
+        - name: q
+          in: query
+          description: Free-text search on agent name / agent ID / position name.
+          schema: { type: string }
+        - name: sort
+          in: query
+          description: |
+            Allowed: `status_changed_at`, `start_date`, `end_date`,
+            `employee_name`. Default = `status:asc,employee_name:asc`
+            (active first, then by name — RO-8).
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Roster page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompanyRosterResponse'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: |
+            `OUT_OF_SCOPE` — shift leader requested a roster for a
+            company they don't lead (PRD F3.5 C-4).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - nLN4d   # HR roster
+        - o5Txgg  # SL roster (read-only)
+
+# ──────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+      description: |
+        Per CONVENTIONS §3 — `Authorization: Bearer <token>` on every
+        authenticated endpoint. Token type (opaque vs JWT) finalized in E1.
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size (CONVENTIONS §8). Server may cap further.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from prior response. Invalidated if sort/filter changes.
+      schema:
+        type: string
+    PlacementId:
+      name: id
+      in: path
+      required: true
+      description: Prefixed placement ID (e.g., `SWP-PL-1207`).
+      schema:
+        type: string
+        pattern: '^SWP-PL-\d+$'
+        example: SWP-PL-1207
+    ShiftLeaderAssignmentId:
+      name: id
+      in: path
+      required: true
+      description: Prefixed shift-leader assignment ID (e.g., `SWP-SLA-204`).
+      schema:
+        type: string
+        pattern: '^SWP-SLA-\d+$'
+        example: SWP-SLA-204
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        UUID v4 from the client (CONVENTIONS §13). Replays return the
+        original response; same key with a different body → `409 IDEMPOTENCY_KEY_REUSED`.
+      schema:
+        type: string
+        format: uuid
+        example: 3c7e9a1c-4f2d-4f4a-8b1e-6f1a5b9b21aa
+
+  responses:
+    BadRequest:
+      description: Malformed request (CONVENTIONS §11).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: INVALID_REQUEST
+              message: 'Body permintaan tidak valid.'
+              fields:
+                end_date: 'Harus setelah start_date.'
+              request_id: req_01J5XK22YR0
+    Unauthenticated:
+      description: Missing/expired token (CONVENTIONS §3).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: 'Sesi berakhir. Silakan masuk kembali.'
+              request_id: req_01J5XK22YR1
+    Forbidden:
+      description: Token valid but role/scope lacks permission.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: FORBIDDEN
+              message: 'Anda tidak memiliki akses untuk tindakan ini.'
+              request_id: req_01J5XK22YR2
+    NotFound:
+      description: Resource doesn't exist (or caller lacks visibility — CONVENTIONS §7).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            error:
+              code: NOT_FOUND
+              message: 'Penempatan tidak ditemukan.'
+              request_id: req_01J5XK22YR3
+    UnprocessableEntity:
+      description: Structurally valid but rejected by business rules.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    # ─────── Common ─────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              description: |
+                UPPER_SNAKE_CASE machine-readable code. Cross-cutting codes
+                in CONVENTIONS §11. E3-specific codes:
+                  - `INV_1_VIOLATION` (409) — employee already has active placement.
+                  - `INV_2_VIOLATION` (409) — company already has a leader.
+                  - `INV_3_VIOLATION` (409) — employee already leads elsewhere.
+                  - `INV_4_VIOLATION` (409) — leader not actively placed at company.
+                  - `PLACEMENT_PERIOD_OVERLAP` (422) — new period overlaps existing.
+                  - `PLACEMENT_OUTSIDE_CONTRACT` (422) — period outside agreement.
+                  - `LEADER_NOT_ELIGIBLE` (422) — employee role/state not eligible.
+                  - `COMPANY_INACTIVE` (409) — target company archived.
+                  - `TERMINAL_STATE_IMMUTABLE` (409) — editing a terminal placement.
+                  - `NO_ACTIVE_LEADER` (404) — company has vacancy (lookup).
+                  - `ALREADY_ENDED` (409) — assignment already inactive.
+                  - `IDEMPOTENCY_KEY_REUSED` (409).
+              example: INV_1_VIOLATION
+            message:
+              type: string
+              description: Human-readable (Bahasa Indonesia default; `Accept-Language` may switch).
+              example: 'Agen sudah memiliki penempatan aktif.'
+            fields:
+              type: object
+              additionalProperties:
+                type: string
+              description: Field-level errors keyed by request body field path (400/422 only).
+              example:
+                employee_id: 'Sudah memiliki penempatan aktif.'
+            details:
+              oneOf:
+                - $ref: '#/components/schemas/INVViolationDetails'
+                - $ref: '#/components/schemas/OutsideContractDetails'
+                - type: object
+                  additionalProperties: true
+              description: |
+                Optional structured payload for the frontend. For invariant
+                violations, conforms to `INVViolationDetails`.
+            request_id:
+              type: string
+              description: Support/debugging correlation ID.
+              example: req_01J5XK22YR8
+
+    INVViolationDetails:
+      type: object
+      required: [invariant]
+      description: |
+        Structured details for INV-* 409 responses. Lets the frontend
+        render the right warning state (Wave 2.3 INV variants) and offer
+        the right CTA (`suggested_actions`) without a follow-up fetch.
+      properties:
+        invariant:
+          type: string
+          enum: [INV_1, INV_2, INV_3, INV_4]
+        current_placement:
+          $ref: '#/components/schemas/PlacementSummary'
+          description: Set for INV-1 — the agent's existing active placement.
+        current_assignment:
+          $ref: '#/components/schemas/ShiftLeaderAssignmentSummary'
+          description: Set for INV-2 — the company's existing active leader.
+        existing_assignment:
+          $ref: '#/components/schemas/ShiftLeaderAssignmentSummary'
+          description: Set for INV-3 — the employee's existing assignment elsewhere.
+        company_id:
+          type: string
+          description: Set for INV-4 — the target company.
+        employee_id:
+          type: string
+          description: Set for INV-4 — the candidate employee.
+        employee_placements_at_company:
+          type: array
+          description: |
+            Set for INV-4 — the candidate's placements at the target
+            company (may include non-active records explaining why
+            INV-4 failed — e.g., a `PENDING_START` placement is not
+            sufficient per SL-2).
+          items:
+            $ref: '#/components/schemas/PlacementSummary'
+        suggested_actions:
+          type: array
+          description: |
+            Hints for the frontend's CTA buttons. Stable enum values
+            the frontend can switch on.
+          items:
+            type: string
+            enum:
+              - end          # offer "Akhiri" CTA
+              - transfer     # offer "Transfer" CTA
+              - replace      # offer "Ganti" CTA (for INV-2)
+              - end_existing_first  # for INV-3
+              - assign_after_placement  # for INV-4 — must place first
+
+    OutsideContractDetails:
+      type: object
+      properties:
+        agreement_id:
+          type: string
+          example: SWP-AG-882
+        agreement_type:
+          type: string
+          enum: [PKWT, PKWTT]
+        agreement_start:
+          type: string
+          format: date
+        agreement_end:
+          type: string
+          format: date
+          nullable: true
+
+    # ─────── Placement core ─────────────────────────────────────────────
+    PlacementLifecycleStatus:
+      type: string
+      description: |
+        Placement state per F3.2 state machine. Maps to the FEATURE.md §4
+        invariants and the lifecycle states.
+
+        - `PENDING_START` — created with `start_date > today` (a.k.a.
+          *Scheduled* in the PRD prose). Auto-activates on the date.
+        - `ACTIVE` — currently in force.
+        - `EXTENDED` — present-tense indication that the placement has
+          been renewed via a successor; rare standalone (most chains move
+          straight to `SUPERSEDED`). Reserved for E9 migrated records
+          that don't fit the cleaner state machine.
+        - `EXPIRING` — system-flagged 30 days before `end_date` (LC-3).
+        - `ENDED` — end-of-term reached (LC-4) **or** soft-ended via `:end`.
+        - `TRANSFERRED` — closed because the agent was transferred (RT-2).
+        - `TERMINATED` — closed early by HR (`:terminate`, LC-5).
+        - `RESIGNED` — closed because the agent resigned (LC-6).
+        - `SUPERSEDED` — closed because a renewal/successor took effect (LC-7).
+
+        `ENDED`, `TRANSFERRED`, `TERMINATED`, `RESIGNED`, `SUPERSEDED` are
+        **terminal & immutable** (LC-1; Super Admin override only).
+      enum:
+        - PENDING_START
+        - ACTIVE
+        - EXTENDED
+        - EXPIRING
+        - ENDED
+        - TRANSFERRED
+        - TERMINATED
+        - RESIGNED
+        - SUPERSEDED
+
+    EndedReason:
+      type: string
+      description: Reason associated with a terminal lifecycle state.
+      enum:
+        - END_OF_TERM    # natural expiry
+        - ENDED          # soft-end (manual, non-destructive)
+        - TERMINATED     # HR early termination
+        - RESIGNED       # agent-initiated
+        - TRANSFERRED    # closed because of a transfer
+        - SUPERSEDED     # closed because of a renewal
+
+    Placement:
+      type: object
+      required:
+        - id
+        - employee_id
+        - agreement_id
+        - client_company_id
+        - service_line_id
+        - position_id
+        - start_date
+        - lifecycle_status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-PL-\d+$'
+          example: SWP-PL-1207
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-\d+$'
+          description: Cross-epic — references E2 Employee.
+          example: SWP-EMP-1042
+        employee_name:
+          type: string
+          description: Denormalized for display; server-authoritative.
+          example: 'Budi Santoso'
+        agreement_id:
+          type: string
+          pattern: '^SWP-AG-\d+$'
+          description: |
+            Cross-epic — references E2 Employment Agreement (`PKWT`/`PKWTT`).
+            Placement period MUST sit within this agreement's validity
+            (BR-1b; PKWT auto-cap applies).
+          example: SWP-AG-882
+        agreement_type:
+          type: string
+          enum: [PKWT, PKWTT]
+          description: Denormalized for display.
+        client_company_id:
+          type: string
+          pattern: '^SWP-CMP-\d+$'
+          description: Cross-epic — references E2 ClientCompany.
+          example: SWP-CMP-014
+        client_company_name:
+          type: string
+          example: 'Plaza Senayan'
+        service_line_id:
+          type: string
+          pattern: '^SWP-SVC-\d+$'
+          description: Cross-epic — references E2 ServiceLine.
+          example: SWP-SVC-003
+        service_line_name:
+          type: string
+          example: 'Parking'
+        position_id:
+          type: string
+          pattern: '^SWP-POS-\d+$'
+          description: Cross-epic — references E2 Position (per placement; BR-9).
+          example: SWP-POS-021
+        position_name:
+          type: string
+          example: 'Parking Attendant'
+        start_date:
+          type: string
+          format: date
+          example: '2026-06-03'
+        end_date:
+          type: string
+          format: date
+          nullable: true
+          description: |
+            Null = open-ended (typical for PKWTT). For PKWT, must sit
+            within the agreement period or be auto-capped (BR-1b).
+          example: '2026-12-31'
+        annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Cuti tahunan entitlement at this placement.
+          example: 12
+        base_salary_ref_idr:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Reference only — payroll is read-only (E8).
+          example: 4800000
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+        lifecycle_status:
+          $ref: '#/components/schemas/PlacementLifecycleStatus'
+        status_changed_at:
+          type: string
+          format: date-time
+          description: Last lifecycle transition.
+        ended_reason:
+          allOf:
+            - $ref: '#/components/schemas/EndedReason'
+          nullable: true
+          description: Null while non-terminal. Set when entering a terminal state.
+        ended_at:
+          type: string
+          format: date
+          nullable: true
+          description: Effective end date for any terminal status.
+        termination_reason:
+          type: string
+          nullable: true
+          description: Required when `lifecycle_status = TERMINATED` (LC-5).
+        resign_at:
+          type: string
+          format: date
+          nullable: true
+          description: Required when `lifecycle_status = RESIGNED` (LC-6); may be future-dated.
+        predecessor_id:
+          type: string
+          pattern: '^SWP-PL-\d+$'
+          nullable: true
+          description: Set on the successor created by renewal (LC-7) or transfer (RT-3).
+        successor_id:
+          type: string
+          pattern: '^SWP-PL-\d+$'
+          nullable: true
+          description: Back-reference to the placement that superseded/transferred from this one.
+        backdate_reason:
+          type: string
+          nullable: true
+          description: Required when `start_date < today` at creation (BR-6).
+        created_by:
+          type: string
+          pattern: '^SWP-USR-\d+$'
+          description: Actor who created the placement.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        warnings:
+          type: array
+          description: |
+            Soft warnings attached to the record (non-blocking). Examples:
+            `NO_SHIFT_LEADER_AT_COMPANY`, `END_DATE_AUTO_CAPPED_TO_AGREEMENT`.
+          items: { type: string }
+      example:
+        id: SWP-PL-1207
+        employee_id: SWP-EMP-1042
+        employee_name: 'Budi Santoso'
+        agreement_id: SWP-AG-882
+        agreement_type: PKWT
+        client_company_id: SWP-CMP-014
+        client_company_name: 'Plaza Senayan'
+        service_line_id: SWP-SVC-003
+        service_line_name: 'Parking'
+        position_id: SWP-POS-021
+        position_name: 'Parking Attendant'
+        start_date: '2026-06-03'
+        end_date: '2026-12-31'
+        annual_leave_entitlement_days: 12
+        base_salary_ref_idr: 4800000
+        notes: 'Replacement for Andi (resigned).'
+        lifecycle_status: ACTIVE
+        status_changed_at: '2026-06-03T01:00:00Z'
+        ended_reason: null
+        ended_at: null
+        termination_reason: null
+        resign_at: null
+        predecessor_id: null
+        successor_id: null
+        backdate_reason: null
+        created_by: SWP-USR-7
+        created_at: '2026-06-02T08:30:00Z'
+        updated_at: '2026-06-03T01:00:00Z'
+        warnings: []
+
+    PlacementSummary:
+      type: object
+      description: Compact projection used inside error payloads (INV-1).
+      required: [id, employee_id, client_company_id, lifecycle_status, start_date]
+      properties:
+        id: { type: string, example: SWP-PL-988 }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        client_company_id: { type: string, example: SWP-CMP-009 }
+        client_company_name: { type: string, example: 'Mall Kelapa Gading' }
+        service_line_id: { type: string, example: SWP-SVC-003 }
+        service_line_name: { type: string, example: 'Parking' }
+        lifecycle_status:
+          $ref: '#/components/schemas/PlacementLifecycleStatus'
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date, nullable: true }
+
+    PlacementWriteRequest:
+      type: object
+      required:
+        - employee_id
+        - agreement_id
+        - client_company_id
+        - service_line_id
+        - position_id
+        - start_date
+      properties:
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-\d+$'
+          description: Must reference an `ACTIVE` employee (BR — F3.1 C-9).
+        agreement_id:
+          type: string
+          pattern: '^SWP-AG-\d+$'
+          description: |
+            Must be an `ACTIVE` SWP-AG-* belonging to `employee_id`.
+            Placement period must lie within the agreement validity (BR-1b);
+            for PKWT, an out-of-range `end_date` is auto-capped to the
+            agreement end and surfaces as `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]`.
+        client_company_id:
+          type: string
+          pattern: '^SWP-CMP-\d+$'
+          description: Must reference an `ACTIVE` company (BR-3).
+        service_line_id:
+          type: string
+          pattern: '^SWP-SVC-\d+$'
+        position_id:
+          type: string
+          pattern: '^SWP-POS-\d+$'
+          description: Per-placement; may differ across companies for the same agent (BR-9).
+        start_date:
+          type: string
+          format: date
+          description: |
+            Determines initial status (BR-5): `<= today` → ACTIVE,
+            `> today` → PENDING_START. Backdating requires `backdate_reason` (BR-6).
+        end_date:
+          type: string
+          format: date
+          nullable: true
+          description: Optional — null = open-ended (PKWTT). If set, must be `> start_date` (BR-4).
+        annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+        base_salary_ref_idr:
+          type: integer
+          minimum: 0
+          nullable: true
+        backdate_reason:
+          type: string
+          nullable: true
+          description: Required when `start_date < today` (BR-6).
+          maxLength: 1000
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    PlacementPatchRequest:
+      type: object
+      description: |
+        Limited-field edit. Any read-only field present in the body is
+        rejected with `INVALID_REQUEST`.
+      properties:
+        position_id:
+          type: string
+          pattern: '^SWP-POS-\d+$'
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+        base_salary_ref_idr:
+          type: integer
+          minimum: 0
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    PlacementCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/Placement'
+
+    PlacementDetailResponse:
+      type: object
+      required: [placement, history_chain]
+      properties:
+        placement:
+          $ref: '#/components/schemas/Placement'
+        history_chain:
+          type: array
+          description: |
+            Oldest → newest list of all placements in this chain (linked
+            via predecessor/successor). Includes the current placement.
+          items:
+            $ref: '#/components/schemas/PlacementSummary'
+        current_shift_leader:
+          $ref: '#/components/schemas/ShiftLeaderAssignmentSummary'
+          nullable: true
+          description: |
+            The company's current leader (if any). Convenience join —
+            saves the Detail page from a second fetch. `null` when the
+            company has a vacancy (SL-7).
+
+    PlacementListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Placement'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    # ─────── Action requests ────────────────────────────────────────────
+    TransferRequest:
+      type: object
+      required:
+        - new_client_company_id
+        - new_service_line_id
+        - new_position_id
+        - new_start_date
+        - transfer_reason
+      properties:
+        new_client_company_id:
+          type: string
+          pattern: '^SWP-CMP-\d+$'
+          description: |
+            Must differ from the current company **OR** `new_service_line_id`
+            must differ from current — see TR-1. Otherwise `422` (use `:renew`).
+        new_service_line_id:
+          type: string
+          pattern: '^SWP-SVC-\d+$'
+        new_position_id:
+          type: string
+          pattern: '^SWP-POS-\d+$'
+        new_start_date:
+          type: string
+          format: date
+          description: |
+            Effective date of the new placement. The predecessor's
+            `ended_at` is auto-set to `new_start_date − 1 day` (TR-2 /
+            BR-2 1-day buffer).
+        new_end_date:
+          type: string
+          format: date
+          nullable: true
+        new_agreement_id:
+          type: string
+          pattern: '^SWP-AG-\d+$'
+          description: |
+            Defaults to the predecessor's `agreement_id` if omitted.
+            Required if the agent has moved to a new agreement (e.g.
+            PKWT renewed).
+          nullable: true
+        new_annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+        new_base_salary_ref_idr:
+          type: integer
+          minimum: 0
+          nullable: true
+        transfer_reason:
+          type: string
+          maxLength: 1000
+          description: Required — written to audit log + the new placement's `notes`.
+        transfer_note:
+          type: string
+          nullable: true
+          maxLength: 2000
+          description: |
+            Optional free-text. Migration carries legacy `new_office`
+            context here.
+        backdate_reason:
+          type: string
+          nullable: true
+          description: Required if `new_start_date < today` (BR-6).
+          maxLength: 1000
+
+    TransferResponse:
+      type: object
+      required: [predecessor, successor]
+      properties:
+        predecessor:
+          $ref: '#/components/schemas/Placement'
+          description: The closed placement (`lifecycle_status = TRANSFERRED`).
+        successor:
+          $ref: '#/components/schemas/Placement'
+          description: The new placement at the destination.
+        vacated_assignment:
+          $ref: '#/components/schemas/ShiftLeaderAssignment'
+          nullable: true
+          description: |
+            If the transferred agent was the shift leader of the old
+            company, the auto-ended assignment (TR-4 / SL-6) is returned
+            here so the UI can render the cascading-vacancy state.
+        warnings:
+          type: array
+          description: |
+            Soft warnings — e.g., `NO_SHIFT_LEADER_AT_DESTINATION` (TR-5).
+          items: { type: string }
+
+    RenewRequest:
+      type: object
+      required:
+        - new_start_date
+      properties:
+        new_start_date:
+          type: string
+          format: date
+          description: |
+            Must be at least 1 day after the predecessor's `end_date` (BR-2).
+        new_end_date:
+          type: string
+          format: date
+          nullable: true
+          description: |
+            Optional — if omitted and the agreement is PKWTT, the new
+            placement is open-ended. For PKWT, auto-capped to the
+            agreement end if it exceeds it (BR-1b).
+        new_agreement_id:
+          type: string
+          pattern: '^SWP-AG-\d+$'
+          nullable: true
+          description: |
+            Defaults to the predecessor's `agreement_id`. Provide a new
+            one if PKWT was renewed in E2.
+        new_position_id:
+          type: string
+          pattern: '^SWP-POS-\d+$'
+          nullable: true
+          description: Defaults to the predecessor's position.
+        terms_changes:
+          type: object
+          description: Optional overrides for the successor's terms.
+          properties:
+            annual_leave_entitlement_days:
+              type: integer
+              minimum: 0
+              nullable: true
+            base_salary_ref_idr:
+              type: integer
+              minimum: 0
+              nullable: true
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    RenewResponse:
+      type: object
+      required: [predecessor, successor]
+      properties:
+        predecessor:
+          $ref: '#/components/schemas/Placement'
+          description: '`lifecycle_status = SUPERSEDED` effective successor.start_date.'
+        successor:
+          $ref: '#/components/schemas/Placement'
+        warnings:
+          type: array
+          items: { type: string }
+
+    EndRequest:
+      type: object
+      required: [reason, effective_date]
+      properties:
+        reason:
+          type: string
+          description: |
+            EnabP reason classification (Wave-1). Free-text-backed enum:
+            the request body sends a structured `reason` enum value;
+            `notes` carries the free-text detail.
+          enum:
+            - END_OF_TERM
+            - MUTUAL_AGREEMENT
+            - CLIENT_REQUEST
+            - OTHER
+        effective_date:
+          type: string
+          format: date
+          description: |
+            The placement's `ended_at`. May be backdated by HR Admin
+            (requires `backdate_reason`).
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+        backdate_reason:
+          type: string
+          nullable: true
+          description: Required if `effective_date < today` (BR-6 analog).
+          maxLength: 1000
+
+    TerminateRequest:
+      type: object
+      required: [termination_reason, type_company_name_confirm]
+      properties:
+        termination_reason:
+          type: string
+          minLength: 10
+          maxLength: 2000
+          description: |
+            Mandatory free-text reason (audit-quality). Must be ≥ 10 chars.
+        effective_date:
+          type: string
+          format: date
+          description: Defaults to today (Asia/Jakarta) if omitted.
+          nullable: true
+        type_company_name_confirm:
+          type: string
+          description: |
+            Client company name typed back by the HR admin — must match
+            `client_company.name` (case-insensitive, trimmed). Per Wave-1
+            V4LG8 destructive-confirm pattern.
+        backdate_reason:
+          type: string
+          nullable: true
+          maxLength: 1000
+
+    ResignRequest:
+      type: object
+      required: [resign_at, resignation_reason]
+      properties:
+        resign_at:
+          type: string
+          format: date
+          description: |
+            Effective resignation date (last working day). May be
+            future-dated (LC-6 / Open Q resolved as future-allowed).
+        resignation_reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    # ─────── Shift Leader Assignment ────────────────────────────────────
+    ShiftLeaderVacatedReason:
+      type: string
+      enum:
+        - REASSIGNED
+        - PLACEMENT_ENDED   # auto-vacate from SL-6
+        - MANUAL
+        - COMPANY_ARCHIVED  # SL/C-5
+
+    ShiftLeaderAssignment:
+      type: object
+      required:
+        - id
+        - client_company_id
+        - employee_id
+        - assigned_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-SLA-\d+$'
+          example: SWP-SLA-204
+        client_company_id:
+          type: string
+          pattern: '^SWP-CMP-\d+$'
+          example: SWP-CMP-014
+        client_company_name:
+          type: string
+          example: 'Plaza Senayan'
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-\d+$'
+          example: SWP-EMP-1042
+        employee_name:
+          type: string
+          example: 'Budi Santoso'
+        assigned_at:
+          type: string
+          format: date-time
+          description: When the assignment took effect (UTC ISO 8601).
+        unassigned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null while active.
+        assigned_by:
+          type: string
+          pattern: '^SWP-USR-\d+$'
+          description: Actor; `system` for auto-vacate.
+        vacated_reason:
+          allOf:
+            - $ref: '#/components/schemas/ShiftLeaderVacatedReason'
+          nullable: true
+        active:
+          type: boolean
+          description: Convenience computed flag = `unassigned_at == null`.
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      example:
+        id: SWP-SLA-204
+        client_company_id: SWP-CMP-014
+        client_company_name: 'Plaza Senayan'
+        employee_id: SWP-EMP-1042
+        employee_name: 'Budi Santoso'
+        assigned_at: '2026-06-03T01:00:00Z'
+        unassigned_at: null
+        assigned_by: SWP-USR-7
+        vacated_reason: null
+        active: true
+        notes: null
+        created_at: '2026-06-03T01:00:00Z'
+        updated_at: '2026-06-03T01:00:00Z'
+
+    ShiftLeaderAssignmentSummary:
+      type: object
+      required: [id, client_company_id, employee_id, assigned_at]
+      properties:
+        id: { type: string, example: SWP-SLA-198 }
+        client_company_id: { type: string, example: SWP-CMP-014 }
+        client_company_name: { type: string, example: 'Plaza Senayan' }
+        employee_id: { type: string, example: SWP-EMP-0917 }
+        employee_name: { type: string, example: 'Citra Lestari' }
+        assigned_at: { type: string, format: date-time }
+        unassigned_at: { type: string, format: date-time, nullable: true }
+
+    ShiftLeaderAssignmentWriteRequest:
+      type: object
+      required:
+        - client_company_id
+        - employee_id
+        - start_date
+      properties:
+        client_company_id:
+          type: string
+          pattern: '^SWP-CMP-\d+$'
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-\d+$'
+          description: |
+            Must satisfy INV-4 (active placement at `client_company_id`).
+            Must satisfy INV-3 (not leading another company).
+        start_date:
+          type: string
+          format: date
+          description: Effective assignment date.
+        replace:
+          type: boolean
+          default: false
+          description: |
+            When `true`, an existing active assignment at `client_company_id`
+            is atomically ended (`vacated_reason = REASSIGNED`) before the
+            new one is created — i.e., explicit override of INV-2. When
+            `false` (default) and a leader already exists, the response is
+            `409 INV_2_VIOLATION`.
+        replace_reason:
+          type: string
+          nullable: true
+          description: 'Required when `replace: true` (audit).'
+          maxLength: 1000
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    ShiftLeaderAssignmentCreateResponse:
+      type: object
+      required: [assignment]
+      properties:
+        assignment:
+          $ref: '#/components/schemas/ShiftLeaderAssignment'
+        replaced_assignment:
+          $ref: '#/components/schemas/ShiftLeaderAssignment'
+          nullable: true
+          description: |
+            When `replace: true` ended an existing assignment, the closed
+            record is returned here.
+
+    ShiftLeaderAssignmentEndRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+          maxLength: 1000
+          description: |
+            Free-text audit reason. Maps to
+            `vacated_reason = MANUAL` (default for HR-initiated end).
+            Auto-vacate from SL-6 uses `PLACEMENT_ENDED` and never goes
+            through this endpoint.
+        effective_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Defaults to `now` (UTC).
+
+    ShiftLeaderAssignmentReplaceRequest:
+      type: object
+      required: [new_employee_id, start_date, replace_reason]
+      properties:
+        new_employee_id:
+          type: string
+          pattern: '^SWP-EMP-\d+$'
+          description: Candidate; INV-3 and INV-4 are revalidated.
+        start_date:
+          type: string
+          format: date
+        replace_reason:
+          type: string
+          maxLength: 1000
+        notes:
+          type: string
+          nullable: true
+          maxLength: 2000
+
+    ShiftLeaderAssignmentListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftLeaderAssignment'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    # ─────── Company Roster ─────────────────────────────────────────────
+    CompanyRosterResponse:
+      type: object
+      required: [company_id, placements, has_more, summary]
+      properties:
+        company_id:
+          type: string
+          example: SWP-CMP-014
+        company_name:
+          type: string
+          example: 'Plaza Senayan'
+        current_shift_leader:
+          $ref: '#/components/schemas/ShiftLeaderAssignmentSummary'
+          nullable: true
+          description: |
+            Null when the company has a vacancy. Frontend renders the
+            "Tanpa shift leader — Tetapkan" CTA (Companies-list pattern
+            `h22BP`).
+        placements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Placement'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+        summary:
+          $ref: '#/components/schemas/CompanyRosterSummary'
+
+    CompanyRosterSummary:
+      type: object
+      required: [total_active]
+      description: Aggregate counts for the company (post-filter — RO-5).
+      properties:
+        total_active:
+          type: integer
+          example: 12
+        total_scheduled:
+          type: integer
+          example: 1
+        total_expiring:
+          type: integer
+          example: 2
+        by_service_line:
+          type: array
+          items:
+            type: object
+            required: [service_line_id, count]
+            properties:
+              service_line_id: { type: string, example: SWP-SVC-003 }
+              service_line_name: { type: string, example: 'Parking' }
+              count: { type: integer, example: 7 }
+        by_status:
+          type: array
+          items:
+            type: object
+            required: [status, count]
+            properties:
+              status:
+                $ref: '#/components/schemas/PlacementLifecycleStatus'
+              count:
+                type: integer
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OpenAPI extensions (documentation-only)
+# ──────────────────────────────────────────────────────────────────────────────
+# x-rbac      : per CONVENTIONS §17 — declares allowed roles + scope.
+# x-design-screens : per CONVENTIONS §20 — .pen frame IDs that consume the endpoint.
+# x-idempotent     : flag — endpoint requires `Idempotency-Key` (CONVENTIONS §13).

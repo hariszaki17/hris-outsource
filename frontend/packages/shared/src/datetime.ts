@@ -1,0 +1,51 @@
+/**
+ * Asia/Jakarta-canonical date/time helpers. CONVENTIONS.md §10 · ENGINEERING.md E4.
+ *
+ * SWP operates only in Indonesia (WIB, UTC+7) in v1. ALL display/derivation goes through
+ * here — never `new Date()` formatting in components. The API sends:
+ *   - instants:   RFC 3339 UTC  "2026-06-03T14:32:08Z"
+ *   - dates:      "2026-06-03"
+ *   - local time: "HH:MM" (always Asia/Jakarta, e.g. shift start_time)
+ */
+import { Temporal } from '@js-temporal/polyfill';
+
+export const TZ = 'Asia/Jakarta';
+export const LOCALE_ID = 'id-ID';
+
+/** Parse an RFC 3339 UTC instant and render it in WIB. */
+export function formatInstant(
+  iso: string,
+  opts: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' },
+): string {
+  const zoned = Temporal.Instant.from(iso).toZonedDateTimeISO(TZ);
+  return new Intl.DateTimeFormat(LOCALE_ID, { ...opts, timeZone: TZ }).format(
+    new Date(zoned.epochMilliseconds),
+  );
+}
+
+/** Render a calendar date ("2026-06-03") with no timezone math. */
+export function formatDate(
+  isoDate: string,
+  opts: Intl.DateTimeFormatOptions = { dateStyle: 'medium' },
+): string {
+  const pd = Temporal.PlainDate.from(isoDate);
+  return new Intl.DateTimeFormat(LOCALE_ID, { ...opts, timeZone: 'UTC' }).format(
+    new Date(Date.UTC(pd.year, pd.month - 1, pd.day)),
+  );
+}
+
+/** Normalize an "HH:MM" Asia/Jakarta local shift time (validates range). */
+export function formatLocalTime(hhmm: string): string {
+  const t = Temporal.PlainTime.from(hhmm);
+  return `${String(t.hour).padStart(2, '0')}:${String(t.minute).padStart(2, '0')}`;
+}
+
+/** Current instant as an RFC 3339 UTC string (server is authoritative; use only for client-side UX). */
+export function nowIso(): string {
+  return Temporal.Now.instant().toString();
+}
+
+/** Whole days between two calendar dates (inclusive of neither end; for ranges). */
+export function daysBetween(startIsoDate: string, endIsoDate: string): number {
+  return Temporal.PlainDate.from(startIsoDate).until(Temporal.PlainDate.from(endIsoDate)).days;
+}

@@ -112,6 +112,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 ### E9 — Data Migration (SWP prod → hris-outsource)
 **Goal:** transform-and-load everything from MySQL `lumen_swp` into Postgres under the new model; validate & reconcile.
 **Features:** Source extraction (MySQL) · Field/entity mapping (legacy role + `company_id` → new model; `placement` string → entity) · Load into Postgres · Identity/role remap · Reconciliation & validation reports · Idempotent re-runs · Cutover runbook.
+**v1 mode (resolved 2026-06-02):** **One-shot script — no UI.** Big-bang cutover via full script execution. Blocking items (`decrypt_fail`, `orphan_identity`, `unmatched_placement`) are pre-resolved in code (alias tables + hardcoded crosswalks) or logged + skipped; no human-in-the-loop review queue. Manual inspection if needed via SQL/CLI on the staging DB.
 **Depends on:** target schemas from E1–E8 (runs continuously; lands at cutover).
 
 ### E10 — Reporting, Exports & Notifications (cross-cutting)
@@ -150,7 +151,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | **E6** Leave | [FEATURE](epics/E6-leave/FEATURE.md) | leave-quota-balances · leave-request · leave-approval · leave-schedule-integration · leave-calendar-views | [✓](epics/E6-leave/DATA-MAPPING.md) |
 | **E7** Overtime | [FEATURE](epics/E7-overtime/FEATURE.md) | overtime-rules · overtime-capture · overtime-approval · overtime-records | [✓](epics/E7-overtime/DATA-MAPPING.md) |
 | **E8** Payroll (read-only) | [FEATURE](epics/E8-payroll/FEATURE.md) | payslip-history · payroll-archive | [✓](epics/E8-payroll/DATA-MAPPING.md) |
-| **E9** Data Migration | [FEATURE](epics/E9-migration/FEATURE.md) | extraction-staging · transform-crosswalks · reconciliation-review · load-idempotent · cutover-validation | (orchestrates E2–E8) |
+| **E9** Data Migration *(script-only, no UI v1)* | [FEATURE](epics/E9-migration/FEATURE.md) | extraction-staging · transform-crosswalks · reconciliation-review · load-idempotent · cutover-validation | (orchestrates E2–E8) |
 | **E10** Reporting & Notifications | [FEATURE](epics/E10-reporting/FEATURE.md) | notifications · dashboards · attendance-billable-report · export-framework | — (reads modules) |
 
 **Totals:** 10 epics · 43 PRDs · 10 feature docs · 7 data-mapping docs.
@@ -199,7 +200,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 **E7 — Overtime**
 - ✅ Public-holiday calendar: **HR-maintained in-app** master (recurring + one-off); shared with E6 duration counting
 - ✅ Auto-detected OT: **agent confirms, then leader approves**
-- ✅ Minimum OT counted = **60 minutes**
+- ✅ Minimum OT counted = **30 minutes** *(superseded 2026-06-02 — was 60 min in 2026-05-29 review; PRDs were authoritative)*
 - Pre-approval: worked-without-request OT still approvable after the fact (flagged); Holiday tier beats Rest-day when both apply; cross-midnight OT → start date *(default)*
 
 **E8 — Payroll (read-only)**
@@ -207,7 +208,8 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 
 **E9 — Migration**
 - ✅ Migrate **everything**, incl. full attendance history (plan a larger migration + validation window)
-- Blocking review items: `decrypt_fail`, `orphan_identity`, `unmatched_placement` = **blocking**; `unclassified_service_line`, `ambiguous_chain` = non-blocking. Placement-string matching = exact + alias list + fuzzy-with-manual-confirm. Keep `lumen_swp` read-only ~6–12 months post-cutover. Maintenance window + validation thresholds sized by dry-runs *(default)*
+- ✅ **v1: one-shot script, no UI** *(resolved 2026-06-02)* — big-bang cutover, no human-in-the-loop review queue. Blocking items (`decrypt_fail`, `orphan_identity`, `unmatched_placement`) handled via pre-built alias tables + hardcoded crosswalks in the migration script, OR logged-and-skipped with a post-run report. Inspection via SQL/CLI on staging DB if needed.
+- Placement-string matching = exact + alias list (no fuzzy + manual confirm in v1; if exact+alias miss, log and skip). Keep `lumen_swp` read-only ~6–12 months post-cutover. Maintenance window + validation thresholds sized by dry-runs *(default)*
 
 **E10 — Reporting & Notifications**
 - ✅ Billable = **verified-only** (consistent with E5)

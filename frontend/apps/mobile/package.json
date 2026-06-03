@@ -1,0 +1,9 @@
+{
+  "name": "@swp/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SWP HRIS Outsource — mobile app (agents + shift leaders). React Native. Placeholder; built after the web console.",
+  "scripts": {
+    "typecheck": "echo \"(mobile) not yet scaffolded\" && exit 0"
+  }
+}

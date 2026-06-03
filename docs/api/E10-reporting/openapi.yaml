@@ -1,0 +1,2497 @@
+openapi: 3.1.0
+info:
+  title: HRIS Outsource — E10 Reporting, Exports & Notifications API
+  version: 1.0.0
+  description: |
+    OpenAPI 3.1 contract for the **E10 Reporting, Exports & Notifications**
+    epic of SWP's HRIS rebuild.
+
+    Covers role-based dashboards (F10.2), in-app notifications + center
+    (F10.1), the v1-priority Attendance & Billable-Hours report (F10.3),
+    and the reusable Export Framework (F10.4).
+
+    E10 is the **cross-cutting glue** of the system. Almost every endpoint
+    here reads from other epics' data rather than owning state of its own.
+    Endpoint descriptions annotate the upstream data sources explicitly:
+
+      - Dashboards aggregate from E2/E3/E4/E5/E6/E7/E8.
+      - Notifications are *generated implicitly* by writes in E2/E3/E4/E5/E6/E7
+        (per CONVENTIONS §16.2) — this spec only exposes the read & mark-read
+        side of the durable in-app center.
+      - The billable-hours report reads verified attendance (E5) joined to
+        placements (E3), client companies + service lines + attendance codes
+        (E2). Billable = verified-only (EPICS.md §8 E10).
+      - Exports consume any report's query and produce an Excel file (v1).
+
+    Inherits binding rules from `docs/api/CONVENTIONS.md` — base URL, auth
+    header, pagination shape, error envelope, RBAC extension semantics,
+    timestamp/id formats, audit-log side-effect (§16.1), notification
+    side-effect (§16.2), idempotency (§13). Do not duplicate those rules
+    here.
+
+    PRD refs in operation descriptions point to:
+      - `dashboards.md` (DB-1..DB-6, C-1..C-4)
+      - `notifications.md` (NT-1..NT-6, C-1..C-4)
+      - `attendance-billable-report.md` (BR-1..BR-7, C-1..C-4)
+      - `export-framework.md` (EX-1..EX-6, C-1..C-4)
+
+    **Locked decisions consumed by this spec (EPICS.md §8):**
+      - Billable = verified attendance only.
+      - Notifications all-on in v1 (preferences endpoint returns a disabled
+        stub — D10).
+      - Billing math = hours only (no rates/amounts).
+      - Export format = Excel only in v1 (D5; PDF deferred to v1.1, attempts
+        return `EXPORT_FORMAT_UNSUPPORTED`).
+      - Super Admin dashboard shape = same as HR + a role label (D1).
+  contact:
+    name: SWP HRIS — product & architecture
+  license:
+    name: Proprietary — PT Saranawisesa Properindo
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://staging-api.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: dashboards
+    description: |
+      Role-based landing dashboard data. PRD F10.2 / `dashboards.md`.
+      The single endpoint `GET /dashboards/me` returns a POV-shaped payload
+      whose schema is discriminated by the caller's role (DB-1).
+      Aggregates read projections from E2/E3/E4/E5/E6/E7/E8.
+  - name: notifications
+    description: |
+      Durable in-app notification center + mark-read transitions.
+      PRD F10.1 / `notifications.md`. Notifications are PRODUCED implicitly
+      by writes in other epics (CONVENTIONS §16.2) — this API exposes only
+      the read & state-change endpoints, never a write endpoint to create
+      a notification. Push delivery (FCM/APNs) is external infrastructure,
+      not a REST endpoint.
+  - name: reports
+    description: |
+      The v1 attendance & billable-hours report (F10.3). PRD
+      `attendance-billable-report.md`. Reads verified attendance (E5) on
+      billable attendance codes (E2 `is_billable`) joined to placements
+      (E3). Export trigger lives here; the export job lifecycle lives
+      under the `exports` tag.
+  - name: exports
+    description: |
+      Reusable export framework (F10.4). PRD `export-framework.md`.
+      Every report uses this. v1 format is **Excel only** (D5); PDF
+      requests are rejected with `EXPORT_FORMAT_UNSUPPORTED` until v1.1.
+      Each export creates one `EXPORT_JOB` and one audit-log entry
+      (EX-4, INV-5).
+
+# ---------------------------------------------------------------------------
+# PATHS
+# ---------------------------------------------------------------------------
+paths:
+
+  # ====================================================================
+  # DASHBOARDS
+  # ====================================================================
+  /dashboards/me:
+    get:
+      operationId: getMyDashboard
+      tags: [dashboards]
+      summary: Get the current user's dashboard payload (role-shaped)
+      description: |
+        Returns the landing dashboard data for the caller. The response
+        shape is **POV-shaped**: the server selects the right block layout
+        based on the caller's role (DB-1, INV-3).
+
+        - `hr_admin` / `super_admin` → `HrDashboard` shape:
+          company totals, expiring placements (E3), pending approvals counts
+          (E5/E6/E7), attendance anomalies (E5), "Perlu Tindakan" approval-
+          inbox panel rows. Super Admin receives the same payload plus
+          `role_label: "Super Admin"` (D1 — locked in EPICS §8).
+        - `shift_leader` → `LeaderDashboard` shape:
+          today's team status (clock-ins, late count from E5), pending
+          verifications (E5), OT/leave pending counts (E6/E7), schedule
+          alerts for the leader's single assigned company (E3 INV-3).
+        - `agent` → `AgentDashboard` shape:
+          today's shift (E4), recent attendance summary (E5), leave balance
+          summary (E6), pending requests (E6/E7), recent notifications
+          (F10.1 read projection).
+
+        **Data sources:** E3 (placements, expiring), E4 (schedule), E5
+        (attendance, exceptions), E6 (leave + quota), E7 (OT requests),
+        plus E10 notifications (count).
+
+        **Caching:** server SHOULD set `Cache-Control: private, max-age=30`
+        for freshness (DB-6, C-4). Clients MAY display a "Diperbarui Xs lalu"
+        timestamp from `generated_at`.
+
+        **Empty states (DB C-1, C-3):** every count/list may be 0/empty.
+        Clients render the empty-state variant from the design system
+        (E10-AUDIT §3 P0 gaps).
+
+        **Deep links (DB-5):** each row in `pending_approvals_panel` and
+        each card in the agent/leader payload carries a `deep_link` object
+        (epic + entity_id + path) the client uses to route into the owning
+        epic's screen.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [ETi5H, RiSPW, e8Sw1]
+      responses:
+        '200':
+          description: |
+            Dashboard payload. Discriminated by `role`.
+          headers:
+            Cache-Control:
+              description: Server-set cache directive (DB-6).
+              schema:
+                type: string
+                example: "private, max-age=30"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+              examples:
+                hrAdmin:
+                  summary: HR Admin Sari Hadi opens dashboard
+                  value:
+                    role: hr_admin
+                    role_label: "HR Admin"
+                    generated_at: "2026-06-03T07:14:52Z"
+                    period_label: "Juni 2026"
+                    kpis:
+                      active_placements: 482
+                      active_companies: 27
+                      attendance_rate_pct: 96.2
+                      billable_hours_mtd: 38420.5
+                      ot_hours_mtd: 1284.0
+                      leave_pending: 6
+                    expiring_placements_30d: 12
+                    expiring_agreements_30d: 4
+                    attendance_anomalies_today: 3
+                    billable_trend:
+                      granularity: day
+                      points:
+                        - date: "2026-05-28"
+                          value: 1240.5
+                        - date: "2026-05-29"
+                          value: 1310.0
+                        - date: "2026-05-30"
+                          value: 1198.5
+                    pending_approvals_panel:
+                      - kind: ATTENDANCE_VERIFY
+                        label: "Verifikasi kehadiran"
+                        count: 8
+                        deep_link:
+                          epic: E5
+                          path: "/attendance?status=PENDING_VERIFY"
+                      - kind: LEAVE_APPROVE
+                        label: "Persetujuan cuti"
+                        count: 3
+                        deep_link:
+                          epic: E6
+                          path: "/leave-requests?status=PENDING_L1,PENDING_L2"
+                      - kind: OT_APPROVE
+                        label: "Persetujuan lembur"
+                        count: 5
+                        deep_link:
+                          epic: E7
+                          path: "/overtime?status=PENDING"
+                      - kind: PLACEMENT_EXPIRING
+                        label: "Penempatan akan berakhir"
+                        count: 12
+                        deep_link:
+                          epic: E3
+                          path: "/placements?expiring_within=30d"
+                superAdmin:
+                  summary: Super Admin (same shape, different role label — D1)
+                  value:
+                    role: super_admin
+                    role_label: "Super Admin"
+                    generated_at: "2026-06-03T07:14:52Z"
+                    period_label: "Juni 2026"
+                    kpis:
+                      active_placements: 482
+                      active_companies: 27
+                      attendance_rate_pct: 96.2
+                      billable_hours_mtd: 38420.5
+                      ot_hours_mtd: 1284.0
+                      leave_pending: 6
+                    expiring_placements_30d: 12
+                    expiring_agreements_30d: 4
+                    attendance_anomalies_today: 3
+                    billable_trend:
+                      granularity: day
+                      points: []
+                    pending_approvals_panel: []
+                shiftLeader:
+                  summary: Rudi Wijaya, Shift Leader at Plaza Senayan
+                  value:
+                    role: shift_leader
+                    role_label: "Shift Leader"
+                    company:
+                      id: SWP-CMP-0021
+                      name: "Plaza Senayan"
+                    generated_at: "2026-06-03T07:14:52Z"
+                    today:
+                      date: "2026-06-03"
+                      shifts_total: 24
+                      clocked_in: 19
+                      late_count: 2
+                      absent_count: 3
+                      pending_verifications: 4
+                    pending_counts:
+                      attendance_verify: 4
+                      leave_approve: 1
+                      ot_approve: 2
+                    schedule_alerts:
+                      - kind: COVERAGE_GAP
+                        label: "Shift Malam belum lengkap"
+                        date: "2026-06-04"
+                        deep_link:
+                          epic: E4
+                          path: "/schedule?date=2026-06-04&company_id=SWP-CMP-0021"
+                    pending_approvals_panel:
+                      - kind: ATTENDANCE_VERIFY
+                        label: "Verifikasi kehadiran"
+                        count: 4
+                        deep_link:
+                          epic: E5
+                          path: "/attendance?company_id=SWP-CMP-0021&status=PENDING_VERIFY"
+                      - kind: LEAVE_APPROVE
+                        label: "Persetujuan cuti"
+                        count: 1
+                        deep_link:
+                          epic: E6
+                          path: "/leave-requests?company_id=SWP-CMP-0021&status=PENDING_L1"
+                      - kind: OT_APPROVE
+                        label: "Persetujuan lembur"
+                        count: 2
+                        deep_link:
+                          epic: E7
+                          path: "/overtime?company_id=SWP-CMP-0021&status=PENDING"
+                agent:
+                  summary: Budi Santoso, agent placed at Plaza Senayan
+                  value:
+                    role: agent
+                    generated_at: "2026-06-03T07:14:52Z"
+                    today_shift:
+                      schedule_id: SWP-SCH-882104
+                      shift_name: "Shift Pagi"
+                      start_time: "06:00"
+                      end_time: "14:00"
+                      company_name: "Plaza Senayan"
+                      clock_in_status: NOT_CLOCKED_IN
+                      deep_link:
+                        epic: E5
+                        path: "/attendance/clock-in"
+                    recent_attendance:
+                      last_7d_present: 5
+                      last_7d_late: 1
+                      last_7d_absent: 0
+                    leave_balance:
+                      annual_remaining_days: 7
+                      annual_quota_days: 12
+                      period_label: "2026"
+                    ot_this_month_hours: 6.5
+                    pending_requests:
+                      leave: 1
+                      ot: 0
+                    recent_notifications_unread: 3
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  # ====================================================================
+  # NOTIFICATIONS
+  # ====================================================================
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List the current user's notifications (in-app inbox)
+      description: |
+        Returns the durable in-app notification center for the caller
+        (NT-1, NT-2, NT-6). Cursor-paginated per CONVENTIONS §8.
+
+        **Scope:** strictly self — a user only ever sees notifications
+        addressed to their `recipient_id` (NT-2). The server enforces;
+        no `recipient_id` filter is exposed.
+
+        **Generation:** notifications are NOT created via this API. They
+        are dispatched as a side-effect of writes in other epics
+        (CONVENTIONS §16.2; NT-3 event catalog):
+        schedule published (E4), leave approved/rejected (E6), OT
+        approved/rejected/auto-detected (E7), attendance verification
+        needed (E5), attendance correction submitted (E5), HR change-
+        request submitted (E2), agreement/placement expiring (E2/E3
+        cron-driven).
+
+        **Read state filter** (`read_state`): `UNREAD` | `READ` | `ALL`
+        (default `ALL`). Wave-1 mobile "Belum dibaca" tab maps to `UNREAD`.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [i0qW8, WKYgI]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: read_state
+          in: query
+          description: Filter by read state. Default `ALL`.
+          required: false
+          schema:
+            type: string
+            enum: [UNREAD, READ, ALL]
+            default: ALL
+        - name: kind
+          in: query
+          description: |
+            Filter by notification kind (NT-3). Use the multi-value
+            `__in` suffix to combine: `?kind__in=LEAVE_APPROVED,OT_APPROVED`.
+          required: false
+          schema:
+            $ref: '#/components/schemas/NotificationKind'
+        - name: kind__in
+          in: query
+          description: Comma-separated list of notification kinds.
+          required: false
+          schema:
+            type: string
+            example: "LEAVE_APPROVED,OT_APPROVED,SCHEDULE_PUBLISHED"
+      responses:
+        '200':
+          description: A page of notifications, newest first.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+              examples:
+                inbox:
+                  summary: Mixed inbox for HR Sari Hadi
+                  value:
+                    data:
+                      - id: SWP-NTF-880241
+                        kind: LEAVE_REQUEST_SUBMITTED
+                        title: "Pengajuan cuti baru"
+                        body: "Budi Santoso mengajukan cuti 3 hari (10–12 Jun)."
+                        read_at: null
+                        created_at: "2026-06-03T06:58:11Z"
+                        deep_link:
+                          epic: E6
+                          entity_id: SWP-LR-1042
+                          path: "/leave-requests/SWP-LR-1042"
+                        actor:
+                          id: SWP-USR-3104
+                          label: "Budi Santoso"
+                        is_critical: true
+                      - id: SWP-NTF-880198
+                        kind: ATTENDANCE_VERIFY_NEEDED
+                        title: "Verifikasi kehadiran"
+                        body: "8 record kehadiran menunggu verifikasi."
+                        read_at: "2026-06-03T06:02:00Z"
+                        created_at: "2026-06-03T05:45:08Z"
+                        deep_link:
+                          epic: E5
+                          entity_id: null
+                          path: "/attendance?status=PENDING_VERIFY"
+                        actor:
+                          id: null
+                          label: "system"
+                        is_critical: false
+                    next_cursor: "eyJpZCI6IlNXUC1OVEYtODgwMTAwIn0"
+                    has_more: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notifications/count:
+    get:
+      operationId: getNotificationCount
+      tags: [notifications]
+      summary: Get the unread-notification count (topbar badge)
+      description: |
+        Convenience endpoint for the topbar bell badge (web `caFkE`) and
+        the mobile bottom-nav indicator. Returns only the unread count —
+        cheap & cacheable.
+
+        Clients SHOULD poll this on a low interval (e.g., 60s) rather than
+        re-fetching the full list (no SSE/WebSocket in v1, per
+        CONVENTIONS §1).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [caFkE]
+      responses:
+        '200':
+          description: Unread count for the caller.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unread]
+                properties:
+                  unread:
+                    type: integer
+                    minimum: 0
+                    example: 3
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notifications/{notification_id}:mark-read:
+    post:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark a single notification as read
+      description: |
+        Single-call read-state transition (NT-4; Wave-1 unread→read).
+        The server flips `read_at` from `null` to "now" and returns the
+        updated `Notification`. Idempotent: a second call with the same
+        `Idempotency-Key` returns the same body.
+
+        If the notification is already read, the call is a no-op (200 with
+        the existing `read_at` preserved).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [WslFv, meAQc, LsYPf, eOrnJ, inLk6]
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Notification marked as read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notifications/{notification_id}:mark-unread:
+    post:
+      operationId: markNotificationUnread
+      tags: [notifications]
+      summary: Mark a single notification as unread
+      description: |
+        Reverse the read transition (sets `read_at` back to `null`). Used
+        when an agent/leader wants to flag a notification for later
+        attention. Idempotent.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [i0qW8]
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Notification marked as unread.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notifications:mark-all-read:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Bulk mark-all-read
+      description: |
+        Marks every notification in the caller's inbox as read in one call
+        (web `B9XPDU` "Tandai semua dibaca"). Optional `before_timestamp`
+        cutoff scopes the action to notifications created strictly before
+        that instant — useful for "mark everything older than today as
+        read" patterns. Omit for "all".
+
+        Idempotent on `Idempotency-Key`. Returns the number of records
+        affected; the client refetches `/notifications/count` (returns 0
+        unless `before_timestamp` was supplied and new items have arrived
+        since).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [B9XPDU]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                before_timestamp:
+                  type: string
+                  format: date-time
+                  description: |
+                    Only mark notifications with `created_at < before_timestamp`.
+                    Omit to mark all.
+                  example: "2026-06-03T00:00:00Z"
+      responses:
+        '200':
+          description: Bulk update completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [marked_count]
+                properties:
+                  marked_count:
+                    type: integer
+                    minimum: 0
+                    description: Number of notifications transitioned to READ.
+                    example: 12
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /notifications/preferences:
+    get:
+      operationId: getNotificationPreferences
+      tags: [notifications]
+      summary: Get notification preferences (disabled stub in v1)
+      description: |
+        **v1 stub** — per EPICS.md §8 E10 (D10) notifications are all-on
+        in v1. This endpoint exists to reserve the IA slot and let the
+        client render a "Notification preferences (available in v1.1)"
+        disabled affordance per the Wave-1.3 disabled-affordance pattern
+        (E10-AUDIT §3 P1).
+
+        Always returns the same payload in v1; never accepts writes.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: [i0qW8]
+      responses:
+        '200':
+          description: v1 stub payload — preferences disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPreferences'
+              examples:
+                v1Stub:
+                  value:
+                    enabled: false
+                    available_in: "v1.1"
+                    message: "Pengaturan notifikasi akan tersedia di v1.1. Semua notifikasi aktif."
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  # ====================================================================
+  # BILLABLE ATTENDANCE REPORT
+  # ====================================================================
+  /reports/attendance-billable:
+    get:
+      operationId: getBillableAttendanceReport
+      tags: [reports]
+      summary: Run the attendance & billable-hours report
+      description: |
+        The v1 priority report (BR-1..BR-7). Aggregates **verified**
+        attendance records (E5) recorded against **billable** attendance
+        codes (E2 `is_billable=true`) into hours by the requested
+        grouping.
+
+        **Data sources:**
+        - E5 `Attendance` filtered by `is_verified=true` (BR-1, INV-4).
+        - E2 `AttendanceCode` for the `is_billable` predicate.
+        - E3 `Placement` for `company_id`, `service_line_id`, and to split
+          hours across companies when an agent transferred mid-period
+          (BR-7, C-3).
+        - E2 `ClientCompany`, `ServiceLine`, `Employee` for display labels.
+
+        **Cross-midnight (BR-7, C-4):** hours are counted once to the
+        shift's start date (avoids double-counting).
+
+        **Hours only (BR-5; EPICS §8 D-default):** no rates, no amounts.
+
+        **Pending callout (BR-6, C-1, E10-AUDIT Wave-2 HIGH):** the
+        summary always includes a `pending_summary` block counting
+        unverified records in the same period — surfaced as a callout
+        ("8j belum bisa ditagih") so HR can chase verification. Pending
+        records are NOT included in `total_billable_hours`.
+
+        **Scope (BR-4):**
+        - HR / Super Admin → `company_id` optional; omit to span all
+          companies.
+        - Shift leader → `company_id` MUST equal the leader's assigned
+          company (E3 INV-3); other values → 403 `OUT_OF_SCOPE`.
+
+        **Period cap:** the server caps the date range to 1 year for
+        performance. Requests over the cap return 422
+        `REPORT_PERIOD_TOO_WIDE`.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens: [EF8AZ, IZPG8]
+      parameters:
+        - name: company_id
+          in: query
+          description: |
+            Client company filter. Required for `shift_leader` (must
+            equal their assigned company). Optional for HR/Super Admin
+            (omit for cross-company).
+          required: false
+          schema:
+            type: string
+            example: SWP-CMP-0021
+        - name: service_line_id
+          in: query
+          description: Optional service-line filter (E2).
+          required: false
+          schema:
+            type: string
+            example: SWP-SVC-001
+        - name: period_start
+          in: query
+          description: Inclusive start date (ISO `full-date`). Required.
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-06-01"
+        - name: period_end
+          in: query
+          description: |
+            Inclusive end date. Required. `end < start` → 400.
+            Range over 1 year → 422 `REPORT_PERIOD_TOO_WIDE`.
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-06-30"
+        - name: group_by
+          in: query
+          description: |
+            How the per-row breakdown is aggregated.
+          required: false
+          schema:
+            type: string
+            enum: [employee, day, shift_master]
+            default: employee
+      responses:
+        '200':
+          description: Computed report — summary, pending callout, breakdown.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillableReport'
+              examples:
+                hrMonth:
+                  summary: HR runs June 2026 for Plaza Senayan, grouped by employee
+                  value:
+                    generated_at: "2026-06-03T07:14:52Z"
+                    filters:
+                      company_id: SWP-CMP-0021
+                      company_name: "Plaza Senayan"
+                      service_line_id: null
+                      service_line_name: null
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                      group_by: employee
+                    summary:
+                      total_billable_hours: 4128.5
+                      total_worked_hours: 4310.0
+                      total_payable_hours: 4232.0
+                      total_verified_records: 612
+                      verification_rate_pct: 98.0
+                    pending_summary:
+                      pending_records: 8
+                      pending_hours_estimate: 64.0
+                      note: "Belum dapat ditagih hingga diverifikasi."
+                    rows:
+                      - group_key: SWP-EMP-3104
+                        group_label: "Budi Santoso"
+                        company_id: SWP-CMP-0021
+                        company_name: "Plaza Senayan"
+                        service_line_id: SWP-SVC-001
+                        service_line_name: "Facility Services"
+                        worked_hours: 176.0
+                        billable_hours: 168.0
+                        payable_hours: 172.0
+                        verified_record_count: 22
+                        unverified_record_count: 0
+                emptyAfterFilters:
+                  summary: No data for the filter combination (E10-AUDIT P1)
+                  value:
+                    generated_at: "2026-06-03T07:14:52Z"
+                    filters:
+                      company_id: SWP-CMP-0099
+                      company_name: "Site Baru"
+                      service_line_id: null
+                      service_line_name: null
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                      group_by: employee
+                    summary:
+                      total_billable_hours: 0
+                      total_worked_hours: 0
+                      total_payable_hours: 0
+                      total_verified_records: 0
+                      verification_rate_pct: null
+                    pending_summary:
+                      pending_records: 0
+                      pending_hours_estimate: 0
+                      note: ""
+                    rows: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: |
+            Caller is a shift leader requesting a company they are not
+            assigned to (BR-4 / INV-3).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                outOfScope:
+                  value:
+                    error:
+                      code: OUT_OF_SCOPE
+                      message: "Anda hanya dapat menjalankan laporan untuk perusahaan Anda."
+                      request_id: req_01J7K3W3A1
+        '422':
+          description: Period out of range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                periodTooWide:
+                  value:
+                    error:
+                      code: REPORT_PERIOD_TOO_WIDE
+                      message: "Rentang tanggal melebihi 1 tahun."
+                      fields:
+                        period_end: "Maksimum 1 tahun dari period_start."
+                      request_id: req_01J7K3W3A2
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /reports/attendance-billable:export:
+    post:
+      operationId: exportBillableAttendanceReport
+      tags: [reports]
+      summary: Trigger an Excel export of the billable attendance report
+      description: |
+        Convenience wrapper around `POST /exports` that pre-fills
+        `report_type=ATTENDANCE_BILLABLE` and passes the report's filters
+        as-is. Returns 202 + an `ExportJob` reference; the client polls
+        `GET /exports/{id}` or waits for the `EXPORT_READY` notification
+        (NT-3, EX-3).
+
+        **Format:** Excel only in v1 (D5). PDF deferred to v1.1 — clients
+        showing a disabled PDF affordance should NOT call this endpoint
+        with `format=PDF`; the underlying export framework returns 422
+        `EXPORT_FORMAT_UNSUPPORTED` if forced.
+
+        **Idempotency required** (CONVENTIONS §13). Re-submit with the
+        same key to retrieve the same `ExportJob`.
+
+        **Audit (EX-4, INV-5):** the resulting export is logged with the
+        full filter set.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens: [MxNSO, FJ6hX, uSW4W, KnZN9]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [period_start, period_end]
+              properties:
+                company_id:
+                  type: string
+                  nullable: true
+                  example: SWP-CMP-0021
+                service_line_id:
+                  type: string
+                  nullable: true
+                  example: null
+                period_start:
+                  type: string
+                  format: date
+                  example: "2026-06-01"
+                period_end:
+                  type: string
+                  format: date
+                  example: "2026-06-30"
+                group_by:
+                  type: string
+                  enum: [employee, day, shift_master]
+                  default: employee
+            examples:
+              hrJuneExport:
+                summary: HR exports June for Plaza Senayan
+                value:
+                  company_id: SWP-CMP-0021
+                  period_start: "2026-06-01"
+                  period_end: "2026-06-30"
+                  group_by: employee
+      responses:
+        '202':
+          description: |
+            Export queued. Body is an `ExportJob` with `status=QUEUED`
+            (or `PROCESSING` if the worker picked it up synchronously).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+              examples:
+                queued:
+                  value:
+                    id: SWP-EXP-1042
+                    report_type: ATTENDANCE_BILLABLE
+                    status: QUEUED
+                    format: EXCEL
+                    confidential: false
+                    progress_percent: 0
+                    filename: null
+                    size_bytes: null
+                    file_url: null
+                    error: null
+                    filters:
+                      company_id: SWP-CMP-0021
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                      group_by: employee
+                    audit_log_entry_id: SWP-AL-1204520
+                    requester_id: SWP-USR-1042
+                    requested_at: "2026-06-03T07:14:52Z"
+                    completed_at: null
+                    expires_at: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Period out of range or filter invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                periodTooWide:
+                  value:
+                    error:
+                      code: REPORT_PERIOD_TOO_WIDE
+                      message: "Rentang tanggal melebihi 1 tahun."
+                      request_id: req_01J7K3W3B1
+        '429':
+          description: |
+            Per-user export throttle (RATE_LIMITED_EXPORTS) or general
+            rate limit. Both return 429 — the `code` distinguishes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                exportThrottle:
+                  value:
+                    error:
+                      code: RATE_LIMITED_EXPORTS
+                      message: "Terlalu banyak ekspor. Coba lagi sebentar."
+                      request_id: req_01J7K3W3B2
+
+  # ====================================================================
+  # EXPORT FRAMEWORK
+  # ====================================================================
+  /exports:
+    get:
+      operationId: listMyExports
+      tags: [exports]
+      summary: List the caller's recent export jobs
+      description: |
+        Returns the caller's own export history (scope = self per EX-2).
+        HR/Super Admin do NOT see other users' exports here — those live
+        in the audit log (E1).
+
+        Filterable by `report_type` and `status`. Cursor-paginated.
+        Sort: `requested_at:desc` by default.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: self
+      x-design-screens: [uSW4W]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: report_type
+          in: query
+          description: Filter by report type.
+          required: false
+          schema:
+            $ref: '#/components/schemas/ReportType'
+        - name: status
+          in: query
+          description: Filter by job status.
+          required: false
+          schema:
+            $ref: '#/components/schemas/ExportStatus'
+      responses:
+        '200':
+          description: A page of export jobs.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/CursorPage'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExportJob'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+    post:
+      operationId: createExport
+      tags: [exports]
+      summary: Request a new export (generic, any report_type)
+      description: |
+        Generic export entry-point used by every export-capable report
+        (F10.4). The `report_type` discriminates which downstream query
+        runs; `filters` is a free-form object validated against that
+        report's allowed filter schema (server-side; documented per
+        report).
+
+        **Format (D5; locked in EPICS §8 E10):** Excel only in v1.
+        Clients SHOULD send `format: EXCEL`; sending `format: PDF` or
+        `format: CSV` returns 422 `EXPORT_FORMAT_UNSUPPORTED`. The
+        Wave-1.3 disabled-affordance pattern applies on the UI — the
+        format dropdown only offers Excel.
+
+        **Confidential flag (EX-5):**
+        - Always `true` for `report_type=PAYSLIPS` (E8). The server forces
+          it true regardless of the request body — clients sending `false`
+          for payslips are silently coerced (and the audit log records
+          the coercion).
+        - Defaults `false` for other report types; HR may override to
+          `true` on sensitive HR exports.
+
+        **Scope (EX-2):** the export inherits the caller's report-scope
+        — a shift leader's payload is filtered to their assigned company
+        even if `filters.company_id` is omitted.
+
+        **Throttle:** per-user export rate limit returns 429
+        `RATE_LIMITED_EXPORTS`. Bulk-spamming the same key returns the
+        cached job (idempotency).
+
+        **Size guard:** the server estimates the result set; if it would
+        exceed the v1 row cap (e.g., 250k rows) the call returns 422
+        `EXPORT_TOO_LARGE` with a hint to narrow the period (Wave-1
+        SizeWarn).
+
+        **Audit (EX-4, INV-5):** one audit entry per export job; the
+        entry's id is returned in `audit_log_entry_id` for traceability.
+
+        **Idempotency required** (CONVENTIONS §13). Re-submit the same
+        key → same job (no new audit entry).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens: [FJ6hX, uSW4W, KnZN9]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+            examples:
+              billableAttendance:
+                summary: HR exports the billable-attendance report
+                value:
+                  report_type: ATTENDANCE_BILLABLE
+                  format: EXCEL
+                  confidential: false
+                  filters:
+                    company_id: SWP-CMP-0021
+                    period_start: "2026-06-01"
+                    period_end: "2026-06-30"
+                    group_by: employee
+              payslips:
+                summary: HR exports payslips (confidential forced true)
+                value:
+                  report_type: PAYSLIPS
+                  format: EXCEL
+                  confidential: true
+                  filters:
+                    period: "2026-05"
+                    company_id: SWP-CMP-0021
+              auditLog:
+                summary: HR exports an audit-log slice
+                value:
+                  report_type: AUDIT_LOG
+                  format: EXCEL
+                  confidential: false
+                  filters:
+                    period_start: "2026-06-01"
+                    period_end: "2026-06-02"
+                    entity_type: leave_request
+              pdfRejected:
+                summary: Client mistakenly requests PDF — will be rejected (D5)
+                value:
+                  report_type: ATTENDANCE_BILLABLE
+                  format: PDF
+                  filters:
+                    period_start: "2026-06-01"
+                    period_end: "2026-06-30"
+      responses:
+        '202':
+          description: Export job queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Idempotency key reused with a different body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                idempotencyReuse:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_KEY_REUSED
+                      message: "Idempotency-Key sudah digunakan dengan body berbeda."
+                      request_id: req_01J7K3W3C1
+        '422':
+          description: |
+            Validation failed semantically. Possible codes:
+            `EXPORT_TOO_LARGE`, `EXPORT_FORMAT_UNSUPPORTED`,
+            `REPORT_PERIOD_TOO_WIDE`, `RULE_VIOLATION`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                tooLarge:
+                  summary: Size guard tripped — surfaces Wave-1 SizeWarn
+                  value:
+                    error:
+                      code: EXPORT_TOO_LARGE
+                      message: "Hasil terlalu besar. Persempit rentang tanggal."
+                      fields:
+                        period_end: "Estimasi melebihi 250.000 baris."
+                      request_id: req_01J7K3W3C2
+                pdfUnsupported:
+                  summary: PDF requested — rejected per D5
+                  value:
+                    error:
+                      code: EXPORT_FORMAT_UNSUPPORTED
+                      message: "Format PDF belum tersedia. Gunakan Excel."
+                      fields:
+                        format: "PDF akan tersedia di v1.1."
+                      request_id: req_01J7K3W3C3
+        '429':
+          description: Per-user export throttle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                exportThrottle:
+                  value:
+                    error:
+                      code: RATE_LIMITED_EXPORTS
+                      message: "Terlalu banyak ekspor. Coba lagi sebentar."
+                      request_id: req_01J7K3W3C4
+
+  /exports/{export_id}:
+    get:
+      operationId: getExport
+      tags: [exports]
+      summary: Get an export job by ID (status, progress, file URL)
+      description: |
+        Poll endpoint for export job lifecycle (Wave-1 Step-2 progress,
+        Step-3 success). Returns the current state:
+
+        - `QUEUED` — accepted, awaiting worker pickup.
+        - `PROCESSING` — worker is generating; `progress_percent` is
+          populated when known.
+        - `COMPLETED` — `file_url` (use `GET /exports/{id}/download` to
+          fetch with auth), `filename`, `size_bytes`, `expires_at`.
+        - `FAILED` — `error` carries `{code, message}`.
+        - `CANCELLED` — caller (or HR) aborted via `:cancel`.
+
+        Polling cadence: clients SHOULD use 2-5s intervals while
+        `QUEUED` / `PROCESSING`; back off to 30s after 30s of no change.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: self
+      x-design-screens: [uSW4W]
+      parameters:
+        - $ref: '#/components/parameters/ExportIdPath'
+      responses:
+        '200':
+          description: Current state of the export job.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+              examples:
+                processing:
+                  value:
+                    id: SWP-EXP-1042
+                    report_type: ATTENDANCE_BILLABLE
+                    status: PROCESSING
+                    format: EXCEL
+                    confidential: false
+                    progress_percent: 40
+                    filename: null
+                    size_bytes: null
+                    file_url: null
+                    error: null
+                    filters:
+                      company_id: SWP-CMP-0021
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                    audit_log_entry_id: SWP-AL-1204520
+                    requester_id: SWP-USR-1042
+                    requested_at: "2026-06-03T07:14:52Z"
+                    completed_at: null
+                    expires_at: null
+                completed:
+                  value:
+                    id: SWP-EXP-1042
+                    report_type: ATTENDANCE_BILLABLE
+                    status: COMPLETED
+                    format: EXCEL
+                    confidential: false
+                    progress_percent: 100
+                    filename: "billable-plaza-senayan-2026-06.xlsx"
+                    size_bytes: 184320
+                    file_url: "https://api.swp.example.com/api/v1/exports/SWP-EXP-1042/download"
+                    error: null
+                    filters:
+                      company_id: SWP-CMP-0021
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                    audit_log_entry_id: SWP-AL-1204520
+                    requester_id: SWP-USR-1042
+                    requested_at: "2026-06-03T07:14:52Z"
+                    completed_at: "2026-06-03T07:15:48Z"
+                    expires_at: "2026-06-10T07:15:48Z"
+                failed:
+                  value:
+                    id: SWP-EXP-1043
+                    report_type: PAYSLIPS
+                    status: FAILED
+                    format: EXCEL
+                    confidential: true
+                    progress_percent: null
+                    filename: null
+                    size_bytes: null
+                    file_url: null
+                    error:
+                      code: INTERNAL
+                      message: "Gagal menghasilkan file. Coba lagi."
+                    filters:
+                      period: "2026-05"
+                    audit_log_entry_id: SWP-AL-1204521
+                    requester_id: SWP-USR-1042
+                    requested_at: "2026-06-03T07:14:52Z"
+                    completed_at: "2026-06-03T07:15:01Z"
+                    expires_at: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /exports/{export_id}/download:
+    get:
+      operationId: downloadExport
+      tags: [exports]
+      summary: Download the generated export file
+      description: |
+        Redirects to a signed, short-TTL storage URL for the actual file.
+        The redirect target is opaque storage infrastructure (presigned
+        S3-style URL) — clients follow the redirect.
+
+        **Access control (EX-5):** auth required (same `Authorization`
+        Bearer token); response is `302 Found` with the signed URL only
+        if the caller is the requester (scope=self).
+
+        **Expiry (EX-5, C-4):** files expire at `ExportJob.expires_at`
+        (default 7 days post-completion). Subsequent calls return 410
+        `EXPORT_EXPIRED`. Clients SHOULD re-create the export with the
+        same filters to refresh.
+
+        **Confidential payslip exports (EX-5):** the signed URL TTL is
+        shorter (default 5 minutes); the file itself carries a
+        confidentiality marker in metadata.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: self
+      x-design-screens: [uSW4W]
+      parameters:
+        - $ref: '#/components/parameters/ExportIdPath'
+      responses:
+        '302':
+          description: Redirect to signed storage URL.
+          headers:
+            Location:
+              description: Short-TTL signed URL.
+              schema:
+                type: string
+                format: uri
+                example: "https://files.swp.example.com/exports/SWP-EXP-1042.xlsx?sig=..."
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: Export file has expired (EX-5 retention; C-4).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                expired:
+                  value:
+                    error:
+                      code: EXPORT_EXPIRED
+                      message: "File ekspor sudah kedaluwarsa. Jalankan ulang ekspor."
+                      request_id: req_01J7K3W3D1
+
+  /exports/{export_id}:cancel:
+    post:
+      operationId: cancelExport
+      tags: [exports]
+      summary: Cancel an in-flight export (Wave-1.3 Step2 abort)
+      description: |
+        Aborts an export job that is `QUEUED` or `PROCESSING`. Idempotent:
+        cancelling an already-`CANCELLED` / `FAILED` / `COMPLETED` job is
+        a no-op (200 with current state).
+
+        Surfaces the Wave-1.3 Step-2 abort button (E10-AUDIT P0
+        progress-state).
+
+        Only the requester (scope=self) may cancel.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: self
+      x-design-screens: [uSW4W]
+      parameters:
+        - $ref: '#/components/parameters/ExportIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Cancellation request accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJob'
+              examples:
+                cancelled:
+                  value:
+                    id: SWP-EXP-1042
+                    report_type: ATTENDANCE_BILLABLE
+                    status: CANCELLED
+                    format: EXCEL
+                    confidential: false
+                    progress_percent: null
+                    filename: null
+                    size_bytes: null
+                    file_url: null
+                    error: null
+                    filters:
+                      company_id: SWP-CMP-0021
+                      period_start: "2026-06-01"
+                      period_end: "2026-06-30"
+                    audit_log_entry_id: SWP-AL-1204520
+                    requester_id: SWP-USR-1042
+                    requested_at: "2026-06-03T07:14:52Z"
+                    completed_at: "2026-06-03T07:15:10Z"
+                    expires_at: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ===========================================================================
+# COMPONENTS
+# ===========================================================================
+components:
+
+  # ------------------------------------------------------------------ SECURITY
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT-or-opaque
+      description: |
+        `Authorization: Bearer <token>`. Token format is treated as opaque
+        by clients (CONVENTIONS §3). Issued by E1 `/auth/login`.
+
+  # --------------------------------------------------------------- PARAMETERS
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor from the previous page's `next_cursor`.
+      required: false
+      schema:
+        type: string
+        example: "eyJpZCI6IlNXUC1OVEYtODgwMTAwIn0"
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Default 50, server max 200.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Client-generated UUID v4 (CONVENTIONS §13). Cached for 24 h.
+        Required on every write/action endpoint in E10.
+      required: true
+      schema:
+        type: string
+        format: uuid
+        example: "3c7e9a48-1c3d-4b3a-9f1a-2b1f2cf3a401"
+    NotificationIdPath:
+      name: notification_id
+      in: path
+      description: Full prefixed notification ID (`SWP-NTF-...`).
+      required: true
+      schema:
+        type: string
+        example: SWP-NTF-880241
+    ExportIdPath:
+      name: export_id
+      in: path
+      description: Full prefixed export-job ID (`SWP-EXP-...`).
+      required: true
+      schema:
+        type: string
+        example: SWP-EXP-1042
+
+  # -------------------------------------------------------------- RESPONSES
+  responses:
+    BadRequest:
+      description: Validation failed (malformed body, bad query param). CONVENTIONS §11.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            invalid:
+              value:
+                error:
+                  code: INVALID_REQUEST
+                  message: "Permintaan tidak valid."
+                  fields:
+                    period_end: "Wajib diisi."
+                  request_id: req_01J7K3W3E1
+    Unauthenticated:
+      description: |
+        Missing, invalid, or expired access token. Client renders
+        `comp/EmptySessionExpired` and re-auths.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            expired:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: "Sesi berakhir. Silakan masuk kembali."
+                  request_id: req_01J7K3W3E2
+    Forbidden:
+      description: Authenticated but role / scope lacks permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: "Anda tidak memiliki izin untuk tindakan ini."
+                  request_id: req_01J7K3W3E3
+    NotFound:
+      description: Resource does not exist or caller lacks visibility.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: "Sumber tidak ditemukan."
+                  request_id: req_01J7K3W3E4
+    RateLimited:
+      description: Too many requests (CONVENTIONS §19).
+      headers:
+        Retry-After:
+          description: Seconds the client should wait before retrying.
+          schema:
+            type: integer
+            example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          examples:
+            rateLimited:
+              value:
+                error:
+                  code: RATE_LIMITED
+                  message: "Terlalu banyak permintaan. Coba lagi sebentar."
+                  request_id: req_01J7K3W3E5
+
+  # ----------------------------------------------------------------- SCHEMAS
+  schemas:
+
+    # -- common envelopes --------------------------------------------------
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              description: |
+                UPPER_SNAKE_CASE machine-readable error code (CONVENTIONS §11).
+
+                **E10 domain-specific codes:**
+                  - `EXPORT_TOO_LARGE` (422) — result-set exceeds row cap
+                    (Wave-1 SizeWarn).
+                  - `EXPORT_FORMAT_UNSUPPORTED` (422) — PDF/CSV requested
+                    on a v1 endpoint (D5; Excel only).
+                  - `EXPORT_EXPIRED` (410) — download URL TTL expired
+                    (EX-5 retention).
+                  - `RATE_LIMITED_EXPORTS` (429) — per-user export
+                    throttle.
+                  - `REPORT_PERIOD_TOO_WIDE` (422) — date range exceeds
+                    the per-report cap.
+                  - `OUT_OF_SCOPE` (403) — shift leader requesting a
+                    company they are not assigned to (BR-4 / INV-3).
+              example: EXPORT_TOO_LARGE
+            message:
+              type: string
+              description: Human-readable message, defaults to Bahasa Indonesia.
+              example: "Hasil terlalu besar. Persempit rentang tanggal."
+            fields:
+              type: object
+              description: |
+                Field-level errors (400 / 422). Keys are request-body or
+                query-param field names.
+              additionalProperties:
+                type: string
+              example:
+                period_end: "Estimasi melebihi 250.000 baris."
+            request_id:
+              type: string
+              example: req_01J7K3W3F1
+
+    CursorPage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          description: Page of items (typed per endpoint).
+          items: {}
+        next_cursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next page; `null` if `has_more` is false.
+          example: "eyJpZCI6IlNXUC1OVEYtODgwMTAwIn0"
+        has_more:
+          type: boolean
+          example: true
+
+    DeepLink:
+      type: object
+      description: |
+        A reference to a target screen in another epic. The client routes
+        on `epic` + `path`; `entity_id` is the prefixed ID for analytics
+        / deep-link copy. (E10 owns no UI of its own beyond the
+        dashboards and notification center — every actionable widget
+        links into another epic.)
+      required: [epic, path]
+      properties:
+        epic:
+          type: string
+          description: Owning epic code.
+          enum: [E2, E3, E4, E5, E6, E7, E8]
+          example: E6
+        entity_id:
+          type: string
+          nullable: true
+          description: Full prefixed ID of the target entity (when applicable).
+          example: SWP-LR-1042
+        path:
+          type: string
+          description: Client-side route path (mobile + web share path conventions).
+          example: "/leave-requests/SWP-LR-1042"
+
+    # -- shared enums ------------------------------------------------------
+    Role:
+      type: string
+      description: Caller's role (RB-1; same enum as E1 `Role`).
+      enum: [super_admin, hr_admin, shift_leader, agent]
+      example: hr_admin
+
+    # ====================================================================
+    # DASHBOARDS
+    # ====================================================================
+    Dashboard:
+      description: |
+        POV-shaped dashboard payload. The `role` discriminator selects
+        the per-role variant. `super_admin` reuses the `HrDashboard`
+        shape with `role: super_admin` and `role_label: "Super Admin"`
+        (D1).
+      oneOf:
+        - $ref: '#/components/schemas/HrDashboard'
+        - $ref: '#/components/schemas/LeaderDashboard'
+        - $ref: '#/components/schemas/AgentDashboard'
+      discriminator:
+        propertyName: role
+        mapping:
+          hr_admin: '#/components/schemas/HrDashboard'
+          super_admin: '#/components/schemas/HrDashboard'
+          shift_leader: '#/components/schemas/LeaderDashboard'
+          agent: '#/components/schemas/AgentDashboard'
+
+    HrDashboard:
+      type: object
+      description: |
+        HR Admin (and Super Admin per D1) dashboard. Cross-company KPIs.
+        Data sources: E2 (companies, employees, agreements), E3
+        (placements + expiring), E5 (attendance anomalies), E6/E7
+        (pending counts), F10.1 (notifications).
+      required:
+        - role
+        - role_label
+        - generated_at
+        - period_label
+        - kpis
+        - expiring_placements_30d
+        - expiring_agreements_30d
+        - attendance_anomalies_today
+        - billable_trend
+        - pending_approvals_panel
+      properties:
+        role:
+          type: string
+          enum: [hr_admin, super_admin]
+          description: |
+            `super_admin` returns the same body shape with a distinct
+            `role_label` (D1).
+        role_label:
+          type: string
+          description: Human label for the topbar / dashboard header.
+          example: "HR Admin"
+        generated_at:
+          type: string
+          format: date-time
+          description: Server compute timestamp (DB-6 freshness).
+        period_label:
+          type: string
+          description: Display label for the KPI period (current month by default).
+          example: "Juni 2026"
+        kpis:
+          type: object
+          required:
+            - active_placements
+            - active_companies
+            - attendance_rate_pct
+            - billable_hours_mtd
+            - ot_hours_mtd
+            - leave_pending
+          properties:
+            active_placements:
+              type: integer
+              description: Count of E3 placements currently active.
+              example: 482
+            active_companies:
+              type: integer
+              description: Count of E2 client companies with ≥1 active placement.
+              example: 27
+            attendance_rate_pct:
+              type: number
+              format: float
+              description: |
+                Verified-present / scheduled in the current period (E5
+                aggregate).
+              example: 96.2
+            billable_hours_mtd:
+              type: number
+              format: float
+              description: |
+                Month-to-date billable hours (verified-only per INV-4).
+              example: 38420.5
+            ot_hours_mtd:
+              type: number
+              format: float
+              description: Month-to-date approved OT hours (E7).
+              example: 1284.0
+            leave_pending:
+              type: integer
+              description: Leave requests pending HR-level approval (E6).
+              example: 6
+        expiring_placements_30d:
+          type: integer
+          description: Placements ending within 30 days (E3 cron-driven).
+          example: 12
+        expiring_agreements_30d:
+          type: integer
+          description: Employment agreements ending within 30 days (E2).
+          example: 4
+        attendance_anomalies_today:
+          type: integer
+          description: |
+            Today's flagged attendance exceptions (E5: out-of-geofence,
+            unscheduled clock-in, missing clock-out).
+          example: 3
+        billable_trend:
+          type: object
+          required: [granularity, points]
+          properties:
+            granularity:
+              type: string
+              enum: [day, week, month]
+              example: day
+            points:
+              type: array
+              items:
+                type: object
+                required: [date, value]
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  value:
+                    type: number
+                    format: float
+                    description: Billable hours for the bucket.
+        pending_approvals_panel:
+          type: array
+          description: |
+            "Perlu Tindakan" inbox panel rows (DB-3, DB-5). Each row
+            deep-links into the owning epic's approval queue.
+          items:
+            $ref: '#/components/schemas/ApprovalInboxRow'
+
+    LeaderDashboard:
+      type: object
+      description: |
+        Shift Leader dashboard, scoped to their single assigned company
+        (E3 INV-3). Data: E4 (today's schedule), E5 (clock-in status),
+        E6/E7 (pending counts).
+      required:
+        - role
+        - role_label
+        - company
+        - generated_at
+        - today
+        - pending_counts
+        - schedule_alerts
+        - pending_approvals_panel
+      properties:
+        role:
+          type: string
+          enum: [shift_leader]
+        role_label:
+          type: string
+          example: "Shift Leader"
+        company:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+              example: SWP-CMP-0021
+            name:
+              type: string
+              example: "Plaza Senayan"
+        generated_at:
+          type: string
+          format: date-time
+        today:
+          type: object
+          required: [date, shifts_total, clocked_in, late_count, absent_count, pending_verifications]
+          properties:
+            date:
+              type: string
+              format: date
+            shifts_total:
+              type: integer
+              description: Total scheduled shifts today (E4).
+              example: 24
+            clocked_in:
+              type: integer
+              description: Agents who have clocked in (E5).
+              example: 19
+            late_count:
+              type: integer
+              description: Agents flagged late (>15 min grace, EPICS §8 E5).
+              example: 2
+            absent_count:
+              type: integer
+              example: 3
+            pending_verifications:
+              type: integer
+              description: Attendance records awaiting leader verification (E5).
+              example: 4
+        pending_counts:
+          type: object
+          required: [attendance_verify, leave_approve, ot_approve]
+          properties:
+            attendance_verify:
+              type: integer
+              example: 4
+            leave_approve:
+              type: integer
+              example: 1
+            ot_approve:
+              type: integer
+              example: 2
+        schedule_alerts:
+          type: array
+          description: |
+            Upcoming schedule problems (coverage gaps, unassigned slots,
+            placements expiring) for the leader's company.
+          items:
+            type: object
+            required: [kind, label, deep_link]
+            properties:
+              kind:
+                type: string
+                enum: [COVERAGE_GAP, UNASSIGNED_SHIFT, PLACEMENT_EXPIRING]
+              label:
+                type: string
+                example: "Shift Malam belum lengkap"
+              date:
+                type: string
+                format: date
+                nullable: true
+              deep_link:
+                $ref: '#/components/schemas/DeepLink'
+        pending_approvals_panel:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApprovalInboxRow'
+
+    AgentDashboard:
+      type: object
+      description: |
+        Agent (self) dashboard. Data: E4 (today's shift), E5
+        (attendance), E6 (leave balance + pending), E7 (OT MTD), F10.1
+        (recent notifications).
+      required:
+        - role
+        - generated_at
+        - today_shift
+        - recent_attendance
+        - leave_balance
+        - ot_this_month_hours
+        - pending_requests
+        - recent_notifications_unread
+      properties:
+        role:
+          type: string
+          enum: [agent]
+        generated_at:
+          type: string
+          format: date-time
+        today_shift:
+          type: object
+          nullable: true
+          description: |
+            Today's scheduled shift, or `null` if the agent is off
+            today / has no schedule (E10-AUDIT P2 off-duty state).
+          required: [schedule_id, shift_name, start_time, end_time, company_name, clock_in_status]
+          properties:
+            schedule_id:
+              type: string
+              example: SWP-SCH-882104
+            shift_name:
+              type: string
+              example: "Shift Pagi"
+            start_time:
+              type: string
+              description: HH:MM Asia/Jakarta (CONVENTIONS §10).
+              example: "06:00"
+            end_time:
+              type: string
+              example: "14:00"
+            company_name:
+              type: string
+              example: "Plaza Senayan"
+            clock_in_status:
+              type: string
+              enum: [NOT_CLOCKED_IN, CLOCKED_IN, CLOCKED_OUT, LATE, ABSENT]
+              example: NOT_CLOCKED_IN
+            deep_link:
+              $ref: '#/components/schemas/DeepLink'
+        recent_attendance:
+          type: object
+          required: [last_7d_present, last_7d_late, last_7d_absent]
+          properties:
+            last_7d_present:
+              type: integer
+              example: 5
+            last_7d_late:
+              type: integer
+              example: 1
+            last_7d_absent:
+              type: integer
+              example: 0
+        leave_balance:
+          type: object
+          required: [annual_remaining_days, annual_quota_days, period_label]
+          description: Summary of annual-leave quota (E6).
+          properties:
+            annual_remaining_days:
+              type: number
+              format: float
+              example: 7
+            annual_quota_days:
+              type: number
+              format: float
+              example: 12
+            period_label:
+              type: string
+              example: "2026"
+        ot_this_month_hours:
+          type: number
+          format: float
+          description: Approved OT hours MTD (E7).
+          example: 6.5
+        pending_requests:
+          type: object
+          required: [leave, ot]
+          properties:
+            leave:
+              type: integer
+              example: 1
+            ot:
+              type: integer
+              example: 0
+        recent_notifications_unread:
+          type: integer
+          description: |
+            Convenience: same value as `GET /notifications/count` at the
+            moment the dashboard was generated.
+          example: 3
+
+    ApprovalInboxRow:
+      type: object
+      description: |
+        One row of the "Perlu Tindakan" panel (HR + Leader). The panel
+        doubles as the leader's combined approval inbox (E10-AUDIT §8 —
+        accepted option (a)).
+      required: [kind, label, count, deep_link]
+      properties:
+        kind:
+          type: string
+          enum:
+            - ATTENDANCE_VERIFY
+            - LEAVE_APPROVE
+            - OT_APPROVE
+            - PLACEMENT_EXPIRING
+            - AGREEMENT_EXPIRING
+            - HR_CHANGE_REQUEST
+          description: |
+            Approval queue type. Each maps to one upstream epic
+            (E5/E6/E7/E3/E2).
+        label:
+          type: string
+          example: "Persetujuan cuti"
+        count:
+          type: integer
+          minimum: 0
+          example: 3
+        deep_link:
+          $ref: '#/components/schemas/DeepLink'
+
+    # ====================================================================
+    # NOTIFICATIONS
+    # ====================================================================
+    NotificationKind:
+      type: string
+      description: |
+        Notification kind (NT-3 event catalog). Each kind has a fixed
+        owning epic that produces it (CONVENTIONS §16.2):
+
+        - `SCHEDULE_PUBLISHED` — E4
+        - `SCHEDULE_CHANGED` — E4
+        - `SHIFT_REMINDER` — E4 cron
+        - `LEAVE_REQUEST_SUBMITTED` — E6 (to leader/HR)
+        - `LEAVE_APPROVED` — E6 (to submitter)
+        - `LEAVE_REJECTED` — E6 (to submitter)
+        - `OT_REQUEST_SUBMITTED` — E7 (to leader/HR)
+        - `OT_AUTO_DETECTED` — E7 (to agent — needs confirmation)
+        - `OT_APPROVED` — E7 (to submitter)
+        - `OT_REJECTED` — E7 (to submitter)
+        - `ATTENDANCE_VERIFY_NEEDED` — E5 (to leader)
+        - `ATTENDANCE_CORRECTION_SUBMITTED` — E5 (to leader / HR if >7d)
+        - `ATTENDANCE_AUTO_CLOSED` — E5 (to agent)
+        - `HR_CHANGE_REQUEST_SUBMITTED` — E2 (to HR)
+        - `AGREEMENT_EXPIRING` — E2 cron (to HR)
+        - `PLACEMENT_EXPIRING` — E3 cron (to HR + leader)
+        - `PLACEMENT_LEADER_CHANGED` — E3
+        - `EXPORT_READY` — E10 self (export job completed)
+        - `EXPORT_FAILED` — E10 self
+      enum:
+        - SCHEDULE_PUBLISHED
+        - SCHEDULE_CHANGED
+        - SHIFT_REMINDER
+        - LEAVE_REQUEST_SUBMITTED
+        - LEAVE_APPROVED
+        - LEAVE_REJECTED
+        - OT_REQUEST_SUBMITTED
+        - OT_AUTO_DETECTED
+        - OT_APPROVED
+        - OT_REJECTED
+        - ATTENDANCE_VERIFY_NEEDED
+        - ATTENDANCE_CORRECTION_SUBMITTED
+        - ATTENDANCE_AUTO_CLOSED
+        - HR_CHANGE_REQUEST_SUBMITTED
+        - AGREEMENT_EXPIRING
+        - PLACEMENT_EXPIRING
+        - PLACEMENT_LEADER_CHANGED
+        - EXPORT_READY
+        - EXPORT_FAILED
+      example: LEAVE_APPROVED
+
+    Notification:
+      type: object
+      description: |
+        A single in-app notification (NT-4). Push delivery is a separate
+        side-channel; the in-app row is the durable record (NT-6).
+      required: [id, kind, title, body, read_at, created_at, deep_link, actor, is_critical]
+      properties:
+        id:
+          type: string
+          example: SWP-NTF-880241
+        kind:
+          $ref: '#/components/schemas/NotificationKind'
+        title:
+          type: string
+          description: Short headline (Bahasa Indonesia by default).
+          example: "Pengajuan cuti baru"
+        body:
+          type: string
+          description: Body text (single line, ~120 chars max).
+          example: "Budi Santoso mengajukan cuti 3 hari (10–12 Jun)."
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the recipient marked this notification as read.
+            `null` = unread.
+          example: null
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-06-03T06:58:11Z"
+        deep_link:
+          $ref: '#/components/schemas/DeepLink'
+        actor:
+          type: object
+          description: Who triggered the underlying event.
+          required: [label]
+          properties:
+            id:
+              type: string
+              nullable: true
+              description: |
+                `SWP-USR-...` of the actor. `null` when the actor is the
+                system (cron, auto-detection).
+              example: SWP-USR-3104
+            label:
+              type: string
+              description: Display name + role (or "system").
+              example: "Budi Santoso"
+        is_critical:
+          type: boolean
+          description: |
+            Critical categories (approvals, schedule changes) stay on
+            regardless of mute preferences (NT-5, C-3). In v1 preferences
+            are all-on so this is informational only.
+          example: true
+
+    NotificationPreferences:
+      type: object
+      description: |
+        Notification preferences (v1 stub). D10: notifications are
+        all-on in v1, so this endpoint reserves the IA slot and lets the
+        client render a disabled affordance.
+      required: [enabled, available_in]
+      properties:
+        enabled:
+          type: boolean
+          description: Always `false` in v1.
+          example: false
+        available_in:
+          type: string
+          description: Target version when preferences ship.
+          example: "v1.1"
+        message:
+          type: string
+          description: Human copy for the disabled affordance tooltip.
+          example: "Pengaturan notifikasi akan tersedia di v1.1. Semua notifikasi aktif."
+
+    # ====================================================================
+    # BILLABLE REPORT
+    # ====================================================================
+    BillableReport:
+      type: object
+      description: |
+        F10.3 attendance & billable-hours report. Computed live from
+        verified attendance (E5) on billable codes (E2). Hours only —
+        no rates / amounts per EPICS §8 D-default.
+      required:
+        - generated_at
+        - filters
+        - summary
+        - pending_summary
+        - rows
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+          description: Compute timestamp (point-in-time per EX-6, BR-7).
+        filters:
+          type: object
+          description: Echo of the filter set used for the run.
+          required: [period_start, period_end, group_by]
+          properties:
+            company_id:
+              type: string
+              nullable: true
+              example: SWP-CMP-0021
+            company_name:
+              type: string
+              nullable: true
+              example: "Plaza Senayan"
+            service_line_id:
+              type: string
+              nullable: true
+              example: null
+            service_line_name:
+              type: string
+              nullable: true
+              example: null
+            period_start:
+              type: string
+              format: date
+              example: "2026-06-01"
+            period_end:
+              type: string
+              format: date
+              example: "2026-06-30"
+            group_by:
+              type: string
+              enum: [employee, day, shift_master]
+              example: employee
+        summary:
+          type: object
+          description: |
+            Totals across all rows. Verified-only per INV-4 / BR-1.
+          required:
+            - total_billable_hours
+            - total_worked_hours
+            - total_payable_hours
+            - total_verified_records
+          properties:
+            total_billable_hours:
+              type: number
+              format: float
+              description: Hours on billable codes, verified-only.
+              example: 4128.5
+            total_worked_hours:
+              type: number
+              format: float
+              description: All verified worked hours (billable + non-billable).
+              example: 4310.0
+            total_payable_hours:
+              type: number
+              format: float
+              description: Hours considered for payroll (per E5 / E8 rules).
+              example: 4232.0
+            total_verified_records:
+              type: integer
+              example: 612
+            verification_rate_pct:
+              type: number
+              format: float
+              nullable: true
+              description: |
+                verified / (verified + unverified) for the period.
+                `null` when there are zero records.
+              example: 98.0
+        pending_summary:
+          type: object
+          description: |
+            **Wave-2.10 HIGH callout.** Counts records that are NOT yet
+            billable because they remain unverified (BR-6, C-1). These
+            are explicitly excluded from `summary.total_billable_hours`
+            — the callout exists so HR can chase verification.
+          required: [pending_records, pending_hours_estimate, note]
+          properties:
+            pending_records:
+              type: integer
+              minimum: 0
+              example: 8
+            pending_hours_estimate:
+              type: number
+              format: float
+              description: |
+                Estimated hours represented by the pending records
+                (worked-hours, pre-verification). NOT counted in billable.
+              example: 64.0
+            note:
+              type: string
+              example: "Belum dapat ditagih hingga diverifikasi."
+        rows:
+          type: array
+          description: Per-row breakdown driven by `filters.group_by`.
+          items:
+            $ref: '#/components/schemas/BillableReportRow'
+
+    BillableReportRow:
+      type: object
+      description: |
+        One aggregated row. `group_key` semantics depend on the report's
+        `group_by`:
+          - `employee` → `SWP-EMP-...`
+          - `day` → ISO date (e.g., "2026-06-15")
+          - `shift_master` → `SWP-SHF-...`
+      required:
+        - group_key
+        - group_label
+        - worked_hours
+        - billable_hours
+        - payable_hours
+        - verified_record_count
+        - unverified_record_count
+      properties:
+        group_key:
+          type: string
+          example: SWP-EMP-3104
+        group_label:
+          type: string
+          description: Display label for the row (name / date / shift name).
+          example: "Budi Santoso"
+        company_id:
+          type: string
+          nullable: true
+          description: |
+            Populated when the report is scoped to a company OR when
+            `group_by=employee` and the agent is currently placed at
+            exactly one company (otherwise null; transfers split into
+            multiple rows per BR-7, C-3).
+          example: SWP-CMP-0021
+        company_name:
+          type: string
+          nullable: true
+          example: "Plaza Senayan"
+        service_line_id:
+          type: string
+          nullable: true
+          example: SWP-SVC-001
+        service_line_name:
+          type: string
+          nullable: true
+          example: "Facility Services"
+        worked_hours:
+          type: number
+          format: float
+          example: 176.0
+        billable_hours:
+          type: number
+          format: float
+          description: Verified-only (INV-4).
+          example: 168.0
+        payable_hours:
+          type: number
+          format: float
+          example: 172.0
+        verified_record_count:
+          type: integer
+          example: 22
+        unverified_record_count:
+          type: integer
+          description: |
+            Pending records for this group (informational; excluded from
+            `billable_hours`).
+          example: 0
+
+    # ====================================================================
+    # EXPORTS
+    # ====================================================================
+    ReportType:
+      type: string
+      description: |
+        Identifier for the report being exported. Each value selects a
+        different downstream query + filter schema (server-validated):
+
+        - `ATTENDANCE_BILLABLE` — F10.3 (this epic).
+        - `ATTENDANCE_RAW` — E5 raw attendance dump.
+        - `LEAVE_HISTORY` — E6 leave history.
+        - `OVERTIME_RECORDS` — E7 OT records.
+        - `PAYSLIPS` — E8 payslip archive (always confidential — EX-5).
+        - `AUDIT_LOG` — E1 audit log slice.
+      enum:
+        - ATTENDANCE_BILLABLE
+        - ATTENDANCE_RAW
+        - LEAVE_HISTORY
+        - OVERTIME_RECORDS
+        - PAYSLIPS
+        - AUDIT_LOG
+      example: ATTENDANCE_BILLABLE
+
+    ExportFormat:
+      type: string
+      description: |
+        Output format. **Excel only in v1** per EPICS §8 E10 (D5). PDF
+        and CSV reserved for v1.1 — requesting either now returns 422
+        `EXPORT_FORMAT_UNSUPPORTED`.
+      enum:
+        - EXCEL
+        - PDF
+        - CSV
+      example: EXCEL
+
+    ExportStatus:
+      type: string
+      description: |
+        Export job lifecycle. Wave-1.3 modal step mapping:
+          - Step-1 (format choice) → request not yet sent.
+          - Step-2 (progress + abort) → `QUEUED` / `PROCESSING`.
+          - Step-3 (success + download) → `COMPLETED`.
+          - Error variant → `FAILED`.
+          - Abort → `CANCELLED`.
+      enum:
+        - QUEUED
+        - PROCESSING
+        - COMPLETED
+        - FAILED
+        - CANCELLED
+      example: COMPLETED
+
+    ExportRequest:
+      type: object
+      description: |
+        Request body for `POST /exports`. The `filters` shape is specific
+        to the chosen `report_type` and is validated server-side against
+        the owning report's filter schema (documented per report).
+      required: [report_type, format, filters]
+      properties:
+        report_type:
+          $ref: '#/components/schemas/ReportType'
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+        confidential:
+          type: boolean
+          description: |
+            Marks the file as confidential (EX-5; restricts download TTL
+            + tags the audit entry). For `report_type=PAYSLIPS` the
+            server forces this to `true` regardless of the request body.
+          default: false
+        filters:
+          type: object
+          description: |
+            Free-form filter map. Server validates per `report_type`.
+            Common keys: `company_id`, `service_line_id`, `period_start`,
+            `period_end`, `group_by`. See per-report endpoints for the
+            exact filter contract.
+          additionalProperties: true
+          example:
+            company_id: SWP-CMP-0021
+            period_start: "2026-06-01"
+            period_end: "2026-06-30"
+            group_by: employee
+
+    ExportJob:
+      type: object
+      description: |
+        An export job. One per `POST /exports` call (idempotent on
+        `Idempotency-Key`). Persisted; queryable forever via
+        `GET /exports/{id}`, but the underlying file expires per `expires_at`.
+      required:
+        - id
+        - report_type
+        - status
+        - format
+        - confidential
+        - filters
+        - audit_log_entry_id
+        - requester_id
+        - requested_at
+      properties:
+        id:
+          type: string
+          example: SWP-EXP-1042
+        report_type:
+          $ref: '#/components/schemas/ReportType'
+        status:
+          $ref: '#/components/schemas/ExportStatus'
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+        confidential:
+          type: boolean
+          description: |
+            Whether the file is marked confidential (EX-5). Forced true
+            for `PAYSLIPS`.
+          example: false
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: |
+            Populated while `PROCESSING` (Wave-1.3 Step-2 progress bar).
+            `null` before the worker reports progress or once `COMPLETED`
+            / `FAILED` / `CANCELLED`.
+          example: 40
+        filename:
+          type: string
+          nullable: true
+          description: Server-chosen filename (present once `COMPLETED`).
+          example: "billable-plaza-senayan-2026-06.xlsx"
+        size_bytes:
+          type: integer
+          nullable: true
+          description: File size in bytes (present once `COMPLETED`).
+          example: 184320
+        file_url:
+          type: string
+          format: uri
+          nullable: true
+          description: |
+            Stable in-API URL for the download endpoint
+            (`/exports/{id}/download`) once `COMPLETED`. The actual
+            storage URL is fetched via a 302 redirect from there
+            (short-TTL signed URL).
+          example: "https://api.swp.example.com/api/v1/exports/SWP-EXP-1042/download"
+        error:
+          nullable: true
+          description: Populated only when `status=FAILED`.
+          type: object
+          properties:
+            code:
+              type: string
+              example: INTERNAL
+            message:
+              type: string
+              example: "Gagal menghasilkan file. Coba lagi."
+        filters:
+          type: object
+          description: Echo of the filter set used (for audit + display).
+          additionalProperties: true
+          example:
+            company_id: SWP-CMP-0021
+            period_start: "2026-06-01"
+            period_end: "2026-06-30"
+        audit_log_entry_id:
+          type: string
+          description: |
+            E1 audit-log entry created at request time (INV-5, EX-4).
+            Use this for traceability — HR can follow back to the audit
+            log to see who exported what.
+          example: SWP-AL-1204520
+        requester_id:
+          type: string
+          description: User who requested the export.
+          example: SWP-USR-1042
+        requested_at:
+          type: string
+          format: date-time
+          example: "2026-06-03T07:14:52Z"
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When `status` reached `COMPLETED`/`FAILED`/`CANCELLED`.
+          example: "2026-06-03T07:15:48Z"
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            When the underlying file expires (EX-5 retention; C-4).
+            Default 7 days post-completion; shorter for `PAYSLIPS`.
+            After this, `GET /exports/{id}/download` returns 410
+            `EXPORT_EXPIRED` — the job record itself is preserved.
+          example: "2026-06-10T07:15:48Z"
+
+# ---------------------------------------------------------------------------
+# GLOBAL SECURITY
+# ---------------------------------------------------------------------------
+security:
+  - bearerAuth: []

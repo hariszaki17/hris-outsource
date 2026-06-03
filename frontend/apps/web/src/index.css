@@ -1,0 +1,23 @@
+/* Single CSS entry. Imports Tailwind, then the SWP token theme partial, then tells
+   Tailwind v4 which workspace sources to scan for class names. ENGINEERING.md E3/G4. */
+@import "tailwindcss";
+@import "../../../packages/design-tokens/src/theme.css";
+
+@source '../../../packages/ui/src';
+
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background-color: var(--color-app);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}

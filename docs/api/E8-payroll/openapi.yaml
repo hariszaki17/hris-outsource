@@ -1,0 +1,1451 @@
+openapi: 3.1.0
+info:
+  title: SWP HRIS — E8 Payroll (historical, read-only)
+  version: 1.0.0
+  description: |
+    **E8 Payroll** — historical payroll archive for SWP's outsourced agents.
+    Per [EPICS.md §8](../../EPICS.md) and FEATURE/PRD specs, this epic is **data-only in v1**:
+
+    - **No active payroll runs.** Forward payroll input is handled by E5/E7 exports
+      consumed by an external payroll system (out of scope here).
+    - **Read-only.** Payslips, salary components, and benefits are migrated from
+      `lumen_swp` (MySQL) by E9 and never created/edited in-app. Any write attempt
+      to a payslip returns `405 Method Not Allowed` with `error.code: "PAYSLIP_IMMUTABLE"`.
+    - **HR may append immutable audit notes** (decision §8: "immutable; HR
+      annotates via audited note, not edits"). Notes are metadata attached to the
+      payslip; they do **not** mutate any monetary or breakdown field on the
+      payslip itself. Append-only — no PATCH/DELETE on audit notes.
+    - **Decrypt failures surface inline.** Per DATA-MAPPING.md G-1, items whose
+      legacy `DBEncryption`-cast columns cannot be decrypted at read time are
+      returned **as the payslip record** with `decrypt_fail: true` and each
+      monetary field nulled and annotated with `locked_reason: "decrypt_fail"`.
+      `DECRYPT_FAIL` is **not** an error status; the call returns `200 OK`.
+    - **PDF download deferred to v1.1** (decision D5 2026-06-02). **Only Excel**
+      export is offered via `POST /payslips:export`, which delegates to the
+      E10 export framework. No `/payslips/{id}:download-pdf` endpoint exists in
+      v1; clients must hide / not render PDF affordances.
+    - **Confidentiality lock.** Exports always carry `confidential: true`
+      regardless of client input (Wave 2.8 / Wave 1.3 OptConfidential lock).
+      Audit log entry is written per PA-7.
+
+    **RBAC summary:**
+    - **Agent** — self scope only (own payslips, no component breakdown per INV-3, PH-5).
+    - **Shift leader** — **not allowed** on payroll endpoints (PA-2; INV-4).
+    - **HR admin / Super admin** — global scope; can read any payslip, see full
+      breakdown + benefits, append audit notes, export.
+
+    Inherits all conventions from [CONVENTIONS.md](../CONVENTIONS.md): bearer
+    auth, cursor pagination, snake_case JSON, error envelope, IDR-only money,
+    ISO 8601 timestamps, `SWP-<ENTITY>-<NUMERIC>` IDs.
+
+  contact:
+    name: SWP Product & Architecture
+    email: product@swp.example.com
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: payslips
+    description: |
+      Historical payslip summaries (F8.1) and full HR archive (F8.2).
+      Read-only per INV-1 / PH-4 / PA-4.
+  - name: payslip-audit-notes
+    description: |
+      Append-only HR annotations on a payslip (PA-7, §8 immutable-with-audited-note
+      decision). The note is metadata — appending a note does not modify the
+      payslip's monetary or breakdown fields.
+  - name: payslip-export
+    description: |
+      Asynchronous Excel export via the E10 export framework (per D5 2026-06-02:
+      Excel-only; PDF deferred to v1.1). Always confidential.
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Payslips
+  # ─────────────────────────────────────────────────────────────────────
+
+  /payslips:
+    get:
+      tags: [payslips]
+      summary: List payslips
+      operationId: listPayslips
+      description: |
+        List payslips visible to the caller.
+
+        **Scope (RBAC, PH-2):**
+        - Agent → own payslips only. Server forces `employee_id = self`;
+          `employee_id` query param is ignored if it doesn't match `self` (no error,
+          for consistency with self-only resources in other epics).
+        - HR admin / Super admin → all payslips. May filter by `employee_id`.
+
+        **Empty list (C-1 PH-1 / C-1 PA-1):** an agent or HR query that resolves to
+        zero rows returns `200 OK` with `data: []`. This is **not** an error.
+        Clients render `comp/EmptyFresh` ("Belum ada slip gaji yang tercatat").
+        For HR analytics where empty=anomaly, the code `MISSING_PAYROLL_HISTORY`
+        is reserved on the response (`meta.code`) for client-side state mapping.
+
+        **Decrypt-fail rows** are included with `status: "DECRYPT_FAIL"`,
+        `decrypt_fail: true`, and monetary fields nulled. They are NOT filtered
+        out — surfacing them is the point (E8-AUDIT P0 #3, "Perlu review" row).
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: employee_id
+          in: query
+          description: HR-only filter. Ignored for agents (forced to self).
+          required: false
+          schema:
+            type: string
+            example: SWP-EMP-1042
+        - name: period
+          in: query
+          description: |
+            Filter by pay period in `YYYY-MM` form. Matches `year` + `month`
+            on the payslip.
+          required: false
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+            example: "2025-12"
+        - name: year
+          in: query
+          description: Filter by pay year (alternative to `period`).
+          required: false
+          schema:
+            type: integer
+            minimum: 2000
+            maximum: 2100
+            example: 2025
+        - name: status
+          in: query
+          description: |
+            Filter by payslip status. `FINAL` = normally decryptable record;
+            `DECRYPT_FAIL` = surfaced for migration review.
+          required: false
+          schema:
+            $ref: '#/components/schemas/PayslipStatus'
+        - name: sort
+          in: query
+          description: |
+            Comma-separated sort keys. Default: `paid_on:desc`.
+            Allowed: `paid_on`, `year`, `month`, `employee_id`.
+          required: false
+          schema:
+            type: string
+            example: "paid_on:desc"
+      responses:
+        '200':
+          description: Page of payslip summaries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayslipListResponse'
+              examples:
+                hr_archive_page:
+                  summary: HR archive — mixed FINAL and DECRYPT_FAIL rows
+                  value:
+                    data:
+                      - id: SWP-PS-90121
+                        employee_id: SWP-EMP-1042
+                        employee_name: Budi Santoso
+                        year: 2025
+                        month: 12
+                        period: "2025-12"
+                        paid_on: "2025-12-28"
+                        working_days: 22
+                        gross_earnings: "8500000.00"
+                        gross_deductions: "1175000.00"
+                        take_home_pay: "7325000.00"
+                        status: FINAL
+                        decrypt_fail: false
+                        read_only: true
+                        source:
+                          system: lumen_swp
+                          source_id: "44218"
+                      - id: SWP-PS-90119
+                        employee_id: SWP-EMP-1118
+                        employee_name: Rudi Hartono
+                        year: 2025
+                        month: 12
+                        period: "2025-12"
+                        paid_on: "2025-12-28"
+                        working_days: null
+                        gross_earnings: null
+                        gross_deductions: null
+                        take_home_pay: null
+                        status: DECRYPT_FAIL
+                        decrypt_fail: true
+                        read_only: true
+                        locked_reason: decrypt_fail
+                        source:
+                          system: lumen_swp
+                          source_id: "44216"
+                    next_cursor: "eyJpZCI6IlNXUC1QUy05MDExMCJ9"
+                    has_more: true
+                agent_self_list:
+                  summary: Agent — own payslips
+                  value:
+                    data:
+                      - id: SWP-PS-90121
+                        employee_id: SWP-EMP-1042
+                        employee_name: Budi Santoso
+                        year: 2025
+                        month: 12
+                        period: "2025-12"
+                        paid_on: "2025-12-28"
+                        working_days: 22
+                        gross_earnings: "8500000.00"
+                        gross_deductions: "1175000.00"
+                        take_home_pay: "7325000.00"
+                        status: FINAL
+                        decrypt_fail: false
+                        read_only: true
+                        source:
+                          system: lumen_swp
+                          source_id: "44218"
+                    next_cursor: null
+                    has_more: false
+                empty:
+                  summary: New hire — no payroll history
+                  value:
+                    data: []
+                    next_cursor: null
+                    has_more: false
+                    meta:
+                      code: MISSING_PAYROLL_HISTORY
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self_or_global
+      x-design-screens:
+        - jBgLn   # HR · Arsip Payroll (web list)
+        - v8uQX2  # Agent · Slip Gaji (mobile list)
+
+    post:
+      tags: [payslips]
+      summary: (Not allowed — payslips are read-only)
+      operationId: createPayslip_NotAllowed
+      description: |
+        Payslips are migrated from `lumen_swp` by E9 and are immutable in v1
+        (INV-1 / PH-4 / PA-4). Any POST returns `405 Method Not Allowed` with
+        `error.code: "PAYSLIP_IMMUTABLE"`. Documented here so clients receive a
+        stable contract for the rejection.
+      responses:
+        '405':
+          $ref: '#/components/responses/PayslipImmutable'
+      x-rbac:
+        roles: []
+        scope: global
+      x-design-screens: []
+
+  /payslips/{id}:
+    parameters:
+      - $ref: '#/components/parameters/PayslipId'
+
+    get:
+      tags: [payslips]
+      summary: Get payslip detail
+      operationId: getPayslip
+      description: |
+        Returns one payslip with the **full breakdown**:
+
+        - `earnings[]` — `SalaryComponent` rows where the legacy
+          `is_amount_for_bpjs` family resolves to an earning (gaji pokok,
+          tunjangan, etc.). HR-only fields (component-level) are omitted from
+          the agent response per INV-3 / PH-5.
+        - `deductions[]` — deduction rows (BPJS-K, BPJS-TK, PPh 21, etc.).
+        - `benefits[]` — employer-borne `Benefit` records linked to the
+          employee at this period (HR/Super Admin only — agents do not see
+          this array; field is omitted from the agent response per INV-3 /
+          PH-5).
+        - `take_home_pay`, `gross_earnings`, `gross_deductions` — summary
+          totals.
+
+        **Agent scope (PH-2):** an agent calling this endpoint with a payslip
+        that does not belong to them returns `403 Forbidden` with
+        `error.code: "OUT_OF_SCOPE"`. Note: per CONVENTIONS §7, we
+        deliberately use 403 here (not 404) because the route is
+        well-formed and the agent's own payslips are at the same URL shape;
+        the scope check is the relevant signal.
+
+        **Decrypt failure (PH-1 C-2 / PA-1 C-1, E9 G-1):** if the underlying
+        legacy `DBEncryption`-cast columns cannot be decrypted, the response
+        is still `200 OK`. `decrypt_fail: true` is set, `status` is
+        `DECRYPT_FAIL`, every monetary field is `null`, and each affected
+        line carries `locked_reason: "decrypt_fail"`. Non-monetary metadata
+        (period, employee, source, working_days when not in an encrypted
+        column) is preserved when available. Clients render the
+        "under-migration-review" state (E8-AUDIT P0 #3).
+
+        **Read-only flag:** `read_only` is always `true` in v1 per INV-1 /
+        PH-4 / PA-4. It is returned for forward-compatibility with a future
+        active-payroll epic.
+
+        **Migration traceability:** `source.system` is always `"lumen_swp"` for
+        migrated records; `source.source_id` is the legacy `employee_payslips.id`.
+      responses:
+        '200':
+          description: The payslip.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payslip'
+              examples:
+                hr_final:
+                  summary: HR · FINAL payslip with full breakdown (JaScP)
+                  value:
+                    id: SWP-PS-90121
+                    employee_id: SWP-EMP-1042
+                    employee_name: Budi Santoso
+                    year: 2025
+                    month: 12
+                    period: "2025-12"
+                    paid_on: "2025-12-28"
+                    working_days: 22
+                    gross_earnings: "8500000.00"
+                    gross_deductions: "1175000.00"
+                    take_home_pay: "7325000.00"
+                    status: FINAL
+                    decrypt_fail: false
+                    read_only: true
+                    earnings:
+                      - name: "Gaji Pokok"
+                        value: "6500000.00"
+                        for_bpjs: true
+                      - name: "Tunjangan Transport"
+                        value: "1200000.00"
+                        for_bpjs: false
+                      - name: "Tunjangan Makan"
+                        value: "800000.00"
+                        for_bpjs: false
+                    deductions:
+                      - name: "BPJS Kesehatan (1%)"
+                        value: "65000.00"
+                        for_bpjs: true
+                      - name: "BPJS Ketenagakerjaan (JHT 2%)"
+                        value: "130000.00"
+                        for_bpjs: true
+                      - name: "BPJS Ketenagakerjaan (JP 1%)"
+                        value: "65000.00"
+                        for_bpjs: true
+                      - name: "PPh 21"
+                        value: "915000.00"
+                        for_bpjs: false
+                    benefits:
+                      - name: "BPJS Kesehatan (employer 4%)"
+                        value: "260000.00"
+                      - name: "BPJS JKK"
+                        value: "16900.00"
+                      - name: "BPJS JKM"
+                        value: "19500.00"
+                    source:
+                      system: lumen_swp
+                      source_id: "44218"
+                    created_at: "2025-12-28T11:02:14Z"
+                agent_self:
+                  summary: Agent · own payslip (no breakdown per INV-3)
+                  value:
+                    id: SWP-PS-90121
+                    employee_id: SWP-EMP-1042
+                    employee_name: Budi Santoso
+                    year: 2025
+                    month: 12
+                    period: "2025-12"
+                    paid_on: "2025-12-28"
+                    working_days: 22
+                    gross_earnings: "8500000.00"
+                    gross_deductions: "1175000.00"
+                    take_home_pay: "7325000.00"
+                    status: FINAL
+                    decrypt_fail: false
+                    read_only: true
+                    source:
+                      system: lumen_swp
+                      source_id: "44218"
+                    created_at: "2025-12-28T11:02:14Z"
+                decrypt_fail:
+                  summary: Decrypt-fail row · all money nulled, locked
+                  value:
+                    id: SWP-PS-90119
+                    employee_id: SWP-EMP-1118
+                    employee_name: Rudi Hartono
+                    year: 2025
+                    month: 12
+                    period: "2025-12"
+                    paid_on: "2025-12-28"
+                    working_days: null
+                    gross_earnings: null
+                    gross_deductions: null
+                    take_home_pay: null
+                    status: DECRYPT_FAIL
+                    decrypt_fail: true
+                    read_only: true
+                    locked_reason: decrypt_fail
+                    earnings: []
+                    deductions: []
+                    benefits: []
+                    source:
+                      system: lumen_swp
+                      source_id: "44216"
+                    created_at: "2025-12-28T11:02:14Z"
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          description: |
+            Agent attempted to read another agent's payslip, or a non-HR/non-agent
+            role (shift leader) attempted to read payroll. PA-2 / INV-4 / PH-2.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                out_of_scope:
+                  value:
+                    error:
+                      code: OUT_OF_SCOPE
+                      message: "Slip gaji ini bukan milik Anda."
+                      request_id: req_01J6XK7Z
+                forbidden_role:
+                  value:
+                    error:
+                      code: FORBIDDEN
+                      message: "Peran Anda tidak memiliki akses arsip payroll."
+                      request_id: req_01J6XK80
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self_or_global
+      x-design-screens:
+        - JaScP   # HR · Detail Slip Gaji
+        - ocsq4   # Agent · Detail Slip (mobile)
+
+    patch:
+      tags: [payslips]
+      summary: (Not allowed — payslips are read-only)
+      operationId: updatePayslip_NotAllowed
+      description: |
+        Historical payroll is immutable (INV-1 / PH-4 / PA-4; §8 decision).
+        Returns `405 Method Not Allowed` with `error.code: "PAYSLIP_IMMUTABLE"`.
+        HR corrections/annotations go through `POST /payslips/{id}/audit-notes`.
+      responses:
+        '405':
+          $ref: '#/components/responses/PayslipImmutable'
+      x-rbac:
+        roles: []
+        scope: global
+      x-design-screens: []
+
+    delete:
+      tags: [payslips]
+      summary: (Not allowed — payslips are read-only)
+      operationId: deletePayslip_NotAllowed
+      description: |
+        Historical payroll is immutable and retained indefinitely pending
+        compliance input (§8). Returns `405 Method Not Allowed`.
+      responses:
+        '405':
+          $ref: '#/components/responses/PayslipImmutable'
+      x-rbac:
+        roles: []
+        scope: global
+      x-design-screens: []
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Payslip audit notes (HR append-only annotations) — PA-7, §8
+  # ─────────────────────────────────────────────────────────────────────
+
+  /payslips/{id}/audit-notes:
+    parameters:
+      - $ref: '#/components/parameters/PayslipId'
+
+    get:
+      tags: [payslip-audit-notes]
+      summary: List audit notes on a payslip
+      operationId: listPayslipAuditNotes
+      description: |
+        Returns the chronological list of HR-appended audit notes for a
+        payslip. Notes are metadata; appending a note does **not** alter the
+        payslip's monetary or breakdown fields (PA-7, §8). Visible to HR /
+        Super Admin only; agents and shift leaders receive `403 Forbidden`.
+
+        Notes may exist on `DECRYPT_FAIL` payslips and are not nulled — this
+        is the canonical channel for migration-review commentary.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Page of audit notes (oldest first by default).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayslipAuditNoteListResponse'
+              examples:
+                with_notes:
+                  value:
+                    data:
+                      - id: SWP-PS-90119-NOTE-1
+                        payslip_id: SWP-PS-90119
+                        text: "Decrypt failed pada migrasi 2026-05-30; ditahan untuk review tim migrasi (lihat tiket MIG-318)."
+                        author_id: SWP-EMP-9001
+                        author_name: Sari Hadi
+                        created_at: "2026-05-30T08:14:22Z"
+                      - id: SWP-PS-90119-NOTE-2
+                        payslip_id: SWP-PS-90119
+                        text: "Konfirmasi key payroll lama dengan finance team — kunci tidak cocok untuk record ini."
+                        author_id: SWP-EMP-9001
+                        author_name: Sari Hadi
+                        created_at: "2026-05-31T03:42:09Z"
+                    next_cursor: null
+                    has_more: false
+                empty:
+                  value:
+                    data: []
+                    next_cursor: null
+                    has_more: false
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - JaScP   # HR · Detail Slip Gaji (notes shown inline on detail)
+
+    post:
+      tags: [payslip-audit-notes]
+      summary: Append an audit note
+      operationId: createPayslipAuditNote
+      description: |
+        Append an immutable audit note to a payslip. HR-only (PA-7, §8).
+
+        The note is metadata — it does NOT mutate the payslip. The note is
+        retained for the same retention period as the payslip itself
+        (indefinite pending compliance input per §8). Notes cannot be edited
+        or deleted (append-only); a correcting note may be appended.
+
+        Allowed on `DECRYPT_FAIL` payslips (in fact, this is the primary
+        channel for documenting migration-review findings).
+
+        **Idempotency:** clients MUST send `Idempotency-Key` per CONVENTIONS
+        §13. Re-submitting with the same key returns the same created note;
+        a different body under the same key returns `409` with
+        `error.code: "IDEMPOTENCY_KEY_REUSED"`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayslipAuditNoteCreate'
+            examples:
+              note:
+                value:
+                  text: "Decrypt failed pada migrasi 2026-05-30; ditahan untuk review tim migrasi (lihat tiket MIG-318)."
+      responses:
+        '201':
+          description: Note appended.
+          headers:
+            Location:
+              description: URL of the created note (read via `GET /payslips/{id}/audit-notes`).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayslipAuditNote'
+              examples:
+                created:
+                  value:
+                    id: SWP-PS-90119-NOTE-1
+                    payslip_id: SWP-PS-90119
+                    text: "Decrypt failed pada migrasi 2026-05-30; ditahan untuk review tim migrasi (lihat tiket MIG-318)."
+                    author_id: SWP-EMP-9001
+                    author_name: Sari Hadi
+                    created_at: "2026-05-30T08:14:22Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Idempotency key reused with a different body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                reused:
+                  value:
+                    error:
+                      code: IDEMPOTENCY_KEY_REUSED
+                      message: "Idempotency-Key sudah digunakan dengan payload berbeda."
+                      request_id: req_01J6XK7C
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - JaScP   # HR · Detail Slip Gaji (E8-AUDIT P1 #4 — annotation overlay)
+
+    patch:
+      tags: [payslip-audit-notes]
+      summary: (Not allowed — notes are append-only)
+      operationId: updatePayslipAuditNote_NotAllowed
+      description: |
+        Audit notes are append-only per §8 immutability lock. Edits are
+        rejected; append a correcting note instead. Returns `405`.
+      responses:
+        '405':
+          $ref: '#/components/responses/PayslipImmutable'
+      x-rbac:
+        roles: []
+        scope: global
+      x-design-screens: []
+
+    delete:
+      tags: [payslip-audit-notes]
+      summary: (Not allowed — notes are append-only)
+      operationId: deletePayslipAuditNote_NotAllowed
+      description: |
+        Audit notes cannot be deleted (§8 append-only). Returns `405`.
+      responses:
+        '405':
+          $ref: '#/components/responses/PayslipImmutable'
+      x-rbac:
+        roles: []
+        scope: global
+      x-design-screens: []
+
+  # ─────────────────────────────────────────────────────────────────────
+  # Payslip export — Excel only (D5 2026-06-02), delegated to E10
+  # ─────────────────────────────────────────────────────────────────────
+
+  /payslips:export:
+    post:
+      tags: [payslip-export]
+      summary: Queue an Excel export of payslips
+      operationId: exportPayslips
+      description: |
+        Queue an asynchronous **Excel-only** export of the HR payroll archive.
+        Per decision D5 (2026-06-02), PDF export is deferred to v1.1; this
+        endpoint is the sole v1 payroll export channel.
+
+        **Confidentiality lock (Wave 2.8 / Wave 1.3 OptConfidential):** the
+        server enforces `confidential: true` on every payroll export response
+        regardless of the client's input — the field is accepted for forward
+        compatibility but is read-only. Audit log entry is written per PA-7
+        with a confidentiality marking.
+
+        **Job model:** returns `202 Accepted` with an `SWP-EXP-...` job ID.
+        The export itself is produced by the **E10 export framework**
+        (Dependencies: PA-5/PA-7). Clients poll job status via E10's
+        `GET /exports/{id}` (owned by E10's spec, not duplicated here).
+
+        **Size guardrail (Wave-1 SizeWarn banner):** if the requested range
+        would emit more rows than the server's threshold (configurable; default
+        50,000 payslip rows) the request is rejected with `422` and
+        `error.code: "EXPORT_TOO_LARGE"`. Clients narrow the period or split
+        the request.
+
+        **RBAC:** HR / Super Admin only. Agents and shift leaders → `403`.
+
+        **Idempotency:** required. A repeated submission with the same
+        `Idempotency-Key` returns the same job ID + status.
+
+        **Decrypt-fail rows in the output:** rows with `status: DECRYPT_FAIL`
+        appear in the export with monetary columns blanked and a
+        `locked_reason` column populated, preserving the same surface as the
+        API response (DATA-MAPPING.md G-1).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayslipExportRequest'
+            examples:
+              by_period:
+                summary: All visible payslips for one period
+                value:
+                  period: "2025-12"
+                  format: XLSX
+                  confidential: true
+              by_employees:
+                summary: Selected employees for a year
+                value:
+                  year: 2025
+                  employee_ids:
+                    - SWP-EMP-1042
+                    - SWP-EMP-1118
+                  format: XLSX
+                  confidential: true
+      responses:
+        '202':
+          description: |
+            Export queued. The body is an export-job stub; poll status via
+            E10 (`GET /exports/{id}`).
+          headers:
+            Location:
+              description: |
+                E10 export job resource URL — `/api/v1/exports/{id}`.
+              schema:
+                type: string
+                example: /api/v1/exports/SWP-EXP-8821
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayslipExportJob'
+              examples:
+                queued:
+                  value:
+                    id: SWP-EXP-8821
+                    status: QUEUED
+                    format: XLSX
+                    confidential: true
+                    requested_at: "2026-06-03T10:14:02Z"
+                    requested_by:
+                      id: SWP-EMP-9001
+                      name: Sari Hadi
+                    scope:
+                      period: "2025-12"
+                      employee_ids: []
+                    poll_url: /api/v1/exports/SWP-EXP-8821
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Idempotency key reused with a different body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            Business-rule rejection. Includes `EXPORT_TOO_LARGE` for size cap
+            (surfaces Wave-1 SizeWarn banner) and `RULE_VIOLATION` for other
+            validation failures (e.g., no period AND no year specified).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                too_large:
+                  value:
+                    error:
+                      code: EXPORT_TOO_LARGE
+                      message: "Cakupan ekspor terlalu besar. Persempit periode atau employee_ids."
+                      fields:
+                        period: "Cakupan menghasilkan 124.000 baris (maks 50.000)."
+                      request_id: req_01J6XK90
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - jBgLn   # HR · Arsip Payroll (RFJJj "Ekspor (RAHASIA)" button origin)
+
+# ─────────────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+      description: |
+        See CONVENTIONS §3. Server token format (opaque session vs JWT) is
+        deferred to E1; consumers MUST treat the token as opaque.
+
+  parameters:
+
+    PayslipId:
+      name: id
+      in: path
+      required: true
+      description: Payslip ID — `SWP-PS-<numeric>` per CONVENTIONS §4.
+      schema:
+        type: string
+        pattern: '^SWP-PS-\d+$'
+        example: SWP-PS-90121
+
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `next_cursor`. CONVENTIONS §8.
+      required: false
+      schema:
+        type: string
+
+    Limit:
+      name: limit
+      in: query
+      description: Page size. Default 50, max 200. CONVENTIONS §8.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        UUID v4 chosen by the client. Server caches the response for 24h
+        keyed by (caller, key). CONVENTIONS §13.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+
+    # ───────── Money & enums ─────────
+
+    Money:
+      type: string
+      nullable: true
+      description: |
+        IDR monetary amount as a decimal string with exactly 2 fractional
+        digits (e.g. `"7325000.00"`). String — not number — to avoid float
+        precision loss client-side. **Nullable** because decrypt-fail
+        payslips return `null` for monetary fields (paired with
+        `locked_reason: "decrypt_fail"` at the parent level).
+      pattern: '^-?\d+\.\d{2}$'
+      example: "7325000.00"
+
+    PayslipStatus:
+      type: string
+      enum:
+        - FINAL
+        - DECRYPT_FAIL
+      description: |
+        - `FINAL` — record decrypted successfully; monetary fields populated.
+        - `DECRYPT_FAIL` — legacy `DBEncryption` decryption failed for one or
+          more monetary columns. Surfaced read-only; monetary fields nulled.
+
+    SourceRef:
+      type: object
+      description: |
+        Migration traceability per DATA-MAPPING.md. Present on every payslip
+        migrated from `lumen_swp`.
+      required: [system, source_id]
+      properties:
+        system:
+          type: string
+          enum: [lumen_swp]
+          description: Source system identifier (E9).
+          example: lumen_swp
+        source_id:
+          type: string
+          description: Legacy primary key (`employee_payslips.id`). String — not parsed.
+          example: "44218"
+
+    LockedReason:
+      type: string
+      enum:
+        - decrypt_fail
+      description: |
+        Reason a value or field group is locked / nulled. v1 has one value;
+        more may be added (e.g. `pending_review`, `policy_restricted`) in
+        future epics.
+
+    # ───────── Line items ─────────
+
+    EarningLine:
+      type: object
+      description: |
+        One line of the payslip's earnings breakdown (`employee_salaries`
+        rows whose component resolves to an earning per
+        `employee_salary_columns`). HR/Super Admin only — agents do not see
+        line items per INV-3 / PH-5.
+
+        On `DECRYPT_FAIL` payslips, the parent `earnings` array is an empty
+        array (`[]`) — individual lines are not surfaced because their
+        encrypted `value` could not be read.
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          description: Component display name (denormalized from `employee_salary_columns.name`).
+          example: "Gaji Pokok"
+        value:
+          $ref: '#/components/schemas/Money'
+        for_bpjs:
+          type: boolean
+          description: Mirrors legacy `is_amount_for_bpjs` — included in the BPJS calculation base.
+          example: true
+        locked_reason:
+          $ref: '#/components/schemas/LockedReason'
+
+    DeductionLine:
+      type: object
+      description: |
+        One line of the payslip's deductions breakdown. Same source shape as
+        `EarningLine` but resolved to a deduction component. HR-only.
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          example: "BPJS Kesehatan (1%)"
+        value:
+          $ref: '#/components/schemas/Money'
+        for_bpjs:
+          type: boolean
+          example: true
+        locked_reason:
+          $ref: '#/components/schemas/LockedReason'
+
+    BenefitLine:
+      type: object
+      description: |
+        Employer-borne benefit attached to the employee at this payslip's
+        period (`employee_benefits`). HR-only per INV-4. Decoupled from the
+        payslip — a benefit may exist independently of a specific payslip
+        (PA-1 C-2); when surfaced through the payslip endpoint, only the
+        benefits applicable to that period are included.
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          example: "BPJS Kesehatan (employer 4%)"
+        value:
+          $ref: '#/components/schemas/Money'
+        locked_reason:
+          $ref: '#/components/schemas/LockedReason'
+
+    # ───────── Payslip ─────────
+
+    Payslip:
+      type: object
+      description: |
+        A historical payslip. Migrated from `lumen_swp.employee_payslips`
+        per DATA-MAPPING.md. Read-only in v1.
+
+        **Field nulling under decrypt failure** (DATA-MAPPING G-1 / PH-1 C-2 /
+        PA-1 C-1):
+
+        | Field | FINAL | DECRYPT_FAIL |
+        |---|---|---|
+        | `working_days` | int | `null` (when stored on an encrypted column) |
+        | `gross_earnings` | `Money` | `null` |
+        | `gross_deductions` | `Money` | `null` |
+        | `take_home_pay` | `Money` | `null` |
+        | `earnings`, `deductions`, `benefits` (HR) | populated | `[]` |
+        | `status` | `FINAL` | `DECRYPT_FAIL` |
+        | `decrypt_fail` | `false` | `true` |
+        | `locked_reason` | absent | `"decrypt_fail"` |
+        | non-monetary metadata (period, employee, source, paid_on) | populated | populated |
+
+        **Agent view (INV-3 / PH-5):** the `earnings`, `deductions`, and
+        `benefits` arrays are **omitted entirely** from the response body
+        when the caller is an agent. Summary monetary totals
+        (`gross_earnings`, `gross_deductions`, `take_home_pay`) remain.
+      required:
+        - id
+        - employee_id
+        - year
+        - month
+        - period
+        - paid_on
+        - status
+        - decrypt_fail
+        - read_only
+        - source
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-PS-\d+$'
+          example: SWP-PS-90121
+        employee_id:
+          type: string
+          description: Resolves via E2 (`GET /api/v1/employees/{id}`).
+          example: SWP-EMP-1042
+        employee_name:
+          type: string
+          nullable: true
+          description: |
+            Display-only convenience field (denormalized from E2). Clients
+            should still resolve via E2 if they need authoritative current
+            data. Nullable when the employee was hard-deleted post-migration
+            (rare; soft-delete is the norm).
+          example: Budi Santoso
+        year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+          example: 2025
+        month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          example: 12
+        period:
+          type: string
+          description: Convenience field — `YYYY-MM`. Matches `year` + `month`.
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+          example: "2025-12"
+        paid_on:
+          type: string
+          format: date
+          nullable: true
+          description: Pay date (legacy `tanggal_dibayarkan`).
+          example: "2025-12-28"
+        working_days:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 31
+          description: |
+            Working days in the period (legacy `total_hari_kerja`, cast
+            string→int per DATA-MAPPING). `null` when on an encrypted column
+            and decrypt failed.
+          example: 22
+        gross_earnings:
+          $ref: '#/components/schemas/Money'
+        gross_deductions:
+          $ref: '#/components/schemas/Money'
+        take_home_pay:
+          $ref: '#/components/schemas/Money'
+        status:
+          $ref: '#/components/schemas/PayslipStatus'
+        decrypt_fail:
+          type: boolean
+          description: |
+            `true` iff at least one encrypted monetary column could not be
+            decrypted. Convenience flag — equivalent to
+            `status === "DECRYPT_FAIL"`. Surfaced for client UI gating
+            (Wave-1 "Perlu review" warn chip).
+          example: false
+        read_only:
+          type: boolean
+          description: |
+            Always `true` in v1 per INV-1 / PH-4 / PA-4. Returned for
+            forward-compatibility with a future active-payroll epic.
+          example: true
+        locked_reason:
+          $ref: '#/components/schemas/LockedReason'
+        earnings:
+          type: array
+          description: |
+            HR/Super Admin only (INV-3 / INV-4 / PH-5). Omitted from agent
+            responses. Empty array on `DECRYPT_FAIL`.
+          items:
+            $ref: '#/components/schemas/EarningLine'
+        deductions:
+          type: array
+          description: |
+            HR/Super Admin only (INV-3 / INV-4 / PH-5). Omitted from agent
+            responses. Empty array on `DECRYPT_FAIL`.
+          items:
+            $ref: '#/components/schemas/DeductionLine'
+        benefits:
+          type: array
+          description: |
+            HR/Super Admin only (INV-4). Omitted from agent responses.
+            Empty array on `DECRYPT_FAIL`. Per PA-1 C-2, a benefit may exist
+            independently of a payslip — this endpoint only returns benefits
+            applicable to the payslip's period.
+          items:
+            $ref: '#/components/schemas/BenefitLine'
+        source:
+          $ref: '#/components/schemas/SourceRef'
+        created_at:
+          type: string
+          format: date-time
+          description: |
+            Migration-write timestamp in Postgres (E9). Not the legacy
+            record's creation date.
+          example: "2025-12-28T11:02:14Z"
+
+    PayslipListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payslip'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page. `null` when `has_more` is `false`.
+        has_more:
+          type: boolean
+        meta:
+          type: object
+          description: |
+            Optional response metadata. `code: "MISSING_PAYROLL_HISTORY"` is
+            set on `data: []` responses so clients can route to the
+            "no history" empty state (E8-AUDIT P1 #5).
+          properties:
+            code:
+              type: string
+              enum: [MISSING_PAYROLL_HISTORY]
+
+    # ───────── Audit notes ─────────
+
+    PayslipAuditNote:
+      type: object
+      description: |
+        Immutable HR annotation attached to a payslip (PA-7, §8). Notes do
+        not modify the payslip itself; they are stored as separate records
+        and surfaced on detail / list calls.
+      required: [id, payslip_id, text, author_id, created_at]
+      properties:
+        id:
+          type: string
+          description: Composite ID — `{payslip_id}-NOTE-{seq}`.
+          example: SWP-PS-90119-NOTE-1
+        payslip_id:
+          type: string
+          pattern: '^SWP-PS-\d+$'
+          example: SWP-PS-90119
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: |
+            Free-text annotation. Indonesian by default. Plain text only;
+            markdown is not rendered.
+          example: "Decrypt failed pada migrasi; menunggu rotasi kunci payroll legacy."
+        author_id:
+          type: string
+          description: Employee ID of the HR / Super Admin who appended the note.
+          example: SWP-EMP-9001
+        author_name:
+          type: string
+          nullable: true
+          description: Denormalized display name (from E2).
+          example: Sari Hadi
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-05-30T08:14:22Z"
+
+    PayslipAuditNoteCreate:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: |
+            The annotation text. Must be non-empty after trim. Markdown is
+            not rendered.
+          example: "Decrypt failed pada migrasi 2026-05-30; ditahan untuk review tim migrasi."
+
+    PayslipAuditNoteListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayslipAuditNote'
+        next_cursor:
+          type: string
+          nullable: true
+        has_more:
+          type: boolean
+
+    # ───────── Export ─────────
+
+    PayslipExportRequest:
+      type: object
+      description: |
+        Body for `POST /payslips:export`. Either `period` or `year` MUST be
+        provided. `format` is currently always `XLSX` (per D5 2026-06-02 —
+        PDF deferred). `confidential` is accepted for forward compatibility
+        but the server enforces `true` regardless of the client's value
+        (Wave 2.8 / Wave 1.3 OptConfidential lock).
+      properties:
+        period:
+          type: string
+          description: |
+            Single-period scope `YYYY-MM`. Mutually compatible with `year`;
+            if both are provided, `period` wins. At least one of
+            `period` / `year` is required.
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+          example: "2025-12"
+        year:
+          type: integer
+          minimum: 2000
+          maximum: 2100
+          description: Full-year scope. Used when `period` is absent.
+          example: 2025
+        employee_ids:
+          type: array
+          description: |
+            Optional restriction by employee. When omitted or empty, the
+            export covers **all visible** payslips matching the period/year
+            for the caller's RBAC scope (HR = global).
+          items:
+            type: string
+            pattern: '^SWP-EMP-\d+$'
+          example:
+            - SWP-EMP-1042
+            - SWP-EMP-1118
+        format:
+          type: string
+          enum: [XLSX]
+          default: XLSX
+          description: |
+            Output format. **XLSX only** in v1 (D5 2026-06-02). PDF
+            deferred to v1.1.
+        confidential:
+          type: boolean
+          default: true
+          description: |
+            Read-only at the server. Always coerced to `true` for payroll
+            exports — clients may send `false` but the response will reflect
+            `true`. Wave 2.8 / Wave 1.3 OptConfidential lock.
+          example: true
+
+    PayslipExportJob:
+      type: object
+      description: |
+        Stub returned synchronously when an export is queued. The full
+        export job resource (status transitions, download URL) is owned by
+        **E10** — poll via `GET /api/v1/exports/{id}`.
+      required: [id, status, format, confidential, requested_at, requested_by, scope, poll_url]
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-EXP-\d+$'
+          example: SWP-EXP-8821
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, DONE, FAILED]
+          example: QUEUED
+        format:
+          type: string
+          enum: [XLSX]
+          example: XLSX
+        confidential:
+          type: boolean
+          description: Always `true` for payroll exports (server-enforced).
+          example: true
+        requested_at:
+          type: string
+          format: date-time
+          example: "2026-06-03T10:14:02Z"
+        requested_by:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              example: SWP-EMP-9001
+            name:
+              type: string
+              nullable: true
+              example: Sari Hadi
+        scope:
+          type: object
+          properties:
+            period:
+              type: string
+              nullable: true
+              example: "2025-12"
+            year:
+              type: integer
+              nullable: true
+              example: 2025
+            employee_ids:
+              type: array
+              items:
+                type: string
+              example: []
+        poll_url:
+          type: string
+          description: Convenience — E10 export job URL.
+          example: /api/v1/exports/SWP-EXP-8821
+
+    # ───────── Errors ─────────
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                UPPER_SNAKE_CASE machine-readable code. E8-specific codes:
+
+                - `PAYSLIP_IMMUTABLE` (405) — any write to a payslip.
+                - `OUT_OF_SCOPE` (403) — agent accessing another agent's payslip.
+                - `EXPORT_TOO_LARGE` (422) — export scope exceeds threshold.
+                - `IDEMPOTENCY_KEY_REUSED` (409) — see CONVENTIONS §13.
+
+                Cross-cutting codes per CONVENTIONS §11 also apply
+                (`UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `INVALID_REQUEST`,
+                `RULE_VIOLATION`, `RATE_LIMITED`, `INTERNAL`).
+
+                Note: `DECRYPT_FAIL` is **NOT** an error code — decrypt
+                failure surfaces as a successful `200 OK` payslip response
+                with `decrypt_fail: true`. Likewise `MISSING_PAYROLL_HISTORY`
+                surfaces as `200 OK` with `data: []` and `meta.code`.
+              example: PAYSLIP_IMMUTABLE
+            message:
+              type: string
+              description: "Human-readable Indonesian message (or English when `Accept-Language: en-US`)."
+              example: "Data payroll bersifat read-only; perubahan tidak diizinkan."
+            fields:
+              type: object
+              description: Field-level errors (400 / 422 only).
+              additionalProperties:
+                type: string
+            request_id:
+              type: string
+              description: For support/debugging.
+              example: req_01J6XK7Z
+
+  responses:
+
+    BadRequest:
+      description: Validation failed (malformed JSON, missing required, bad cursor).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalid:
+              value:
+                error:
+                  code: INVALID_REQUEST
+                  message: "Permintaan tidak valid."
+                  fields:
+                    period: "Format harus YYYY-MM."
+                  request_id: req_01J6XK7A
+
+    Unauthenticated:
+      description: Missing or expired token. Client must re-auth (CONVENTIONS §3).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            unauth:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: "Sesi Anda telah berakhir. Silakan masuk kembali."
+                  request_id: req_01J6XK7B
+
+    Forbidden:
+      description: |
+        Authenticated but role lacks permission. Triggered for shift_leader
+        on any payroll endpoint, for agent on archive/notes/export, and for
+        agent on another agent's payslip (`OUT_OF_SCOPE`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: "Peran Anda tidak memiliki akses fitur ini."
+                  request_id: req_01J6XK7E
+            out_of_scope:
+              value:
+                error:
+                  code: OUT_OF_SCOPE
+                  message: "Slip gaji ini bukan milik Anda."
+                  request_id: req_01J6XK7F
+
+    NotFound:
+      description: |
+        Resource doesn't exist OR caller lacks visibility (treated the same
+        per CONVENTIONS §7 to avoid leaking existence).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            not_found:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: "Slip gaji tidak ditemukan."
+                  request_id: req_01J6XK7G
+
+    PayslipImmutable:
+      description: |
+        Write attempted on a read-only payroll resource (INV-1 / PH-4 / PA-4;
+        §8 immutable-with-audited-note decision). HR must append an audit note
+        via `POST /payslips/{id}/audit-notes` instead.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            immutable:
+              value:
+                error:
+                  code: PAYSLIP_IMMUTABLE
+                  message: "Data payroll historis bersifat read-only. Gunakan catatan audit untuk anotasi."
+                  request_id: req_01J6XK7H
+
+    RateLimited:
+      description: Per-user rate limit exceeded (CONVENTIONS §19).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until the client may retry.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            rate_limited:
+              value:
+                error:
+                  code: RATE_LIMITED
+                  message: "Terlalu banyak permintaan. Coba lagi nanti."
+                  request_id: req_01J6XK7J

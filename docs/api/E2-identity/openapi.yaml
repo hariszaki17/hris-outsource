@@ -1,0 +1,3163 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource · E2 Identity, Org & Master Data
+  version: 1.0.0
+  description: |
+    OpenAPI 3.1 contract for **E2 — Identity, Org & Master Data**.
+
+    Scope: the people the system is about (employees + linked logins), the
+    employment relationship (PKWT/PKWTT agreements + compensation), the client
+    company directory, the service-line/position master, and the operational
+    master data (leave types, attendance codes, overtime rules).
+
+    Binding conventions: see `docs/api/CONVENTIONS.md` (sections referenced
+    inline as §N). Picker endpoints are co-located with their owning resource
+    per §18 — no separate `/lookups` namespace.
+
+    Cross-references: employee-detail tab data (Penempatan/Kehadiran/Cuti/Lembur)
+    is **not served** by E2; the E2 employee-detail response carries
+    `x-cross-epic-references` mapping each tab to the owning epic's endpoint.
+
+    Personas used in examples: **Sari Hadi (HR Admin)**, **Rudi Wijaya (Shift
+    Leader, Plaza Senayan)**, **Budi Santoso (Agent, Parking Attendant)**.
+  contact:
+    name: SWP HRIS Product
+  license:
+    name: Internal — SWP
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api-staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: employees
+    description: |
+      Employee directory + agent self-service change-requests. Doubles as the
+      Employee picker per §18 — listing fields are picker-shaped.
+  - name: change-requests
+    description: |
+      Agent-initiated change-requests (HR approval queue). Agent can edit only
+      phone, address, bank per E2 §8 lock; statutory fields stay HR-only.
+  - name: agreements
+    description: |
+      Employment agreements (PKWT/PKWTT) — the legal SWP↔agent relationship
+      and the source of current compensation referenced by E7/E8.
+  - name: client-companies
+    description: |
+      Client company directory (legacy `companies.role=2`). Doubles as the
+      ClientCompany picker. **`geofence_radius_m` default 100m** is the locked
+      decision from EPICS.md §8.
+  - name: service-lines-positions
+    description: |
+      Service lines (Facility / Building Mgmt / Parking — seeded but
+      admin-extendable) and positions scoped under each. Both surfaces double
+      as pickers.
+  - name: master-data
+    description: |
+      Operational master data — leave types, attendance codes, overtime rules
+      (the OT rule's `min_minutes` defaults to **30** per D4 lock).
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # =====================================================================
+  # EMPLOYEES (F2.1)
+  # =====================================================================
+
+  /employees:
+    get:
+      operationId: listEmployees
+      tags: [employees]
+      summary: List employees (also serves as Employee picker per §18)
+      description: |
+        Cursor-paginated list of employees. Same endpoint doubles as the
+        Employee picker (`?q=...&status=ACTIVE&role=...`) per CONVENTIONS §18.
+        When called for picker use, the consumer reads only the
+        `picker_summary` projection on each item (`id`, `full_name`, `nip`,
+        `position`, `client_company`).
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - WElYh   # E2 · Karyawan — Daftar (Admin list)
+        - n3wi1w  # E2 SL · Karyawan — List (scoped)
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Sort' }
+        - in: query
+          name: q
+          description: Free-text search across `full_name`, `nip`, `nik`, `email`, `phone`.
+          schema: { type: string }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+        - in: query
+          name: status__in
+          description: Multi-value status filter (CONVENTIONS §9).
+          schema: { type: string, example: "ACTIVE,INACTIVE" }
+        - in: query
+          name: service_line
+          description: Filter by current placement's service line ID.
+          schema: { $ref: '#/components/schemas/ServiceLineId' }
+        - in: query
+          name: client_company
+          description: Filter by current placement's client company ID.
+          schema: { $ref: '#/components/schemas/ClientCompanyId' }
+        - in: query
+          name: role
+          description: |
+            Filter by linked User role (E1). Use `shift_leader` (combined
+            with `assigned=false`) for the unassigned-leader picker (§18).
+          schema:
+            type: string
+            enum: [agent, shift_leader, hr_admin, super_admin]
+        - in: query
+          name: assigned
+          description: |
+            Only meaningful with `role=shift_leader`. `false` = leader not yet
+            assigned to any client company (drives the leader-picker for E3).
+          schema: { type: boolean }
+        - in: query
+          name: has_login
+          description: Filter by whether a `User` is linked (EP-3 provisioning).
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Paginated employee page.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Employee' }
+              examples:
+                two_employees:
+                  summary: HR list, default sort
+                  value:
+                    data:
+                      - id: SWP-EMP-1042
+                        full_name: Budi Santoso
+                        nip: "1042"
+                        nik: "3175011505900012"
+                        join_at: "2024-03-15"
+                        status: ACTIVE
+                        current_position:
+                          id: SWP-POS-014
+                          name: Petugas Parkir
+                        current_service_line:
+                          id: SWP-SVC-003
+                          name: Parking
+                        current_client_company:
+                          id: SWP-CMP-101
+                          name: Plaza Senayan
+                        has_login: true
+                        user_id: SWP-USR-1042
+                      - id: SWP-EMP-1043
+                        full_name: Rudi Wijaya
+                        nip: "1043"
+                        nik: "3175011505900019"
+                        join_at: "2023-11-01"
+                        status: ACTIVE
+                        current_position:
+                          id: SWP-POS-015
+                          name: Koordinator Lokasi
+                        current_service_line:
+                          id: SWP-SVC-003
+                          name: Parking
+                        current_client_company:
+                          id: SWP-CMP-101
+                          name: Plaza Senayan
+                        has_login: true
+                        user_id: SWP-USR-1043
+                    next_cursor: "eyJpZCI6IlNXUC1FTVAtMTA0MyJ9"
+                    has_more: true
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createEmployee
+      tags: [employees]
+      summary: Create an employee (EP-1)
+      description: |
+        Creates an Employee. If `provision_login` is true, a linked User (E1)
+        is created with role `agent` and an invite is sent (EP-3). Otherwise
+        the employee is saved data-only and a login can be provisioned later.
+
+        Required fields per EP-1: `full_name`, `nik`, `join_at`. Duplicate NIK
+        returns `DUPLICATE_NIK` (409).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - h6bDz   # E2 · Karyawan — Tambah
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeWriteRequest' }
+            examples:
+              hr_creating_agent_with_login:
+                summary: HR creates an agent and provisions login
+                value:
+                  full_name: Budi Santoso
+                  nik: "3175011505900012"
+                  nip: "1042"
+                  join_at: "2024-03-15"
+                  gender: MALE
+                  phone: "+62-812-3344-5566"
+                  email_personal: budi.santoso@gmail.com
+                  npwp: "12.345.678.9-012.000"
+                  bpjs_kesehatan: "0001234567890"
+                  bpjs_ketenagakerjaan: "1234567890"
+                  bank_account:
+                    bank_name: BCA
+                    account_number: "1234567890"
+                    account_holder_name: Budi Santoso
+                  address: "Jl. Mawar 23, Jakarta Selatan"
+                  provision_login: true
+                  login_email: budi.santoso@swp.co.id
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              description: URI of the new employee.
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Conflict — NIK or login email already in use.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                duplicate_nik:
+                  value:
+                    error:
+                      code: DUPLICATE_NIK
+                      message: "NIK sudah terdaftar untuk karyawan lain."
+                      fields:
+                        nik: "NIK 3175011505900012 sudah dipakai oleh Budi Santoso (SWP-EMP-1042)."
+                      request_id: req_01J5XK2Q7
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /employees/{employee_id}:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+    get:
+      operationId: getEmployee
+      tags: [employees]
+      summary: Get an employee detail (EP-1)
+      description: |
+        Returns the full Employee record. The response carries
+        `x-cross-epic-references` semantics: the design's 5-tab detail
+        (Profil / Penempatan / Kehadiran / Cuti & Lembur / Dokumen) is
+        populated by **separate** endpoints — only the Profil tab is served
+        from E2. See `x-cross-epic-references` extension below.
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: company_or_global
+      x-design-screens:
+        - JBjBb   # E2 · Karyawan — Detail
+        - rtKzk   # E2 SL · Detail (read-only)
+        - s5RO1   # Agen · Profil Saya
+      x-cross-epic-references:
+        description: |
+          The employee-detail UI has 5 tabs. Only the **Profil** tab is served
+          by this endpoint. The other tabs are powered by these endpoints
+          (D3 — annotated, not duplicated):
+        tabs:
+          profil:
+            served_by: GET /employees/{employee_id}
+            epic: E2
+          penempatan:
+            served_by: GET /placements?employee_id={employee_id}
+            epic: E3
+          kehadiran:
+            served_by: GET /attendance?employee_id={employee_id}
+            epic: E5
+          cuti_lembur:
+            served_by:
+              - GET /leave-requests?employee_id={employee_id}
+              - GET /overtime-requests?employee_id={employee_id}
+            epic: E6, E7
+          dokumen:
+            served_by: GET /employees/{employee_id}/attachments
+            epic: E2 (future v1.1+ — no PRD reference today)
+      responses:
+        '200':
+          description: Employee record (Profil tab data).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+              examples:
+                budi:
+                  value:
+                    id: SWP-EMP-1042
+                    full_name: Budi Santoso
+                    nip: "1042"
+                    nik: "3175011505900012"
+                    join_at: "2024-03-15"
+                    gender: MALE
+                    birth_date: "1990-05-15"
+                    birth_place: Jakarta
+                    phone: "+62-812-3344-5566"
+                    email_personal: budi.santoso@gmail.com
+                    npwp: "12.345.678.9-012.000"
+                    bpjs_kesehatan: "0001234567890"
+                    bpjs_ketenagakerjaan: "1234567890"
+                    bank_account:
+                      bank_name: BCA
+                      account_number: "1234567890"
+                      account_holder_name: Budi Santoso
+                    address: "Jl. Mawar 23, Jakarta Selatan"
+                    status: ACTIVE
+                    has_login: true
+                    user_id: SWP-USR-1042
+                    current_position:
+                      id: SWP-POS-014
+                      name: Petugas Parkir
+                    current_service_line:
+                      id: SWP-SVC-003
+                      name: Parking
+                    current_client_company:
+                      id: SWP-CMP-101
+                      name: Plaza Senayan
+                    created_at: "2024-03-15T08:00:00Z"
+                    updated_at: "2026-05-30T11:42:08Z"
+                    created_by: SWP-EMP-0001
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateEmployee
+      tags: [employees]
+      summary: HR/admin edit of an employee (EP-6)
+      description: |
+        Partial update by HR/super-admin. **Statutory fields (NIK, NPWP,
+        full_name) are HR-only** per EP-6. Agents must instead use
+        `POST /employees/{id}/change-requests` for non-statutory edits
+        (phone, address, bank).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - JBjBb   # E2 · Karyawan — Detail (Edit Profil)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmployeeWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate NIK.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /employees/{employee_id}:deactivate:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+    post:
+      operationId: deactivateEmployee
+      tags: [employees]
+      summary: Soft-deactivate employee (EP-7)
+      description: |
+        Sets employee status to `INACTIVE` and disables the linked User
+        login (EP-7). Historical records (placements, attendance, leave) are
+        preserved. Terminal state per Wave 3.4 — reactivation possible via
+        `:reactivate` (C-3).
+
+        Auto-cascades: active placements (E3) are flagged for review.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - JBjBb   # row-kebab → Nonaktifkan overlay (wlNma)
+        - WElYh
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional reason for audit log.
+      responses:
+        '200':
+          description: Deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already inactive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /employees/{employee_id}:reactivate:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+    post:
+      operationId: reactivateEmployee
+      tags: [employees]
+      summary: Reactivate a deactivated employee (C-3)
+      description: |
+        Restores status to `ACTIVE`. If the linked User existed, login is
+        re-enabled; otherwise HR may invoke the provision flow separately.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - JBjBb
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Reactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /employees:bulk-deactivate:
+    post:
+      operationId: bulkDeactivateEmployees
+      tags: [employees]
+      summary: Bulk deactivate employees (rare)
+      description: |
+        Bulk-deactivate path per CONVENTIONS §14. Idempotency-Key required.
+        Use cases: bulk end-of-contract from a payroll cycle. Most flows use
+        per-id `:deactivate` instead.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKeyRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: '#/components/schemas/EmployeeId' }
+                reason:
+                  type: string
+                  description: Audit note applied to every affected entity.
+      responses:
+        '200':
+          description: Partial-success result envelope per §14.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: All items failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResult' }
+
+  # --- Agent self-edit change requests (EP-5) -----------------------------
+
+  /employees/{employee_id}/change-requests:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+    post:
+      operationId: createChangeRequest
+      tags: [change-requests, employees]
+      summary: Agent submits a profile-change request (EP-5)
+      description: |
+        Mobile-only flow. Agent can request changes to **phone, address, or
+        bank_account** (E2 §8 lock). Statutory fields (NIK, NPWP, full_name)
+        are blocked — sending them returns `FIELD_NOT_EDITABLE` (422).
+
+        The request is queued for HR approval; the resulting `ChangeRequest`
+        has `status=PENDING` and ID prefix `SWP-CHG-`.
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - n465cT  # Agen · Ajukan Perubahan
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeRequestCreate' }
+            examples:
+              budi_phone_and_bank:
+                value:
+                  changes:
+                    phone: "+62-812-9988-7766"
+                    bank_account:
+                      bank_name: BCA
+                      account_number: "9999000011"
+                      account_holder_name: Budi Santoso
+                  note: "Ganti nomor & rekening baru"
+      responses:
+        '201':
+          description: Pending change request created.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Validation — including `FIELD_NOT_EDITABLE` if a statutory field was sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                statutory_blocked:
+                  value:
+                    error:
+                      code: FIELD_NOT_EDITABLE
+                      message: "Field NIK hanya dapat diubah oleh HR."
+                      fields:
+                        nik: "Statutori — tidak dapat diajukan dari mobile."
+                      request_id: req_01J5XKN2
+    get:
+      operationId: listOwnChangeRequests
+      tags: [change-requests, employees]
+      summary: Agent lists own change requests
+      description: |
+        Agent's own history (PENDING/APPROVED/REJECTED). Powers the mobile
+        "Riwayat Pengajuan" list on `SXqA5`.
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - SXqA5
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/ChangeRequestStatus' }
+      responses:
+        '200':
+          description: Page of own change requests.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # --- HR approval queue --------------------------------------------------
+
+  /change-requests:
+    get:
+      operationId: listPendingChangeRequests
+      tags: [change-requests]
+      summary: HR approval queue — all pending change requests
+      description: |
+        HR sees the cross-employee pending queue (BLOCKER finding from
+        E2-AUDIT.md §6: this surface didn't exist in legacy). Filterable by
+        request type and employee.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER: design surface still missing
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Sort' }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/ChangeRequestStatus' }
+        - in: query
+          name: employee_id
+          schema: { $ref: '#/components/schemas/EmployeeId' }
+        - in: query
+          name: request_type
+          description: |
+            Filter by the *type* of change requested. Derived server-side
+            from the fields present in the request body.
+          schema:
+            type: string
+            enum: [PHONE, ADDRESS, BANK_ACCOUNT, MULTIPLE]
+        - in: query
+          name: q
+          description: Free-text search on submitter name / NIP.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pending queue page.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /change-requests/{change_request_id}:
+    parameters:
+      - in: path
+        name: change_request_id
+        required: true
+        schema: { $ref: '#/components/schemas/ChangeRequestId' }
+    get:
+      operationId: getChangeRequest
+      tags: [change-requests]
+      summary: HR views change-request detail (old → new diff)
+      description: |
+        Detail of a single change request including the old → new diff per
+        field; powers the HR review modal.
+      x-rbac:
+        roles: [hr_admin, super_admin, agent]
+        scope: company_or_global
+      responses:
+        '200':
+          description: Change-request detail with diff.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeRequestDetail' }
+              examples:
+                budi_diff:
+                  value:
+                    id: SWP-CHG-2117
+                    employee:
+                      id: SWP-EMP-1042
+                      full_name: Budi Santoso
+                      nip: "1042"
+                    status: PENDING
+                    submitted_at: "2026-06-01T09:14:22Z"
+                    note: "Ganti nomor & rekening baru"
+                    diff:
+                      phone:
+                        old: "+62-812-3344-5566"
+                        new: "+62-812-9988-7766"
+                      bank_account:
+                        old:
+                          bank_name: BCA
+                          account_number: "1234567890"
+                          account_holder_name: Budi Santoso
+                        new:
+                          bank_name: BCA
+                          account_number: "9999000011"
+                          account_holder_name: Budi Santoso
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /change-requests/{change_request_id}:approve:
+    parameters:
+      - in: path
+        name: change_request_id
+        required: true
+        schema: { $ref: '#/components/schemas/ChangeRequestId' }
+    post:
+      operationId: approveChangeRequest
+      tags: [change-requests]
+      summary: HR approves a change request — applies the change
+      description: |
+        On approve, the requested values are atomically written to the
+        Employee record (audit log captures the actor + before/after).
+        Idempotent via Idempotency-Key.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Approved & applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already resolved (APPROVED or REJECTED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /change-requests/{change_request_id}:reject:
+    parameters:
+      - in: path
+        name: change_request_id
+        required: true
+        schema: { $ref: '#/components/schemas/ChangeRequestId' }
+    post:
+      operationId: rejectChangeRequest
+      tags: [change-requests]
+      summary: HR rejects a change request (reason required — Wave-1 ModalReject)
+      description: |
+        Reject with a required free-text `reason` (Wave-1 ModalReject
+        pattern). The Employee record is **not** modified. Submitter is
+        notified (CONVENTIONS §16.2 row "HR change-request submitted" extends
+        to "resolved").
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+                  description: Human-readable rejection reason (surfaced to the agent).
+            examples:
+              budi_bank_rejected:
+                value:
+                  reason: "Mohon lampirkan foto buku tabungan untuk verifikasi rekening baru."
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already resolved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # =====================================================================
+  # EMPLOYMENT AGREEMENTS (F2.2)
+  # =====================================================================
+
+  /agreements:
+    get:
+      operationId: listAgreements
+      tags: [agreements]
+      summary: List employment agreements
+      description: |
+        Filter by employee, status (ACTIVE/SUPERSEDED/CLOSED/EXPIRING), and
+        type (PKWT/PKWTT). `EXPIRING` is a server-computed virtual status —
+        active PKWT agreements within 30 days of `end_date` (matches the
+        notifications cron in CONVENTIONS §16.2).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER: F2.2 screens entirely missing
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Sort' }
+        - in: query
+          name: employee_id
+          schema: { $ref: '#/components/schemas/EmployeeId' }
+        - in: query
+          name: status
+          schema: { $ref: '#/components/schemas/AgreementStatus' }
+        - in: query
+          name: status__in
+          schema: { type: string, example: "ACTIVE,EXPIRING" }
+        - in: query
+          name: type
+          schema: { $ref: '#/components/schemas/AgreementType' }
+        - in: query
+          name: end_date__lte
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Page of agreements.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Agreement' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAgreement
+      tags: [agreements]
+      summary: Create a PKWT or PKWTT agreement (EA-1)
+      description: |
+        Creates an employment agreement. Validations per EA-1/EA-2:
+        - `PKWT` requires `start_date` + `end_date`; `PKWTT` requires
+          `start_date` only.
+        - At most one **active** agreement per employee (EA-2). If one
+          exists, either close it first or use `:renew` for the successor
+          flow (EA-3).
+        - `PKWT` period must be ≤ 5 years (Indonesian labor law) →
+          `PKWT_PERIOD_EXCEEDS_MAX` (422).
+        - Compensation fields are encrypted at rest (EA-4); see schema
+          `CompensationTerms`.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementWriteRequest' }
+            examples:
+              pkwt_budi:
+                summary: PKWT, 1-year, with comp
+                value:
+                  employee_id: SWP-EMP-1042
+                  type: PKWT
+                  agreement_no: "PKWT/SWP/2026/0142"
+                  start_date: "2026-06-01"
+                  end_date: "2027-05-31"
+                  compensation:
+                    base_salary_idr: 5200000
+                    bpjs_terms:
+                      kesehatan_employer_pct: 4.0
+                      kesehatan_employee_pct: 1.0
+                      ketenagakerjaan_employer_pct: 6.24
+                      ketenagakerjaan_employee_pct: 3.0
+                    tax_profile: PTKP_K0
+              pkwtt_rudi:
+                summary: PKWTT, indefinite, no end_date
+                value:
+                  employee_id: SWP-EMP-1043
+                  type: PKWTT
+                  agreement_no: "PKWTT/SWP/2024/0019"
+                  start_date: "2024-01-01"
+                  compensation:
+                    base_salary_idr: 8500000
+                    bpjs_terms:
+                      kesehatan_employer_pct: 4.0
+                      kesehatan_employee_pct: 1.0
+                      ketenagakerjaan_employer_pct: 6.24
+                      ketenagakerjaan_employee_pct: 3.0
+                    tax_profile: PTKP_K1
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Active agreement already exists (use `:renew` instead).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                inv2:
+                  value:
+                    error:
+                      code: ACTIVE_AGREEMENT_EXISTS
+                      message: "Karyawan sudah memiliki perjanjian aktif. Gunakan endpoint :renew untuk perpanjangan."
+                      request_id: req_01J5XKQ9
+        '422':
+          description: Business-rule violation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                pkwt_too_long:
+                  value:
+                    error:
+                      code: PKWT_PERIOD_EXCEEDS_MAX
+                      message: "Periode PKWT melebihi batas 5 tahun yang diizinkan UU Ketenagakerjaan."
+                      fields:
+                        end_date: "Periode 6 tahun melebihi maksimum 5 tahun."
+                      request_id: req_01J5XKR0
+                missing_doc:
+                  value:
+                    error:
+                      code: MISSING_REQUIRED_DOCUMENT
+                      message: "Dokumen kontrak wajib dilampirkan sebelum perjanjian dapat diaktifkan."
+                      request_id: req_01J5XKR1
+
+  /agreements/{agreement_id}:
+    parameters:
+      - { $ref: '#/components/parameters/AgreementIdPath' }
+    get:
+      operationId: getAgreement
+      tags: [agreements]
+      summary: Get agreement detail
+      description: |
+        Returns the agreement record. **Compensation fields are masked**
+        unless the caller has the `view_compensation` permission (EA-4
+        role-gated; HR admin & super admin only). Agents (mobile) get a
+        slimmer view: type, period, status — compensation hidden (EA-4 §4).
+      x-rbac:
+        roles: [hr_admin, super_admin, agent]
+        scope: self
+      responses:
+        '200':
+          description: Agreement detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateAgreement
+      tags: [agreements]
+      summary: Partial update on an agreement
+      description: |
+        Patch agreement fields. Compensation changes via this endpoint are
+        **effective-dated and historized** as new `CompensationRecord`s (C-3
+        decision); the underlying field is never overwritten in place. The
+        agreement's "current comp" is the latest record effective today.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgreementWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /agreements/{agreement_id}:renew:
+    parameters:
+      - { $ref: '#/components/parameters/AgreementIdPath' }
+    post:
+      operationId: renewAgreement
+      tags: [agreements]
+      summary: Renew a PKWT (generates a linked successor — EA-3)
+      description: |
+        Creates a **new** agreement with `predecessor_id` set to the current
+        one and sets the predecessor's status to `SUPERSEDED`. The successor
+        may itself be PKWT (with new end_date) or convert to PKWTT (C-2 —
+        permanent conversion).
+
+        Returns the new agreement (with new `SWP-AG-*` id).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, start_date]
+              properties:
+                type: { $ref: '#/components/schemas/AgreementType' }
+                agreement_no:
+                  type: string
+                  description: New agreement reference number (e.g. PKWT/SWP/2027/0142).
+                start_date: { type: string, format: date }
+                end_date:
+                  type: string
+                  format: date
+                  description: Required when type=PKWT.
+                compensation: { $ref: '#/components/schemas/CompensationTerms' }
+                note:
+                  type: string
+                  description: Optional human note carried into the audit log.
+            examples:
+              budi_renew_pkwt:
+                value:
+                  type: PKWT
+                  agreement_no: "PKWT/SWP/2027/0142"
+                  start_date: "2027-06-01"
+                  end_date: "2028-05-31"
+                  compensation:
+                    base_salary_idr: 5500000
+                    bpjs_terms:
+                      kesehatan_employer_pct: 4.0
+                      kesehatan_employee_pct: 1.0
+                      ketenagakerjaan_employer_pct: 6.24
+                      ketenagakerjaan_employee_pct: 3.0
+                    tax_profile: PTKP_K0
+      responses:
+        '201':
+          description: Successor created.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Predecessor is not in a renewable state (e.g., already SUPERSEDED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: Business-rule violation (e.g., PKWT > 5 years).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /agreements/{agreement_id}:close:
+    parameters:
+      - { $ref: '#/components/parameters/AgreementIdPath' }
+    post:
+      operationId: closeAgreement
+      tags: [agreements]
+      summary: Close an agreement early (EA-5)
+      description: |
+        Terminates an agreement with a reason and effective date (EA-5).
+        Reason ∈ {RESIGNED, TERMINATED, END_OF_TERM, OTHER}. Active
+        placements (E3) referencing this agreement are flagged for review
+        (cascade — implicit side effect; not a separate API call).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, effective_date]
+              properties:
+                reason:
+                  type: string
+                  enum: [RESIGNED, TERMINATED, END_OF_TERM, OTHER]
+                effective_date:
+                  type: string
+                  format: date
+                note:
+                  type: string
+                  maxLength: 500
+            examples:
+              budi_resigned:
+                value:
+                  reason: RESIGNED
+                  effective_date: "2026-08-15"
+                  note: "Pengunduran diri atas permintaan sendiri (lampirkan surat di attachments)."
+      responses:
+        '200':
+          description: Closed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Agreement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already closed/superseded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /agreements/{agreement_id}/attachments:
+    parameters:
+      - { $ref: '#/components/parameters/AgreementIdPath' }
+    post:
+      operationId: uploadAgreementAttachment
+      tags: [agreements]
+      summary: Upload an agreement document (PDF/JPG/PNG)
+      description: |
+        Multipart upload per CONVENTIONS §15. Used for the signed agreement
+        scan, ID copies, etc. Max 10 MB; allowed types: `application/pdf`,
+        `image/jpeg`, `image/png`.
+
+        On agreement create, server-side validation may require at least one
+        attachment of category `signed_agreement` — failing this returns
+        `MISSING_REQUIRED_DOCUMENT` (422) at create time, not here.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                category:
+                  type: string
+                  enum: [signed_agreement, addendum, supporting_doc]
+                  default: signed_agreement
+                caption:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: File stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileRef' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: File too large (> 10 MB).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # =====================================================================
+  # CLIENT COMPANIES (F2.3)
+  # =====================================================================
+
+  /client-companies:
+    get:
+      operationId: listClientCompanies
+      tags: [client-companies]
+      summary: List client companies (also serves as ClientCompany picker)
+      description: |
+        Doubles as the ClientCompany picker per §18. Supports filters by
+        active service line presence, status, and whether a shift leader is
+        already assigned (`has_leader`) — the unassigned-company picker is
+        used by E3 leader-assignment.
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens: []  # AUDIT BLOCKER: F2.3 screens entirely missing
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Sort' }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+        - in: query
+          name: service_line
+          description: Filter to companies with active placements in this service line.
+          schema: { $ref: '#/components/schemas/ServiceLineId' }
+        - in: query
+          name: has_leader
+          description: |
+            `true` = company has an assigned shift leader (1 leader / company
+            invariant from E3). `false` = unassigned (leader-picker use).
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Page of client companies.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ClientCompany' }
+              examples:
+                two_companies:
+                  value:
+                    data:
+                      - id: SWP-CMP-101
+                        name: Plaza Senayan
+                        address: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270"
+                        geo:
+                          lat: -6.2253
+                          lng: 106.7995
+                        geofence_radius_m: 100
+                        geofence_active: true
+                        npwp: "01.234.567.8-013.000"
+                        pic_name: Ahmad Rizki
+                        phone: "+62-21-572-5555"
+                        email: ops@plazasenayan.example.com
+                        status: ACTIVE
+                        has_leader: true
+                        active_placement_count: 42
+                      - id: SWP-CMP-102
+                        name: Plaza Indonesia
+                        address: "Jl. M.H. Thamrin Kav. 28-30, Jakarta Pusat 10350"
+                        geo: null
+                        geofence_radius_m: 100
+                        geofence_active: false
+                        npwp: null
+                        pic_name: null
+                        phone: null
+                        email: null
+                        status: ACTIVE
+                        has_leader: false
+                        active_placement_count: 0
+                    next_cursor: null
+                    has_more: false
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createClientCompany
+      tags: [client-companies]
+      summary: Create a client company (CC-1)
+      description: |
+        Creates a client company. **`geofence_radius_m` defaults to 100m**
+        if omitted — locked decision per EPICS.md §8 (2026-05-29). Valid
+        range 25–1000m; out-of-range returns `GEOFENCE_RADIUS_INVALID` (400).
+
+        `geofence_active` is **derived server-side** from `geo.lat`/`geo.lng`
+        presence (D11). A company with no geo can still be created — geofence
+        is just disabled until coordinates are added (C-1).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientCompanyWriteRequest' }
+            examples:
+              plaza_senayan:
+                value:
+                  name: Plaza Senayan
+                  address: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270"
+                  geo:
+                    lat: -6.2253
+                    lng: 106.7995
+                  geofence_radius_m: 100
+                  npwp: "01.234.567.8-013.000"
+                  pic_name: Ahmad Rizki
+                  phone: "+62-21-572-5555"
+                  email: ops@plazasenayan.example.com
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientCompany' }
+        '400':
+          description: Bad request — e.g., geofence radius out of bounds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                bad_radius:
+                  value:
+                    error:
+                      code: GEOFENCE_RADIUS_INVALID
+                      message: "Radius geofence harus 25–1000 meter."
+                      fields:
+                        geofence_radius_m: "Nilai 5000 di luar rentang yang diizinkan."
+                      request_id: req_01J5XLA2
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Duplicate name or NPWP (CC-2).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /client-companies/{client_company_id}:
+    parameters:
+      - { $ref: '#/components/parameters/ClientCompanyIdPath' }
+    get:
+      operationId: getClientCompany
+      tags: [client-companies]
+      summary: Get client company detail
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      responses:
+        '200':
+          description: Client company detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientCompany' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateClientCompany
+      tags: [client-companies]
+      summary: Edit client company (geofence, location, statutory fields)
+      description: |
+        Partial update — typical use cases: setting `geo` for a company that
+        was created without coordinates (transitions `geofence_active` from
+        false to true); adjusting `geofence_radius_m`; updating PIC contact.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientCompanyWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientCompany' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate name or NPWP.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /client-companies/{client_company_id}:deactivate:
+    parameters:
+      - { $ref: '#/components/parameters/ClientCompanyIdPath' }
+    post:
+      operationId: deactivateClientCompany
+      tags: [client-companies]
+      summary: Deactivate a client company (CC-5 — active-placement guard)
+      description: |
+        Sets the company to `INACTIVE`. **Blocks** if active placements exist
+        unless `force=true` is passed AND the actor accepts the consequence
+        (returns `COMPANY_HAS_ACTIVE_PLACEMENTS` (409) by default). HR is
+        expected to end/transfer placements first per CC-5.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - in: query
+          name: force
+          description: |
+            If `true`, deactivate even with active placements (will mark them
+            for review). Default `false` (warn-and-guide per CC-5 open
+            decision).
+          schema: { type: boolean, default: false }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientCompany' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Active placements present and `force` not set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                active_placements:
+                  value:
+                    error:
+                      code: COMPANY_HAS_ACTIVE_PLACEMENTS
+                      message: "Plaza Senayan masih memiliki 42 penempatan aktif. Akhiri atau pindahkan terlebih dahulu."
+                      fields:
+                        active_placement_count: "42"
+                      request_id: req_01J5XLB3
+
+  /client-companies/{client_company_id}:reactivate:
+    parameters:
+      - { $ref: '#/components/parameters/ClientCompanyIdPath' }
+    post:
+      operationId: reactivateClientCompany
+      tags: [client-companies]
+      summary: Reactivate a client company (C-2)
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Reactivated — selectable as placement target again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientCompany' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # =====================================================================
+  # SERVICE LINES & POSITIONS (F2.4)
+  # =====================================================================
+
+  /service-lines:
+    get:
+      operationId: listServiceLines
+      tags: [service-lines-positions]
+      summary: List service lines (also serves as ServiceLine picker)
+      description: |
+        Returns all service lines (3 seeded — Facility Services, Building
+        Management, Parking — plus any admin-added). Doubles as the picker
+        per §18.
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER: F2.4 screens entirely missing
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+      responses:
+        '200':
+          description: Page of service lines.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ServiceLine' }
+              examples:
+                seeded:
+                  value:
+                    data:
+                      - id: SWP-SVC-001
+                        name: Facility Services
+                        status: ACTIVE
+                        position_count: 8
+                      - id: SWP-SVC-002
+                        name: Building Management
+                        status: ACTIVE
+                        position_count: 6
+                      - id: SWP-SVC-003
+                        name: Parking
+                        status: ACTIVE
+                        position_count: 4
+                    next_cursor: null
+                    has_more: false
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createServiceLine
+      tags: [service-lines-positions]
+      summary: Create a service line (SP-1 admin-extendable)
+      description: |
+        Per SP-1, the 3 seeded service lines are admin-extendable but cannot
+        be deleted while referenced. Names are unique.
+      x-rbac:
+        roles: [super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceLineWriteRequest' }
+            examples:
+              new_line:
+                value:
+                  name: Security Services
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceLine' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Duplicate name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /service-lines/{service_line_id}:
+    parameters:
+      - { $ref: '#/components/parameters/ServiceLineIdPath' }
+    get:
+      operationId: getServiceLine
+      tags: [service-lines-positions]
+      summary: Get a service line
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      responses:
+        '200':
+          description: Service line detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceLine' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateServiceLine
+      tags: [service-lines-positions]
+      summary: Rename a service line
+      x-rbac:
+        roles: [super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceLineWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceLine' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /service-lines/{service_line_id}:discontinue:
+    parameters:
+      - { $ref: '#/components/parameters/ServiceLineIdPath' }
+    post:
+      operationId: discontinueServiceLine
+      tags: [service-lines-positions]
+      summary: Discontinue (soft-delete) a service line (SP-1)
+      description: |
+        Soft-deactivation only (status → `INACTIVE`); hard-delete forbidden
+        when referenced. Returns `SERVICE_LINE_IN_USE` (409) if any active
+        placement / position / overtime-rule references it.
+      x-rbac:
+        roles: [super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Discontinued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceLine' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Referenced by active placements/positions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                in_use:
+                  value:
+                    error:
+                      code: SERVICE_LINE_IN_USE
+                      message: "Service line 'Parking' masih dipakai 42 penempatan aktif."
+                      request_id: req_01J5XLC4
+
+  /service-lines/{service_line_id}/positions:
+    parameters:
+      - { $ref: '#/components/parameters/ServiceLineIdPath' }
+    get:
+      operationId: listPositionsInServiceLine
+      tags: [service-lines-positions]
+      summary: List positions in a service line (also Position picker)
+      description: |
+        Returns positions scoped under one service line (SP-2). Doubles as
+        the Position picker used by E3 placement creation (filtered by the
+        placement's service_line).
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+      responses:
+        '200':
+          description: Page of positions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Position' }
+              examples:
+                parking_positions:
+                  value:
+                    data:
+                      - id: SWP-POS-014
+                        service_line_id: SWP-SVC-003
+                        name: Petugas Parkir
+                        alias: Parking Attendant
+                        status: ACTIVE
+                      - id: SWP-POS-015
+                        service_line_id: SWP-SVC-003
+                        name: Koordinator Lokasi
+                        alias: Parking Supervisor
+                        status: ACTIVE
+                    next_cursor: null
+                    has_more: false
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createPosition
+      tags: [service-lines-positions]
+      summary: Create a position under a service line (SP-2/SP-3)
+      description: |
+        Creates a position scoped to one service line. The pair
+        `(service_line_id, name)` is unique (SP-3) — duplicate returns
+        `POSITION_IN_USE` (409 — same code is reused for line+name
+        collisions and for soft-delete-with-references).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionWriteRequest' }
+            examples:
+              petugas_parkir:
+                value:
+                  name: Petugas Parkir
+                  alias: Parking Attendant
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Position' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate position name within this service line.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /positions/{position_id}:
+    parameters:
+      - { $ref: '#/components/parameters/PositionIdPath' }
+    patch:
+      operationId: updatePosition
+      tags: [service-lines-positions]
+      summary: Update a position (name / alias / status)
+      description: |
+        Note: **reassigning a position to a different service line is
+        discouraged/blocked** if it has active references (C-4). Create a
+        new position under the target line instead.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Position' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate position name within its service line.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      operationId: softDeletePosition
+      tags: [service-lines-positions]
+      summary: Soft-delete a position (SP-4)
+      description: |
+        Soft-delete only — sets `status=INACTIVE`. Returns `POSITION_IN_USE`
+        (409) if active placements still reference it; existing placements
+        retain their position reference (C-2). HR may instead just deactivate.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      responses:
+        '204':
+          description: Soft-deleted.
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Referenced by active placements.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                position_used:
+                  value:
+                    error:
+                      code: POSITION_IN_USE
+                      message: "Posisi 'Petugas Parkir' masih dipakai 22 penempatan aktif."
+                      request_id: req_01J5XLD5
+
+  # =====================================================================
+  # OPERATIONAL MASTER DATA (F2.5)
+  # =====================================================================
+
+  /leave-types:
+    get:
+      operationId: listLeaveTypes
+      tags: [master-data]
+      summary: List leave types (also serves as LeaveType picker)
+      description: |
+        Returns the SWP-wide leave types (legacy was per-company; collapsed
+        to one set per DATA-MAPPING G-6 / C-2). Doubles as the picker for E6.
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER: F2.5 screens entirely missing
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+        - in: query
+          name: is_annual
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Page of leave types.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/LeaveType' }
+              examples:
+                seeded:
+                  value:
+                    data:
+                      - id: SWP-LT-001
+                        name: Cuti Tahunan
+                        code: ANNUAL
+                        description: "Cuti tahunan reguler"
+                        default_annual_quota: 12
+                        is_annual: true
+                        requires_document: false
+                        color: "#188E4D"
+                        status: ACTIVE
+                      - id: SWP-LT-002
+                        name: Cuti Sakit
+                        code: SICK
+                        description: "Cuti sakit dengan surat dokter"
+                        default_annual_quota: 0
+                        is_annual: false
+                        requires_document: true
+                        color: "#E07A2A"
+                        status: ACTIVE
+                    next_cursor: null
+                    has_more: false
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createLeaveType
+      tags: [master-data]
+      summary: Create a leave type (LT-1)
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveTypeWriteRequest' }
+            examples:
+              maternity:
+                value:
+                  name: Cuti Melahirkan
+                  code: MATERNITY
+                  description: "Cuti melahirkan 3 bulan sesuai UU Ketenagakerjaan"
+                  default_annual_quota: 90
+                  is_annual: false
+                  requires_document: true
+                  color: "#188E4D"
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveType' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Duplicate name or code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /leave-types/{leave_type_id}:
+    parameters:
+      - in: path
+        name: leave_type_id
+        required: true
+        schema: { $ref: '#/components/schemas/LeaveTypeId' }
+    get:
+      operationId: getLeaveType
+      tags: [master-data]
+      summary: Get a leave type
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      responses:
+        '200':
+          description: Leave type detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveType' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateLeaveType
+      tags: [master-data]
+      summary: Update a leave type
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveTypeWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveType' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate name/code.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      operationId: softDeleteLeaveType
+      tags: [master-data]
+      summary: Soft-delete a leave type (MD-1)
+      description: |
+        Soft-delete (status → INACTIVE). New leave requests cannot use it;
+        in-flight ones complete (C-1). Hard-delete forbidden when referenced.
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      responses:
+        '204':
+          description: Soft-deleted.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Has open leave requests — refuse.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /attendance-codes:
+    get:
+      operationId: listAttendanceCodes
+      tags: [master-data]
+      summary: List attendance codes (also serves as AttendanceCode picker)
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+        - in: query
+          name: is_billable
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Page of attendance codes.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/AttendanceCode' }
+              examples:
+                seeded:
+                  value:
+                    data:
+                      - id: SWP-AC-001
+                        code: PRESENT
+                        label: Hadir
+                        description: "Hadir lengkap dengan verifikasi"
+                        color: "#0F8B8D"   # teal = present per DESIGN-SYSTEM §2
+                        is_workday: true
+                        is_paid: true
+                        is_billable: true
+                        needs_verification: true
+                        status: ACTIVE
+                      - id: SWP-AC-002
+                        code: LATE
+                        label: Terlambat
+                        color: "#E07A2A"
+                        is_workday: true
+                        is_paid: true
+                        is_billable: true
+                        needs_verification: true
+                        status: ACTIVE
+                    next_cursor: null
+                    has_more: false
+    post:
+      operationId: createAttendanceCode
+      tags: [master-data]
+      summary: Create an attendance code (AC-1)
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AttendanceCodeWriteRequest' }
+            examples:
+              ot_present:
+                value:
+                  code: OT_PRESENT
+                  label: Hadir Lembur
+                  description: "Hadir dengan jam lembur tercatat (billable)"
+                  color: "#188E4D"
+                  is_workday: true
+                  is_paid: true
+                  is_billable: true
+                  needs_verification: true
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceCode' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Duplicate code/label.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /attendance-codes/{attendance_code_id}:
+    parameters:
+      - in: path
+        name: attendance_code_id
+        required: true
+        schema: { $ref: '#/components/schemas/AttendanceCodeId' }
+    get:
+      operationId: getAttendanceCode
+      tags: [master-data]
+      summary: Get an attendance code
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader, agent]
+        scope: global
+      responses:
+        '200':
+          description: Attendance code detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceCode' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateAttendanceCode
+      tags: [master-data]
+      summary: Update an attendance code
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AttendanceCodeWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceCode' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate code/label.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    delete:
+      operationId: softDeleteAttendanceCode
+      tags: [master-data]
+      summary: Soft-delete an attendance code (MD-1)
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      responses:
+        '204':
+          description: Soft-deleted.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Referenced by attendance records — refuse.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /overtime-rules:
+    get:
+      operationId: listOvertimeRules
+      tags: [master-data]
+      summary: List overtime rules (also serves as OvertimeRule picker)
+      description: |
+        Returns the OT rules consumed by E7. Rules may be scoped to a
+        service line or global (OR-1/OR-2).
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: global
+      x-design-screens: []  # AUDIT BLOCKER
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - in: query
+          name: service_line
+          schema: { $ref: '#/components/schemas/ServiceLineId' }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+      responses:
+        '200':
+          description: Page of overtime rules.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/OvertimeRule' }
+              examples:
+                global_default:
+                  value:
+                    data:
+                      - id: SWP-OTR-001
+                        name: Default OT
+                        service_line_id: null
+                        weekday_rate: 1.5
+                        restday_rate: 2.0
+                        holiday_rate: 3.0
+                        min_minutes: 30          # locked per D4
+                        max_minutes_per_day: 240
+                        pre_approval_required: true
+                        status: ACTIVE
+                    next_cursor: null
+                    has_more: false
+    post:
+      operationId: createOvertimeRule
+      tags: [master-data]
+      summary: Create an overtime rule (OR-1)
+      description: |
+        Creates an overtime rule. `min_minutes` defaults to **30** per
+        EPICS.md §8 D4 (resolved 2026-06-02 — was 60 in earlier review).
+        Sending a value below 30 returns `RULE_VIOLATION` (422).
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OvertimeRuleWriteRequest' }
+            examples:
+              parking_night:
+                value:
+                  name: Parking Night OT
+                  service_line_id: SWP-SVC-003
+                  weekday_rate: 1.5
+                  restday_rate: 2.0
+                  holiday_rate: 3.0
+                  min_minutes: 30
+                  max_minutes_per_day: 240
+                  pre_approval_required: true
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OvertimeRule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Duplicate name.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /overtime-rules/{overtime_rule_id}:
+    parameters:
+      - in: path
+        name: overtime_rule_id
+        required: true
+        schema: { $ref: '#/components/schemas/OvertimeRuleId' }
+    get:
+      operationId: getOvertimeRule
+      tags: [master-data]
+      summary: Get an overtime rule
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: global
+      responses:
+        '200':
+          description: Overtime rule detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OvertimeRule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateOvertimeRule
+      tags: [master-data]
+      summary: Update an overtime rule
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OvertimeRuleWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OvertimeRule' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      operationId: softDeleteOvertimeRule
+      tags: [master-data]
+      summary: Soft-delete an overtime rule (MD-1)
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      responses:
+        '204':
+          description: Soft-deleted.
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Referenced by OT requests — refuse.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+# =========================================================================
+# COMPONENTS
+# =========================================================================
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+      description: |
+        `Authorization: Bearer <token>` per CONVENTIONS §3. Token type
+        (opaque vs JWT) is deferred to E1; consumers MUST treat as opaque.
+
+  parameters:
+    Limit:
+      in: query
+      name: limit
+      description: Page size (default 50, max 200) per §8.
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      in: query
+      name: cursor
+      description: Opaque cursor from a previous page's `next_cursor` per §8.
+      schema: { type: string }
+    Sort:
+      in: query
+      name: sort
+      description: |
+        Comma-separated `field:direction` per §9 (e.g.,
+        `?sort=created_at:desc,full_name:asc`). Cursor encodes sort — mismatch
+        returns `CURSOR_MISMATCH` (400).
+      schema: { type: string }
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      description: UUID v4. Same key with different body → `IDEMPOTENCY_KEY_REUSED` (409). Per §13.
+      schema: { type: string, format: uuid }
+    IdempotencyKeyRequired:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: UUID v4 — required for bulk endpoints per §14.
+      schema: { type: string, format: uuid }
+    EmployeeIdPath:
+      in: path
+      name: employee_id
+      required: true
+      schema: { $ref: '#/components/schemas/EmployeeId' }
+    AgreementIdPath:
+      in: path
+      name: agreement_id
+      required: true
+      schema: { $ref: '#/components/schemas/AgreementId' }
+    ClientCompanyIdPath:
+      in: path
+      name: client_company_id
+      required: true
+      schema: { $ref: '#/components/schemas/ClientCompanyId' }
+    ServiceLineIdPath:
+      in: path
+      name: service_line_id
+      required: true
+      schema: { $ref: '#/components/schemas/ServiceLineId' }
+    PositionIdPath:
+      in: path
+      name: position_id
+      required: true
+      schema: { $ref: '#/components/schemas/PositionId' }
+
+  responses:
+    BadRequest:
+      description: Malformed request or invalid input (CONVENTIONS §11).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            generic:
+              value:
+                error:
+                  code: INVALID_REQUEST
+                  message: "Permintaan tidak valid."
+                  request_id: req_01J5XK0A
+    Unauthenticated:
+      description: Missing or expired bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            expired:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: "Sesi berakhir. Silakan masuk kembali."
+                  request_id: req_01J5XK0B
+    Forbidden:
+      description: Authenticated but role-not-permitted (CONVENTIONS §3, §17).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            no_permission:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: "Anda tidak memiliki izin untuk tindakan ini."
+                  request_id: req_01J5XK0C
+    NotFound:
+      description: Resource not found (or hidden from caller's scope).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            generic:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: "Data tidak ditemukan."
+                  request_id: req_01J5XK0D
+    UnprocessableEntity:
+      description: Business-rule violation (semantically invalid).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            generic:
+              value:
+                error:
+                  code: RULE_VIOLATION
+                  message: "Aturan bisnis tidak terpenuhi."
+                  request_id: req_01J5XK0E
+
+  schemas:
+
+    # ---- Common envelopes ------------------------------------------------
+
+    PageEnvelope:
+      type: object
+      description: Standard pagination envelope (CONVENTIONS §8).
+      properties:
+        data:
+          type: array
+          items: {}
+        next_cursor:
+          type: [string, "null"]
+          description: Opaque cursor for the next page; `null` when no more pages.
+        has_more:
+          type: boolean
+      required: [data, has_more]
+
+    ErrorEnvelope:
+      type: object
+      description: Standard error envelope (CONVENTIONS §11).
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string, example: "QUOTA_EXCEEDED" }
+            message: { type: string, example: "Permintaan melebihi kuota tersisa." }
+            fields:
+              type: object
+              additionalProperties: { type: string }
+              description: Only on 400/422 — maps field name → field-level error.
+            request_id: { type: string, example: "req_01J5XK..." }
+
+    BulkResult:
+      type: object
+      description: Bulk-operation result envelope (CONVENTIONS §14).
+      required: [succeeded, failed]
+      properties:
+        succeeded:
+          type: array
+          items: { type: string }
+          description: IDs that succeeded.
+        failed:
+          type: array
+          items:
+            type: object
+            required: [id, error]
+            properties:
+              id: { type: string }
+              error: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+    FileRef:
+      type: object
+      description: File-upload response per CONVENTIONS §15.
+      required: [id, url, name, size_bytes, mime, uploaded_at]
+      properties:
+        id: { type: string, example: "SWP-FILE-9912" }
+        url: { type: string, format: uri }
+        name: { type: string }
+        size_bytes: { type: integer }
+        mime: { type: string }
+        uploaded_at: { type: string, format: date-time }
+
+    # ---- ID types (string aliases with SWP-* prefix per §4) -------------
+
+    EmployeeId:
+      type: string
+      pattern: '^SWP-EMP-\d+$'
+      example: SWP-EMP-1042
+    ChangeRequestId:
+      type: string
+      pattern: '^SWP-CHG-\d+$'
+      example: SWP-CHG-2117
+    AgreementId:
+      type: string
+      pattern: '^SWP-AG-\d+$'
+      example: SWP-AG-7711
+    ClientCompanyId:
+      type: string
+      pattern: '^SWP-CMP-\d+$'
+      example: SWP-CMP-101
+    ServiceLineId:
+      type: string
+      pattern: '^SWP-SVC-\d+$'
+      example: SWP-SVC-003
+    PositionId:
+      type: string
+      pattern: '^SWP-POS-\d+$'
+      example: SWP-POS-014
+    LeaveTypeId:
+      type: string
+      pattern: '^SWP-LT-\d+$'
+      example: SWP-LT-001
+    AttendanceCodeId:
+      type: string
+      pattern: '^SWP-AC-\d+$'
+      example: SWP-AC-001
+    OvertimeRuleId:
+      type: string
+      pattern: '^SWP-OTR-\d+$'
+      example: SWP-OTR-001
+    UserId:
+      type: string
+      pattern: '^SWP-USR-\d+$'
+      example: SWP-USR-1042
+
+    # ---- Employee -------------------------------------------------------
+
+    BankAccount:
+      type: object
+      properties:
+        bank_name: { type: string, example: BCA }
+        account_number: { type: string, example: "1234567890" }
+        account_holder_name: { type: string, example: Budi Santoso }
+
+    Gender:
+      type: string
+      enum: [MALE, FEMALE]
+
+    EmployeeStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE]
+      description: |
+        Employee lifecycle state. Deactivation is a terminal soft-state per
+        EP-7 / Wave 3.4 (reactivation possible via `:reactivate`).
+
+    Employee:
+      type: object
+      description: |
+        Full employee record. The list response uses the same shape — the
+        picker projection is just `id`, `full_name`, `nip`,
+        `current_position`, `current_client_company`.
+      required: [id, full_name, nik, join_at, status, has_login]
+      properties:
+        id: { $ref: '#/components/schemas/EmployeeId' }
+        user_id:
+          allOf: [{ $ref: '#/components/schemas/UserId' }]
+          nullable: true
+          description: Linked E1 User account (null until provisioned).
+        full_name: { type: string, maxLength: 200 }
+        nik:
+          type: string
+          description: Indonesian KTP / national ID. Unique (EP-2). HR-only edit (EP-6).
+          example: "3175011505900012"
+        nip:
+          type: string
+          description: SWP internal employee number.
+          example: "1042"
+        join_at: { type: string, format: date }
+        gender: { $ref: '#/components/schemas/Gender' }
+        birth_date: { type: string, format: date }
+        birth_place: { type: string }
+        phone:
+          type: string
+          description: Agent-editable via change-request (E2 §8 lock).
+          example: "+62-812-3344-5566"
+        email_personal: { type: string, format: email }
+        address:
+          type: string
+          description: Agent-editable via change-request.
+        npwp:
+          type: string
+          description: HR-only edit. Indonesian tax ID. May be null for non-PKP agents.
+        bpjs_kesehatan: { type: string }
+        bpjs_ketenagakerjaan: { type: string }
+        bank_account:
+          allOf: [{ $ref: '#/components/schemas/BankAccount' }]
+          description: Agent-editable via change-request.
+        status: { $ref: '#/components/schemas/EmployeeStatus' }
+        has_login:
+          type: boolean
+          description: True if a User record is linked (EP-3 provisioning state).
+        current_position:
+          type: object
+          nullable: true
+          description: Picker summary of the agent's current placement (E3 read).
+          properties:
+            id: { $ref: '#/components/schemas/PositionId' }
+            name: { type: string }
+        current_service_line:
+          type: object
+          nullable: true
+          properties:
+            id: { $ref: '#/components/schemas/ServiceLineId' }
+            name: { type: string }
+        current_client_company:
+          type: object
+          nullable: true
+          properties:
+            id: { $ref: '#/components/schemas/ClientCompanyId' }
+            name: { type: string }
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+        created_by:
+          allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
+          readOnly: true
+
+    EmployeeWriteRequest:
+      type: object
+      description: |
+        Used for both create (`POST /employees`) and patch
+        (`PATCH /employees/{id}`). On patch, all fields are optional and
+        only present fields are updated.
+      properties:
+        full_name: { type: string, maxLength: 200 }
+        nik: { type: string }
+        nip: { type: string }
+        join_at: { type: string, format: date }
+        gender: { $ref: '#/components/schemas/Gender' }
+        birth_date: { type: string, format: date }
+        birth_place: { type: string }
+        phone: { type: string }
+        email_personal: { type: string, format: email }
+        address: { type: string }
+        npwp: { type: string }
+        bpjs_kesehatan: { type: string }
+        bpjs_ketenagakerjaan: { type: string }
+        bank_account: { $ref: '#/components/schemas/BankAccount' }
+        provision_login:
+          type: boolean
+          description: |
+            On create only. If true, also create a linked E1 User with role
+            `agent` and send an invite (EP-3). Optional at create — login can
+            be provisioned later via a separate call (C-1).
+        login_email:
+          type: string
+          format: email
+          description: |
+            Required if `provision_login=true`. Used as the User's login
+            email; unique system-wide (EP-2).
+
+    # ---- ChangeRequest --------------------------------------------------
+
+    ChangeRequestStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+
+    ChangeRequest:
+      type: object
+      description: |
+        Agent's profile-change request awaiting HR approval (EP-5). Only the
+        whitelisted fields can be changed: `phone`, `address`, `bank_account`.
+      required: [id, employee_id, status, submitted_at, changes]
+      properties:
+        id: { $ref: '#/components/schemas/ChangeRequestId' }
+        employee_id: { $ref: '#/components/schemas/EmployeeId' }
+        status: { $ref: '#/components/schemas/ChangeRequestStatus' }
+        submitted_at: { type: string, format: date-time }
+        resolved_at:
+          type: [string, "null"]
+          format: date-time
+        resolved_by:
+          allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
+          nullable: true
+        rejection_reason:
+          type: [string, "null"]
+          description: Set when status=REJECTED.
+        note:
+          type: [string, "null"]
+          description: Free-text note from the agent at submission.
+        changes:
+          type: object
+          description: Only the agent-editable subset.
+          properties:
+            phone: { type: string }
+            address: { type: string }
+            bank_account: { $ref: '#/components/schemas/BankAccount' }
+        request_type:
+          type: string
+          enum: [PHONE, ADDRESS, BANK_ACCOUNT, MULTIPLE]
+          description: Derived from which fields are in `changes`; used by HR filters.
+
+    ChangeRequestCreate:
+      type: object
+      description: Body for `POST /employees/{id}/change-requests`.
+      required: [changes]
+      properties:
+        changes:
+          type: object
+          minProperties: 1
+          properties:
+            phone: { type: string }
+            address: { type: string }
+            bank_account: { $ref: '#/components/schemas/BankAccount' }
+          additionalProperties: false
+        note: { type: string, maxLength: 500 }
+
+    ChangeRequestDetail:
+      type: object
+      description: HR review detail — embeds submitter summary + per-field diff.
+      required: [id, employee, status, submitted_at, diff]
+      properties:
+        id: { $ref: '#/components/schemas/ChangeRequestId' }
+        employee:
+          type: object
+          properties:
+            id: { $ref: '#/components/schemas/EmployeeId' }
+            full_name: { type: string }
+            nip: { type: string }
+        status: { $ref: '#/components/schemas/ChangeRequestStatus' }
+        submitted_at: { type: string, format: date-time }
+        resolved_at:
+          type: [string, "null"]
+          format: date-time
+        resolved_by:
+          allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
+          nullable: true
+        rejection_reason:
+          type: [string, "null"]
+        note:
+          type: [string, "null"]
+        diff:
+          type: object
+          description: Per-field old → new diff.
+          additionalProperties:
+            type: object
+            properties:
+              old: {}
+              new: {}
+
+    # ---- Agreement ------------------------------------------------------
+
+    AgreementType:
+      type: string
+      enum: [PKWT, PKWTT]
+      description: |
+        Indonesian labor-law employment type. `PKWT` = perjanjian kerja
+        waktu tertentu (fixed-term, with end_date). `PKWTT` = perjanjian
+        kerja waktu tidak tertentu (indefinite, no end_date).
+
+    AgreementStatus:
+      type: string
+      enum: [ACTIVE, SUPERSEDED, CLOSED, EXPIRING]
+      description: |
+        `EXPIRING` is a server-computed virtual status — active PKWT within
+        30 days of `end_date`. Persisted status is one of ACTIVE/SUPERSEDED/CLOSED.
+
+    AgreementCloseReason:
+      type: string
+      enum: [RESIGNED, TERMINATED, END_OF_TERM, OTHER]
+
+    TaxProfile:
+      type: string
+      description: |
+        Indonesian PTKP code. Examples: `PTKP_TK0` (single, no dependents),
+        `PTKP_K0`, `PTKP_K1` (married, N dependents).
+      example: PTKP_K0
+
+    BpjsTerms:
+      type: object
+      description: BPJS percentages (statutory + agreement-specific overrides).
+      properties:
+        kesehatan_employer_pct: { type: number, format: float, example: 4.0 }
+        kesehatan_employee_pct: { type: number, format: float, example: 1.0 }
+        ketenagakerjaan_employer_pct: { type: number, format: float, example: 6.24 }
+        ketenagakerjaan_employee_pct: { type: number, format: float, example: 3.0 }
+
+    CompensationTerms:
+      type: object
+      description: |
+        Current compensation. Encrypted at rest (EA-4); response **masks**
+        values to `***` for callers without the `view_compensation`
+        permission (HR admin & super admin only; agents on mobile never see
+        these — they get the agreement summary only).
+      properties:
+        base_salary_idr:
+          type: number
+          format: float
+          description: Base monthly salary in IDR. Encrypted at rest.
+          example: 5200000
+        bpjs_terms: { $ref: '#/components/schemas/BpjsTerms' }
+        tax_profile: { $ref: '#/components/schemas/TaxProfile' }
+        effective_date:
+          type: string
+          format: date
+          description: |
+            Effective date of these terms (`CompensationRecord.effective_date`
+            — F2.2 C-3). Defaults to agreement start_date on create.
+
+    Agreement:
+      type: object
+      required: [id, employee_id, type, status, start_date]
+      properties:
+        id: { $ref: '#/components/schemas/AgreementId' }
+        employee_id: { $ref: '#/components/schemas/EmployeeId' }
+        type: { $ref: '#/components/schemas/AgreementType' }
+        agreement_no:
+          type: string
+          example: "PKWT/SWP/2026/0142"
+        start_date: { type: string, format: date }
+        end_date:
+          type: [string, "null"]
+          format: date
+          description: Required when type=PKWT; null for PKWTT.
+        status: { $ref: '#/components/schemas/AgreementStatus' }
+        predecessor_id:
+          allOf: [{ $ref: '#/components/schemas/AgreementId' }]
+          nullable: true
+          description: Set on the successor created via `:renew` (EA-3).
+        successor_id:
+          allOf: [{ $ref: '#/components/schemas/AgreementId' }]
+          nullable: true
+        closed_reason: { $ref: '#/components/schemas/AgreementCloseReason' }
+        closed_at:
+          type: [string, "null"]
+          format: date-time
+        compensation:
+          allOf: [{ $ref: '#/components/schemas/CompensationTerms' }]
+          description: |
+            Current comp. Hidden / masked for unauthorized roles (EA-4). On
+            mobile (agent role) this field is omitted entirely.
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    AgreementWriteRequest:
+      type: object
+      description: Body for create/patch on agreements.
+      properties:
+        employee_id: { $ref: '#/components/schemas/EmployeeId' }
+        type: { $ref: '#/components/schemas/AgreementType' }
+        agreement_no: { type: string }
+        start_date: { type: string, format: date }
+        end_date:
+          type: string
+          format: date
+          description: Required for PKWT; must be omitted for PKWTT.
+        compensation: { $ref: '#/components/schemas/CompensationTerms' }
+
+    # ---- ClientCompany --------------------------------------------------
+
+    Geofence:
+      type: object
+      description: |
+        Geofence definition for a client company. `radius_m` defaults to
+        **100m** per EPICS.md §8 lock. `active` is derived server-side from
+        `center` (lat/lng) presence per D11.
+      properties:
+        center:
+          type: object
+          nullable: true
+          required: [lat, lng]
+          properties:
+            lat: { type: number, format: double, minimum: -90, maximum: 90 }
+            lng: { type: number, format: double, minimum: -180, maximum: 180 }
+        radius_m:
+          type: integer
+          minimum: 25
+          maximum: 1000
+          default: 100
+          description: Geofence radius in meters. Out-of-range → `GEOFENCE_RADIUS_INVALID`.
+        active:
+          type: boolean
+          readOnly: true
+          description: Server-derived from `center` presence (D11).
+
+    ClientCompany:
+      type: object
+      description: Client company directory entry (F2.3).
+      required: [id, name, address, geofence_radius_m, status]
+      properties:
+        id: { $ref: '#/components/schemas/ClientCompanyId' }
+        name: { type: string, maxLength: 200, example: Plaza Senayan }
+        address: { type: string, example: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270" }
+        geo:
+          type: object
+          nullable: true
+          required: [lat, lng]
+          properties:
+            lat: { type: number, format: double }
+            lng: { type: number, format: double }
+        geofence_radius_m:
+          type: integer
+          minimum: 25
+          maximum: 1000
+          default: 100
+          description: Per-site geofence radius (default 100m per §8 lock).
+        geofence_active:
+          type: boolean
+          readOnly: true
+          description: Server-derived — true iff `geo.lat` and `geo.lng` are set (D11).
+        npwp:
+          type: [string, "null"]
+          description: Optional Indonesian tax ID. Unique when set (CC-2).
+        pic_name: { type: [string, "null"] }
+        phone: { type: [string, "null"] }
+        email: { type: [string, "null"], format: email }
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        has_leader:
+          type: boolean
+          readOnly: true
+          description: True iff the company has an assigned shift leader (E3 — 1/company invariant).
+        active_placement_count:
+          type: integer
+          readOnly: true
+          description: Cached count for the warn-and-guide deactivate flow (CC-5).
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    ClientCompanyWriteRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 200 }
+        address: { type: string }
+        geo:
+          type: object
+          nullable: true
+          properties:
+            lat: { type: number, format: double, minimum: -90, maximum: 90 }
+            lng: { type: number, format: double, minimum: -180, maximum: 180 }
+        geofence_radius_m:
+          type: integer
+          minimum: 25
+          maximum: 1000
+          default: 100
+        npwp: { type: string }
+        pic_name: { type: string }
+        phone: { type: string }
+        email: { type: string, format: email }
+
+    # ---- ServiceLine / Position -----------------------------------------
+
+    ServiceLine:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { $ref: '#/components/schemas/ServiceLineId' }
+        name:
+          type: string
+          example: Parking
+          description: |
+            Unique. Seeded values: Facility Services, Building Management,
+            Parking (SP-1).
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        position_count:
+          type: integer
+          readOnly: true
+          description: Cached count of active positions in this service line.
+
+    ServiceLineWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+
+    Position:
+      type: object
+      required: [id, service_line_id, name, status]
+      properties:
+        id: { $ref: '#/components/schemas/PositionId' }
+        service_line_id: { $ref: '#/components/schemas/ServiceLineId' }
+        name:
+          type: string
+          example: Petugas Parkir
+          description: Unique within its service line (SP-3).
+        alias:
+          type: string
+          description: English label / alternative name.
+          example: Parking Attendant
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    PositionWriteRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        alias: { type: string, maxLength: 100 }
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    # ---- Operational master data ----------------------------------------
+
+    LeaveType:
+      type: object
+      required: [id, name, code, is_annual, requires_document, status]
+      properties:
+        id: { $ref: '#/components/schemas/LeaveTypeId' }
+        name:
+          type: string
+          example: Cuti Tahunan
+          description: Unique (MD-2).
+        code:
+          type: string
+          description: Machine-readable code (e.g., `ANNUAL`, `SICK`, `MATERNITY`). Unique.
+          example: ANNUAL
+        description: { type: string }
+        default_annual_quota:
+          type: integer
+          minimum: 0
+          description: Default per-year quota days (consumed by E6 quota seeding).
+        is_annual:
+          type: boolean
+          description: If true, quota accrues annually (LT-2).
+        requires_document:
+          type: boolean
+          description: If true, leave request must attach a document (LT-3).
+        color:
+          type: string
+          description: Hex color used by calendar UIs (E6). Tokenized — DESIGN-SYSTEM §2.
+          example: "#188E4D"
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    LeaveTypeWriteRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        code: { type: string, maxLength: 30 }
+        description: { type: string }
+        default_annual_quota: { type: integer, minimum: 0 }
+        is_annual: { type: boolean }
+        requires_document: { type: boolean }
+        color: { type: string }
+
+    AttendanceCode:
+      type: object
+      required: [id, code, label, color, is_workday, is_paid, is_billable, needs_verification, status]
+      properties:
+        id: { $ref: '#/components/schemas/AttendanceCodeId' }
+        code:
+          type: string
+          description: Machine-readable code (e.g., `PRESENT`, `LATE`, `ABSENT`). Unique.
+          example: PRESENT
+        label:
+          type: string
+          description: Indonesian display label (e.g., "Hadir"). Unique.
+          example: Hadir
+        description: { type: string }
+        color:
+          type: string
+          description: |
+            Hex. Per DESIGN-SYSTEM §2 the **present** status is **teal**
+            (`#0F8B8D`), NOT brand green — brand green (`#188E4D`) is reserved
+            for primary actions.
+          example: "#0F8B8D"
+        is_workday:
+          type: boolean
+          description: Counts as a working day (relevant for E6 day-counting).
+        is_paid:
+          type: boolean
+          description: Paid by SWP to the agent.
+        is_billable:
+          type: boolean
+          description: Chargeable to the client (E10 billable reporting; verified-only).
+        needs_verification:
+          type: boolean
+          description: Shift-leader verification required (E5).
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    AttendanceCodeWriteRequest:
+      type: object
+      properties:
+        code: { type: string, maxLength: 30 }
+        label: { type: string, maxLength: 60 }
+        description: { type: string }
+        color: { type: string }
+        is_workday: { type: boolean }
+        is_paid: { type: boolean }
+        is_billable: { type: boolean }
+        needs_verification: { type: boolean }
+
+    OvertimeRule:
+      type: object
+      required: [id, name, weekday_rate, restday_rate, holiday_rate, min_minutes, pre_approval_required, status]
+      properties:
+        id: { $ref: '#/components/schemas/OvertimeRuleId' }
+        name:
+          type: string
+          example: Default OT
+          description: Unique (MD-2).
+        service_line_id:
+          allOf: [{ $ref: '#/components/schemas/ServiceLineId' }]
+          nullable: true
+          description: |
+            Optional scope. `null` = global default; otherwise restricted to
+            that service line (OR-2). When both apply, line-scoped wins (C-4).
+        weekday_rate:
+          type: number
+          format: float
+          description: Multiplier for weekday OT (e.g., 1.5).
+          example: 1.5
+        restday_rate:
+          type: number
+          format: float
+          description: Multiplier for rest-day OT (e.g., 2.0).
+          example: 2.0
+        holiday_rate:
+          type: number
+          format: float
+          description: Multiplier for public-holiday OT (e.g., 3.0). Beats rest-day when both apply.
+          example: 3.0
+        min_minutes:
+          type: integer
+          minimum: 30
+          default: 30
+          description: |
+            Minimum OT counted in minutes. **Locked at 30** per EPICS.md §8
+            D4 (resolved 2026-06-02 — was 60 in earlier review). Values
+            below 30 → `RULE_VIOLATION` (422).
+        max_minutes_per_day:
+          type: integer
+          description: Daily cap (e.g., 240 minutes = 4 hours).
+          example: 240
+        pre_approval_required:
+          type: boolean
+          description: If true, OT request must be pre-approved before worked (E7).
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    OvertimeRuleWriteRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        service_line_id:
+          allOf: [{ $ref: '#/components/schemas/ServiceLineId' }]
+          nullable: true
+        weekday_rate: { type: number, format: float }
+        restday_rate: { type: number, format: float }
+        holiday_rate: { type: number, format: float }
+        min_minutes:
+          type: integer
+          minimum: 30
+          default: 30
+        max_minutes_per_day: { type: integer }
+        pre_approval_required: { type: boolean }

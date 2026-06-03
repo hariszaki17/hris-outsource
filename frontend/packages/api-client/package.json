@@ -1,0 +1,33 @@
+{
+  "name": "@swp/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed API client GENERATED from docs/api/*/openapi.yaml via Orval (TanStack Query hooks + Zod + MSW). Never hand-edit src/gen/**.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./e1": "./src/e1.ts",
+    "./e6": "./src/e6.ts",
+    "./mocks": "./src/mocks.ts",
+    "./query-client": "./src/query-client.ts"
+  },
+  "scripts": {
+    "gen": "orval --config ./orval.config.ts && biome format --write ./src/gen >/dev/null 2>&1 || true",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@swp/shared": "workspace:*",
+    "@tanstack/react-query": "5.64.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "9.3.0",
+    "@types/react": "19.0.7",
+    "msw": "2.7.0",
+    "orval": "7.4.1",
+    "typescript": "5.7.3",
+    "zod": "3.24.1"
+  }
+}

@@ -76,7 +76,7 @@ Superseded → neutral · Transfer (Transferred) → orange.
 ## 3. Typography
 - **UI:** Inter. Scale: 30/700 page title · 22/700 section · 19/700 card title · 14/600 strong ·
   14/400 body · 13 secondary · 12 caption · 11/600 +0.5ls table header.
-- **Mono:** IBM Plex Mono — IDs (MIG-xxxxx), times, coordinates.
+- **Mono:** IBM Plex Mono — IDs (SWP-EMP-xxxx, SWP-PL-xxxx, etc. per `docs/api/CONVENTIONS.md`), times, coordinates.
 - **Display/brand:** Poppins/Gilroy (login & marketing only).
 
 ## 4. Spacing / radius / elevation

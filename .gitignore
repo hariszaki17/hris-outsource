@@ -1,0 +1,9 @@
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+
+# Local tooling
+.gstack/
+
+# Node (frontend has its own .gitignore for node_modules/dist/gen/.env.local)
+node_modules/

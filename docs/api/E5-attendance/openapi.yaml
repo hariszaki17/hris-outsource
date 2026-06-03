@@ -1,0 +1,1869 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource — E5 Attendance API
+  version: 1.0.0
+  description: |
+    OpenAPI contract for **E5 Attendance**: GPS-geofenced shift-aware clock in/out, automatic
+    evaluation (lateness / auto-close), exceptions-only verification (with HR escalation for
+    leader-own records), and 7-day agent self-correction workflow.
+
+    Inherits all conventions from [`docs/api/CONVENTIONS.md`](../CONVENTIONS.md) — auth, IDs,
+    pagination, error envelope, RBAC, audit/notification side-effects, bulk-operation contract,
+    file upload contract, rate limits.
+
+    **Locked decisions (EPICS.md §8, 2026-05-29 / 2026-06-02):**
+      - Per-site geofence on `ClientCompany.geofence_radius_m`, default **100 m**.
+      - Late grace **15 min** (strictly-after `start + grace` = late).
+      - Unscheduled clock-in **allowed + flagged** (no block).
+      - **Online-only** for v1 (no offline queue / sync; no `offline_queued` concept).
+      - Billable counts **verified records only** (E5↔E10).
+      - Leader-own exception records **escalate to HR** (no self-verify).
+      - Agent self-correction window **7 days** (older = HR only).
+      - Anti-spoofing (mock GPS) **post-v1** (`wfo` boolean carried in contract but not enforced).
+      - Early clock-out flagged if > 15 min before scheduled end.
+
+    **Cross-epic references:**
+      - E2 — `ClientCompany.geofence_radius_m`, `ClientCompany.location` (lat/lng), `AttendanceCode`.
+      - E3 — `Placement` resolves the agent's site for geofence + service line; `ShiftLeaderAssignment` resolves scope.
+      - E4 — `Schedule` resolves the scheduled `shift_start_at` / `shift_end_at` for lateness, auto-close, early-clock-out detection.
+      - E6 — Approved leave suppresses `ABSENT` (see `Attendance.status=ON_LEAVE`).
+      - E7 — `verified` records feed worked-time → OT detection.
+      - E8 / E10 — Billable/payable rollups consume `VERIFIED` records only.
+
+    **E5 high-volume notes:** `GET /attendance` is the primary read surface and is expected to be
+    paged by cursor with combined filters (employee/company/service_line/date/status/flag/source).
+    All listing endpoints follow CONVENTIONS §8 cursor pagination and reject offset-style queries.
+  contact:
+    name: hris-outsource product+architecture
+  license:
+    name: Internal — SWP only
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: clock-in-out
+    description: F5.1 — mobile clock-in/out, photo upload (multipart), GPS validation.
+  - name: attendance-records
+    description: F5.5 — list/read attendance records (agent self / leader company / HR cross-company).
+  - name: attendance-verification
+    description: F5.3 — single + bulk verify/reject of exception records; HR escalation queue.
+  - name: corrections
+    description: F5.4 — agent/leader/HR-filed corrections, approve/reject/cancel; 7-day agent window.
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # F5.1 — Clock in/out
+  # ---------------------------------------------------------------------------
+  /attendance:clock-in:
+    post:
+      tags: [clock-in-out]
+      operationId: clockIn
+      summary: Agent clocks in (GPS + geofence check).
+      description: |
+        Creates an **Attendance** record for the caller (agent). Server resolves the agent's
+        active placement, today's schedule (E4), and the site's geofence radius (E2
+        `ClientCompany.geofence_radius_m`).
+
+        Behaviour:
+          - **Inside geofence:** record persists with `flags.outside_geofence=false`.
+          - **Outside geofence:** request **rejected** with `422 OUT_OF_GEOFENCE` so the
+            mobile client can render the distance and prompt "Move closer / Tetap clock-in?"
+            (out-of-geofence is *allowed but flagged* per CI-3 — the explicit override is a
+            separate request body field `force_outside_geofence=true`; without override the
+            server defends against accidental remote taps).
+          - **No active schedule today:** `flags.unscheduled=true` is set on the response;
+            the record persists.
+          - **Late:** server computes `late_minutes` from E4 `shift_start_at` + grace (15 min);
+            within grace → `late_minutes=0` and `flags.late=false`; strictly after → `flags.late=true`.
+          - **Already clocked in:** `409 ALREADY_CLOCKED_IN` returned (CI-5).
+          - **GPS unavailable** (client passes `gps_available=false` or omits lat/lng): `422 GPS_UNAVAILABLE`.
+
+        Requires `Idempotency-Key` (CONVENTIONS §13) — mobile retries must not double-create.
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - Iek78  # Agen · Absen (Clock In/Out)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClockInRequest'
+            examples:
+              budi_inside_geofence:
+                summary: Budi clocks in at Plaza Senayan (in-radius, on time)
+                value:
+                  lat: -6.2256
+                  lng: 106.7997
+                  gps_available: true
+                  photo_id: SWP-FILE-att-9182
+                  wfo: true
+                  force_outside_geofence: false
+              budi_late_inside:
+                summary: Budi clocks in 18 min late (in-radius)
+                value:
+                  lat: -6.2256
+                  lng: 106.7997
+                  gps_available: true
+                  wfo: true
+              budi_force_outside:
+                summary: Override after seeing the out-of-geofence warning
+                value:
+                  lat: -6.2298
+                  lng: 106.8051
+                  gps_available: true
+                  wfo: true
+                  force_outside_geofence: true
+      responses:
+        '201':
+          description: Attendance record created.
+          headers:
+            Location:
+              schema: { type: string }
+              description: URL of the new attendance record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClockInResponse'
+              examples:
+                in_radius_on_time:
+                  summary: In-radius, on-time
+                  value:
+                    data:
+                      id: SWP-ATT-10711
+                      employee_id: SWP-EMP-1042
+                      placement_id: SWP-PL-882
+                      schedule_id: SWP-SCH-22041
+                      company_id: SWP-CMP-014
+                      service_line: facility_services
+                      attendance_code_id: SWP-AC-001
+                      shift_start_at: '2026-06-03T07:00:00Z'
+                      shift_end_at: '2026-06-03T15:00:00Z'
+                      check_in_at: '2026-06-03T06:58:12Z'
+                      check_out_at: null
+                      lat_in: -6.2256
+                      lng_in: 106.7997
+                      lat_out: null
+                      lng_out: null
+                      wfo: true
+                      late_minutes: 0
+                      worked_minutes: null
+                      auto_closed: false
+                      status: PRESENT
+                      verification_status: PENDING
+                      flags: []
+                      geofence_in:
+                        inside: true
+                        distance_m: 24
+                        radius_m: 100
+                      geofence_out: null
+                      verified_by: null
+                      verified_at: null
+                      created_at: '2026-06-03T06:58:12Z'
+                      updated_at: '2026-06-03T06:58:12Z'
+                late_in_radius:
+                  summary: Late but in-radius (flag=LATE; verification=PENDING per EV-5)
+                  value:
+                    data:
+                      id: SWP-ATT-10712
+                      employee_id: SWP-EMP-1042
+                      placement_id: SWP-PL-882
+                      schedule_id: SWP-SCH-22042
+                      company_id: SWP-CMP-014
+                      service_line: facility_services
+                      shift_start_at: '2026-06-03T07:00:00Z'
+                      shift_end_at: '2026-06-03T15:00:00Z'
+                      check_in_at: '2026-06-03T07:18:00Z'
+                      lat_in: -6.2256
+                      lng_in: 106.7997
+                      wfo: true
+                      late_minutes: 18
+                      auto_closed: false
+                      status: LATE
+                      verification_status: PENDING
+                      flags: [LATE]
+                      geofence_in:
+                        inside: true
+                        distance_m: 32
+                        radius_m: 100
+                unscheduled:
+                  summary: No schedule today — allowed + flagged
+                  value:
+                    data:
+                      id: SWP-ATT-10713
+                      employee_id: SWP-EMP-1042
+                      placement_id: SWP-PL-882
+                      schedule_id: null
+                      company_id: SWP-CMP-014
+                      service_line: facility_services
+                      check_in_at: '2026-06-03T09:14:01Z'
+                      lat_in: -6.2256
+                      lng_in: 106.7997
+                      wfo: true
+                      late_minutes: 0
+                      status: PRESENT
+                      verification_status: PENDING
+                      flags: [UNSCHEDULED]
+                      geofence_in:
+                        inside: true
+                        distance_m: 27
+                        radius_m: 100
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Already clocked-in (open record exists).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                already_clocked_in:
+                  value:
+                    error:
+                      code: ALREADY_CLOCKED_IN
+                      message: Anda sudah clock-in dan belum clock-out.
+                      fields:
+                        open_attendance_id: SWP-ATT-10711
+                      request_id: req_01J5XK1ABCDEFG
+        '422':
+          description: Geofence / GPS rule violation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                out_of_geofence:
+                  summary: Out-of-geofence (server returned distance for mobile warning)
+                  value:
+                    error:
+                      code: OUT_OF_GEOFENCE
+                      message: Lokasi Anda di luar radius geofence lokasi tugas.
+                      fields:
+                        distance_m: '512'
+                        radius_m: '100'
+                        company_id: SWP-CMP-014
+                      request_id: req_01J5XK2HIJKLMN
+                gps_unavailable:
+                  summary: GPS off / permission denied
+                  value:
+                    error:
+                      code: GPS_UNAVAILABLE
+                      message: Layanan lokasi tidak tersedia. Aktifkan GPS untuk clock-in.
+                      request_id: req_01J5XK3OPQRSTU
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance:clock-out:
+    post:
+      tags: [clock-in-out]
+      operationId: clockOut
+      summary: Agent clocks out.
+      description: |
+        Closes the caller's currently-open attendance record. Server computes
+        `worked_minutes`, sets `check_out_at` / `lat_out` / `lng_out`, and recomputes
+        evaluation (F5.2) — including the `EARLY` flag if clock-out is **> 15 min before**
+        scheduled shift end (EPICS §8 default).
+
+        Notes:
+          - No open record → `409 NOT_CLOCKED_IN` (CI-3 case).
+          - Out-of-geofence on clock-out is **persisted as a flag**, not blocked
+            (asymmetric vs clock-in: leaving the site is normal at the end of a shift).
+          - Photo optional on clock-out.
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - Iek78  # Agen · Absen (Clock In/Out) — clock-out variant (P0 missing per audit §3)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClockOutRequest'
+            examples:
+              normal:
+                value:
+                  lat: -6.2256
+                  lng: 106.7997
+                  gps_available: true
+                  photo_id: SWP-FILE-att-9183
+      responses:
+        '200':
+          description: Clock-out recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClockOutResponse' }
+              examples:
+                normal_close:
+                  value:
+                    data:
+                      id: SWP-ATT-10711
+                      check_in_at: '2026-06-03T06:58:12Z'
+                      check_out_at: '2026-06-03T15:02:33Z'
+                      worked_minutes: 484
+                      status: PRESENT
+                      verification_status: VERIFIED  # auto-approved (no flags)
+                      flags: []
+                      geofence_out:
+                        inside: true
+                        distance_m: 18
+                        radius_m: 100
+                early_clockout:
+                  value:
+                    data:
+                      id: SWP-ATT-10711
+                      check_out_at: '2026-06-03T14:30:00Z'
+                      worked_minutes: 452
+                      status: PRESENT
+                      verification_status: PENDING
+                      flags: [EARLY]
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: No open attendance record (clock-out without prior clock-in).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                not_clocked_in:
+                  value:
+                    error:
+                      code: NOT_CLOCKED_IN
+                      message: Anda belum clock-in. Ajukan koreksi jika seharusnya bekerja.
+                      request_id: req_01J5XK4VWXYZ12
+        '422':
+          description: GPS rule violation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                gps_unavailable:
+                  value:
+                    error:
+                      code: GPS_UNAVAILABLE
+                      message: Layanan lokasi tidak tersedia. Aktifkan GPS untuk clock-out.
+                      request_id: req_01J5XK5345678
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance:photo-upload:
+    post:
+      tags: [clock-in-out]
+      operationId: uploadAttendancePhoto
+      summary: Upload a clock-in / clock-out photo (multipart).
+      description: |
+        Multipart upload per CONVENTIONS §15. Returns an `SWP-FILE-*` ID the client
+        passes to `clock-in` / `clock-out` as `photo_id`. The file is **not yet attached**
+        to any attendance record at this point — orphan uploads expire after 24 h.
+
+        - **Max size:** 10 MB
+        - **Allowed types:** `image/jpeg`, `image/png`
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - Iek78
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPEG or PNG, max 10 MB.
+                caption:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: File stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadedFile' }
+              examples:
+                jpeg:
+                  value:
+                    id: SWP-FILE-att-9182
+                    url: https://api.swp.example.com/api/v1/files/SWP-FILE-att-9182
+                    name: clock-in-2026-06-03-0658.jpg
+                    size_bytes: 482113
+                    mime: image/jpeg
+                    uploaded_at: '2026-06-03T06:58:01Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413':
+          description: File too large (> 10 MB).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                too_large:
+                  value:
+                    error:
+                      code: FILE_TOO_LARGE
+                      message: Ukuran file melebihi 10 MB.
+                      fields:
+                        size_bytes: '12582912'
+                        max_size_bytes: '10485760'
+                      request_id: req_01J5XK6789ABC
+        '415':
+          description: Unsupported media type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                bad_type:
+                  value:
+                    error:
+                      code: UNSUPPORTED_MEDIA_TYPE
+                      message: Hanya file JPEG atau PNG yang diperbolehkan.
+                      fields:
+                        mime: image/heic
+                      request_id: req_01J5XK7DEF0123
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ---------------------------------------------------------------------------
+  # F5.5 — Attendance records (list + detail)
+  # ---------------------------------------------------------------------------
+  /attendance:
+    get:
+      tags: [attendance-records]
+      operationId: listAttendance
+      summary: List attendance records (paged, filtered).
+      description: |
+        Primary read surface for attendance. **High-volume table** — always cursor-paged
+        (CONVENTIONS §8). Default page size 50, cap 200.
+
+        **RBAC + visibility:**
+          - `agent` → only own records (`employee_id` filter is forced to caller).
+          - `shift_leader` → only records whose `company_id` matches their
+            `ShiftLeaderAssignment.company_id` (E3). Server appends this filter; client-supplied
+            `company_id` outside the leader's scope yields `403 OUT_OF_SCOPE`.
+          - `hr_admin` / `super_admin` → all records.
+
+        **`source=leader_own`** (HR-only): filters to records that auto-escalated to HR
+        because the agent was a shift_leader at that company (EPICS §8 — leaders cannot
+        self-verify). Returns `403 FORBIDDEN` for non-HR callers.
+
+        **`q`** searches across employee name, employee ID, and company name.
+
+        The cursor encodes the active filter+sort tuple; mismatched cursor → `400 CURSOR_MISMATCH`.
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - sZCLW  # Kehadiran — Dashboard (HR)
+        - V2QL7  # E5 SL · Team Attendance — Plaza Senayan
+        - PAOwr  # Agen · Riwayat Kehadiran
+        - UEG2J  # Verifikasi Kehadiran (HR) — list-with-status-filter
+        - MsXnm  # E5 SL · Verifikasi — Plaza Senayan
+      parameters:
+        - { in: query, name: limit,        schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
+        - { in: query, name: cursor,       schema: { type: string } }
+        - { in: query, name: sort,         schema: { type: string, default: "check_in_at:desc" }, description: "Comma-separated `field:asc|desc` (CONVENTIONS §9). Supported fields: `check_in_at`, `shift_start_at`, `created_at`, `late_minutes`." }
+        - { in: query, name: q,            schema: { type: string }, description: "Free-text across employee name/ID and company name." }
+        - { in: query, name: employee_id,  schema: { type: string, pattern: '^SWP-EMP-[A-Za-z0-9]+$' } }
+        - { in: query, name: company_id,   schema: { type: string, pattern: '^SWP-CMP-[A-Za-z0-9]+$' } }
+        - { in: query, name: service_line, schema: { type: string, enum: [facility_services, building_management, parking] } }
+        - in: query
+          name: date_from
+          schema: { type: string, format: date }
+          description: Inclusive lower bound on the **shift start date** (or `check_in_at` date for unscheduled records).
+        - in: query
+          name: date_to
+          schema: { type: string, format: date }
+          description: Inclusive upper bound (same basis as `date_from`).
+        - in: query
+          name: status
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/AttendanceStatus' }
+          style: form
+          explode: false
+          description: "Multi-value: `?status=LATE,ABSENT` (status `__in` style)."
+        - in: query
+          name: verification_status
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/VerificationStatus' }
+          style: form
+          explode: false
+        - in: query
+          name: flag
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/AttendanceFlag' }
+          style: form
+          explode: false
+          description: "Multi-value: `?flag=LATE,OUTSIDE_GEOFENCE`."
+        - in: query
+          name: exceptions_only
+          schema: { type: boolean, default: false }
+          description: "Shortcut for `verification_status=PENDING,ESCALATED`. Powers the `Eksepsi` tab."
+        - in: query
+          name: source
+          schema: { type: string, enum: [leader_own] }
+          description: "**HR-only.** `leader_own` filters to records auto-escalated to HR because the subject employee is a shift_leader at that company (no self-verify per EPICS §8). Non-HR callers receive 403."
+      responses:
+        '200':
+          description: Paged list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendancePage' }
+              examples:
+                hr_exceptions_today:
+                  summary: HR — today's exceptions across all companies
+                  value:
+                    data:
+                      - id: SWP-ATT-10712
+                        employee_id: SWP-EMP-1042
+                        employee_name: Budi Santoso
+                        placement_id: SWP-PL-882
+                        schedule_id: SWP-SCH-22042
+                        company_id: SWP-CMP-014
+                        company_name: Plaza Senayan
+                        service_line: facility_services
+                        shift_start_at: '2026-06-03T07:00:00Z'
+                        shift_end_at: '2026-06-03T15:00:00Z'
+                        check_in_at: '2026-06-03T07:18:00Z'
+                        check_out_at: null
+                        late_minutes: 18
+                        worked_minutes: null
+                        auto_closed: false
+                        status: LATE
+                        verification_status: PENDING
+                        flags: [LATE]
+                        wfo: true
+                        geofence_in: { inside: true, distance_m: 32, radius_m: 100 }
+                    next_cursor: 'eyJpZCI6IlNXUC1BVFQtMTA2OTAifQ'
+                    has_more: true
+        '400':
+          description: Invalid filter or cursor mismatch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                cursor_mismatch:
+                  value:
+                    error:
+                      code: CURSOR_MISMATCH
+                      message: Filter berubah; mulai dari halaman pertama.
+                      request_id: req_01J5XK8GHIJKL
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance/{id}:
+    get:
+      tags: [attendance-records]
+      operationId: getAttendance
+      summary: Get a single attendance record (with full flags, geofence, evaluation).
+      description: |
+        Returns the full `Attendance` record including geofence in/out detail and the
+        last-applied correction reference (if any). RBAC same as list — agent self,
+        leader own-company, HR all. 404 used for both "not found" and "out of scope"
+        (CONVENTIONS §7) to avoid leaking existence.
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - VY894  # Detail Verifikasi (HR)
+        - RZPQz  # Detail Verifikasi (SL)
+      parameters:
+        - $ref: '#/components/parameters/AttendanceId'
+      responses:
+        '200':
+          description: Record found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Attendance' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ---------------------------------------------------------------------------
+  # F5.3 — Verification (single + bulk)
+  # ---------------------------------------------------------------------------
+  /attendance/{id}:verify:
+    post:
+      tags: [attendance-verification]
+      operationId: verifyAttendance
+      summary: Approve (verify) a single exception record.
+      description: |
+        Sets `verification_status=VERIFIED`, stamps `verified_by` (caller) + `verified_at` (server time).
+        The record is now billable (EPICS §8: billable = verified-only).
+
+        **Leader-own routing:** if the record belongs to an employee whose role is `shift_leader`
+        and whose assigned company matches this record's company, **the record is auto-escalated
+        to HR at the moment of evaluation** — meaning leaders never see their own records in
+        their queue. If a leader attempts to verify their own record by ID, server returns
+        `403 VERIFY_OWN_RECORD` (defensive; the UI should never show the action).
+
+        **Out-of-scope:** leader trying to verify a record from a company they don't lead →
+        `403 OUT_OF_SCOPE`.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - VY894  # Detail Verifikasi (HR)
+        - RZPQz  # Detail Verifikasi (SL)
+        - UEG2J  # Verifikasi Kehadiran (HR) — inline "Setujui"
+        - MsXnm  # E5 SL · Verifikasi — inline "Setujui"
+      parameters:
+        - $ref: '#/components/parameters/AttendanceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+                  description: Optional reviewer note. Stored on the audit log; not user-visible to the agent unless surfaced in F5.5.
+            examples:
+              with_note:
+                value: { note: "Telat karena kemacetan; bukti chat sudah diterima." }
+      responses:
+        '200':
+          description: Record verified.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Attendance' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: Leader-out-of-scope OR leader trying to self-verify.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                out_of_scope:
+                  value:
+                    error:
+                      code: OUT_OF_SCOPE
+                      message: Anda hanya dapat memverifikasi catatan dari perusahaan binaan Anda.
+                      request_id: req_01J5XK9MNOPQR
+                verify_own_record:
+                  summary: Leader attempted to verify own (already-escalated) record
+                  value:
+                    error:
+                      code: VERIFY_OWN_RECORD
+                      message: Catatan kehadiran Anda sendiri sudah dieskalasi ke HR.
+                      request_id: req_01J5XKASTUVWX
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Record not in a verifiable state (e.g., already VERIFIED / REJECTED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                already_decided:
+                  value:
+                    error:
+                      code: CONFLICT
+                      message: Catatan sudah diputuskan sebelumnya.
+                      fields:
+                        verification_status: VERIFIED
+                      request_id: req_01J5XKBYZ1234
+
+  /attendance/{id}:reject:
+    post:
+      tags: [attendance-verification]
+      operationId: rejectAttendance
+      summary: Reject an exception record (reason required); prompts correction flow.
+      description: |
+        Sets `verification_status=REJECTED`, stamps `rejected_by` / `rejected_at` / `reject_reason`.
+        Audit log + notification to the agent. The mobile client then surfaces "Ajukan koreksi"
+        (F5.4) — separate API call.
+
+        **Audit ↔ user-visible note:** the reason is **user-visible** (shown to the agent), so it
+        lives on the record (not just audit). This is the exception to CONVENTIONS §16.1 — reject
+        reasons are user-facing, not just audit.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - VY894  # Detail Verifikasi (HR) — "Tolak & Minta Koreksi"
+        - RZPQz  # Detail Verifikasi (SL)
+        - UEG2J  # inline "Tolak"
+        - MsXnm  # SL inline "Tolak"
+      parameters:
+        - $ref: '#/components/parameters/AttendanceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  description: Required user-visible reason shown to the agent.
+            examples:
+              standard:
+                value: { reason: "Jam clock-in tidak sesuai catatan absensi visual; mohon ajukan koreksi." }
+      responses:
+        '200':
+          description: Record rejected.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Attendance' }
+        '400':
+          description: Missing/short reason.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                missing_reason:
+                  value:
+                    error:
+                      code: INVALID_REQUEST
+                      message: Alasan penolakan wajib diisi (minimum 5 karakter).
+                      fields:
+                        reason: Wajib diisi.
+                      request_id: req_01J5XKC56789A
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Record not in a rejectable state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /attendance:bulk-verify:
+    post:
+      tags: [attendance-verification]
+      operationId: bulkVerifyAttendance
+      summary: Bulk-verify multiple exception records.
+      description: |
+        Bulk endpoint per CONVENTIONS §14 — partial success allowed. Each record is
+        evaluated and audited individually; per-row failures (e.g., out-of-scope, already
+        decided, leader-own) are returned in `failed[]` with their own error envelope.
+
+        **Required:** `Idempotency-Key`. Mobile/web clients pass UUID v4.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - UEG2J  # HR Verifikasi BulkBar
+        - MsXnm  # SL Verifikasi BulkBar
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, pattern: '^SWP-ATT-[A-Za-z0-9]+$' }
+                note:
+                  type: string
+                  maxLength: 500
+            examples:
+              bulk_slightly_late:
+                value:
+                  ids: [SWP-ATT-10712, SWP-ATT-10713, SWP-ATT-10714, SWP-ATT-10715, SWP-ATT-10716]
+                  note: "Konfirmasi massal — telat <20 mnt karena hujan."
+      responses:
+        '200':
+          description: At least one record succeeded; failures listed in `failed[]`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkActionResponse' }
+              examples:
+                partial:
+                  value:
+                    succeeded: [SWP-ATT-10712, SWP-ATT-10713, SWP-ATT-10715, SWP-ATT-10716]
+                    failed:
+                      - id: SWP-ATT-10714
+                        error:
+                          code: VERIFY_OWN_RECORD
+                          message: Catatan milik leader sendiri — sudah dieskalasi ke HR.
+        '422':
+          description: All rows failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkActionResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance:bulk-reject:
+    post:
+      tags: [attendance-verification]
+      operationId: bulkRejectAttendance
+      summary: Bulk-reject multiple records with a shared reason.
+      description: |
+        Bulk reject — same reason applied to all rows. Each row gets an individual
+        notification to the affected agent and an individual audit log entry. Partial
+        success behaviour matches `bulk-verify`.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - UEG2J
+        - MsXnm
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, reason]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, pattern: '^SWP-ATT-[A-Za-z0-9]+$' }
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+            examples:
+              bulk_reject:
+                value:
+                  ids: [SWP-ATT-10712, SWP-ATT-10713]
+                  reason: "Data clock-in tidak sesuai foto; ajukan koreksi dengan bukti."
+      responses:
+        '200':
+          description: At least one record succeeded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkActionResponse' }
+        '422':
+          description: All rows failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkActionResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ---------------------------------------------------------------------------
+  # F5.4 — Corrections
+  # ---------------------------------------------------------------------------
+  /corrections:
+    post:
+      tags: [corrections]
+      operationId: createCorrection
+      summary: File an attendance correction request.
+      description: |
+        Agent creates a correction for their own past attendance. Server validates:
+
+          - `attendance.employee_id == caller.employee_id` for `agent` role (HR/leader may file on behalf
+            with `on_behalf_of=true` semantics — server fills `requester_id` to the actual caller).
+          - **7-day window** for agents: `now - attendance.shift_date > 7 days` → `422 OUTSIDE_CORRECTION_WINDOW`
+            (HR exempt; older corrections by HR only — EPICS §8 lock).
+          - **One active correction at a time per attendance:** an existing `PENDING` correction on the
+            same `attendance_id` → `409 CORRECTION_ALREADY_PENDING`.
+          - **Evidence required** for `check_in` / `check_out` time corrections via `evidence_file_id`
+            (multipart-uploaded via `/attendance:photo-upload` or via the leave-style attachments endpoint).
+
+        Requires `Idempotency-Key`.
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        # P0 missing per E5-AUDIT §3 — mobile correction-request sheet
+        - mobile-correction-create-form  # placeholder; design TBD
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CorrectionWriteRequest' }
+            examples:
+              missed_clockout:
+                summary: Budi forgot to clock out; proposes 15:10
+                value:
+                  attendance_id: SWP-ATT-10711
+                  type: CHECK_OUT
+                  proposed_check_out_at: '2026-06-03T15:10:00Z'
+                  reason: "Lupa clock-out, sudah pulang pukul 15:10."
+                  evidence_file_id: SWP-FILE-cor-3301
+              wrong_clockin:
+                summary: Budi's clock-in time was 07:00 but recorded 07:18 due to flaky GPS
+                value:
+                  attendance_id: SWP-ATT-10712
+                  type: CHECK_IN
+                  proposed_check_in_at: '2026-06-03T07:00:00Z'
+                  reason: "GPS lambat — bukti foto absen pukul 06:58 sebelum tap."
+                  evidence_file_id: SWP-FILE-cor-3302
+              wrong_code:
+                value:
+                  attendance_id: SWP-ATT-10713
+                  type: CODE
+                  proposed_attendance_code_id: SWP-AC-007
+                  reason: "Hari ini WFO bantuan dari kantor pusat — kode harusnya `wfo_assist`."
+      responses:
+        '201':
+          description: Correction created (PENDING).
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Correction' }
+              examples:
+                pending:
+                  value:
+                    data:
+                      id: SWP-COR-2204
+                      attendance_id: SWP-ATT-10711
+                      requester_id: SWP-EMP-1042
+                      type: CHECK_OUT
+                      proposed_check_in_at: null
+                      proposed_check_out_at: '2026-06-03T15:10:00Z'
+                      proposed_attendance_code_id: null
+                      reason: "Lupa clock-out, sudah pulang pukul 15:10."
+                      evidence_file_id: SWP-FILE-cor-3301
+                      status: PENDING
+                      decided_by: null
+                      decided_at: null
+                      reject_reason: null
+                      original_snapshot:
+                        check_in_at: '2026-06-03T06:58:12Z'
+                        check_out_at: '2026-06-03T15:00:00Z'
+                        attendance_code_id: SWP-AC-001
+                        auto_closed: true
+                        status: INCOMPLETE
+                      created_at: '2026-06-04T08:11:00Z'
+                      updated_at: '2026-06-04T08:11:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A pending correction already exists for this attendance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                already_pending:
+                  value:
+                    error:
+                      code: CORRECTION_ALREADY_PENDING
+                      message: Ada koreksi yang masih menunggu keputusan untuk catatan ini.
+                      fields:
+                        pending_correction_id: SWP-COR-2199
+                      request_id: req_01J5XKDBCDEFG
+        '422':
+          description: Outside correction window OR business rule.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                outside_window:
+                  value:
+                    error:
+                      code: OUTSIDE_CORRECTION_WINDOW
+                      message: Koreksi mandiri hanya untuk 7 hari terakhir. Hubungi HR untuk catatan lebih lama.
+                      fields:
+                        attendance_date: '2026-05-15'
+                        window_days: '7'
+                      request_id: req_01J5XKEHIJKLM
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+    get:
+      tags: [corrections]
+      operationId: listCorrections
+      summary: List corrections (scoped by role).
+      description: |
+        Returns paged corrections.
+
+        **Visibility:**
+          - `agent` → own requests.
+          - `shift_leader` → corrections on attendance records of their assigned company.
+          - `hr_admin` / `super_admin` → all.
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        # P0 missing per E5-AUDIT §3 — leader/HR correction-approval queue + mobile correction tracker
+        - mobile-correction-list
+        - web-correction-queue
+      parameters:
+        - { in: query, name: limit,        schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
+        - { in: query, name: cursor,       schema: { type: string } }
+        - { in: query, name: sort,         schema: { type: string, default: "created_at:desc" } }
+        - { in: query, name: employee_id,  schema: { type: string, pattern: '^SWP-EMP-[A-Za-z0-9]+$' } }
+        - { in: query, name: company_id,   schema: { type: string, pattern: '^SWP-CMP-[A-Za-z0-9]+$' } }
+        - in: query
+          name: status
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/CorrectionStatus' }
+          style: form
+          explode: false
+        - { in: query, name: date_from,    schema: { type: string, format: date } }
+        - { in: query, name: date_to,      schema: { type: string, format: date } }
+        - in: query
+          name: type
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/CorrectionType' }
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: Paged list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CorrectionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /corrections/{id}:
+    get:
+      tags: [corrections]
+      operationId: getCorrection
+      summary: Get a single correction with original-vs-proposed diff.
+      description: |
+        Returns the correction record including `original_snapshot` (frozen at create) and the
+        proposed values, plus a server-rendered `diff[]` array enumerating each changed field
+        for the UI to render side-by-side.
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - web-correction-detail
+      parameters:
+        - $ref: '#/components/parameters/CorrectionId'
+      responses:
+        '200':
+          description: Correction with diff.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Correction' }
+              examples:
+                with_diff:
+                  value:
+                    data:
+                      id: SWP-COR-2204
+                      attendance_id: SWP-ATT-10711
+                      requester_id: SWP-EMP-1042
+                      type: CHECK_OUT
+                      proposed_check_out_at: '2026-06-03T15:10:00Z'
+                      reason: "Lupa clock-out, sudah pulang pukul 15:10."
+                      evidence_file_id: SWP-FILE-cor-3301
+                      status: PENDING
+                      original_snapshot:
+                        check_out_at: '2026-06-03T15:00:00Z'
+                        auto_closed: true
+                        status: INCOMPLETE
+                      diff:
+                        - field: check_out_at
+                          before: '2026-06-03T15:00:00Z'
+                          after: '2026-06-03T15:10:00Z'
+                        - field: auto_closed
+                          before: true
+                          after: false
+                        - field: status
+                          before: INCOMPLETE
+                          after: PRESENT
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /corrections/{id}:approve:
+    post:
+      tags: [corrections]
+      operationId: approveCorrection
+      summary: Approve a correction — applies diff to the attendance and re-evaluates.
+      description: |
+        Transitions the correction `PENDING → APPROVED → APPLIED` atomically (server-side):
+
+          1. `decided_by` / `decided_at` set; status flips to `APPROVED`.
+          2. `Attendance` record updated with proposed values; `original_snapshot` preserved on
+             the correction.
+          3. `Attendance` re-evaluated (F5.2 EV-7): `is_late`, `late_minutes`, `auto_closed`,
+             `status`, `verification_status`, `flags` recomputed. The `CORRECTED` flag is added.
+          4. Correction `status=APPLIED`.
+
+        Returns both the updated correction and a reference to the new attendance state.
+
+        **Leader-own escalation:** if the underlying attendance belongs to a leader at the same
+        company, only HR may approve.
+
+        **Downstream propagation (E7 OT, E10 billing):** noted in PRD F5.4 C-4 as open;
+        v1 emits a notification to recomputation listeners (no synchronous re-bill).
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - web-correction-detail
+      parameters:
+        - $ref: '#/components/parameters/CorrectionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: Correction applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Correction' }
+                  attendance: { $ref: '#/components/schemas/Attendance' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Correction not in PENDING state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /corrections/{id}:reject:
+    post:
+      tags: [corrections]
+      operationId: rejectCorrection
+      summary: Reject a correction with a required reason.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - web-correction-detail
+        - reject-correction-modal  # P0 missing per E5-AUDIT §3
+      parameters:
+        - $ref: '#/components/parameters/CorrectionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 5, maxLength: 500 }
+            examples:
+              reject:
+                value: { reason: "Bukti yang dilampirkan tidak menunjukkan jam clock-in. Lampirkan ulang." }
+      responses:
+        '200':
+          description: Correction rejected.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Correction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Correction not in PENDING state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /corrections/{id}:cancel:
+    post:
+      tags: [corrections]
+      operationId: cancelCorrection
+      summary: Agent withdraws own pending correction.
+      description: |
+        Only the original requester (or HR) may cancel a `PENDING` correction. Sets status
+        `CANCELLED` (terminal). No effect on the attendance record.
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - mobile-correction-list
+      parameters:
+        - $ref: '#/components/parameters/CorrectionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Correction cancelled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Correction' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: Caller is neither the requester nor HR.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Correction not in PENDING state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+# ===========================================================================
+# Components
+# ===========================================================================
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque_or_jwt  # CONVENTIONS §3 — client must treat as opaque
+
+  parameters:
+    AttendanceId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, pattern: '^SWP-ATT-[A-Za-z0-9]+$' }
+      example: SWP-ATT-10711
+    CorrectionId:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, pattern: '^SWP-COR-[A-Za-z0-9]+$' }
+      example: SWP-COR-2204
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, format: uuid }
+      description: |
+        UUID v4 from client. Server caches the response for 24 h (CONVENTIONS §13).
+        Same key + same body → same response; same key + different body → `409 IDEMPOTENCY_KEY_REUSED`.
+
+  schemas:
+    # -----------------------------------------------------------------------
+    # Core attendance entities
+    # -----------------------------------------------------------------------
+    Attendance:
+      type: object
+      description: |
+        A single attendance record for one agent on one shift (or unscheduled).
+        Created on clock-in; closed on clock-out or system auto-close (F5.2 EV-3).
+      required:
+        - id
+        - employee_id
+        - placement_id
+        - company_id
+        - service_line
+        - check_in_at
+        - lat_in
+        - lng_in
+        - status
+        - verification_status
+        - flags
+        - wfo
+        - auto_closed
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+          example: SWP-ATT-10711
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+        employee_name:
+          type: string
+          description: "Server-denormalized for list rendering (avoids client JOIN). Not authoritative for edits."
+          example: Budi Santoso
+        placement_id:
+          type: string
+          pattern: '^SWP-PL-[A-Za-z0-9]+$'
+        schedule_id:
+          type: [string, "null"]
+          pattern: '^SWP-SCH-[A-Za-z0-9]+$'
+          description: "Null for **unscheduled** clock-ins (flagged `UNSCHEDULED`)."
+        company_id:
+          type: string
+          pattern: '^SWP-CMP-[A-Za-z0-9]+$'
+          description: "Derived from `placement` (or schedule when present). Never separately editable."
+        company_name:
+          type: string
+          example: Plaza Senayan
+        service_line:
+          type: string
+          enum: [facility_services, building_management, parking]
+          description: "Derived from placement → service line (no separate JOIN endpoint)."
+        attendance_code_id:
+          type: [string, "null"]
+          pattern: '^SWP-AC-[A-Za-z0-9]+$'
+        shift_start_at:
+          type: [string, "null"]
+          format: date-time
+          description: "From E4 schedule; null if unscheduled."
+        shift_end_at:
+          type: [string, "null"]
+          format: date-time
+        check_in_at:
+          type: string
+          format: date-time
+          example: '2026-06-03T06:58:12Z'
+        check_out_at:
+          type: [string, "null"]
+          format: date-time
+          description: "Null while still open. Set by clock-out OR by auto-close at shift end."
+        lat_in:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        lng_in:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        lat_out:
+          type: [number, "null"]
+          format: double
+        lng_out:
+          type: [number, "null"]
+          format: double
+        photo_in_id:
+          type: [string, "null"]
+          description: SWP-FILE-* id (optional).
+        photo_out_id:
+          type: [string, "null"]
+        wfo:
+          type: boolean
+          description: |
+            Working From Office indicator. **v1: defaults to `true`** (anti-spoofing post-v1 per
+            EPICS §8). The contract carries the field today so future versions can flip it without
+            schema break.
+        late_minutes:
+          type: integer
+          minimum: 0
+          description: |
+            0 if on time OR within grace (≤ 15 min). Strictly > grace → late_minutes = ceil(actual delay).
+            Bounded by shift duration server-side.
+          example: 18
+        worked_minutes:
+          type: [integer, "null"]
+          minimum: 0
+          description: Set on clock-out (or auto-close). Null while open.
+        auto_closed:
+          type: boolean
+          description: True iff record was force-closed by the shift-end job (F5.2 EV-3).
+        status:
+          $ref: '#/components/schemas/AttendanceStatus'
+        verification_status:
+          $ref: '#/components/schemas/VerificationStatus'
+        flags:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceFlag' }
+          description: |
+            Zero or more flags driving the verification queue. **No flags + on-time + in-radius +
+            complete + code-doesn't-need-verification → AUTO_APPROVED.** Any flag → PENDING (or
+            ESCALATED for leader-own).
+        geofence_in:
+          $ref: '#/components/schemas/GeofenceCheck'
+        geofence_out:
+          oneOf:
+            - $ref: '#/components/schemas/GeofenceCheck'
+            - type: "null"
+        verified_by:
+          type: [string, "null"]
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+        verified_at:
+          type: [string, "null"]
+          format: date-time
+        rejected_by:
+          type: [string, "null"]
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+        rejected_at:
+          type: [string, "null"]
+          format: date-time
+        reject_reason:
+          type: [string, "null"]
+          description: User-visible reason (shown to the agent).
+        last_correction_id:
+          type: [string, "null"]
+          pattern: '^SWP-COR-[A-Za-z0-9]+$'
+          description: |
+            ID of the most-recently-applied correction, if any. The `CORRECTED` flag also appears
+            in `flags[]`. Full correction history via `GET /corrections?employee_id=...&attendance_id=...`.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AttendanceStatus:
+      type: string
+      enum: [PRESENT, LATE, INCOMPLETE, ABSENT, ON_LEAVE]
+      description: |
+        - `PRESENT` — clocked in (on time or within grace) and clocked out.
+        - `LATE` — clocked in after grace; otherwise complete.
+        - `INCOMPLETE` — auto-closed by system (no clock-out by shift end).
+        - `ABSENT` — scheduled shift with no clock-in by shift end.
+        - `ON_LEAVE` — overlapped with an approved leave (E6); suppresses `ABSENT` (PRD F5.2 C-6).
+
+    VerificationStatus:
+      type: string
+      enum: [AUTO_APPROVED, PENDING, VERIFIED, REJECTED, ESCALATED]
+      description: |
+        - `AUTO_APPROVED` — clean record (no flags, code doesn't need verification) — INV-3 short-circuit.
+        - `PENDING` — at least one flag; waiting for leader/HR verification.
+        - `VERIFIED` — approved (manually or auto). **Billable.**
+        - `REJECTED` — rejected with reason; agent typically follows up with a correction.
+        - `ESCALATED` — leader-own record auto-routed to HR (filter `?source=leader_own`).
+
+    AttendanceFlag:
+      type: string
+      enum: [LATE, EARLY, OUTSIDE_GEOFENCE, UNSCHEDULED, ESCALATED, CORRECTED, AUTO_CLOSED, ABSENT, NEEDS_CODE_VERIFICATION]
+      description: |
+        Reasons a record needs verification (INV-3 / EV-5):
+        - `LATE` — clock-in strictly after `shift_start + 15 min`.
+        - `EARLY` — clock-out > 15 min before `shift_end`.
+        - `OUTSIDE_GEOFENCE` — either in or out lat/lng outside `radius_m`.
+        - `UNSCHEDULED` — no `schedule_id` (no shift today).
+        - `ESCALATED` — leader-own record routed to HR (drives HR-only filter `source=leader_own`).
+        - `CORRECTED` — at least one correction applied to this record.
+        - `AUTO_CLOSED` — force-closed by shift-end job (F5.2 EV-3).
+        - `ABSENT` — scheduled but no clock-in by shift end.
+        - `NEEDS_CODE_VERIFICATION` — attendance code's `needs_verification=true` (E2).
+
+    GeofenceCheck:
+      type: object
+      required: [inside, distance_m, radius_m]
+      description: |
+        Result of comparing a captured lat/lng to the placement's site geofence.
+        `distance_m` is the Haversine distance from the site centroid to the captured point.
+      properties:
+        inside:
+          type: boolean
+          description: "`distance_m <= radius_m`."
+        distance_m:
+          type: integer
+          minimum: 0
+          description: Server-computed Haversine distance, rounded to meters.
+          example: 24
+        radius_m:
+          type: integer
+          minimum: 0
+          description: "Site's configured radius from `ClientCompany.geofence_radius_m` (default 100; EPICS §8)."
+          example: 100
+
+    # -----------------------------------------------------------------------
+    # Clock-in / clock-out request & response
+    # -----------------------------------------------------------------------
+    ClockInRequest:
+      type: object
+      required: [lat, lng, gps_available]
+      properties:
+        lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+        gps_available:
+          type: boolean
+          description: |
+            Client signal: `false` means location services off / permission denied — server returns
+            `422 GPS_UNAVAILABLE`. Required true to clock in.
+        wfo:
+          type: boolean
+          default: true
+          description: "v1 default `true`; placeholder for post-v1 anti-spoofing flag."
+        photo_id:
+          type: [string, "null"]
+          description: Optional SWP-FILE-* id from `/attendance:photo-upload`.
+        force_outside_geofence:
+          type: boolean
+          default: false
+          description: |
+            When `true`, the client explicitly confirms the out-of-geofence override after seeing
+            the warning sheet. Server then **persists the record** with `flags=[OUTSIDE_GEOFENCE]`
+            instead of rejecting `422 OUT_OF_GEOFENCE`. EPICS §8: "out-of-geofence = allowed + flagged."
+        employee_id:
+          type: [string, "null"]
+          description: |
+            **Only used when a leader/HR clocks in on behalf of an agent (rare; out-of-scope mobile
+            usage; web tool).** Agents must omit — server fills from token.
+
+    ClockInResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Attendance' }
+
+    ClockOutRequest:
+      type: object
+      required: [lat, lng, gps_available]
+      properties:
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lng: { type: number, format: double, minimum: -180, maximum: 180 }
+        gps_available: { type: boolean }
+        photo_id: { type: [string, "null"] }
+
+    ClockOutResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Attendance' }
+
+    UploadedFile:
+      type: object
+      required: [id, url, name, size_bytes, mime, uploaded_at]
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-FILE-[A-Za-z0-9\-]+$'
+        url: { type: string, format: uri }
+        name: { type: string }
+        size_bytes: { type: integer, minimum: 0, maximum: 10485760 }  # 10 MB
+        mime:
+          type: string
+          enum: [image/jpeg, image/png]
+        uploaded_at: { type: string, format: date-time }
+
+    # -----------------------------------------------------------------------
+    # Paged list envelopes
+    # -----------------------------------------------------------------------
+    AttendancePage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Attendance' }
+        next_cursor:
+          type: [string, "null"]
+        has_more:
+          type: boolean
+
+    CorrectionPage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Correction' }
+        next_cursor:
+          type: [string, "null"]
+        has_more:
+          type: boolean
+
+    # -----------------------------------------------------------------------
+    # Verification — bulk response shape
+    # -----------------------------------------------------------------------
+    BulkActionResponse:
+      type: object
+      required: [succeeded, failed]
+      description: |
+        Partial-success shape per CONVENTIONS §14. Status code = 200 if ≥1 succeeded, 422 if all failed.
+      properties:
+        succeeded:
+          type: array
+          items: { type: string }
+        failed:
+          type: array
+          items:
+            type: object
+            required: [id, error]
+            properties:
+              id: { type: string }
+              error: { $ref: '#/components/schemas/Error' }
+
+    # -----------------------------------------------------------------------
+    # Corrections
+    # -----------------------------------------------------------------------
+    Correction:
+      type: object
+      required:
+        - id
+        - attendance_id
+        - requester_id
+        - type
+        - reason
+        - status
+        - original_snapshot
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-COR-[A-Za-z0-9]+$'
+        attendance_id:
+          type: string
+          pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+        requester_id:
+          type: string
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+        type:
+          $ref: '#/components/schemas/CorrectionType'
+        proposed_check_in_at:
+          type: [string, "null"]
+          format: date-time
+        proposed_check_out_at:
+          type: [string, "null"]
+          format: date-time
+        proposed_attendance_code_id:
+          type: [string, "null"]
+          pattern: '^SWP-AC-[A-Za-z0-9]+$'
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+          description: Required user-supplied reason.
+        evidence_file_id:
+          type: [string, "null"]
+          description: SWP-FILE-* id (photo / document evidence). Required for CHECK_IN / CHECK_OUT types.
+        status:
+          $ref: '#/components/schemas/CorrectionStatus'
+        decided_by:
+          type: [string, "null"]
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+        decided_at:
+          type: [string, "null"]
+          format: date-time
+        reject_reason:
+          type: [string, "null"]
+          description: Required on REJECTED; user-visible to the requester.
+        original_snapshot:
+          type: object
+          description: |
+            Frozen pre-application copy of the affected `Attendance` fields. Used for the
+            side-by-side diff and as an audit fallback (CR-5 — "original values preserved").
+          additionalProperties: true
+          example:
+            check_in_at: '2026-06-03T06:58:12Z'
+            check_out_at: '2026-06-03T15:00:00Z'
+            attendance_code_id: SWP-AC-001
+            auto_closed: true
+            status: INCOMPLETE
+        diff:
+          type: array
+          description: |
+            Only present on `GET /corrections/{id}`. Server-rendered field-by-field diff between
+            `original_snapshot` and the proposed/applied state.
+          items:
+            type: object
+            required: [field, before, after]
+            properties:
+              field: { type: string }
+              before: {}  # any
+              after: {}
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CorrectionWriteRequest:
+      type: object
+      required: [attendance_id, type, reason]
+      properties:
+        attendance_id:
+          type: string
+          pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+        type:
+          $ref: '#/components/schemas/CorrectionType'
+        proposed_check_in_at:
+          type: [string, "null"]
+          format: date-time
+          description: Required iff `type=CHECK_IN`.
+        proposed_check_out_at:
+          type: [string, "null"]
+          format: date-time
+          description: Required iff `type=CHECK_OUT`.
+        proposed_attendance_code_id:
+          type: [string, "null"]
+          pattern: '^SWP-AC-[A-Za-z0-9]+$'
+          description: Required iff `type=CODE`.
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 500
+        evidence_file_id:
+          type: [string, "null"]
+          description: Required for `CHECK_IN` / `CHECK_OUT`. Optional for `CODE` / `OTHER`.
+
+    CorrectionType:
+      type: string
+      enum: [CHECK_IN, CHECK_OUT, CODE, OTHER]
+
+    CorrectionStatus:
+      type: string
+      enum: [PENDING, APPROVED, APPLIED, REJECTED, CANCELLED]
+      description: |
+        - `PENDING` — awaiting decision.
+        - `APPROVED` — leader/HR approved; about to apply (transient).
+        - `APPLIED` — applied to `Attendance` and re-evaluated; terminal.
+        - `REJECTED` — rejected with reason; terminal.
+        - `CANCELLED` — requester withdrew before decision; terminal.
+
+    # -----------------------------------------------------------------------
+    # Errors
+    # -----------------------------------------------------------------------
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/Error' }
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: |
+            UPPER_SNAKE_CASE machine-readable. E5-specific codes:
+
+              - `OUT_OF_GEOFENCE` (422; with `distance_m` + `radius_m` in `fields` for the warning display)
+              - `GPS_UNAVAILABLE` (422)
+              - `ALREADY_CLOCKED_IN` (409; `open_attendance_id` in `fields`)
+              - `NOT_CLOCKED_IN` (409)
+              - `OUTSIDE_CORRECTION_WINDOW` (422; `attendance_date` + `window_days` in `fields`)
+              - `CORRECTION_ALREADY_PENDING` (409; `pending_correction_id` in `fields`)
+              - `VERIFY_OWN_RECORD` (403)
+              - `OUT_OF_SCOPE` (403)
+              - `FILE_TOO_LARGE` (413; `size_bytes` + `max_size_bytes` in `fields`)
+              - `UNSUPPORTED_MEDIA_TYPE` (415; `mime` in `fields`)
+              - `CURSOR_MISMATCH` (400)
+              - `IDEMPOTENCY_KEY_REUSED` (409)
+
+            Plus all cross-cutting codes from CONVENTIONS §11.
+        message:
+          type: string
+          description: Human-readable Indonesian by default; `Accept-Language` may switch to en-US.
+        fields:
+          type: object
+          additionalProperties: { type: string }
+          description: Only present on 400/422 (field-level errors) — also used for sidecar context like `distance_m` and `radius_m` on 422 `OUT_OF_GEOFENCE`.
+        request_id:
+          type: string
+          description: For support/debugging; correlates server logs.
+
+  responses:
+    BadRequest:
+      description: Malformed request / validation error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthenticated:
+      description: Missing or expired token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            unauth:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: Sesi berakhir. Silakan masuk kembali.
+                  request_id: req_01J5XK0AAAAAAA
+    Forbidden:
+      description: Role lacks permission OR leader out-of-scope.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: Anda tidak memiliki izin untuk tindakan ini.
+                  request_id: req_01J5XK0BBBBBBB
+    NotFound:
+      description: Resource not found OR caller lacks visibility (deliberately same).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            not_found:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: Catatan tidak ditemukan.
+                  request_id: req_01J5XK0CCCCCCC
+    RateLimited:
+      description: Too many requests.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            rate_limited:
+              value:
+                error:
+                  code: RATE_LIMITED
+                  message: Terlalu banyak permintaan. Coba lagi sesaat.
+                  request_id: req_01J5XK0DDDDDDD
+    InternalError:
+      description: Server error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            internal:
+              value:
+                error:
+                  code: INTERNAL
+                  message: Terjadi kesalahan pada server.
+                  request_id: req_01J5XK0EEEEEEE
