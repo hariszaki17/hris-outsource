@@ -65,6 +65,8 @@ import { OvertimeApprovalsScreen } from '@/features/e7-overtime/overtime-approva
 import { OvertimeDetailScreen } from '@/features/e7-overtime/overtime-detail-screen.tsx';
 import { OvertimeRecordsScreen } from '@/features/e7-overtime/overtime-records-screen.tsx';
 import { OvertimeRulesScreen as OvertimeRulesHolidaysScreen } from '@/features/e7-overtime/overtime-rules-screen.tsx';
+import { PayslipArchiveScreen } from '@/features/e8-payroll/payslip-archive-screen.tsx';
+import { PayslipDetailRoute as PayslipDetailRouteView } from '@/features/e8-payroll/payslip-detail-route.tsx';
 import { PlaceholderScreen } from '@/features/placeholder-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -83,6 +85,7 @@ import {
   createRoute,
   createRouter,
   redirect,
+  useNavigate,
 } from '@tanstack/react-router';
 import { AppShell } from './shell.tsx';
 
@@ -534,6 +537,28 @@ const overtimeDetailRoute = createRoute({
   },
 });
 
+// E8 — Payroll (read-only)
+const payrollRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/payroll',
+  component: function PayrollArchiveRoute() {
+    const navigate = useNavigate();
+    return (
+      <PayslipArchiveScreen
+        onRowClick={(payslipId) => navigate({ to: '/payroll/$payslipId', params: { payslipId } })}
+      />
+    );
+  },
+});
+const payslipDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/payroll/$payslipId',
+  component: function PayslipDetailRoute() {
+    const { payslipId } = payslipDetailRoute.useParams();
+    return <PayslipDetailRouteView payslipId={payslipId} />;
+  },
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/settings',
@@ -653,6 +678,8 @@ const routeTree = rootRoute.addChildren([
     overtimeAturanRoute,
     overtimeDetailRoute,
     overtimeRoute,
+    payslipDetailRoute,
+    payrollRoute,
     placeholder('/reports', 'Laporan'),
     settingsRoute.addChildren([
       settingsIndexRoute,

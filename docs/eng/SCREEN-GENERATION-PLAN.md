@@ -229,11 +229,15 @@ Remaining masters → components:
 - Shared: `overtime-shared.tsx` (status/tier/source/holiday tones+keys). New primitive: `Checkbox` now `forwardRef` (tri-state select-all indeterminate). i18n: full `overtime` namespace (id+en) incl. nested `common`/`errors` (cross-ns keys don't resolve under a sub-namespace — see carry-over).
 - [~] Screenshots deferred to the consolidated end-of-run pass.
 
-### E8 — Payroll (read-only) 🔲  · web container `OaAdZ`
-- [ ] Reconciled against live `.pen`
-- [ ] HR payroll archive — list (F8.2) + payslip detail + "FINAL · Read-only" pill
-- [ ] decrypt-fail detail variant · HR audit-note drawer · empty states · access-denied
-- [ ] Export (Excel-only v1, D5) — via Phase-0 Export modal family
+### E8 — Payroll (read-only) ✅  · web container `OaAdZ`
+- [x] Reconciled against live `.pen` *(6 frames: archive · detail · decrypt-fail · audit-note drawer · export flow · empty/access-denied state-cards)*
+- [x] HR payroll archive — list (F8.2) + filters (period/year/employee/status) + **"FINAL · Read-only" pill** + MISSING_PAYROLL_HISTORY empty + access-denied · `→ features/e8-payroll/payslip-archive-screen.tsx` · frame `jBgLn` · route `/payroll`
+- [x] Payslip detail + component breakdown (earnings/deductions/benefits) + IDR money + **decrypt-fail variant** (null money, "Perlu review" banner) · `→ payslip-detail-screen.tsx` · frames `JaScP`,`q8JxjZ` · route `/payroll/$payslipId`
+- [x] **HR audit-note Drawer** (append-only; immutable banner; list/empty/error/saving) · `→ audit-note-drawer.tsx` · frame `BDHMZ`
+- [x] Export (Excel-only v1, D5) — `PayrollExportButton` + job-state card (QUEUED/RUNNING/DONE/FAILED); detail "Ekspor" surfaces a queued toast. **Full multi-step Export-modal family deferred to E10** (owns `i1uLk`/`PN3mn`…) · `→ payroll-export.tsx`
+- [x] Reusable empty/access-denied state blocks · `→ payroll-states.tsx` · frame `dRfK9`
+- Shared: `payroll-shared.tsx` (status tone+key, IDR `formatMoney`, `formatPeriod`). Route glue: `payslip-detail-route.tsx` (drawer + export toast). i18n: full `payroll` namespace (id+en) incl. nested `common`/`errors`/`status`/`month`. Detail gained `onAddNote` prop (opens drawer). nav: `/payroll` (ADMIN).
+- [~] Screenshots deferred to the consolidated end-of-run pass.
 
 ### E10 — Reporting & Notifications 🔲  · web container `JifD6`
 - [ ] Reconciled against live `.pen`
@@ -275,7 +279,7 @@ Remaining masters → components:
 | E5 Kehadiran (web) | ~4 | 4 ✅ (dashboard HR+SL · verification queue+detail+bulk · corrections queue+detail) |
 | E6 Cuti (web) | ~5 | 5 ✅ (approvals HR-L2+SL-L1 · detail+variants · quotas+grant · calendar) |
 | E7 Lembur (web) | ~4 | 5 ✅ (rekap · approvals HR-L2+SL-L1+bulk · OT decision detail · OT-rules+holiday calendar CRUD · queue/detail/holiday overlays) |
-| E8 Payroll (web) | ~3 | 0 |
+| E8 Payroll (web) | ~3 | 6 ✅ (archive list · payslip detail+decrypt-fail · audit-note drawer · export button+job card · empty/access-denied state-cards · route glue) |
 | E10 Reporting (web) | ~5 | 0 |
 | Phase 3 — mobile | ~8 epics | 0 (deferred) |
 

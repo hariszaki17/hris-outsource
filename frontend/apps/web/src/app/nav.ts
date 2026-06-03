@@ -19,6 +19,7 @@ import {
   Settings,
   Timer,
   Users,
+  Wallet,
 } from 'lucide-react';
 
 /**
@@ -57,6 +58,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/leave/quotas', labelKey: 'nav.leaveQuotas', icon: CalendarCheck, roles: ADMIN },
   { to: '/leave/calendar', labelKey: 'nav.leaveCalendar', icon: CalendarDays, roles: ALL_WEB },
   { to: '/overtime', labelKey: 'nav.overtime', icon: Timer, roles: ALL_WEB },
+  { to: '/payroll', labelKey: 'nav.payroll', icon: Wallet, roles: ADMIN },
   { to: '/reports', labelKey: 'nav.reports', icon: ChartColumn, roles: ADMIN },
 ];
 
