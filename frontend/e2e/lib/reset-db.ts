@@ -61,6 +61,7 @@ function getDbUrl(): string {
 // ---------------------------------------------------------------------------
 const TRUNCATE_TABLES = [
   'idempotency_keys',
+  'password_reset_tokens',
   'refresh_tokens',
   'audit_log',
   // Phase 2+: add company, site, employee, placement tables here when they land.
