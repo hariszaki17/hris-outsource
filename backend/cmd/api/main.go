@@ -75,7 +75,7 @@ func run() error {
 	idHandler := identityhttp.NewHandler(idSvc, identityhttp.CookieConfig{
 		Domain: cfg.Auth.CookieDomain,
 		Secure: cfg.Auth.CookieSecure,
-	})
+	}, cfg.Auth.AccessTTL)
 
 	handler := server.New(server.Deps{
 		AllowedOrigins: cfg.HTTP.AllowedOrigins,

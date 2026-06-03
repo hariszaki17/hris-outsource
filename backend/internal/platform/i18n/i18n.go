@@ -36,9 +36,13 @@ var messages = map[Lang]map[string]string{
 		"INTERNAL":        "Terjadi kesalahan pada sistem.",
 		"MAINTENANCE":     "Sistem sedang dalam pemeliharaan.",
 
-		"INVALID_CREDENTIALS": "Email atau kata sandi salah.",
-		"ACCOUNT_DISABLED":    "Akun Anda telah dinonaktifkan.",
-		"INVALID_REFRESH":     "Sesi tidak valid. Silakan masuk kembali.",
+		// E1 authentication (AU-1..AU-4)
+		"INVALID_CREDENTIALS":  "Email atau kata sandi salah.",
+		"ACCOUNT_DISABLED":     "Akun Anda telah dinonaktifkan.",
+		"INVALID_REFRESH":      "Sesi tidak valid. Silakan masuk kembali.",
+		"RESET_TOKEN_EXPIRED":  "Tautan reset sudah kedaluwarsa. Mohon minta tautan baru.",
+		"WEAK_PASSWORD":        "Kata sandi tidak memenuhi kebijakan.",
+		"FORGOT_PASSWORD_SENT": "Jika email terdaftar, tautan reset telah dikirim.",
 	},
 	EN: {
 		"INVALID_REQUEST": "The request is invalid.",
@@ -53,9 +57,13 @@ var messages = map[Lang]map[string]string{
 		"INTERNAL":        "An internal error occurred.",
 		"MAINTENANCE":     "The system is under maintenance.",
 
-		"INVALID_CREDENTIALS": "Incorrect email or password.",
-		"ACCOUNT_DISABLED":    "Your account has been disabled.",
-		"INVALID_REFRESH":     "Invalid session. Please sign in again.",
+		// E1 authentication (AU-1..AU-4)
+		"INVALID_CREDENTIALS":  "Incorrect email or password.",
+		"ACCOUNT_DISABLED":     "Your account has been disabled.",
+		"INVALID_REFRESH":      "Invalid session. Please sign in again.",
+		"RESET_TOKEN_EXPIRED":  "The reset link has expired. Please request a new one.",
+		"WEAK_PASSWORD":        "The password does not meet the policy requirements.",
+		"FORGOT_PASSWORD_SENT": "If the email is registered, a reset link has been sent.",
 	},
 }
 

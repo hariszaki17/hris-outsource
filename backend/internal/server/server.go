@@ -57,6 +57,8 @@ func New(d Deps) http.Handler {
 			r.Post("/auth/login", d.Auth.Login)
 			r.Post("/auth/refresh", d.Auth.Refresh)
 			r.Post("/auth/logout", d.Auth.Logout)
+			r.Post("/auth/forgot-password", d.Auth.ForgotPassword)
+			r.Post("/auth/reset-password", d.Auth.ResetPassword)
 		})
 
 		// --- Authenticated: access token required, then per-user rate limit.

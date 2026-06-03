@@ -34,12 +34,17 @@ type CookieConfig struct {
 }
 
 type Handler struct {
-	svc    *identity.Service
-	cookie CookieConfig
+	svc          *identity.Service
+	cookie       CookieConfig
+	accessTTLSec int // used to emit expires_in (int seconds) per spec
 }
 
-func NewHandler(svc *identity.Service, cookie CookieConfig) *Handler {
-	return &Handler{svc: svc, cookie: cookie}
+func NewHandler(svc *identity.Service, cookie CookieConfig, accessTTL time.Duration) *Handler {
+	return &Handler{
+		svc:          svc,
+		cookie:       cookie,
+		accessTTLSec: int(accessTTL.Seconds()),
+	}
 }
 
 // Login handles POST /auth/login.
@@ -75,7 +80,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	h.writeTokens(w, r, res)
+
+	bearer := r.Header.Get("X-Auth-Transport") == transportBearer
+	if bearer {
+		h.clearCookie(w)
+	} else {
+		h.setCookie(w, res.RefreshToken, res.RefreshExpiresAt)
+	}
+	// Refresh returns the slim RefreshResponse (no user field required by spec).
+	httpx.WriteJSON(w, http.StatusOK, toRefreshResponse(res, bearer, h.accessTTLSec))
 }
 
 // Logout handles POST /auth/logout — revokes the presented refresh token and
@@ -91,23 +104,73 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Me handles GET /auth/me — echoes the authenticated principal (needs auth).
+// Me handles GET /auth/me — loads the full user from DB (so email, full_name,
+// status, scope are always fresh) and emits the spec-shaped MeResponse.
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	p, ok := auth.PrincipalFrom(r.Context())
 	if !ok {
 		httpx.WriteError(w, r, apperr.Unauthenticated())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, userDTO{
-		ID:         p.UserID,
-		Role:       string(p.Role),
-		EmployeeID: p.EmployeeID,
-		CompanyID:  p.CompanyID,
+	user, err := h.svc.Me(r.Context(), p.UserID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, meFromUser(user))
+}
+
+// ForgotPassword handles POST /auth/forgot-password.
+// Per C-2 of authentication.md the response is ALWAYS 202 with the same generic
+// message, regardless of whether the email is registered (anti-enumeration).
+func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotPasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if req.Email == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"email": "Wajib diisi."}))
+		return
+	}
+	// Intentionally ignore any error (including not-found) — anti-enumeration.
+	_ = h.svc.ForgotPassword(r.Context(), req.Email)
+
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]string{
+		"message": "Jika email terdaftar, tautan reset telah dikirim.",
 	})
 }
 
-// writeTokens emits the access token in the body and the refresh token via the
-// transport the client asked for.
+// ResetPassword handles POST /auth/reset-password.
+// 204 on success; 401 RESET_TOKEN_EXPIRED for invalid/expired/used tokens;
+// 422 WEAK_PASSWORD for policy violations.
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetPasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if req.ResetToken == "" {
+		fields["reset_token"] = "Wajib diisi."
+	}
+	if req.NewPassword == "" {
+		fields["new_password"] = "Wajib diisi."
+	}
+	if len(fields) > 0 {
+		httpx.WriteError(w, r, apperr.Invalid(fields))
+		return
+	}
+
+	if err := h.svc.ResetPassword(r.Context(), req.ResetToken, req.NewPassword); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeTokens emits the login response with the access token in the body and the
+// refresh token via the transport the client asked for.
 func (h *Handler) writeTokens(w http.ResponseWriter, r *http.Request, res identity.Result) {
 	bearer := r.Header.Get("X-Auth-Transport") == transportBearer
 	if bearer {
@@ -115,7 +178,7 @@ func (h *Handler) writeTokens(w http.ResponseWriter, r *http.Request, res identi
 	} else {
 		h.setCookie(w, res.RefreshToken, res.RefreshExpiresAt)
 	}
-	httpx.WriteJSON(w, http.StatusOK, toTokenResponse(res, bearer))
+	httpx.WriteJSON(w, http.StatusOK, toLoginResponse(res, bearer, h.accessTTLSec))
 }
 
 func (h *Handler) readRefreshToken(r *http.Request) string {

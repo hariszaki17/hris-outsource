@@ -1,12 +1,14 @@
 // Package identity is the E1 authentication service: login, refresh-token
-// rotation with reuse detection, and logout. It is the reference vertical slice
-// — handler -> service -> repository — that the other epics mirror.
+// rotation with reuse detection, logout, forgot/reset password. It is the
+// reference vertical slice — handler -> service -> repository — that the other
+// epics mirror.
 package identity
 
 import (
 	"context"
 	"errors"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,10 +26,16 @@ type Repository interface {
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
 	GetUserByID(ctx context.Context, id string) (domain.User, error)
 	GetRefreshTokenByHash(ctx context.Context, hash string) (domain.RefreshToken, error)
+	GetResetTokenByHash(ctx context.Context, hash string) (domain.PasswordResetToken, error)
 	// Writes take the active tx so they commit atomically with audit/jobs.
 	InsertRefreshToken(ctx context.Context, tx pgx.Tx, p NewRefreshToken) (domain.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, tx pgx.Tx, id int64) error
 	RevokeFamily(ctx context.Context, tx pgx.Tx, familyID string) error
+	RevokeAllRefreshForUser(ctx context.Context, tx pgx.Tx, userID string) error
+	SetLastLogin(ctx context.Context, tx pgx.Tx, id string) error
+	UpdatePassword(ctx context.Context, tx pgx.Tx, id, hash string) error
+	InsertResetToken(ctx context.Context, tx pgx.Tx, userID, tokenHash string, expiresAt time.Time) (domain.PasswordResetToken, error)
+	MarkResetTokenUsed(ctx context.Context, tx pgx.Tx, id int64) error
 }
 
 // NewRefreshToken carries the fields needed to persist a rotated token.
@@ -67,9 +75,10 @@ type Result struct {
 	RefreshToken     string
 	RefreshExpiresAt time.Time
 	Principal        auth.Principal
+	User             domain.User // full user for LoginResponse (includes FullName, LastLoginAt, etc.)
 }
 
-// Login verifies credentials and issues a token pair.
+// Login verifies credentials and issues a token pair. Records last_login_at (AU-3).
 func (s *Service) Login(ctx context.Context, email, password, userAgent, ip string) (Result, error) {
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -137,8 +146,82 @@ func (s *Service) Logout(ctx context.Context, plaintext string) error {
 	})
 }
 
+// Me loads the full user record for the /auth/me endpoint.
+func (s *Service) Me(ctx context.Context, userID string) (domain.User, error) {
+	user, err := s.repo.GetUserByID(ctx, userID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.User{}, apperr.NotFound()
+	}
+	if err != nil {
+		return domain.User{}, apperr.Internal(err)
+	}
+	return user, nil
+}
+
+// ForgotPassword creates a single-use reset token for the email if found and
+// active. Per C-2 of authentication.md, it always returns nil (no enumeration):
+// the caller MUST emit 202 regardless of whether the email matched. The plaintext
+// token is NOT emailed in this phase — the E2E harness obtains it directly from
+// the password_reset_tokens table.
+func (s *Service) ForgotPassword(ctx context.Context, email string) error {
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil // anti-enumeration: no error, no token
+	}
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	if !user.IsActive() {
+		return nil // disabled account: still no error (anti-enumeration)
+	}
+
+	_, hash := auth.NewRefreshToken() // reuse opaque-token + sha256 helper
+	expiresAt := s.now().Add(time.Hour)
+
+	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		_, err := s.repo.InsertResetToken(ctx, tx, user.ID, hash, expiresAt)
+		return err
+	})
+}
+
+// ResetPassword validates a plaintext reset token, enforces the password policy,
+// sets the new password, and revokes all of the user's sessions (AU-6).
+func (s *Service) ResetPassword(ctx context.Context, plaintext, newPassword string) error {
+	if err := validatePasswordPolicy(newPassword); err != nil {
+		return err
+	}
+
+	hash := auth.HashRefreshToken(plaintext) // same sha256 helper
+	token, err := s.repo.GetResetTokenByHash(ctx, hash)
+	if errors.Is(err, domain.ErrNotFound) {
+		return errResetTokenExpired()
+	}
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	if !token.IsLive(s.now()) {
+		return errResetTokenExpired()
+	}
+
+	newHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return apperr.Internal(err)
+	}
+
+	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		if err := s.repo.UpdatePassword(ctx, tx, token.UserID, newHash); err != nil {
+			return err
+		}
+		if err := s.repo.MarkResetTokenUsed(ctx, tx, token.ID); err != nil {
+			return err
+		}
+		return s.repo.RevokeAllRefreshForUser(ctx, tx, token.UserID)
+	})
+}
+
 // issuePair mints an access token + a new refresh token. When rotatedFrom is
 // set, the old token is revoked in the SAME tx as the new one is inserted.
+// Also records last_login_at (AU-3) in the same transaction.
 func (s *Service) issuePair(ctx context.Context, user domain.User, familyID string, rotatedFrom *int64, userAgent, ip string) (Result, error) {
 	now := s.now()
 	principal := user.Principal()
@@ -166,11 +249,19 @@ func (s *Service) issuePair(ctx context.Context, user domain.User, familyID stri
 			IP:          ip,
 			ExpiresAt:   refreshExp,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		// AU-3: record the last login time in the same tx.
+		return s.repo.SetLastLogin(ctx, tx, user.ID)
 	})
 	if err != nil {
 		return Result{}, apperr.Internal(err)
 	}
+
+	// Patch the user's LastLoginAt so the response reflects the just-set value
+	// without an extra DB round-trip.
+	user.LastLoginAt = &now
 
 	return Result{
 		AccessToken:      access,
@@ -178,7 +269,33 @@ func (s *Service) issuePair(ctx context.Context, user domain.User, familyID stri
 		RefreshToken:     plaintext,
 		RefreshExpiresAt: refreshExp,
 		Principal:        principal,
+		User:             user,
 	}, nil
+}
+
+// validatePasswordPolicy enforces the platform password policy (AU-4).
+// Min 10 chars, must contain upper, lower, digit, and symbol.
+func validatePasswordPolicy(pw string) error {
+	if len(pw) < 10 {
+		return errWeakPassword()
+	}
+	var hasUpper, hasLower, hasDigit, hasSymbol bool
+	for _, r := range pw {
+		switch {
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		case unicode.IsPunct(r) || unicode.IsSymbol(r):
+			hasSymbol = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit || !hasSymbol {
+		return errWeakPassword()
+	}
+	return nil
 }
 
 // --- domain-specific errors (i18n messages live in platform/i18n) ---
@@ -191,4 +308,12 @@ func errAccountDisabled() *apperr.Error {
 }
 func errInvalidRefresh() *apperr.Error {
 	return &apperr.Error{Code: "INVALID_REFRESH", HTTPStatus: 401}
+}
+func errResetTokenExpired() *apperr.Error {
+	return &apperr.Error{Code: "RESET_TOKEN_EXPIRED", HTTPStatus: 401}
+}
+func errWeakPassword() *apperr.Error {
+	return apperr.Rule("WEAK_PASSWORD", map[string]string{
+		"new_password": "Minimal 10 karakter, harus mengandung huruf besar, kecil, angka, dan simbol.",
+	})
 }
