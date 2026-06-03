@@ -13,11 +13,23 @@
   #root {
     height: 100%;
   }
+  /* The console is a light-themed app. Pin `color-scheme: light` so native form-control popups
+     (<select> option lists, date pickers, the number-input spinners) render in light mode instead
+     of inheriting the OS dark scheme — otherwise they appear transparent / dark and break the
+     theme. Also normalise the native select/option colours to the design tokens. */
+  :root {
+    color-scheme: light;
+  }
   body {
     margin: 0;
     background-color: var(--color-app);
     color: var(--color-text);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+  select,
+  option {
+    background-color: var(--color-surface);
+    color: var(--color-text);
   }
 }

@@ -75,18 +75,15 @@ export type LeaveQuotasSearch = {
 
 const adjustSchema = z.object({
   delta: z
-    .number({ invalid_type_error: 'leaveQuotas.errors.deltaRequired' })
-    .int('leaveQuotas.errors.deltaInt')
-    .refine((v) => v !== 0, 'leaveQuotas.errors.deltaNonZero'),
-  reason: z
-    .string()
-    .min(5, 'leaveQuotas.errors.reasonMin')
-    .max(500, 'leaveQuotas.errors.reasonMax'),
+    .number({ invalid_type_error: 'Wajib diisi' })
+    .int('Harus berupa bilangan bulat')
+    .refine((v) => v !== 0, 'Delta tidak boleh nol'),
+  reason: z.string().min(5, 'Alasan minimal 5 karakter').max(500, 'Alasan maksimal 500 karakter'),
 });
 type AdjustFormValues = z.infer<typeof adjustSchema>;
 
 const bulkGrantSchema = z.object({
-  leave_type_id: z.string().min(1, 'leaveQuotas.errors.leaveTypeRequired'),
+  leave_type_id: z.string().min(1, 'Pilih jenis cuti'),
   period: z.number().int().min(2000).max(2100),
   default_entitlement_days: z.number().int().min(1).max(365).optional(),
   pro_rate: z.boolean(),

@@ -144,7 +144,7 @@ interface DiffTableProps {
 }
 
 function DiffTable({ correction }: DiffTableProps) {
-  const { t } = useTranslation('corrections');
+  const { t } = useTranslation();
   const rows = buildDiffRows(correction, t);
 
   return (
@@ -204,7 +204,7 @@ export function RejectCorrectionModal({
   onOpenChange,
   onDone,
 }: RejectCorrectionModalProps) {
-  const { t } = useTranslation('corrections');
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const rejectMutation = useRejectCorrection();
@@ -308,7 +308,7 @@ export function CorrectionDetailDrawer({
   onOpenChange,
   onDone,
 }: CorrectionDetailDrawerProps) {
-  const { t } = useTranslation('corrections');
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const [rejectOpen, setRejectOpen] = useState(false);

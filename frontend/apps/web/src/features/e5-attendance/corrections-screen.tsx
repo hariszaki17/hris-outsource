@@ -82,7 +82,7 @@ function CorrectionsScreenInner({
   prevCursors,
   onPrevCursorsChange,
 }: CorrectionsScreenProps) {
-  const { t } = useTranslation('corrections');
+  const { t } = useTranslation();
 
   const [drawerCorrectionId, setDrawerCorrectionId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -358,7 +358,7 @@ export function CorrectionsScreen() {
 // ---------------------------------------------------------------------------
 
 function TitleBand() {
-  const { t } = useTranslation('corrections');
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between">
       <div className="flex flex-col gap-1">

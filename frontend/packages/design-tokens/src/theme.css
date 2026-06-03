@@ -57,8 +57,12 @@
   --color-text-2: #52525b;
   --color-text-3: #9ca3af;
   --color-app: #f3f4f6; /* page background (content area) */
+  --color-surface: var(--background); /* #ffffff — cards/modals/selects/tables sit on white.
+    Without this, `bg-surface` generates no rule and those surfaces render transparent (the grey
+    page bleeds through — looks like a "transparent" modal/dropdown). DESIGN-SYSTEM §2 surface. */
   --color-surface-2: #f9fafb;
   --color-border-soft: #eef0f2;
+  --color-error: var(--destructive); /* #bf4a40 — form validation text/border/ring (= bad-tx) */
 
   /* dark sidebar */
   --color-sidebar: #18181b;
