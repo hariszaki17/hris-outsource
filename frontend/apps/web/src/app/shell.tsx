@@ -2,8 +2,9 @@ import {
   NAV_ITEMS,
   SETTINGS_ITEM,
   activeSection,
-  navForRole,
+  hasPermission,
   subnavForSection,
+  visibleNav,
 } from '@/app/nav.ts';
 import { UserMenu } from '@/app/user-menu.tsx';
 import { useCurrentUser } from '@/lib/use-auth.ts';
@@ -17,7 +18,6 @@ import {
   SidebarSpacer,
   Topbar,
   TopbarIconButton,
-  TopbarSearch,
 } from '@swp/ui';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { Bell } from 'lucide-react';
@@ -40,12 +40,12 @@ export function AppShell() {
   // refresh). Render nothing rather than a broken chrome; the guard handles redirects.
   if (!user) return <Outlet />;
 
-  const items = navForRole(NAV_ITEMS, user.role);
-  const showSettings = SETTINGS_ITEM.roles.includes(user.role);
+  const items = visibleNav(NAV_ITEMS, user.permissions);
+  const showSettings = hasPermission(user.permissions, SETTINGS_ITEM.requires);
 
   const inSettings = pathname.startsWith('/settings');
   const section = inSettings ? '/settings' : activeSection(pathname);
-  const subnav = inSettings ? [] : subnavForSection(section, user.role);
+  const subnav = inSettings ? [] : subnavForSection(section, user.permissions);
 
   // Active sub-nav tab = the longest sub-route that prefixes the current path.
   const activeSub = subnav.reduce<string | null>((best, s) => {
@@ -86,15 +86,14 @@ export function AppShell() {
         <Topbar
           left={<Breadcrumb items={crumbs} />}
           right={
-            <>
-              <TopbarSearch placeholder={t('shell.search')} aria-label={t('shell.search')} />
+            <div className="flex items-center gap-2">
               <TopbarIconButton
                 icon={Bell}
                 label={t('shell.notifications')}
                 onClick={() => navigate({ to: '/notifications' })}
               />
               <UserMenu user={user} />
-            </>
+            </div>
           }
         />
         {subnav.length > 0 && (

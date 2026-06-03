@@ -5,16 +5,22 @@
  * backend lands a refresh mechanism, only this file changes.
  */
 import { configureApiClient } from '@swp/api-client';
-import type { Role } from '@swp/shared';
+import type { Permission, Role } from '@swp/shared';
 
 /**
  * The signed-in staff member. The real shape comes from a `/me`-style endpoint once the Go
- * `/auth` design lands (WEB-STACK §6); until then it is set at login. The shell reads `role`
- * to gate nav (defense-in-depth — the API is the real gate, ENGINEERING.md C1).
+ * `/auth` design lands (WEB-STACK §6); until then it is set at login. The shell gates nav on
+ * `permissions` (defense-in-depth — the API is the real gate, ENGINEERING.md C1).
  */
 export interface SessionUser {
   name: string;
   role: Role;
+  /**
+   * Effective permissions (capability axis — docs/eng/NAVIGATION-AND-RBAC.md). Today derived
+   * from `role` via `permissionsForRole()` at login; later returned verbatim by `/me`. The UI
+   * checks these, never `role`, so new/custom roles need no client changes.
+   */
+  permissions: readonly Permission[];
   /** Avatar initials (display-only). */
   initials: string;
   /** Shift leaders are scoped to ONE client company; surfaced in the shell. */

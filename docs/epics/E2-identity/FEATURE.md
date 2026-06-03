@@ -21,7 +21,7 @@ Define **who** the system is about (agents/employees + their SWP login), the **e
 
 ## 3. Scope
 
-**In scope:** Employee profile + user provisioning, EmploymentAgreement (PKWT/PKWTT + current comp), ClientCompany directory, ServiceLine + Position master, operational master (leave types, attendance codes, overtime rules).
+**In scope:** Employee profile + user provisioning, EmploymentAgreement (PKWT/PKWTT + current comp), ClientCompany directory, **Client Sites + geofence config** (placement locations per company), ServiceLine + Position master, operational master (leave types, attendance codes, overtime rules).
 **Out of scope:** auth/RBAC mechanics & sessions (E1), placement (E3), schedules (E4), the *behavior* of attendance/leave/overtime (E5/E6/E7 — E2 only owns their master definitions), payslip history (E8).
 
 ## 4. Domain entities
@@ -30,6 +30,7 @@ Define **who** the system is about (agents/employees + their SWP login), the **e
 erDiagram
     USER ||--|| EMPLOYEE : "logs in as"
     EMPLOYEE ||--o{ EMPLOYMENT_AGREEMENT : "employed under"
+    CLIENT_COMPANY ||--|{ SITE : "has one or more"
     SERVICE_LINE ||--o{ POSITION : "groups"
 
     EMPLOYEE {
@@ -64,13 +65,25 @@ erDiagram
     CLIENT_COMPANY {
         bigint id PK
         string name
-        string address
-        string lat
-        string lng
-        int geofence_radius_m "default 100"
+        string address "registered / billing"
+        string leader_scope "company | site (default company)"
         string npwp
         string pic_name
         string phone
+        string status
+    }
+    SITE {
+        bigint id PK
+        bigint client_company_id FK
+        string name "e.g. Plaza Senayan / Main Site"
+        string code "nullable short code"
+        string address "physical site address"
+        string lat "nullable until geofence set"
+        string lng "nullable until geofence set"
+        int geofence_radius_m "default 100"
+        boolean is_primary "the default Main Site"
+        string pic_name "nullable on-site contact"
+        string phone "nullable"
         string status
     }
     SERVICE_LINE {
@@ -117,6 +130,7 @@ erDiagram
 - **INV-2:** an Employee has **at most one *active* EmploymentAgreement** at a time (history retained; renewals link via `predecessor_id`).
 - **INV-3:** a Position belongs to **exactly one** ServiceLine; position name is unique within its line.
 - **INV-4:** ServiceLine is the fixed seed set (Facility Services, Building Management, Parking); admin-extendable but not deletable while referenced.
+- **INV-5:** a ClientCompany has **at least one** Site, **exactly one** of which is `is_primary` (the default "Main Site"). Geofence config (lat/lng/`geofence_radius_m`) lives on **Site**, never on ClientCompany. Site name is unique within its company. *(Added 2026-06-03, F2.6.)*
 
 ## 5. Features
 
@@ -125,6 +139,7 @@ erDiagram
 | **F2.1** | Employee & Agent Profile (+ login provisioning) | [employee-profile.md](prds/employee-profile.md) |
 | **F2.2** | Employment Agreement (PKWT/PKWTT + comp) | [employment-agreement.md](prds/employment-agreement.md) |
 | **F2.3** | Client Company Directory | [client-company-directory.md](prds/client-company-directory.md) |
+| **F2.6** | Client Sites & Geofence | [client-sites-geofence.md](prds/client-sites-geofence.md) |
 | **F2.4** | Service Lines & Position Master | [service-lines-positions.md](prds/service-lines-positions.md) |
 | **F2.5** | Operational Master Data (leave / attendance / overtime) | [operational-master-data.md](prds/operational-master-data.md) |
 
@@ -190,23 +205,51 @@ flowchart TD
 
 ### F2.3 — Client Company Directory
 
-The catalog of partnering companies where agents are placed (legacy `companies` where `role=2`). Pure reference data with geo (used later by attendance geofencing) and statutory info.
+The catalog of partnering companies where agents are placed (legacy `companies` where `role=2`). Reference data carrying the company's **statutory/billing** info (name, registered address, NPWP, PIC) plus `leader_scope`. The **physical placement locations + geofence** live on its Sites (F2.6), not here.
 
 ```mermaid
 flowchart LR
     subgraph HR[HR / Admin]
         D1([Manage clients]) --> D2[Create/edit client]
-        D2 --> D3[Name, address, geo, NPWP, PIC, phone]
+        D2 --> D3[Name, address, NPWP, PIC, phone, leader_scope]
     end
     subgraph SYS[System]
         D3 --> E1[Unique name/NPWP check]
         E1 --> E2[Save ClientCompany = Active]
-        E2 --> E3[(Persist + audit)]
-        E3 --> E4[Available as placement target E3]
+        E2 --> E2b[Auto-create primary Main Site F2.6]
+        E2b --> E3[(Persist + audit)]
+        E3 --> E4[Sites available as placement targets E3]
     end
 ```
 
-**Entities:** `ClientCompany`. **Consumed by:** E3, E5 (geofence).
+**Entities:** `ClientCompany` (auto-creates a primary `Site`). **Consumed by:** E3, F2.6.
+
+---
+
+### F2.6 — Client Sites & Geofence
+
+The **physical placement locations** of a client company — a mall, an office tower, a parking complex. One company has **one or more** Sites; single-location companies get one auto **primary "Main Site"**. Each site carries the **geofence** (center lat/lng + radius) that E5 clock-in validates against, plus an optional on-site contact. This is the new home for the geo that used to sit on ClientCompany (relocated 2026-06-03 — reverses the earlier "flat, no sub-sites" decision; EPICS §8). Placement (E3) targets a **Site**, and `ClientCompany.leader_scope` decides whether the shift leader is per-company or per-site.
+
+```mermaid
+flowchart TD
+    subgraph HR[HR / Admin]
+        K1([Manage sites]) --> K2[Select client company]
+        K2 --> K3[Add/edit site: name, address]
+        K3 --> K4[Set geofence center lat/lng + radius_m]
+    end
+    subgraph SYS[System]
+        K4 --> L1{Site name unique<br/>within company?}
+        L1 -- No --> L2[Error] --> K3
+        L1 -- Yes --> L3{Geo set?}
+        L3 -- No --> L4[Save site; geofence disabled + flagged in E5]
+        L3 -- Yes --> L5[Save site with active geofence]
+        L4 --> L6[(Persist + audit)]
+        L5 --> L6
+        L6 --> L7[Site selectable as placement target E3 / geofence source E5]
+    end
+```
+
+**Entities:** `Site`. **Depends on:** F2.3 (parent company). **Consumed by:** E3 (placement target), E5 (geofence center), E10 (per-site reporting).
 
 ---
 
@@ -261,7 +304,7 @@ flowchart LR
 - Master data is **soft-deleted / deactivated**, never hard-deleted, because historical records (placements, attendance, leave) reference it.
 - All create/update/deactivate actions are audited (E1).
 - Compensation fields on EmploymentAgreement are **encrypted at rest** (carry-over from legacy `DBEncryption`); access is role-gated.
-- Uniqueness: User email, Employee NIK, ClientCompany name/NPWP, Position name-within-line.
+- Uniqueness: User email, Employee NIK, ClientCompany name/NPWP, **Site name-within-company**, Position name-within-line.
 
 ## 7. Decisions & open questions
 
@@ -274,8 +317,15 @@ flowchart LR
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **Login provisioning** = opt-in at create (provisionable later).
 - ✅ **Service lines** = the 3 seeded but **admin-extendable**.
-- ✅ **Geofence** = per-site `geofence_radius_m` on ClientCompany (default 100m) — added to the model (§4 / F2.3).
+- ✅ **Geofence** = per-site `geofence_radius_m` (default 100m) — *(superseded 2026-06-03: relocated from ClientCompany onto the new `Site` entity, see below).*
 - ✅ **Agent mobile-editable fields** = phone, address, bank (HR-approved).
+
+**Resolved (2026-06-03) — Client Sites (EPICS §8):**
+- ✅ **Sites are first-class** (reverses "flat, no sub-sites"): ClientCompany 1→N `Site`; geofence (address, lat/lng, radius) **moves off ClientCompany onto Site** (INV-5, F2.6).
+- ✅ **Every company has ≥1 Site** — single-location companies get one auto primary **Main Site**; Placement (E3) targets a Site (required).
+- ✅ **Geofence model** = single circle (center + radius) per site; multi-circle/polygon are post-v1.
+- ✅ **`leader_scope`** on ClientCompany (`company` | `site`, default `company`) decides per-company vs per-site shift leadership (E3 INV-2/3/4).
+- ✅ **Migration** = sites net-new; loader auto-creates one Main Site per company; HR configures geofences post-cutover (E9).
 - ✅ **Overtime rules** shape defined in E7.
 
 **Still open (migration data verification → E9):**

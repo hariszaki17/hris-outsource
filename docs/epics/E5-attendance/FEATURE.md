@@ -94,7 +94,7 @@ erDiagram
 
 ## 6b. Cross-epic note
 
-Geofencing needs a **radius per site** — proposing a `geofence_radius_m` field on **ClientCompany (E2)** alongside its existing lat/lng. Late detection needs a **grace period** (proposed default below). Both flagged as open items.
+Geofencing needs a **center + radius per site** — held on the **`Site` entity (E2 F2.6)** (`lat`/`lng` + `geofence_radius_m`); the agent's placement resolves to exactly one site (E3 INV-5). *(2026-06-03: relocated from ClientCompany onto Site.)* Late detection needs a **grace period** (proposed default below).
 
 ---
 
@@ -237,7 +237,7 @@ flowchart LR
 - ✅ **Auto-clock-out at scheduled shift end** + flag (legacy `checked_out_by_system` behavior).
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
-- ✅ **Geofence radius** = per-site `geofence_radius_m` on ClientCompany (default 100m).
+- ✅ **Geofence radius** = per-site `geofence_radius_m` (default 100m) — *(2026-06-03: on the `Site` entity, E2 F2.6; was ClientCompany).*
 - ✅ **Late grace** = 15 min.
 - ✅ **Unscheduled clock-in** = allowed + flagged.
 - ✅ **Offline clock-in** = online-only for v1 (queue+sync revisited later).

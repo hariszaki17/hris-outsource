@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { ArrowRight, Info, ScrollText, Settings, UsersRound } from 'lucide-react';
+import { ArrowRight, Database, Info, ScrollText, Settings, UsersRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -74,7 +74,7 @@ export function SettingsOverviewScreen() {
         <p className="text-sm text-text-3">{t('settingsOverview.subtitle')}</p>
       </div>
 
-      {/* Three equal cards */}
+      {/* Configuration area cards */}
       <div className="grid grid-cols-3 gap-[18px]">
         <SettingCard
           to="/settings/users"
@@ -98,6 +98,14 @@ export function SettingsOverviewScreen() {
           chipLabel={t('settingsOverview.card.general.chip')}
           heading={t('settingsOverview.card.general.heading')}
           description={t('settingsOverview.card.general.description')}
+          linkLabel={t('settingsOverview.card.open')}
+        />
+        <SettingCard
+          to="/master-data"
+          icon={Database}
+          chipLabel={t('settingsOverview.card.masterData.chip')}
+          heading={t('settingsOverview.card.masterData.heading')}
+          description={t('settingsOverview.card.masterData.description')}
           linkLabel={t('settingsOverview.card.open')}
         />
       </div>

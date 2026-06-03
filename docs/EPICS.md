@@ -144,7 +144,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | Epic | Feature doc | PRDs | Data map |
 |------|-------------|------|----------|
 | **E1** Foundations & Platform | [FEATURE](epics/E1-foundations/FEATURE.md) | authentication · rbac-roles · audit-log · platform-conventions | — (uses E2) |
-| **E2** Identity, Org & Master | [FEATURE](epics/E2-identity/FEATURE.md) | employee-profile · employment-agreement · client-company-directory · service-lines-positions · operational-master-data | [✓](epics/E2-identity/DATA-MAPPING.md) |
+| **E2** Identity, Org & Master | [FEATURE](epics/E2-identity/FEATURE.md) | employee-profile · employment-agreement · client-company-directory · client-sites-geofence · service-lines-positions · operational-master-data | [✓](epics/E2-identity/DATA-MAPPING.md) |
 | **E3** Placement ⭐ | [FEATURE](epics/E3-placement/FEATURE.md) | agent-placement · placement-lifecycle · replacement-transfer · shift-leader-assignment · company-roster | [✓](epics/E3-placement/DATA-MAPPING.md) |
 | **E4** Shift & Scheduling | [FEATURE](epics/E4-shift-scheduling/FEATURE.md) | shift-master-catalog · daily-schedule-assignment · schedule-views · schedule-changes-swaps | [✓](epics/E4-shift-scheduling/DATA-MAPPING.md) |
 | **E5** Attendance | [FEATURE](epics/E5-attendance/FEATURE.md) | clock-in-out · attendance-evaluation · attendance-verification · attendance-corrections · attendance-records | [✓](epics/E5-attendance/DATA-MAPPING.md) |
@@ -154,7 +154,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | **E9** Data Migration *(script-only, no UI v1)* | [FEATURE](epics/E9-migration/FEATURE.md) | extraction-staging · transform-crosswalks · reconciliation-review · load-idempotent · cutover-validation | (orchestrates E2–E8) |
 | **E10** Reporting & Notifications | [FEATURE](epics/E10-reporting/FEATURE.md) | notifications · dashboards · attendance-billable-report · export-framework | — (reads modules) |
 
-**Totals:** 10 epics · 43 PRDs · 10 feature docs · 7 data-mapping docs.
+**Totals:** 10 epics · 44 PRDs · 10 feature docs · 7 data-mapping docs.
 
 > Folder layout: `docs/epics/<E#-name>/FEATURE.md` + `prds/<feature>.md` (+ `DATA-MAPPING.md` for E2–E8).
 
@@ -171,7 +171,10 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - Finance sub-role: none in v1 (HR sees payroll); IDR-only, no multi-currency; bulk actions audited per affected row *(default)*
 
 **E2 — Identity, Org & Master**
-- ✅ Geofence radius: **per-site `geofence_radius_m` on ClientCompany, default 100m**
+- ✅ **Client sites = first-class entity (reverses "flat, no sub-sites")** *(resolved 2026-06-03)* — a ClientCompany has **one or more `Site`s** (placement locations). Geofence config (**address, lat/lng, `geofence_radius_m` default 100m**) moves **off ClientCompany onto `Site`**. This supersedes the 2026-05-29 "flat (no sub-sites)" decision and DATA-MAPPING G-6's "ignore sub-companies". New feature **F2.6 Client Sites & Geofence**.
+- ✅ **Placement targets a Site** *(2026-06-03)* — `Placement.site_id` is **required**; every company has **≥1 Site** (single-location companies get one auto **primary "Main Site"**). E5 geofence always resolves from `placement.site` (no company fallback).
+- ✅ **Geofence model = single circle per site** *(2026-06-03)* — one center (lat/lng) + radius; out-of-geofence stays **allowed + flagged** (E5). Multi-circle / polygon are post-v1.
+- ✅ **Shift-leader scope = configurable per company** *(2026-06-03)* — `ClientCompany.leader_scope ∈ {company, site}` (default `company`). `company` → one leader for the whole company (today's behavior); `site` → one leader **per site**. Rewrites E3 INV-2/3/4 to a "leadership unit" (company **or** site). See [E3 FEATURE §4].
 - Agent mobile-editable fields: phone, address, bank (HR-approved) *(default)*
 - Service lines: the 3 are seeded but **admin-extendable** *(default)*
 
@@ -207,6 +210,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - Payslips **view-only** in v1 (PDF download later); historical payroll **immutable** (HR annotate via audit note); retention indefinite pending compliance input *(default)*
 
 **E9 — Migration**
+- ✅ **Sites are net-new, with a migration shim** *(2026-06-03)* — no geofence/site data is migrated from legacy (`companies.role=2` geo is **not** carried over; `role=4` sub-companies stay ignored). To satisfy the required `Placement.site_id`, the loader **auto-creates one primary "Main Site" per migrated ClientCompany** (geofence empty). Migrated placements attach to it; `leader_scope` defaults to `company`. HR configures geofences and splits multi-site companies **post-cutover**.
 - ✅ Migrate **everything**, incl. full attendance history (plan a larger migration + validation window)
 - ✅ **v1: one-shot script, no UI** *(resolved 2026-06-02)* — big-bang cutover, no human-in-the-loop review queue. Blocking items (`decrypt_fail`, `orphan_identity`, `unmatched_placement`) handled via pre-built alias tables + hardcoded crosswalks in the migration script, OR logged-and-skipped with a post-run report. Inspection via SQL/CLI on staging DB if needed.
 - Placement-string matching = exact + alias list (no fuzzy + manual confirm in v1; if exact+alias miss, log and skip). Keep `lumen_swp` read-only ~6–12 months post-cutover. Maintenance window + validation thresholds sized by dry-runs *(default)*

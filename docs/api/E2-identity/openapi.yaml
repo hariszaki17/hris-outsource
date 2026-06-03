@@ -46,8 +46,14 @@ tags:
   - name: client-companies
     description: |
       Client company directory (legacy `companies.role=2`). Doubles as the
-      ClientCompany picker. **`geofence_radius_m` default 100m** is the locked
-      decision from EPICS.md §8.
+      ClientCompany picker. Statutory/billing info + `leader_scope`; geofence
+      lives on Sites (F2.6).
+  - name: sites
+    description: |
+      Client sites (F2.6) — placement locations under a company, each with its
+      own geofence (center + radius, default 100m per EPICS §8). Every company
+      has ≥1 site (primary "Main Site"). `GET /client-companies/{id}/sites`
+      doubles as the Site picker for placement (E3).
   - name: service-lines-positions
     description: |
       Service lines (Facility / Building Mgmt / Parking — seeded but
@@ -1247,32 +1253,28 @@ paths:
                   value:
                     data:
                       - id: SWP-CMP-101
-                        name: Plaza Senayan
-                        address: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270"
-                        geo:
-                          lat: -6.2253
-                          lng: 106.7995
-                        geofence_radius_m: 100
-                        geofence_active: true
+                        name: Plaza Group
+                        address: "Jl. M.H. Thamrin Kav. 28-30, Jakarta Pusat 10350"
+                        leader_scope: site
                         npwp: "01.234.567.8-013.000"
                         pic_name: Ahmad Rizki
                         phone: "+62-21-572-5555"
-                        email: ops@plazasenayan.example.com
+                        email: ops@plazagroup.example.com
                         status: ACTIVE
                         has_leader: true
+                        site_count: 3
                         active_placement_count: 42
                       - id: SWP-CMP-102
-                        name: Plaza Indonesia
-                        address: "Jl. M.H. Thamrin Kav. 28-30, Jakarta Pusat 10350"
-                        geo: null
-                        geofence_radius_m: 100
-                        geofence_active: false
+                        name: Mall Kelapa Gading
+                        address: "Jl. Boulevard Raya, Jakarta Utara 14240"
+                        leader_scope: company
                         npwp: null
                         pic_name: null
                         phone: null
                         email: null
                         status: ACTIVE
                         has_leader: false
+                        site_count: 1
                         active_placement_count: 0
                     next_cursor: null
                     has_more: false
@@ -1283,13 +1285,10 @@ paths:
       tags: [client-companies]
       summary: Create a client company (CC-1)
       description: |
-        Creates a client company. **`geofence_radius_m` defaults to 100m**
-        if omitted — locked decision per EPICS.md §8 (2026-05-29). Valid
-        range 25–1000m; out-of-range returns `GEOFENCE_RADIUS_INVALID` (400).
-
-        `geofence_active` is **derived server-side** from `geo.lat`/`geo.lng`
-        presence (D11). A company with no geo can still be created — geofence
-        is just disabled until coordinates are added (C-1).
+        Creates a client company and **auto-provisions a primary "Main Site"**
+        (F2.6 / CC-1c) so it is immediately placeable. Geofence config lives on
+        Sites — set it via `POST /client-companies/{id}/sites` or by editing the
+        Main Site. `leader_scope` defaults to `company`.
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -1302,18 +1301,15 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/ClientCompanyWriteRequest' }
             examples:
-              plaza_senayan:
+              plaza_group:
                 value:
-                  name: Plaza Senayan
-                  address: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270"
-                  geo:
-                    lat: -6.2253
-                    lng: 106.7995
-                  geofence_radius_m: 100
+                  name: Plaza Group
+                  address: "Jl. M.H. Thamrin Kav. 28-30, Jakarta Pusat 10350"
+                  leader_scope: site
                   npwp: "01.234.567.8-013.000"
                   pic_name: Ahmad Rizki
                   phone: "+62-21-572-5555"
-                  email: ops@plazasenayan.example.com
+                  email: ops@plazagroup.example.com
       responses:
         '201':
           description: Created.
@@ -1368,11 +1364,11 @@ paths:
     patch:
       operationId: updateClientCompany
       tags: [client-companies]
-      summary: Edit client company (geofence, location, statutory fields)
+      summary: Edit client company (statutory fields, leader_scope)
       description: |
-        Partial update — typical use cases: setting `geo` for a company that
-        was created without coordinates (transitions `geofence_active` from
-        false to true); adjusting `geofence_radius_m`; updating PIC contact.
+        Partial update — statutory/billing fields, PIC contact, and
+        `leader_scope` (company ↔ site). Geofence/location is edited on the
+        company's Sites (F2.6), not here.
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -1479,6 +1475,227 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # =====================================================================
+  # CLIENT SITES & GEOFENCE (F2.6)
+  # =====================================================================
+
+  /client-companies/{client_company_id}/sites:
+    parameters:
+      - { $ref: '#/components/parameters/ClientCompanyIdPath' }
+    get:
+      operationId: listSites
+      tags: [sites]
+      summary: List a company's sites (also serves as the Site picker)
+      description: |
+        Sites of a client company (F2.6). Doubles as the **Site picker** for
+        placement (E3) per §18 — the primary "Main Site" is returned first.
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - in: query
+          name: status
+          schema: { type: string, enum: [ACTIVE, INACTIVE] }
+      responses:
+        '200':
+          description: Page of sites (primary first).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PageEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Site' }
+              examples:
+                two_sites:
+                  value:
+                    data:
+                      - id: SWP-SITE-501
+                        client_company_id: SWP-CMP-101
+                        name: Plaza Senayan
+                        code: PS
+                        address: "Jl. Asia Afrika No. 8, Jakarta Pusat 10270"
+                        geo: { lat: -6.2253, lng: 106.7995 }
+                        geofence_radius_m: 100
+                        geofence_active: true
+                        is_primary: true
+                        pic_name: Ahmad Rizki
+                        phone: "+62-21-572-5555"
+                        status: ACTIVE
+                        active_placement_count: 42
+                      - id: SWP-SITE-502
+                        client_company_id: SWP-CMP-101
+                        name: Plaza Senayan Annex
+                        code: null
+                        address: "Jl. Asia Afrika No. 10, Jakarta Pusat 10270"
+                        geo: null
+                        geofence_radius_m: 100
+                        geofence_active: false
+                        is_primary: false
+                        pic_name: null
+                        phone: null
+                        status: ACTIVE
+                        active_placement_count: 0
+                    next_cursor: null
+                    has_more: false
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createSite
+      tags: [sites]
+      summary: Add a site to a client company (ST-1)
+      description: |
+        Creates a site. `geofence_radius_m` defaults to 100m (§8 lock); valid
+        range 25–1000m → else `GEOFENCE_RADIUS_INVALID` (400). `geofence_active`
+        is derived from `geo` presence (ST-8). A site with no geo is allowed —
+        geofencing is just disabled until coordinates are added. `name` is
+        unique within the company (ST-2).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SiteWriteRequest' }
+            examples:
+              senayan:
+                value:
+                  name: Plaza Senayan
+                  address: "Jl. Asia Afrika No. 8, Jakarta Pusat 10270"
+                  geo: { lat: -6.2253, lng: 106.7995 }
+                  geofence_radius_m: 100
+                  pic_name: Ahmad Rizki
+      responses:
+        '201':
+          description: Created.
+          headers:
+            Location: { schema: { type: string, format: uri } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '400':
+          description: Bad request — e.g., geofence radius out of bounds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                bad_radius:
+                  value:
+                    error:
+                      code: GEOFENCE_RADIUS_INVALID
+                      message: "Radius geofence harus 25–1000 meter."
+                      fields: { geofence_radius_m: "Nilai 5000 di luar rentang yang diizinkan." }
+                      request_id: req_01J5XLA2
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate site name within the company (ST-2).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /sites/{site_id}:
+    parameters:
+      - { $ref: '#/components/parameters/SiteIdPath' }
+    get:
+      operationId: getSite
+      tags: [sites]
+      summary: Get site detail
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      responses:
+        '200':
+          description: Site detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateSite
+      tags: [sites]
+      summary: Edit a site (geofence, location, contact)
+      description: |
+        Partial update — set `geo` to activate the geofence, adjust
+        `geofence_radius_m`, update the on-site PIC. Set `is_primary: true` to
+        make this the primary site (demotes the current primary atomically).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SiteWriteRequest' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Duplicate site name within the company (ST-2).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /sites/{site_id}:deactivate:
+    parameters:
+      - { $ref: '#/components/parameters/SiteIdPath' }
+    post:
+      operationId: deactivateSite
+      tags: [sites]
+      summary: Deactivate a site (ST-6 — active-placement + last-site guard)
+      description: |
+        Sets the site `INACTIVE`. **Blocks** (409) if active placements exist
+        (`SITE_HAS_ACTIVE_PLACEMENTS`) or if it is the company's last active
+        site while the company is active (`SITE_IS_LAST_ACTIVE`). The primary
+        flag must be moved to another active site first.
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Active placements present, or this is the last active site.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                active_placements:
+                  value:
+                    error:
+                      code: SITE_HAS_ACTIVE_PLACEMENTS
+                      message: "Plaza Senayan masih memiliki 42 penempatan aktif. Akhiri atau pindahkan terlebih dahulu."
+                      fields: { active_placement_count: "42" }
+                      request_id: req_01J5XLB3
 
   # =====================================================================
   # SERVICE LINES & POSITIONS (F2.4)
@@ -2352,6 +2569,11 @@ components:
       name: client_company_id
       required: true
       schema: { $ref: '#/components/schemas/ClientCompanyId' }
+    SiteIdPath:
+      in: path
+      name: site_id
+      required: true
+      schema: { $ref: '#/components/schemas/SiteId' }
     ServiceLineIdPath:
       in: path
       name: service_line_id
@@ -2508,6 +2730,10 @@ components:
       type: string
       pattern: '^SWP-CMP-\d+$'
       example: SWP-CMP-101
+    SiteId:
+      type: string
+      pattern: '^SWP-SITE-\d+$'
+      example: SWP-SITE-501
     ServiceLineId:
       type: string
       pattern: '^SWP-SVC-\d+$'
@@ -2884,29 +3110,25 @@ components:
 
     ClientCompany:
       type: object
-      description: Client company directory entry (F2.3).
-      required: [id, name, address, geofence_radius_m, status]
+      description: |
+        Client company directory entry (F2.3). Holds statutory/billing info only —
+        the **physical locations + geofence live on its Sites** (F2.6, relocated
+        2026-06-03; see the `Site` schema and `/client-companies/{id}/sites`).
+      required: [id, name, address, leader_scope, status]
       properties:
         id: { $ref: '#/components/schemas/ClientCompanyId' }
-        name: { type: string, maxLength: 200, example: Plaza Senayan }
-        address: { type: string, example: "Jl. Asia Afrika No. 8, Tanah Abang, Jakarta Pusat 10270" }
-        geo:
-          type: object
-          nullable: true
-          required: [lat, lng]
-          properties:
-            lat: { type: number, format: double }
-            lng: { type: number, format: double }
-        geofence_radius_m:
-          type: integer
-          minimum: 25
-          maximum: 1000
-          default: 100
-          description: Per-site geofence radius (default 100m per §8 lock).
-        geofence_active:
-          type: boolean
-          readOnly: true
-          description: Server-derived — true iff `geo.lat` and `geo.lng` are set (D11).
+        name: { type: string, maxLength: 200, example: Plaza Group }
+        address:
+          type: string
+          description: Registered / billing address (not the geofence — that's per Site).
+          example: "Jl. M.H. Thamrin Kav. 28-30, Jakarta Pusat 10350"
+        leader_scope:
+          type: string
+          enum: [company, site]
+          default: company
+          description: |
+            Shift-leadership granularity (E3 F3.4): `company` = one leader for the
+            whole company; `site` = one leader per active Site. Default `company`.
         npwp:
           type: [string, "null"]
           description: Optional Indonesian tax ID. Unique when set (CC-2).
@@ -2919,7 +3141,11 @@ components:
         has_leader:
           type: boolean
           readOnly: true
-          description: True iff the company has an assigned shift leader (E3 — 1/company invariant).
+          description: True iff the company has an assigned shift leader (company-scope) (E3).
+        site_count:
+          type: integer
+          readOnly: true
+          description: Number of active sites (always ≥1 — every company has a primary Main Site, INV-5).
         active_placement_count:
           type: integer
           readOnly: true
@@ -2932,6 +3158,71 @@ components:
       properties:
         name: { type: string, maxLength: 200 }
         address: { type: string }
+        leader_scope:
+          type: string
+          enum: [company, site]
+          default: company
+        npwp: { type: string }
+        pic_name: { type: string }
+        phone: { type: string }
+        email: { type: string, format: email }
+
+    # ---- Site (F2.6 — placement location + geofence) --------------------
+
+    Site:
+      type: object
+      description: |
+        A physical placement location of a client company (F2.6). Holds the
+        attendance **geofence** (center + radius) that E5 clock-in validates
+        against. Every company has ≥1 Site; exactly one `is_primary` (INV-5).
+      required: [id, client_company_id, name, address, geofence_radius_m, is_primary, status]
+      properties:
+        id: { $ref: '#/components/schemas/SiteId' }
+        client_company_id: { $ref: '#/components/schemas/ClientCompanyId' }
+        name: { type: string, maxLength: 200, example: Plaza Senayan }
+        code:
+          type: [string, "null"]
+          description: Optional short code, unique within the company when set.
+        address: { type: string, example: "Jl. Asia Afrika No. 8, Jakarta Pusat 10270" }
+        geo:
+          type: object
+          nullable: true
+          required: [lat, lng]
+          description: Geofence center. Null until coordinates are set (then geofence activates).
+          properties:
+            lat: { type: number, format: double }
+            lng: { type: number, format: double }
+        geofence_radius_m:
+          type: integer
+          minimum: 25
+          maximum: 1000
+          default: 100
+          description: Geofence radius in meters (default 100m per §8 lock). Out-of-range → `GEOFENCE_RADIUS_INVALID`.
+        geofence_active:
+          type: boolean
+          readOnly: true
+          description: Server-derived — true iff `geo.lat` and `geo.lng` are set (ST-8 / D11).
+        is_primary:
+          type: boolean
+          description: The company's default "Main Site". Exactly one per company (INV-5).
+        pic_name: { type: [string, "null"], description: Optional on-site contact. }
+        phone: { type: [string, "null"] }
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        active_placement_count:
+          type: integer
+          readOnly: true
+          description: Cached count for the deactivate guard (ST-6).
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    SiteWriteRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 200 }
+        code: { type: string }
+        address: { type: string }
         geo:
           type: object
           nullable: true
@@ -2943,10 +3234,11 @@ components:
           minimum: 25
           maximum: 1000
           default: 100
-        npwp: { type: string }
+        is_primary:
+          type: boolean
+          description: Set true to make this the primary site (demotes the current primary).
         pic_name: { type: string }
         phone: { type: string }
-        email: { type: string, format: email }
 
     # ---- ServiceLine / Position -----------------------------------------
 

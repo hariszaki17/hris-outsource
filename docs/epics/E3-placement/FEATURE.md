@@ -21,7 +21,7 @@ Make **placement a first-class entity** (in the legacy system it was just a stri
 
 ## 3. Scope
 
-**In scope:** placement creation, lifecycle/status, re-placement & transfer with history, shift-leader assignment (1 per company), company roster view.
+**In scope:** placement creation (located at a **Site**, E2 F2.6), lifecycle/status, re-placement & transfer with history, shift-leader assignment (1 per **leadership unit** — company or site, per `leader_scope`), company roster view.
 **Out of scope (other epics):** the shift master & rostering (E4), attendance (E5), leave (E6), overtime (E7), payroll figures (E8 read-only), and the migration of legacy placement data (E9).
 
 ## 4. Domain entities
@@ -31,9 +31,12 @@ erDiagram
     EMPLOYEE ||--o{ EMPLOYMENT_AGREEMENT : "employed under"
     EMPLOYMENT_AGREEMENT ||--o{ PLACEMENT : "designated via"
     CLIENT_COMPANY ||--o{ PLACEMENT : "hosts"
+    CLIENT_COMPANY ||--|{ SITE : "has one or more"
+    SITE ||--o{ PLACEMENT : "located at"
     SERVICE_LINE ||--o{ PLACEMENT : "categorizes"
     POSITION ||--o{ PLACEMENT : "role at site"
-    CLIENT_COMPANY ||--|| SHIFT_LEADER_ASSIGNMENT : "has one"
+    CLIENT_COMPANY ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit (scope)"
+    SITE ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit when scope=site"
     EMPLOYEE ||--o{ SHIFT_LEADER_ASSIGNMENT : "serves as"
 
     EMPLOYMENT_AGREEMENT {
@@ -50,6 +53,7 @@ erDiagram
         bigint employee_id FK
         bigint employment_agreement_id FK
         bigint client_company_id FK
+        bigint site_id FK "required; site.client_company_id = client_company_id"
         bigint service_line_id FK
         bigint position_id FK
         date start_date
@@ -64,6 +68,7 @@ erDiagram
     SHIFT_LEADER_ASSIGNMENT {
         bigint id PK
         bigint client_company_id FK
+        bigint site_id FK "null when leader_scope=company; set when =site"
         bigint employee_id FK
         datetime assigned_at
         datetime unassigned_at
@@ -72,11 +77,13 @@ erDiagram
 
 > **Employment vs placement (Indonesian labor law):** In outsourcing (alih daya), the employment relationship is between the agent and **SWP**, not the client. So the **EmploymentAgreement** (`PKWT` fixed-term / `PKWTT` indefinite) lives at the employee↔SWP level (modeled in E2), and a **Placement** is only a *work designation* to a client site. A placement references its employment agreement; for `PKWT` the placement period must fall within the agreement's validity, while `PKWTT` agreements allow **open-ended** placements.
 
-**Invariants (confirmed 2026-05-29 — see §7):**
+**Invariants (confirmed 2026-05-29; INV-2/3/4 + INV-5 revised 2026-06-03 for client sites — see §7):**
 - **INV-1:** an agent has **at most one *active* placement** at any moment (no split/multi-site agents). ✅
-- **INV-2:** a client company with active placements has **exactly one** shift leader.
-- **INV-3:** a shift leader leads **exactly one** company (strict 1:1). ✅
-- **INV-4:** the designated shift leader must themselves be an agent **actively placed at that same company**.
+- **INV-5:** a placement is located at **exactly one `Site`** (`Placement.site_id` required, E2 F2.6), and that site belongs to the placement's client company. ✅
+- A company's **leadership unit** depends on `ClientCompany.leader_scope` (E2): `company` → the company; `site` → each active site. INV-2/3/4 are stated per *leadership unit*:
+  - **INV-2:** a leadership unit with active placements has **exactly one** shift leader.
+  - **INV-3:** a shift leader leads **exactly one** leadership unit (one company **or** one site) — strict 1:1. ✅
+  - **INV-4:** the designated shift leader must themselves be an agent **actively placed within that unit** (at the company / at that site).
 
 ## 5. Features
 
@@ -251,9 +258,13 @@ flowchart LR
 
 ## 7. Decisions & open questions
 
+**Resolved (2026-06-03 — client sites, EPICS §8):**
+- ✅ **Placement targets a `Site`** (E2 F2.6), not just a company — `Placement.site_id` required (INV-5); every company has ≥1 site (auto "Main Site"). E5 geofence resolves from `placement.site`.
+- ✅ **Shift-leader scope = configurable** via `ClientCompany.leader_scope` (`company` | `site`, default `company`). INV-2/3/4 now apply per **leadership unit** (company or site). `ShiftLeaderAssignment` gains a nullable `site_id`. → F3.4.
+
 **Resolved (2026-05-29):**
 - ✅ **INV-1** — one active placement per agent (no split/multi-site).
-- ✅ **INV-3** — shift leader strictly 1:1 with a company (no small-site exceptions for now).
+- ✅ **INV-3** — shift leader strictly 1:1 with a leadership unit *(2026-06-03: unit = company **or** site per `leader_scope`; was company-only)*.
 - ✅ **Renewal** creates a **linked successor** placement (`predecessor_id`), never an in-place extension. → F3.2
 - ✅ **Expiring threshold = 30 days**, hardcoded (no config yet).
 - ✅ **Headcount targets** are **reporting only** (E10) — not modeled at placement level.
@@ -264,7 +275,7 @@ flowchart LR
 
 **Resolved (round 2):**
 - ✅ **Service line** → **manual classification** later, after SWP confirms (no inference for now). → [DATA-MAPPING.md](DATA-MAPPING.md) G-1.
-- ✅ **Sub-companies** (`role=4`) → **not used by SWP; ignore**. ClientCompany = `companies.role=2` only. → G-6.
+- ✅ **Sub-companies** (`role=4`) → **not used by SWP; ignore**. ClientCompany = `companies.role=2` only. → G-6. *(Sites, added 2026-06-03 as E2 F2.6, are **net-new** — not migrated from `role=4`; see E9.)*
 - ✅ **PKWT overrun** → **auto-cap** placement end to agreement end (PRD BR-1b).
 - ✅ **Buffer** → next day after prior end is sufficient.
 

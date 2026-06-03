@@ -34,7 +34,7 @@ docs/
     SCREEN-GENERATION-PLAN.md       ← resumable plan + checklist to generate ALL screens from brainstorm.pen
 ```
 
-The hierarchy is **epic → feature → PRD**. Totals: 10 epics, 43 PRDs, 7 data-mapping docs. Epics are dependency-ordered (E1 Foundations → E2 Identity → E3 Placement → E4 Scheduling → E5 Attendance → E6 Leave / E7 Overtime; E8 Payroll, E9 Migration, E10 Reporting are cross-cutting). The full table and build graph live in `docs/EPICS.md` §5–7.
+The hierarchy is **epic → feature → PRD**. Totals: 10 epics, 44 PRDs, 7 data-mapping docs. Epics are dependency-ordered (E1 Foundations → E2 Identity → E3 Placement → E4 Scheduling → E5 Attendance → E6 Leave / E7 Overtime; E8 Payroll, E9 Migration, E10 Reporting are cross-cutting). The full table and build graph live in `docs/EPICS.md` §5–7.
 
 ### Where decisions live (important)
 - **`docs/EPICS.md` §8 is the authoritative decision log** for **product** decisions. When it conflicts with a per-epic `FEATURE.md` "Still open" section, **§8 wins** — per-epic docs are reconciled progressively.

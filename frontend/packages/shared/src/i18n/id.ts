@@ -116,7 +116,9 @@ export const id = {
   },
   nav: {
     dashboard: 'Dashboard',
+    inbox: 'Kotak Masuk',
     employees: 'Karyawan',
+    clientsAgreements: 'Klien & Perjanjian',
     clientCompanies: 'Perusahaan Klien',
     agreements: 'Perjanjian Kerja',
     changeRequests: 'Persetujuan',
@@ -145,7 +147,6 @@ export const id = {
     brandTitle: 'SWP HRIS',
     brandSubtitle: 'Outsource Ops',
     menu: 'MENU',
-    search: 'Cari agen, lokasi…',
     notifications: 'Notifikasi',
   },
   role: {
@@ -156,7 +157,7 @@ export const id = {
   },
   settingsOverview: {
     title: 'Pengaturan',
-    subtitle: 'Tiga area konfigurasi platform. Bahasa, zona waktu, dan format dikunci di v1.',
+    subtitle: 'Area konfigurasi platform. Bahasa, zona waktu, dan format dikunci di v1.',
     lockedNote:
       'Default v1 dikunci: Bahasa Indonesia · Asia/Jakarta WIB (UTC+7, tanpa DST) · IDR. Lihat tab Umum untuk detail.',
     card: {
@@ -176,6 +177,12 @@ export const id = {
         chip: 'v1 terkunci',
         heading: 'Umum',
         description: 'Konvensi platform: lokalisasi, keamanan, navigasi peran, tentang sistem.',
+      },
+      masterData: {
+        chip: 'Referensi',
+        heading: 'Data Master',
+        description:
+          'Lini layanan, tipe cuti, kode kehadiran, dan aturan lembur — katalog referensi bersama.',
       },
     },
   },
@@ -357,6 +364,12 @@ export const id = {
       placeholder: 'Pilih perusahaan klien',
       empty: 'Tidak ada perusahaan ditemukan',
     },
+    site: {
+      placeholder: 'Pilih site',
+      disabledPlaceholder: 'Pilih perusahaan dulu',
+      empty: 'Tidak ada site ditemukan',
+      primary: 'Utama',
+    },
     serviceLine: {
       placeholder: 'Pilih service line',
       empty: 'Tidak ada service line',
@@ -394,6 +407,7 @@ export const id = {
     fieldAgreement: 'Perjanjian Kerja',
     fieldClientCompany: 'Perusahaan Klien',
     fieldClientCompanyPlaceholder: 'Cari perusahaan klien…',
+    fieldSite: 'Site',
     fieldServiceLine: 'Lini Layanan',
     fieldServiceLinePlaceholder: 'Pilih lini layanan…',
     fieldPosition: 'Posisi',
@@ -1044,6 +1058,47 @@ export const id = {
     uploadDrop: 'Klik atau seret berkas ke sini',
     uploadHint: 'PDF, JPG, PNG · Maks. 10 MB',
   },
+  sites: {
+    panel: {
+      title: 'Site & Geofence',
+      addSite: 'Tambah Site',
+      primary: 'Utama',
+      geofenceActive: 'Geofence aktif',
+      geofenceInactive: 'Geofence nonaktif',
+      placements: '{{count}} penempatan',
+      edit: 'Ubah site',
+      empty: 'Belum ada site.',
+    },
+    form: {
+      createTitle: 'Tambah Site',
+      editTitle: 'Ubah Site',
+      name: 'Nama Site',
+      namePlaceholder: 'Plaza Senayan',
+      code: 'Kode',
+      address: 'Alamat',
+      addressPlaceholder: 'Jl. Asia Afrika No. 8, Jakarta Pusat 10270',
+      pic: 'PIC di Lokasi',
+      phone: 'Telepon',
+      geofenceTitle: 'Geofence',
+      mapHint: 'Klik peta untuk menetapkan titik pusat geofence; ubah radius lewat kolom radius.',
+      noGeoHint: 'Lokasi belum diatur — geofence nonaktif hingga Anda memilih titik.',
+      lat: 'Latitude',
+      lng: 'Longitude',
+      radius: 'Radius (m)',
+      primary: 'Site utama',
+      primaryHint: 'Lokasi default untuk penempatan baru di perusahaan ini.',
+      save: 'Simpan',
+      saving: 'Menyimpan…',
+      cancel: 'Batal',
+    },
+    toast: {
+      created: 'Site dibuat',
+      updated: 'Site diperbarui',
+      createFailed: 'Gagal membuat site',
+      updateFailed: 'Gagal memperbarui site',
+    },
+    state: { loading: 'Memuat…', errorTitle: 'Gagal memuat site' },
+  },
   clientCompanies: {
     title: 'Perusahaan Klien',
     subtitle: 'Direktori klien yang menerima penempatan agen SWP',
@@ -1054,6 +1109,8 @@ export const id = {
       activeDesc: 'sedang dilayani',
       geofence: 'Geofence Aktif',
       geofenceDesc: 'lat/lng terisi',
+      sites: 'Site',
+      sitesDesc: 'lokasi penempatan',
       inactive: 'Nonaktif',
       inactiveDesc: 'tidak menerima penempatan',
     },
@@ -1063,6 +1120,8 @@ export const id = {
       shiftLeader: 'PEMIMPIN SHIFT',
       placements: 'PENEMPATAN',
       geofence: 'GEOFENCE',
+      sites: 'SITE',
+      siteCount: '{{count}} site',
       status: 'STATUS',
       assigned: 'Ditugaskan',
       unassigned: 'Belum ditugaskan',
@@ -1133,6 +1192,11 @@ export const id = {
       longitude: 'Longitude',
       geofenceRadius: 'Radius Geofence (m)',
       createdAt: 'Dibuat',
+      leaderScope: 'Lingkup Shift Leader',
+      leaderScopeCompany: 'Satu leader untuk seluruh perusahaan',
+      leaderScopeSite: 'Satu leader per site',
+      leaderScopeHint:
+        'Lingkup site cocok untuk klien dengan banyak lokasi yang tiap site-nya butuh supervisor sendiri.',
     },
     detail: {
       backLink: 'Kembali ke Perusahaan Klien',
@@ -1182,6 +1246,8 @@ export const id = {
         title: 'Profil Perusahaan',
         subtitle: 'Nama unik. NPWP unik (bila diisi).',
       },
+      geofenceMovedHint:
+        'Lokasi & geofence dikelola per site di halaman detail perusahaan (Site & Geofence).',
       geofenceSection: {
         title: 'Lokasi & Geofence',
         subtitle: 'Geofence default 100m. Tanpa lat/lng, geofence dinonaktifkan untuk situs ini.',

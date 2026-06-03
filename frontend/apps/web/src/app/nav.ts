@@ -1,8 +1,11 @@
-import type { Role } from '@swp/shared';
+import type { Permission } from '@swp/shared';
 import {
+  Banknote,
+  Building2,
   CalendarClock,
   ChartColumn,
   ClipboardCheck,
+  Inbox,
   LayoutDashboard,
   type LucideIcon,
   MapPin,
@@ -13,44 +16,83 @@ import {
 } from 'lucide-react';
 
 /**
- * App-shell navigation config (DESIGN-SYSTEM §5 · `comp/Sidebar` `iCqTB`). The dark sidebar holds
- * **exactly the 8 primary modules the design specifies** (DESIGN-SYSTEM line 171) + a Pengaturan
- * footer — never one item per sub-feature. Sub-pages (master data, client companies, corrections,
- * leave quotas, payroll, …) live **inside their parent section** as a secondary sub-nav (the design
- * IA: "payroll → under Laporan", "verification/corrections → under Kehadiran", no separate sidebar
- * items). Notifications is the topbar bell, not a sidebar item.
+ * App-shell navigation config (DESIGN-SYSTEM §5 · `comp/Sidebar` `iCqTB`; full rationale in
+ * docs/eng/NAVIGATION-AND-RBAC.md). The dark sidebar holds the primary domain modules + a
+ * Pengaturan footer. Sub-pages live **inside their parent section** as a secondary sub-nav
+ * tab strip under the topbar — never one sidebar item per sub-feature.
  *
- * Each item declares the roles that may see it — coarse, hand-authored module visibility. This is
- * **interim**: per ENGINEERING.md A2 the per-operation gate is generated from `x-rbac`; this map
- * will be replaced. Client gating is defense-in-depth only — the Go API is the real gate (C1).
+ * RBAC is **permission-keyed, not role-keyed** (the capability axis): each item declares the
+ * permission(s) it `requires`, and visibility is computed against the signed-in user's
+ * effective `permissions` (SessionUser.permissions). Adding a role — or a future admin-defined
+ * custom role — is a data change to the `ROLE_PERMISSIONS` bundle, with zero nav edits. Client
+ * gating is defense-in-depth only; the Go API is the real gate (ENGINEERING.md C1). Data SCOPE
+ * (which rows — e.g. a shift leader's one site) is a separate, server-enforced axis and does
+ * not appear here.
  */
+
+/** A capability requirement: a single permission, or any-of a set (OR). */
+export type Requirement = Permission | { anyOf: readonly Permission[] };
+
 export interface NavItem {
   to: string;
   /** i18n key for the label. */
   labelKey: string;
   icon: LucideIcon;
-  roles: readonly Role[];
+  requires: Requirement;
 }
 
 export interface SubnavItem {
   to: string;
   labelKey: string;
-  roles: readonly Role[];
+  requires: Requirement;
 }
 
-const ALL_WEB: readonly Role[] = ['super_admin', 'hr_admin', 'shift_leader'];
-const ADMIN: readonly Role[] = ['super_admin', 'hr_admin'];
+/** True if `permissions` satisfies the requirement. */
+export function hasPermission(permissions: readonly Permission[], requires: Requirement): boolean {
+  if (typeof requires === 'string') return permissions.includes(requires);
+  return requires.anyOf.some((p) => permissions.includes(p));
+}
 
-/** Primary sidebar nav — the 8 modules from `comp/Sidebar` `iCqTB`, in canvas order. */
+/**
+ * Primary sidebar nav (domain backbone). `Kotak Masuk` is a cross-cutting workflow surface —
+ * the aggregated "needs my decision" queue (leave + overtime + attendance + change requests),
+ * a *view* over the same data the per-domain approval tabs show (one source of truth). It is
+ * visible to anyone who can approve *anything* (`anyOf`).
+ */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard, roles: ALL_WEB },
-  { to: '/employees', labelKey: 'nav.employees', icon: Users, roles: ALL_WEB },
-  { to: '/placements', labelKey: 'nav.placements', icon: MapPin, roles: ALL_WEB },
-  { to: '/schedule', labelKey: 'nav.scheduleShift', icon: CalendarClock, roles: ALL_WEB },
-  { to: '/attendance', labelKey: 'nav.attendance', icon: ClipboardCheck, roles: ALL_WEB },
-  { to: '/leave', labelKey: 'nav.leave', icon: Plane, roles: ALL_WEB },
-  { to: '/overtime', labelKey: 'nav.overtime', icon: Timer, roles: ALL_WEB },
-  { to: '/reports', labelKey: 'nav.reports', icon: ChartColumn, roles: ADMIN },
+  { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard, requires: 'dashboard.view' },
+  {
+    to: '/inbox',
+    labelKey: 'nav.inbox',
+    icon: Inbox,
+    requires: {
+      anyOf: ['leave.approve', 'overtime.approve', 'attendance.verify', 'change_requests.approve'],
+    },
+  },
+  { to: '/employees', labelKey: 'nav.employees', icon: Users, requires: 'employees.read' },
+  { to: '/placements', labelKey: 'nav.placements', icon: MapPin, requires: 'placements.read' },
+  {
+    to: '/client-companies',
+    labelKey: 'nav.clientsAgreements',
+    icon: Building2,
+    requires: { anyOf: ['clients.read', 'agreements.read'] },
+  },
+  {
+    to: '/schedule',
+    labelKey: 'nav.scheduleShift',
+    icon: CalendarClock,
+    requires: 'schedule.read',
+  },
+  {
+    to: '/attendance',
+    labelKey: 'nav.attendance',
+    icon: ClipboardCheck,
+    requires: 'attendance.read',
+  },
+  { to: '/leave', labelKey: 'nav.leave', icon: Plane, requires: 'leave.read' },
+  { to: '/overtime', labelKey: 'nav.overtime', icon: Timer, requires: 'overtime.read' },
+  { to: '/payroll', labelKey: 'nav.payroll', icon: Banknote, requires: 'payroll.read' },
+  { to: '/reports', labelKey: 'nav.reports', icon: ChartColumn, requires: 'reports.read' },
 ];
 
 /** Footer nav (sidebar bottom). */
@@ -58,58 +100,61 @@ export const SETTINGS_ITEM: NavItem = {
   to: '/settings',
   labelKey: 'nav.settings',
   icon: Settings,
-  roles: ADMIN,
+  requires: 'settings.access',
 };
 
 /**
- * Secondary section sub-nav — keyed by the parent primary route. Rendered as a tab strip under the
- * topbar when the active route belongs to a section that has >1 visible sub-page. Sub-routes that
- * have no entry here (detail/create pages) inherit their parent section for active-state purposes.
+ * Secondary section sub-nav — keyed by the parent primary route. Rendered as a tab strip under
+ * the topbar when the active section has >1 visible sub-page. Sub-routes with no entry here
+ * (detail/create pages) inherit their parent section for active-state.
+ *
+ * NOTE (migration, see doc §"Target IA"): pure reference/config — shift masters, leave quotas,
+ * overtime rules, master data — will consolidate under Pengaturan → Master Data once their
+ * routes move under `/settings/*`. They are kept under their domain section here so they stay
+ * reachable without a route migration in this pass.
  */
 export const SECTION_SUBNAV: Record<string, readonly SubnavItem[]> = {
   '/employees': [
-    { to: '/employees', labelKey: 'nav.employees', roles: ALL_WEB },
-    { to: '/client-companies', labelKey: 'nav.clientCompanies', roles: ADMIN },
-    { to: '/agreements', labelKey: 'nav.agreements', roles: ADMIN },
-    { to: '/change-requests', labelKey: 'nav.changeRequests', roles: ADMIN },
-    { to: '/service-lines', labelKey: 'nav.serviceLines', roles: ADMIN },
-    { to: '/master-data', labelKey: 'nav.masterData', roles: ADMIN },
+    { to: '/employees', labelKey: 'nav.employees', requires: 'employees.read' },
+    { to: '/change-requests', labelKey: 'nav.changeRequests', requires: 'change_requests.read' },
+  ],
+  '/client-companies': [
+    { to: '/client-companies', labelKey: 'nav.clientCompanies', requires: 'clients.read' },
+    { to: '/agreements', labelKey: 'nav.agreements', requires: 'agreements.read' },
+    { to: '/service-lines', labelKey: 'nav.serviceLines', requires: 'service_lines.read' },
   ],
   '/schedule': [
-    { to: '/schedule', labelKey: 'nav.schedule', roles: ALL_WEB },
-    { to: '/shifts', labelKey: 'nav.shifts', roles: ADMIN },
+    { to: '/schedule', labelKey: 'nav.schedule', requires: 'schedule.read' },
+    { to: '/shifts', labelKey: 'nav.shifts', requires: 'shifts.read' },
   ],
   '/attendance': [
-    { to: '/attendance', labelKey: 'nav.attendance', roles: ALL_WEB },
-    { to: '/corrections', labelKey: 'nav.corrections', roles: ALL_WEB },
+    { to: '/attendance', labelKey: 'nav.attendance', requires: 'attendance.read' },
+    { to: '/corrections', labelKey: 'nav.corrections', requires: 'attendance.verify' },
   ],
   '/leave': [
-    { to: '/leave', labelKey: 'nav.leaveApprovals', roles: ALL_WEB },
-    { to: '/leave/quotas', labelKey: 'nav.leaveQuotas', roles: ADMIN },
-    { to: '/leave/calendar', labelKey: 'nav.leaveCalendar', roles: ALL_WEB },
+    { to: '/leave', labelKey: 'nav.leaveApprovals', requires: 'leave.read' },
+    { to: '/leave/quotas', labelKey: 'nav.leaveQuotas', requires: 'leave_quotas.read' },
+    { to: '/leave/calendar', labelKey: 'nav.leaveCalendar', requires: 'leave.read' },
   ],
   '/overtime': [
-    { to: '/overtime', labelKey: 'nav.overtimeApprovals', roles: ALL_WEB },
-    { to: '/overtime/rekap', labelKey: 'nav.overtimeRekap', roles: ADMIN },
-    { to: '/overtime/aturan', labelKey: 'nav.overtimeRules', roles: ADMIN },
-  ],
-  '/reports': [
-    { to: '/reports', labelKey: 'nav.reports', roles: ADMIN },
-    { to: '/payroll', labelKey: 'nav.payroll', roles: ADMIN },
+    { to: '/overtime', labelKey: 'nav.overtimeApprovals', requires: 'overtime.read' },
+    { to: '/overtime/rekap', labelKey: 'nav.overtimeRekap', requires: 'overtime.read' },
+    { to: '/overtime/aturan', labelKey: 'nav.overtimeRules', requires: 'overtime_rules.read' },
   ],
 };
 
-/** Filter a nav list to those visible to `role`. */
-export function navForRole<T extends { roles: readonly Role[] }>(
+/** Filter a nav list to those whose requirement the permissions satisfy. */
+export function visibleNav<T extends { requires: Requirement }>(
   items: readonly T[],
-  role: Role,
+  permissions: readonly Permission[],
 ): T[] {
-  return items.filter((item) => item.roles.includes(role));
+  return items.filter((item) => hasPermission(permissions, item.requires));
 }
 
-/** Routes that belong to a section but aren't sub-nav tabs (detail/create), mapped to their parent. */
+/** Routes that belong to a section but aren't sub-nav tabs (detail/create), mapped to parent. */
 const SECTION_ALIASES: Record<string, string> = {
   '/company-roster': '/placements',
+  '/master-data': '/settings',
 };
 
 /**
@@ -130,22 +175,25 @@ export function activeSection(pathname: string): string | null {
     }
   }
   if (best) return best;
-  // Alias routes (rosters, etc.).
+  // Alias routes (rosters, payroll, master data).
   for (const [route, parent] of Object.entries(SECTION_ALIASES)) {
     if (pathname.startsWith(route)) return parent;
   }
-  // Primary items without a sub-nav (Dashboard, Karyawan-less, Penempatan).
+  // Primary items without a sub-nav (Dashboard, Inbox, Penempatan).
   const direct = NAV_ITEMS.find((i) =>
     i.to === '/' ? pathname === '/' : pathname.startsWith(i.to),
   );
   return direct ? direct.to : null;
 }
 
-/** The sub-nav tabs for a section, filtered by role. Empty when the section has <2 visible tabs. */
-export function subnavForSection(sectionTo: string | null, role: Role): SubnavItem[] {
+/** The sub-nav tabs for a section, filtered by permission. Empty when <2 tabs are visible. */
+export function subnavForSection(
+  sectionTo: string | null,
+  permissions: readonly Permission[],
+): SubnavItem[] {
   if (!sectionTo) return [];
   const subs = SECTION_SUBNAV[sectionTo];
   if (!subs) return [];
-  const visible = navForRole(subs, role);
+  const visible = visibleNav(subs, permissions);
   return visible.length > 1 ? visible : [];
 }

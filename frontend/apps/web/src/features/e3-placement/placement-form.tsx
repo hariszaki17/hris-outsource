@@ -53,6 +53,7 @@ import { ClientCompanyPicker } from '../e2-identity/pickers/client-company-picke
 import { EmployeePicker } from '../e2-identity/pickers/employee-picker.tsx';
 import { PositionPicker } from '../e2-identity/pickers/position-picker.tsx';
 import { ServiceLinePicker } from '../e2-identity/pickers/service-line-picker.tsx';
+import { SitePicker } from '../e2-identity/pickers/site-picker.tsx';
 import { AgreementPicker } from './agreement-picker.tsx';
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,7 @@ const placementSchema = z
     employee_id: z.string().min(1),
     agreement_id: z.string().min(1),
     client_company_id: z.string().min(1),
+    site_id: z.string().min(1),
     service_line_id: z.string().min(1),
     position_id: z.string().min(1),
     start_date: z.string().min(1),
@@ -192,6 +194,7 @@ export function CreatePlacementScreen() {
       employee_id: '',
       agreement_id: '',
       client_company_id: '',
+      site_id: '',
       service_line_id: '',
       position_id: '',
       start_date: '',
@@ -236,6 +239,7 @@ export function CreatePlacementScreen() {
           employee_id: values.employee_id,
           agreement_id: values.agreement_id,
           client_company_id: values.client_company_id,
+          site_id: values.site_id,
           service_line_id: values.service_line_id,
           position_id: values.position_id,
           start_date: values.start_date,
@@ -435,15 +439,36 @@ export function CreatePlacementScreen() {
                   >
                     <ClientCompanyPicker
                       value={watch('client_company_id') || null}
-                      onChange={(val) =>
-                        setValue('client_company_id', val ?? '', { shouldValidate: true })
-                      }
+                      onChange={(val) => {
+                        setValue('client_company_id', val ?? '', { shouldValidate: true });
+                        // Reset site when the company changes (sites belong to a company, BR-3b).
+                        setValue('site_id', '', { shouldValidate: false });
+                      }}
                       error={!!errors.client_company_id}
                       placeholder={t('fieldClientCompanyPlaceholder')}
                     />
                   </FormField>
                 </div>
                 <div className="flex-1 min-w-0">
+                  <FormField
+                    label={t('fieldSite')}
+                    htmlFor="site_id"
+                    required
+                    error={errors.site_id?.message}
+                  >
+                    <SitePicker
+                      clientCompanyId={watch('client_company_id') || null}
+                      value={watch('site_id') || null}
+                      onChange={(val) => setValue('site_id', val ?? '', { shouldValidate: true })}
+                      error={!!errors.site_id}
+                    />
+                  </FormField>
+                </div>
+              </FieldRow>
+
+              {/* Row: service_line */}
+              <FieldRow>
+                <div className="flex-1 min-w-0" style={{ maxWidth: '50%' }}>
                   <FormField
                     label={t('fieldServiceLine')}
                     htmlFor="service_line_id"

@@ -211,6 +211,7 @@ paths:
                   employee_id: SWP-EMP-1042
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
+                  site_id: SWP-SITE-501
                   service_line_id: SWP-SVC-003
                   position_id: SWP-POS-021
                   start_date: '2026-06-03'
@@ -224,6 +225,7 @@ paths:
                   employee_id: SWP-EMP-1042
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
+                  site_id: SWP-SITE-501
                   service_line_id: SWP-SVC-003
                   position_id: SWP-POS-021
                   start_date: '2026-07-01'
@@ -235,6 +237,7 @@ paths:
                   employee_id: SWP-EMP-1042
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
+                  site_id: SWP-SITE-501
                   service_line_id: SWP-SVC-003
                   position_id: SWP-POS-021
                   start_date: '2026-05-15'
@@ -1478,6 +1481,7 @@ components:
         - employee_id
         - agreement_id
         - client_company_id
+        - site_id
         - service_line_id
         - position_id
         - start_date
@@ -1516,6 +1520,17 @@ components:
           description: Cross-epic — references E2 ClientCompany.
           example: SWP-CMP-014
         client_company_name:
+          type: string
+          example: 'Plaza Group'
+        site_id:
+          type: string
+          pattern: '^SWP-SITE-\d+$'
+          description: |
+            Cross-epic — references E2 Site (F2.6). The specific location of
+            this placement; belongs to `client_company_id`. Drives the E5
+            geofence (INV-5). Defaults to the company's primary Main Site.
+          example: SWP-SITE-501
+        site_name:
           type: string
           example: 'Plaza Senayan'
         service_line_id:
@@ -1670,6 +1685,7 @@ components:
         - employee_id
         - agreement_id
         - client_company_id
+        - site_id
         - service_line_id
         - position_id
         - start_date
@@ -1690,6 +1706,13 @@ components:
           type: string
           pattern: '^SWP-CMP-\d+$'
           description: Must reference an `ACTIVE` company (BR-3).
+        site_id:
+          type: string
+          pattern: '^SWP-SITE-\d+$'
+          description: |
+            Must reference an `ACTIVE` Site (E2 F2.6) belonging to
+            `client_company_id` (BR-3b). Defaults to the company's primary
+            Main Site if the client offers a single location.
         service_line_id:
           type: string
           pattern: '^SWP-SVC-\d+$'

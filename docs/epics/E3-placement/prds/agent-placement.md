@@ -42,10 +42,11 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 
 | Ref | Rule |
 |-----|------|
-| BR-1 | A placement requires: agent, **employment agreement**, client company, service line, **position** (from master), start date. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`). |
+| BR-1 | A placement requires: agent, **employment agreement**, client company, **site** (E2 F2.6 — the specific location), service line, **position** (from master), start date. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`). |
 | BR-1b | The placement period must fall **within the agent's employment-agreement validity**. For `PKWT`, if the placement `end_date` would exceed the agreement `end_date`, the system **auto-caps** it to the agreement `end_date` and notifies the creator; `PKWTT` imposes no upper bound. |
 | BR-2 | **INV-1 + 1-day buffer** — the agent must have no `Active`/`Scheduled` placement overlapping the new period, AND the new `start_date` must be **at least 1 day after** any prior placement's `end_date` (no overlap, no same-day handover). Enforced at persist time (DB constraint), not just UI. |
 | BR-3 | The client company must be `Active`. Placing into an inactive/archived company is blocked. |
+| BR-3b | The **site** must belong to the chosen company and be `Active` (E2 F2.6 ST-4). The site defaults to the company's **primary "Main Site"** and can be changed to any other active site. Its geofence (or absence) drives E5 clock-in (CI-2). |
 | BR-4 | When `end_date` is present it must be **after** `start_date`. |
 | BR-5 | If `start_date <= today` → status `Active`. If `start_date > today` → status `Scheduled` (system auto-activates on the date — F3.2). |
 | BR-6 | Backdating `start_date` is allowed for **HR admin and Super Admin**, requires a **reason**, and is recorded in the audit log. |
@@ -60,6 +61,7 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | `employee_id` | FK → Employee | yes | employee exists & status = active |
 | `employment_agreement_id` | FK → EmploymentAgreement | yes | belongs to the same agent; placement period ⊆ agreement validity (BR-1b) |
 | `client_company_id` | FK → ClientCompany | yes | company status = active (BR-3) |
+| `site_id` | FK → Site (E2 F2.6) | yes | belongs to `client_company_id` & status = active (BR-3b); defaults to the company's primary Main Site |
 | `service_line_id` | FK → ServiceLine | yes | one of Facility / Building Mgmt / Parking |
 | `position_id` | FK → Position (E2 master) | yes | per-placement; may differ across companies (BR-9) |
 | `start_date` | date | yes | valid date; backdating needs reason (BR-6) |
@@ -92,6 +94,17 @@ Feature: Agent placement creation
     And an audit-log entry records the creation
     And "Budi" can see the active placement
     And the placement appears in the "Plaza Senayan" roster
+
+  Scenario: Place an agent at a specific site of a multi-site company
+    Given "Plaza Group" has sites "Main Site", "Plaza Senayan", and "Plaza Indonesia"
+    When I create a placement for "Budi" and select the site "Plaza Senayan"
+    Then the placement is created with site = "Plaza Senayan"
+    And E5 clock-in for "Budi" validates against "Plaza Senayan"'s geofence
+
+  Scenario: Site defaults to the company's primary Main Site
+    Given the single-location company "Mall Kelapa Gading" has only its "Main Site"
+    When I create a placement for "Budi" at "Mall Kelapa Gading" without choosing a site
+    Then the placement is created with site = "Main Site"
 
   Scenario: Create a future-dated placement
     When I create a placement for "Budi" with a start date 14 days from today

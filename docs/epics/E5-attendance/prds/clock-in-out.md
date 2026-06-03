@@ -35,7 +35,7 @@ Agent (mobile), System (geofence check, persist, audit), Shift Leader (monitors,
 | Ref | Rule |
 |-----|------|
 | CI-1 | Clock-in captures `check_in_at` (server time, Asia/Jakarta) + device `lat/lng`. |
-| CI-2 | The system resolves the **site geofence** from the agent's active placement's ClientCompany (location + `geofence_radius_m`). |
+| CI-2 | The system resolves the **site geofence** from the agent's active placement's **`Site`** (E2 F2.6 — `site.lat`/`lng` + `site.geofence_radius_m`), not the company. A placement always has exactly one site (E3 INV-5). |
 | CI-3 | If GPS is **outside** the geofence, the clock-in is **still recorded** with `in_geofence_in=false` and flagged for verification (F5.3). |
 | CI-4 | The record links the agent's **scheduled shift** for that date; if none, it's recorded with `schedule_id=null` and flagged **unscheduled**. |
 | CI-5 | An agent may have **only one open** attendance record (clocked-in, not out) at a time — a second clock-in is blocked until clock-out. |
@@ -97,15 +97,15 @@ Feature: Clock in / out
 | C-3 | Clock-out without an open clock-in | Blocked / prompts a correction (F5.4). |
 | C-4 | Spoofed/mock GPS | Out of scope v1; flag as future anti-fraud (note). |
 | C-5 | Offline at site (no connectivity) | See §10 open — queue+sync vs require connectivity. |
-| C-6 | Site has no geofence radius set | Defaults applied / geofence check skipped + flagged (depends on §10). |
+| C-6 | Site has no geo set (lat/lng) | Geofence check **skipped + flagged**; record still saved (E2 F2.6 ST-8). `geofence_radius_m` defaults to 100m. |
 
 ## 9. Dependencies
 
-E4 (schedule), E3 (placement), E2 (ClientCompany geofence + attendance codes), E1 (audit), E10 (notifications), F5.2 (evaluation).
+E4 (schedule), E3 (placement → site), E2 (**Site geofence** F2.6 + attendance codes), E1 (audit), E10 (notifications), F5.2 (evaluation).
 
 ## 10. Decisions & open questions
 
 - ✅ GPS-only; out-of-geofence allowed + flagged; tied to schedule.
+- ✅ **Geofence source = the placement's `Site`** (E2 F2.6), single circle (center + `geofence_radius_m`, default 100m) *(2026-06-03; was ClientCompany)*.
 - **Open:** offline clock-in (queue + later sync) needed, or is on-site connectivity assumed?
-- **Open:** geofence radius — per-site `geofence_radius_m` (default 100 m) confirmed? (cross-ref E2 ClientCompany.)
 - **Open:** anti-spoofing (mock-location detection) — v1 or later?

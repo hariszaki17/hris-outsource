@@ -161,7 +161,7 @@ export function ClientCompaniesScreen() {
   const reactivateMut = useReactivateClientCompany();
 
   const activeCount = companies.filter((c) => c.status === ClientCompanyStatus.ACTIVE).length;
-  const geofenceCount = companies.filter((c) => c.geofence_active).length;
+  const totalSites = companies.reduce((n, c) => n + (c.site_count ?? 0), 0);
   const inactiveCount = companies.filter((c) => c.status === ClientCompanyStatus.INACTIVE).length;
 
   function setFilter(patch: Partial<ClientCompaniesSearch>) {
@@ -275,18 +275,17 @@ export function ClientCompaniesScreen() {
       ),
     },
     {
-      id: 'geofence_radius_m',
-      header: t('table.geofence'),
+      id: 'sites',
+      header: t('table.sites'),
       width: 130,
-      cell: (row) =>
-        row.geofence_active ? (
-          <div className="flex items-center gap-[6px]">
-            <MapPin size={14} className="text-ok-tx shrink-0" aria-hidden />
-            <span className="text-[12px] font-mono text-text">{row.geofence_radius_m}m</span>
-          </div>
-        ) : (
-          <span className="text-[12px] text-text-3 italic">{t('table.noGeo')}</span>
-        ),
+      cell: (row) => (
+        <div className="flex items-center gap-[6px]">
+          <MapPin size={14} className="text-text-3 shrink-0" aria-hidden />
+          <span className="text-[12px] text-text">
+            {t('table.siteCount', { count: row.site_count ?? 0 })}
+          </span>
+        </div>
+      ),
     },
     {
       id: 'status',
@@ -359,9 +358,9 @@ export function ClientCompaniesScreen() {
           className="flex-1"
           icon={MapPin}
           tone="info"
-          label={t('stats.geofence')}
-          value={`${geofenceCount} / ${activeCount}`}
-          sub={t('stats.geofenceDesc')}
+          label={t('stats.sites')}
+          value={`${totalSites}`}
+          sub={t('stats.sitesDesc')}
         />
         <StatCard
           className="flex-1"

@@ -59,24 +59,8 @@ const clientCompanySchema = z.object({
   pic_name: z.string().optional(),
   email: z.string().email('Format email tidak valid').optional().or(z.literal('')),
   phone: z.string().optional(),
-  // Geofence / location (all optional — geo = null if lat/lng absent)
-  lat: z
-    .string()
-    .optional()
-    .refine((v) => !v || (!Number.isNaN(Number(v)) && Number(v) >= -90 && Number(v) <= 90), {
-      message: 'Latitude harus antara -90 dan 90',
-    }),
-  lng: z
-    .string()
-    .optional()
-    .refine((v) => !v || (!Number.isNaN(Number(v)) && Number(v) >= -180 && Number(v) <= 180), {
-      message: 'Longitude harus antara -180 dan 180',
-    }),
-  geofence_radius_m: z.coerce
-    .number()
-    .min(25, 'Minimum 25m')
-    .max(1000, 'Maksimum 1000m')
-    .default(100),
+  // Shift-leadership granularity (E3 F3.4). Geofence/location now lives on Sites (F2.6).
+  leader_scope: z.enum(['company', 'site']).default('company'),
 });
 
 type ClientCompanyFormValues = z.infer<typeof clientCompanySchema>;
@@ -86,7 +70,6 @@ type ClientCompanyFormValues = z.infer<typeof clientCompanySchema>;
 // ---------------------------------------------------------------------------
 
 function buildWriteRequest(values: ClientCompanyFormValues): ClientCompanyWriteRequest {
-  const hasGeo = values.lat && values.lng;
   return {
     name: values.name,
     address: values.address,
@@ -94,8 +77,7 @@ function buildWriteRequest(values: ClientCompanyFormValues): ClientCompanyWriteR
     pic_name: values.pic_name || undefined,
     email: values.email || undefined,
     phone: values.phone || undefined,
-    geo: hasGeo ? { lat: Number(values.lat), lng: Number(values.lng) } : null,
-    geofence_radius_m: values.geofence_radius_m,
+    leader_scope: values.leader_scope,
   };
 }
 
@@ -126,7 +108,6 @@ function CheckRow({ label, state }: { label: string; state: CheckState }) {
 
 function ValidationSummary({ values }: ValidationSummaryProps) {
   const { t } = useTranslation('clientCompanies');
-  const hasGeo = !!(values.lat && values.lng);
   return (
     <div className="rounded-xl bg-surface border border-border overflow-hidden">
       <div className="px-5 pt-4 pb-3 border-b border-border-soft">
@@ -139,7 +120,6 @@ function ValidationSummary({ values }: ValidationSummaryProps) {
           label={`${t('fields.npwp')} (${t('form.optional')})`}
           state={values.npwp ? 'ok' : 'empty'}
         />
-        <CheckRow label={t('form.summaryCard.geoOptional')} state={hasGeo ? 'ok' : 'empty'} />
       </div>
     </div>
   );
@@ -270,7 +250,7 @@ function ClientCompanyFormBody({ form }: ClientCompanyFormBodyProps) {
               </FormField>
             </div>
 
-            {/* Row 3: phone */}
+            {/* Row 3: phone + leader scope */}
             <div className="flex gap-[14px]">
               <FormField
                 htmlFor="cc-phone"
@@ -285,110 +265,29 @@ function ClientCompanyFormBody({ form }: ClientCompanyFormBodyProps) {
                   className="font-mono"
                 />
               </FormField>
-              <div className="flex-1" />
-            </div>
-          </div>
-        </div>
-
-        {/* Section: Lokasi & Geofence */}
-        <div className="rounded-xl bg-surface border border-border overflow-hidden">
-          <div className="px-5 pt-[18px] pb-3 border-b border-border-soft flex flex-col gap-[2px]">
-            <span className="text-[15px] font-semibold text-text">
-              {t('form.geofenceSection.title')}
-            </span>
-            <span className="text-[12px] text-text-2">{t('form.geofenceSection.subtitle')}</span>
-          </div>
-          <div className="flex flex-col gap-[14px] p-5">
-            {/* No geo banner */}
-            {!values.lat && !values.lng && (
-              <div className="flex items-center gap-[10px] rounded-lg bg-warn-bg border border-warn-bd px-[14px] py-[10px]">
-                <span className="text-[13px] text-warn-tx">
-                  {t('form.geofenceSection.noGeoHint')}
-                </span>
-              </div>
-            )}
-
-            {/* lat / lng row */}
-            <div className="flex gap-[14px]">
               <FormField
-                htmlFor="cc-lat"
-                label={t('fields.latitude')}
-                error={errors.lat?.message}
+                htmlFor="cc-leader-scope"
+                label={t('fields.leaderScope')}
+                error={errors.leader_scope?.message}
                 className="flex-1"
               >
-                <Input
-                  id="cc-lat"
-                  {...register('lat')}
-                  placeholder="−6.2088"
-                  className="font-mono"
-                />
-              </FormField>
-              <FormField
-                htmlFor="cc-lng"
-                label={t('fields.longitude')}
-                error={errors.lng?.message}
-                className="flex-1"
-              >
-                <Input
-                  id="cc-lng"
-                  {...register('lng')}
-                  placeholder="106.8456"
-                  className="font-mono"
-                />
+                <select
+                  id="cc-leader-scope"
+                  {...register('leader_scope')}
+                  className="h-9 w-full rounded-md border border-border bg-surface px-3 text-[13px] text-text outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="company">{t('fields.leaderScopeCompany')}</option>
+                  <option value="site">{t('fields.leaderScopeSite')}</option>
+                </select>
               </FormField>
             </div>
 
-            {/* radius row */}
-            <div className="flex gap-[14px]">
-              <FormField
-                htmlFor="cc-radius"
-                label={t('fields.geofenceRadius')}
-                error={errors.geofence_radius_m?.message}
-                className="flex-1"
-              >
-                <Input
-                  id="cc-radius"
-                  {...register('geofence_radius_m')}
-                  type="number"
-                  min={25}
-                  max={1000}
-                  className="font-mono"
-                />
-              </FormField>
-              <div className="flex-1" />
-            </div>
-
-            {/* hint */}
-            <div className="flex items-start gap-2">
-              <Info size={13} className="text-text-3 shrink-0 mt-0.5" aria-hidden />
-              <p className="text-[11px] text-text-3">{t('form.geofenceSection.hint')}</p>
-            </div>
-
-            {/* Map picker placeholder */}
-            <div className="flex items-center justify-center rounded-lg bg-surface-2 border border-border-soft h-[280px]">
-              <div className="flex flex-col items-center gap-3 text-text-2 p-5">
-                <div className="rounded-xl p-3" style={{ background: 'var(--color-surface)' }}>
-                  {/* static map pin illustration */}
-                  <svg
-                    width="32"
-                    height="40"
-                    viewBox="0 0 32 40"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M16 0C7.163 0 0 7.163 0 16c0 10.317 14.37 23.05 15.18 23.75a1.25 1.25 0 0 0 1.64 0C17.63 39.05 32 26.317 32 16 32 7.163 24.837 0 16 0Z"
-                      fill="#188E4D"
-                      fillOpacity="0.15"
-                    />
-                    <circle cx="16" cy="16" r="6" fill="#188E4D" />
-                  </svg>
-                </div>
-                <span className="text-[12px] italic text-center">
-                  {t('form.geofenceSection.mapPlaceholder')}
-                </span>
-              </div>
+            {/* Geofence moved to Sites (F2.6) */}
+            <div className="flex items-start gap-2 rounded-lg bg-info-bg border border-info-bd px-3 py-[10px]">
+              <Info size={14} className="text-info-tx shrink-0 mt-0.5" aria-hidden />
+              <p className="text-[11px] text-info-tx leading-relaxed">
+                {t('form.geofenceMovedHint')}
+              </p>
             </div>
           </div>
         </div>
@@ -421,9 +320,7 @@ export function CreateClientCompanyScreen() {
       pic_name: '',
       email: '',
       phone: '',
-      lat: '',
-      lng: '',
-      geofence_radius_m: 100,
+      leader_scope: 'company',
     },
   });
 
@@ -526,9 +423,7 @@ export function EditClientCompanyDrawer({
       pic_name: '',
       email: '',
       phone: '',
-      lat: '',
-      lng: '',
-      geofence_radius_m: 100,
+      leader_scope: 'company',
     },
   });
 
@@ -542,9 +437,7 @@ export function EditClientCompanyDrawer({
         pic_name: company.pic_name ?? '',
         email: company.email ?? '',
         phone: company.phone ?? '',
-        lat: company.geo?.lat != null ? String(company.geo.lat) : '',
-        lng: company.geo?.lng != null ? String(company.geo.lng) : '',
-        geofence_radius_m: company.geofence_radius_m ?? 100,
+        leader_scope: company.leader_scope ?? 'company',
       });
     }
   }, [company, form]);

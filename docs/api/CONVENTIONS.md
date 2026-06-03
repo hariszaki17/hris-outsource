@@ -49,6 +49,7 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-EMP` | Employee (the agent/staff person) | E2 |
 | `SWP-AG` | Employment Agreement (PKWT/PKWTT) | E2 |
 | `SWP-CMP` | Client Company | E2 |
+| `SWP-SITE` | Client Site (placement location + geofence) | E2 |
 | `SWP-SVC` | Service Line | E2 |
 | `SWP-POS` | Position | E2 |
 | `SWP-LT` | Leave Type | E2 |

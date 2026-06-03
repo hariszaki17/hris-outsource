@@ -68,6 +68,7 @@ import { PayslipArchiveScreen } from '@/features/e8-payroll/payslip-archive-scre
 import { PayslipDetailRoute as PayslipDetailRouteView } from '@/features/e8-payroll/payslip-detail-route.tsx';
 import { BillableReportScreen } from '@/features/e10-reporting/billable-report-screen.tsx';
 import { DashboardScreen } from '@/features/e10-reporting/dashboard-screen.tsx';
+import { InboxScreen } from '@/features/e10-reporting/inbox-screen.tsx';
 import { NotificationsScreen } from '@/features/e10-reporting/notifications-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
@@ -554,6 +555,11 @@ const payslipDetailRoute = createRoute({
 });
 
 // E10 — Reporting & Notifications
+const inboxRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/inbox',
+  component: InboxScreen,
+});
 const reportsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/reports',
@@ -686,6 +692,7 @@ const routeTree = rootRoute.addChildren([
     overtimeRoute,
     payslipDetailRoute,
     payrollRoute,
+    inboxRoute,
     reportsRoute,
     notificationsRoute,
     settingsRoute.addChildren([

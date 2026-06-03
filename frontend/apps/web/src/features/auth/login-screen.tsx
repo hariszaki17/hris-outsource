@@ -1,5 +1,6 @@
 import { AuthLayout } from '@/features/auth/auth-layout.tsx';
 import { auth } from '@/lib/auth.ts';
+import { permissionsForRole } from '@swp/shared';
 import { Banner, Button, Checkbox, FormField, Input } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Eye, Lock, Mail, ShieldX } from 'lucide-react';
@@ -39,7 +40,12 @@ export function LoginScreen() {
     // TODO(E1): replace with the generated useAuthLogin() mutation. On 401 → redirect with
     // ?error=invalid; on 423/429 → ?error=locked; on a disabled account → ?error=disabled.
     // The user (name/role/initials) comes from the auth/`/me` response; stubbed here.
-    auth.login('dev-token', { name: 'Sari Hadi', role: 'hr_admin', initials: 'SH' });
+    auth.login('dev-token', {
+      name: 'Sari Hadi',
+      role: 'hr_admin',
+      permissions: permissionsForRole('hr_admin'),
+      initials: 'SH',
+    });
     await navigate({ to: '/' });
   });
 

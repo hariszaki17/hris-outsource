@@ -62,6 +62,7 @@ flowchart LR
 | `pph21` | **enc** string | tax term | Payroll (E8) | decrypt; carry for E8 |
 | `show_all_benefit` | bool | benefit display flag | E8 (or drop) | low value — confirm |
 | `placement` | **string (free text)** | `client_company_id` | **Placement** | **reconcile** string → `ClientCompany` by matching `companies.name` (role 2/4); manual cleanup for unmatched |
+| — (none) | — | `site_id` | **Placement** | ❗ no legacy site → set to the matched company's auto **primary "Main Site"** (E2 F2.6 / DATA-MAPPING G-8). HR re-points to a real site post-cutover. |
 | `new_office` | string | placement note / transfer hint | Placement `notes` | likely a transfer destination note — keep as note or drop |
 | `role_id` | string→`RecruitmentRole` | `position_id` | **Placement** (Position master) | map each `RecruitmentRole` → `Position`; build lookup |
 | `is_employee_active` | string | active flag | Employee / Placement status | normalize ("1"/"0"/text) → boolean/status |

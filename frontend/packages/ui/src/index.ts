@@ -17,6 +17,7 @@ export { IdChip, type IdChipProps } from './molecules/id-chip.tsx';
 export { DateText, type DateTextProps } from './molecules/date-text.tsx';
 export { Avatar, type AvatarProps } from './molecules/avatar.tsx';
 export { StatCard, type StatCardProps, type StatTone } from './molecules/stat-card.tsx';
+export { MapPicker, type MapPickerProps, type LatLng } from './molecules/map-picker.tsx';
 
 // Molecules — forms
 export { FormField, FormSection, type FormFieldProps } from './molecules/form-field.tsx';

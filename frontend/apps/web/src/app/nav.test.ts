@@ -1,31 +1,37 @@
-import type { Role } from '@swp/shared';
+import { type Role, permissionsForRole } from '@swp/shared';
 import { describe, expect, it } from 'vitest';
 import {
   NAV_ITEMS,
   SECTION_SUBNAV,
   SETTINGS_ITEM,
   activeSection,
-  navForRole,
+  hasPermission,
   subnavForSection,
+  visibleNav,
 } from './nav.ts';
 
 /**
- * Role-aware nav gating (interim x-rbac map, ENGINEERING.md A2/C1). Asserts the coarse
- * module visibility the shell relies on. The API remains the real gate — this is the
- * defense-in-depth client view.
+ * Permission-keyed nav gating (capability axis — docs/eng/NAVIGATION-AND-RBAC.md). The shell
+ * filters nav against the user's effective permissions, never their role. These tests drive the
+ * filters through each role's interim permission bundle. The API remains the real gate — this is
+ * the defense-in-depth client view.
  */
-const labels = (role: Role) => navForRole(NAV_ITEMS, role).map((i) => i.labelKey);
+const labels = (role: Role) =>
+  visibleNav(NAV_ITEMS, permissionsForRole(role)).map((i) => i.labelKey);
 
-describe('navForRole', () => {
-  it('the sidebar holds exactly the 8 design modules (comp/Sidebar iCqTB)', () => {
+describe('visibleNav (permission-keyed)', () => {
+  it('the sidebar holds the domain modules in canvas order', () => {
     expect(NAV_ITEMS.map((i) => i.labelKey)).toEqual([
       'nav.dashboard',
+      'nav.inbox',
       'nav.employees',
       'nav.placements',
+      'nav.clientsAgreements',
       'nav.scheduleShift',
       'nav.attendance',
       'nav.leave',
       'nav.overtime',
+      'nav.payroll',
       'nav.reports',
     ]);
   });
@@ -33,14 +39,15 @@ describe('navForRole', () => {
   it('super_admin and hr_admin see every primary module + settings', () => {
     for (const role of ['super_admin', 'hr_admin'] as const) {
       expect(labels(role)).toEqual(NAV_ITEMS.map((i) => i.labelKey));
-      expect(SETTINGS_ITEM.roles.includes(role)).toBe(true);
+      expect(hasPermission(permissionsForRole(role), SETTINGS_ITEM.requires)).toBe(true);
     }
   });
 
-  it('shift_leader is scoped: sees operational modules, not reports/settings', () => {
+  it('shift_leader is scoped: operational modules + inbox, not clients/payroll/reports/settings', () => {
     const sl = labels('shift_leader');
     expect(sl).toEqual([
       'nav.dashboard',
+      'nav.inbox',
       'nav.employees',
       'nav.placements',
       'nav.scheduleShift',
@@ -48,27 +55,36 @@ describe('navForRole', () => {
       'nav.leave',
       'nav.overtime',
     ]);
+    expect(sl).not.toContain('nav.clientsAgreements');
+    expect(sl).not.toContain('nav.payroll');
     expect(sl).not.toContain('nav.reports');
-    expect(SETTINGS_ITEM.roles.includes('shift_leader')).toBe(false);
+    expect(hasPermission(permissionsForRole('shift_leader'), SETTINGS_ITEM.requires)).toBe(false);
   });
 
-  it('agent (mobile-only) sees no web nav', () => {
+  it('the inbox is visible to anyone who can approve anything (anyOf)', () => {
+    // shift_leader has leave.approve / overtime.approve → inbox shows.
+    expect(labels('shift_leader')).toContain('nav.inbox');
+    // agent has no approve permission → no inbox (and no web nav at all).
     expect(labels('agent')).toEqual([]);
   });
 });
 
 describe('section sub-nav (sub-features live under their parent module)', () => {
-  it('client companies / master data resolve to the Karyawan section, not the sidebar', () => {
-    expect(NAV_ITEMS.map((i) => i.to)).not.toContain('/client-companies');
-    expect(NAV_ITEMS.map((i) => i.to)).not.toContain('/payroll');
-    expect(activeSection('/client-companies')).toBe('/employees');
-    expect(activeSection('/master-data')).toBe('/employees');
-    expect(activeSection('/master-data/overtime-rules')).toBe('/employees');
+  it('clients & agreements is now its own primary module, not under Karyawan', () => {
+    expect(NAV_ITEMS.map((i) => i.to)).toContain('/client-companies');
+    expect(activeSection('/client-companies')).toBe('/client-companies');
+    expect(activeSection('/agreements')).toBe('/client-companies');
+    expect(activeSection('/service-lines')).toBe('/client-companies');
   });
 
-  it('payroll lives under Laporan; corrections under Kehadiran (DESIGN-SYSTEM IA)', () => {
-    expect(activeSection('/payroll')).toBe('/reports');
-    expect(activeSection('/payroll/SWP-PS-1')).toBe('/reports');
+  it('master data resolves to Settings (its new home)', () => {
+    expect(activeSection('/master-data')).toBe('/settings');
+    expect(activeSection('/master-data/overtime-rules')).toBe('/settings');
+  });
+
+  it('payroll is its own primary module; corrections under Kehadiran', () => {
+    expect(activeSection('/payroll')).toBe('/payroll');
+    expect(activeSection('/payroll/SWP-PS-1')).toBe('/payroll');
     expect(activeSection('/corrections')).toBe('/attendance');
   });
 
@@ -78,17 +94,19 @@ describe('section sub-nav (sub-features live under their parent module)', () => 
   });
 
   it('shift_leader sub-nav hides admin-only tabs (Kuota under Cuti)', () => {
-    const slLeave = subnavForSection('/leave', 'shift_leader').map((s) => s.labelKey);
+    const slLeave = subnavForSection('/leave', permissionsForRole('shift_leader')).map(
+      (s) => s.labelKey,
+    );
     expect(slLeave).toContain('nav.leaveApprovals');
     expect(slLeave).toContain('nav.leaveCalendar');
     expect(slLeave).not.toContain('nav.leaveQuotas');
   });
 
   it('a section with <2 visible tabs for a role renders no sub-nav', () => {
-    // Karyawan: shift_leader only sees /employees → no sub-nav strip.
-    expect(subnavForSection('/employees', 'shift_leader')).toEqual([]);
-    // Reports section is admin-only entirely → empty for shift_leader.
-    expect(subnavForSection('/reports', 'shift_leader')).toEqual([]);
+    // Karyawan: shift_leader only sees /employees (not change-requests) → no sub-nav strip.
+    expect(subnavForSection('/employees', permissionsForRole('shift_leader'))).toEqual([]);
+    // Clients & Agreements is admin-only entirely → empty for shift_leader.
+    expect(subnavForSection('/client-companies', permissionsForRole('shift_leader'))).toEqual([]);
   });
 
   it('every sub-nav route is a real, distinct destination', () => {

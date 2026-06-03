@@ -345,7 +345,7 @@ AutoApproved|Pending|Verified|Rejected) · **AttendanceCorrection** (`type`, `co
 Status→token: Present(Hadir)→ok · Late(Terlambat)→warn · Incomplete(Tidak lengkap)→bad ·
 Absent→bad · Pulang awal (early-out flag)→orange. Verification→token: AutoApproved(Terverifikasi
 otomatis)→info · Pending(Menunggu)→warn · Verified→ok · Rejected→bad.
-Rules: **GPS geofence only** (radius per ClientCompany, default 100m); **out-of-geofence allowed +
+Rules: **GPS geofence only** (center + radius per **Site**, E2 F2.6, default 100m); **out-of-geofence allowed +
 flagged** (not blocked); late grace **15 min**; **exceptions-only verification** (clean records
 AutoApproved, only late/out-of-geofence/auto-closed/absent/code-flagged reach the queue);
 **auto-clock-out at shift end** → Incomplete + Pending; cross-midnight attributes to start date;

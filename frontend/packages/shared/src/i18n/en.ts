@@ -113,7 +113,9 @@ export const en: Messages = {
   },
   nav: {
     dashboard: 'Dashboard',
+    inbox: 'Inbox',
     employees: 'Employees',
+    clientsAgreements: 'Clients & Agreements',
     clientCompanies: 'Client Companies',
     agreements: 'Agreements',
     changeRequests: 'Approvals',
@@ -142,7 +144,6 @@ export const en: Messages = {
     brandTitle: 'SWP HRIS',
     brandSubtitle: 'Outsource Ops',
     menu: 'MENU',
-    search: 'Search agents, sites…',
     notifications: 'Notifications',
   },
   role: {
@@ -153,8 +154,7 @@ export const en: Messages = {
   },
   settingsOverview: {
     title: 'Settings',
-    subtitle:
-      'Three platform configuration areas. Language, timezone, and format are locked in v1.',
+    subtitle: 'Platform configuration areas. Language, timezone, and format are locked in v1.',
     lockedNote:
       'v1 defaults locked: Bahasa Indonesia · Asia/Jakarta WIB (UTC+7, no DST) · IDR. See the General tab for details.',
     card: {
@@ -175,6 +175,12 @@ export const en: Messages = {
         chip: 'v1 locked',
         heading: 'General',
         description: 'Platform conventions: localization, security, role navigation, system info.',
+      },
+      masterData: {
+        chip: 'Reference',
+        heading: 'Master Data',
+        description:
+          'Service lines, leave types, attendance codes, and overtime rules — the shared reference catalogs.',
       },
     },
   },
@@ -356,6 +362,12 @@ export const en: Messages = {
     clientCompany: {
       placeholder: 'Select client company',
       empty: 'No companies found',
+    },
+    site: {
+      placeholder: 'Select site',
+      disabledPlaceholder: 'Select a company first',
+      empty: 'No sites found',
+      primary: 'Primary',
     },
     serviceLine: {
       placeholder: 'Select service line',
@@ -978,6 +990,47 @@ export const en: Messages = {
     uploadDrop: 'Click or drag a file here',
     uploadHint: 'PDF, JPG, PNG · Max 10 MB',
   },
+  sites: {
+    panel: {
+      title: 'Sites & Geofence',
+      addSite: 'Add Site',
+      primary: 'Primary',
+      geofenceActive: 'Geofence on',
+      geofenceInactive: 'Geofence off',
+      placements: '{{count}} placements',
+      edit: 'Edit site',
+      empty: 'No sites yet.',
+    },
+    form: {
+      createTitle: 'Add Site',
+      editTitle: 'Edit Site',
+      name: 'Site Name',
+      namePlaceholder: 'Plaza Senayan',
+      code: 'Code',
+      address: 'Address',
+      addressPlaceholder: 'Jl. Asia Afrika No. 8, Jakarta Pusat 10270',
+      pic: 'On-site PIC',
+      phone: 'Phone',
+      geofenceTitle: 'Geofence',
+      mapHint: 'Click the map to set the geofence center; drag the radius field to resize.',
+      noGeoHint: 'No location set — geofence is disabled until you pick a point.',
+      lat: 'Latitude',
+      lng: 'Longitude',
+      radius: 'Radius (m)',
+      primary: 'Primary site',
+      primaryHint: 'The default location for new placements at this company.',
+      save: 'Save',
+      saving: 'Saving…',
+      cancel: 'Cancel',
+    },
+    toast: {
+      created: 'Site created',
+      updated: 'Site updated',
+      createFailed: 'Failed to create site',
+      updateFailed: 'Failed to update site',
+    },
+    state: { loading: 'Loading…', errorTitle: 'Failed to load sites' },
+  },
   clientCompanies: {
     title: 'Client Companies',
     subtitle: 'Directory of client companies receiving SWP agent placements',
@@ -988,6 +1041,8 @@ export const en: Messages = {
       activeDesc: 'currently being served',
       geofence: 'Geofence Active',
       geofenceDesc: 'lat/lng filled in',
+      sites: 'Sites',
+      sitesDesc: 'placement locations',
       inactive: 'Inactive',
       inactiveDesc: 'not accepting placements',
     },
@@ -997,6 +1052,8 @@ export const en: Messages = {
       shiftLeader: 'SHIFT LEADER',
       placements: 'PLACEMENTS',
       geofence: 'GEOFENCE',
+      sites: 'SITES',
+      siteCount: '{{count}} sites',
       status: 'STATUS',
       assigned: 'Assigned',
       unassigned: 'Unassigned',
@@ -1063,6 +1120,11 @@ export const en: Messages = {
       longitude: 'Longitude',
       geofenceRadius: 'Geofence Radius (m)',
       createdAt: 'Created',
+      leaderScope: 'Shift Leader Scope',
+      leaderScopeCompany: 'One leader for the whole company',
+      leaderScopeSite: 'One leader per site',
+      leaderScopeHint:
+        'Site scope suits multi-location clients where each site needs its own on-site supervisor.',
     },
     detail: {
       backLink: 'Back to Client Companies',
@@ -1111,6 +1173,8 @@ export const en: Messages = {
         title: 'Company Profile',
         subtitle: 'Name unique. NPWP unique (if provided).',
       },
+      geofenceMovedHint:
+        'Locations & geofences are managed per site on the company detail page (Sites & Geofence).',
       geofenceSection: {
         title: 'Location & Geofence',
         subtitle: 'Default geofence 100m. Without lat/lng, geofence is disabled for this site.',
@@ -1145,6 +1209,7 @@ export const en: Messages = {
     fieldAgreement: 'Employment Agreement',
     fieldClientCompany: 'Client Company',
     fieldClientCompanyPlaceholder: 'Search client company…',
+    fieldSite: 'Site',
     fieldServiceLine: 'Service Line',
     fieldServiceLinePlaceholder: 'Select service line…',
     fieldPosition: 'Position',

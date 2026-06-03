@@ -16,7 +16,8 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | `users` | User (E1) | `id, email, password, name, nip, phone_number, company_id, role(tinyint), position, is_enabled` |
 | `employees` | Employee | `id, name, nik, nip, join_at, gender, birth_*, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan, acc_number_*, user_id, last_contract_id` |
 | `employee_contracts` | EmploymentAgreement | `contract_status_id, pkwt_reference, contract_start_at, contract_end_at, resign_at, gaji_pokok*, bpjs_*, pph21*` (`*`=encrypted) |
-| `companies` (role=2) | ClientCompany | `id, name, address, lat/long_address, npwp, penanggung_jawab, phone_number, is_enabled` |
+| `companies` (role=2) | ClientCompany | `id, name, address, npwp, penanggung_jawab, phone_number, is_enabled` (geo `lat/long_address` **not** migrated — see G-8) · `leader_scope` defaults `company` |
+| *(none — net-new)* | Site (F2.6) | Loader **auto-creates one primary "Main Site" per ClientCompany**, geofence **empty**; geo is configured post-cutover (G-8). |
 | `recruitment_roles` | Position | `id, role, alias, client, recruitment_role_type_id` |
 | `recruitment_role_types` | (lookup) | `id, name` — drives PKWT/PKWTT + position category derivation |
 | `leave_types` | LeaveType | `id, name, description, is_tahunan, is_document_required` |
@@ -81,6 +82,7 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | G-5 | **Identity reconciliation** | Some `employees.user_id` are null (no login) and some `users` may lack an employee. Decide canonical Employee↔User pairing; keep both legacy ids in crosswalk. |
 | G-6 | **Per-company master** | `attendance_codes` (and any per-company leave config) are keyed by `company_id`; collapse to one SWP-wide set, dedupe by name. |
 | G-7 | **No OvertimeRule / ServiceLine source** | Seed `ServiceLine` = {Facility Services, Building Management, Parking}; define `OvertimeRule` fresh (confirm fields in E7). Not migrated. |
+| G-8 | **Sites are net-new** (F2.6, 2026-06-03) | Legacy is flat (one address per `role=2` company; `role=4` ignored). The loader **auto-creates one primary "Main Site" per ClientCompany** with **empty geofence** to satisfy the required `Placement.site_id`; legacy geo is **not** carried over. HR configures geofences + splits multi-site companies post-cutover. `Placement.site_id` → the company's Main Site. |
 
 ## 5. Migration rules
 
