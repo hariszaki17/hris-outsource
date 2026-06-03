@@ -10,6 +10,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -38,7 +39,7 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.U
 	if err != nil {
 		return domain.User{}, mapErr(err)
 	}
-	return toDomainUser(row), nil
+	return toDomainUserFromEmail(row), nil
 }
 
 func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, error) {
@@ -46,7 +47,7 @@ func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, e
 	if err != nil {
 		return domain.User{}, mapErr(err)
 	}
-	return toDomainUser(row), nil
+	return toDomainUserFromID(row), nil
 }
 
 func (r *Repository) GetRefreshTokenByHash(ctx context.Context, hash string) (domain.RefreshToken, error) {
@@ -99,9 +100,66 @@ func (r *Repository) RevokeFamily(ctx context.Context, tx pgx.Tx, familyID strin
 	return mapErr(r.q.WithTx(tx).RevokeFamily(ctx, familyID))
 }
 
+// SetLastLogin records the current time as the user's last login (AU-3).
+func (r *Repository) SetLastLogin(ctx context.Context, tx pgx.Tx, id string) error {
+	return mapErr(r.q.WithTx(tx).SetLastLogin(ctx, id))
+}
+
+// UpdatePassword sets a new bcrypt/argon2 password hash for the user (AU-4).
+func (r *Repository) UpdatePassword(ctx context.Context, tx pgx.Tx, id, hash string) error {
+	return mapErr(r.q.WithTx(tx).UpdatePassword(ctx, sqlcgen.UpdatePasswordParams{
+		ID:           id,
+		PasswordHash: hash,
+	}))
+}
+
+// InsertResetToken persists a hashed password-reset token (AU-4).
+func (r *Repository) InsertResetToken(ctx context.Context, tx pgx.Tx, userID, tokenHash string, expiresAt time.Time) (domain.PasswordResetToken, error) {
+	row, err := r.q.WithTx(tx).InsertResetToken(ctx, sqlcgen.InsertResetTokenParams{
+		UserID:    userID,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		return domain.PasswordResetToken{}, mapErr(err)
+	}
+	return domain.PasswordResetToken{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		TokenHash: row.TokenHash,
+		ExpiresAt: row.ExpiresAt,
+		UsedAt:    row.UsedAt,
+	}, nil
+}
+
+// GetResetTokenByHash fetches a reset token by its SHA-256 hash (AU-4 verify).
+func (r *Repository) GetResetTokenByHash(ctx context.Context, hash string) (domain.PasswordResetToken, error) {
+	row, err := r.q.GetResetTokenByHash(ctx, hash)
+	if err != nil {
+		return domain.PasswordResetToken{}, mapErr(err)
+	}
+	return domain.PasswordResetToken{
+		ID:        row.ID,
+		UserID:    row.UserID,
+		TokenHash: row.TokenHash,
+		ExpiresAt: row.ExpiresAt,
+		UsedAt:    row.UsedAt,
+	}, nil
+}
+
+// MarkResetTokenUsed marks the token consumed so it cannot be replayed (AU-4).
+func (r *Repository) MarkResetTokenUsed(ctx context.Context, tx pgx.Tx, id int64) error {
+	return mapErr(r.q.WithTx(tx).MarkResetTokenUsed(ctx, id))
+}
+
+// RevokeAllRefreshForUser invalidates every active session for the user (AU-6).
+func (r *Repository) RevokeAllRefreshForUser(ctx context.Context, tx pgx.Tx, userID string) error {
+	return mapErr(r.q.WithTx(tx).RevokeAllRefreshForUser(ctx, userID))
+}
+
 // --- mapping helpers ---
 
-func toDomainUser(u sqlcgen.User) domain.User {
+func toDomainUserFromEmail(u sqlcgen.GetUserByEmailRow) domain.User {
 	return domain.User{
 		ID:           u.ID,
 		Email:        u.Email,
@@ -110,6 +168,24 @@ func toDomainUser(u sqlcgen.User) domain.User {
 		EmployeeID:   derefStr(u.EmployeeID),
 		CompanyID:    derefStr(u.CompanyID),
 		Status:       u.Status,
+		FullName:     u.FullName,
+		LastLoginAt:  u.LastLoginAt,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}
+}
+
+func toDomainUserFromID(u sqlcgen.GetUserByIDRow) domain.User {
+	return domain.User{
+		ID:           u.ID,
+		Email:        u.Email,
+		PasswordHash: u.PasswordHash,
+		Role:         auth.Role(u.Role),
+		EmployeeID:   derefStr(u.EmployeeID),
+		CompanyID:    derefStr(u.CompanyID),
+		Status:       u.Status,
+		FullName:     u.FullName,
+		LastLoginAt:  u.LastLoginAt,
 		CreatedAt:    u.CreatedAt,
 		UpdatedAt:    u.UpdatedAt,
 	}

@@ -10,15 +10,27 @@ import (
 
 type Querier interface {
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
-	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
+	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
+	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	// Login lookup: active, non-deleted user by case-insensitive email.
-	GetUserByEmail(ctx context.Context, email string) (User, error)
-	GetUserByID(ctx context.Context, id string) (User, error)
+	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
+	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
+	// Stores a new (hashed) password reset token for the user (AU-4).
+	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
+	// Marks a token as consumed (single-use enforcement, AU-4).
+	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// Invalidates every live session for a user (AU-6: called on password reset).
+	RevokeAllRefreshForUser(ctx context.Context, userID string) error
 	// Reuse detection: kill every live token in the family.
 	RevokeFamily(ctx context.Context, familyID string) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
+	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
+	SetLastLogin(ctx context.Context, id string) error
+	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
+	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 }
 
 var _ Querier = (*Queries)(nil)

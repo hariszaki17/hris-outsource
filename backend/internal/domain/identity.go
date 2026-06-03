@@ -18,6 +18,8 @@ type User struct {
 	EmployeeID   string // "" when unset
 	CompanyID    string // "" when unset (set for shift_leader)
 	Status       string // active | disabled
+	FullName     string // denormalized from Employee; "" for users not yet linked
+	LastLoginAt  *time.Time // nil on first-ever login; set on every successful login
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -49,4 +51,20 @@ type RefreshToken struct {
 
 func (t RefreshToken) IsLive(now time.Time) bool {
 	return t.RevokedAt == nil && t.ExpiresAt.After(now)
+}
+
+// PasswordResetToken is a single-use, time-limited reset credential (AU-4).
+// Only the SHA-256 hash is stored in the DB; the plaintext is sent to the user
+// in an email (or surfaced via the test-only DB helper).
+type PasswordResetToken struct {
+	ID        int64
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+// IsLive returns true when the token has not been consumed and has not expired.
+func (t PasswordResetToken) IsLive(now time.Time) bool {
+	return t.UsedAt == nil && t.ExpiresAt.After(now)
 }

@@ -26,3 +26,9 @@ WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
 UPDATE refresh_tokens
 SET revoked_at = now()
 WHERE family_id = sqlc.arg(family_id) AND revoked_at IS NULL;
+
+-- name: RevokeAllRefreshForUser :exec
+-- Invalidates every live session for a user (AU-6: called on password reset).
+UPDATE refresh_tokens
+SET revoked_at = now()
+WHERE user_id = sqlc.arg(user_id) AND revoked_at IS NULL;

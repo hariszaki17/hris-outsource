@@ -35,6 +35,15 @@ type IdempotencyKey struct {
 	ExpiresAt      time.Time
 }
 
+type PasswordResetToken struct {
+	ID        int64
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
 type RefreshToken struct {
 	ID          int64
 	UserID      string
@@ -59,4 +68,6 @@ type User struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+	FullName     string
+	LastLoginAt  *time.Time
 }

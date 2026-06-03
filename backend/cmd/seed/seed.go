@@ -28,6 +28,7 @@ type persona struct {
 	email      string
 	password   string
 	role       string
+	fullName   string
 	employeeID *string
 	companyID  *string
 }
@@ -48,6 +49,7 @@ var personas = []persona{
 		email:      "sari.hadi@swp.test",
 		password:   PasswordHRAdmin,
 		role:       "hr_admin",
+		fullName:   "Sari Hadi",
 		employeeID: strPtr("SWP-EMP-1042"),
 		companyID:  nil,
 	},
@@ -58,6 +60,7 @@ var personas = []persona{
 		email:      "rudi.wijaya@swp.test",
 		password:   PasswordShiftLeader,
 		role:       "shift_leader",
+		fullName:   "Rudi Wijaya",
 		employeeID: strPtr("SWP-EMP-1108"),
 		companyID:  strPtr("SWP-CMP-0021"),
 	},
@@ -65,6 +68,7 @@ var personas = []persona{
 		email:      "super.admin@swp.test",
 		password:   PasswordSuperAdmin,
 		role:       "super_admin",
+		fullName:   "Super Admin",
 		employeeID: nil,
 		companyID:  nil,
 	},
@@ -72,6 +76,7 @@ var personas = []persona{
 		email:      "agent.budi@swp.test",
 		password:   PasswordAgent,
 		role:       "agent",
+		fullName:   "Budi Santoso",
 		employeeID: strPtr("SWP-EMP-2891"),
 		companyID:  nil,
 	},
@@ -104,6 +109,7 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 			Email:        p.email,
 			PasswordHash: hash,
 			Role:         p.role,
+			FullName:     p.fullName,
 			EmployeeID:   p.employeeID,
 			CompanyID:    p.companyID,
 		})

@@ -102,6 +102,18 @@ func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshToken
 	return i, err
 }
 
+const revokeAllRefreshForUser = `-- name: RevokeAllRefreshForUser :exec
+UPDATE refresh_tokens
+SET revoked_at = now()
+WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// Invalidates every live session for a user (AU-6: called on password reset).
+func (q *Queries) RevokeAllRefreshForUser(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, revokeAllRefreshForUser, userID)
+	return err
+}
+
 const revokeFamily = `-- name: RevokeFamily :exec
 UPDATE refresh_tokens
 SET revoked_at = now()
