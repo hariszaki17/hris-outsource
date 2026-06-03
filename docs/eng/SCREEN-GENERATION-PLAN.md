@@ -220,7 +220,8 @@ Remaining masters → components:
 - [x] HR leave detail + queues (F6.3) + **SL L1 variant** + no-leader + LA-5 balance-override variants + reject modal · `→ leave-approvals-screen.tsx`,`leave-detail-screen.tsx`,`leave-overlays.tsx` · frames `yho5i`,`qb0S0`,`DJrBn`,`eHXWF`,`ZlnfW`,`Hzbbv`
 - [x] Leave calendars (HR/team) + approved+pending toggle (F6.5, D6) · `→ leave-calendar-screen.tsx` · frames `s5niW`,`YvYcr`
 - [~] Cancel / shorten approved leave — hooks wired (`useCancelApprovedLeaveRequest`,`useShortenLeaveRequest`); surfaced from detail actions *(deferred: dedicated wave-3.4 modals)*
-- [!] **EN i18n deferral:** leave/leaveQuotas/leaveCalendar `en.ts` reuses Bahasa values (app default = Bahasa); English polish is a follow-up.
+- [x] **EN i18n pass done** (final review): leave/leaveQuotas/leaveCalendar `en.ts` translated to English (was reusing Bahasa).
+- [x] **Screenshots done** (final review): captured in `e2e/e7-e10-screens.spec.ts` (`01-leave-approvals.png`).
 
 ### E7 — Overtime / Lembur ✅  · web container `BnEnb`
 - [x] Reconciled against live `.pen` *(5 web frames: HR rekap/approvals/detail/rules + SL L1 + overlays showcase `YGLK3`, withdraw `STI8j`)*
