@@ -7,7 +7,9 @@ import {
   visibleNav,
 } from '@/app/nav.ts';
 import { UserMenu } from '@/app/user-menu.tsx';
+import { auth } from '@/lib/auth.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useAuthLogout } from '@swp/api-client/e1';
 import {
   Breadcrumb,
   Sidebar,
@@ -35,6 +37,17 @@ export function AppShell() {
   const user = useCurrentUser();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const logoutMut = useAuthLogout();
+
+  async function handleLogout() {
+    try {
+      await logoutMut.mutateAsync();
+    } catch {
+      // If logout fails (e.g. session already expired), still clear local state.
+    }
+    auth.clear();
+    void navigate({ to: '/login' });
+  }
 
   // Defensive: the route guard requires a token, but a session may lack a user (e.g. mid
   // refresh). Render nothing rather than a broken chrome; the guard handles redirects.
@@ -92,7 +105,7 @@ export function AppShell() {
                 label={t('shell.notifications')}
                 onClick={() => navigate({ to: '/notifications' })}
               />
-              <UserMenu user={user} />
+              <UserMenu user={user} onLogout={handleLogout} />
             </div>
           }
         />

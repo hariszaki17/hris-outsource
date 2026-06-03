@@ -1,9 +1,12 @@
 import { AuthLayout } from '@/features/auth/auth-layout.tsx';
-import { auth } from '@/lib/auth.ts';
-import { permissionsForRole } from '@swp/shared';
+import { auth, buildSessionUser } from '@/lib/auth.ts';
+import { ApiError } from '@swp/api-client';
+import type { LoginResponse } from '@swp/api-client/e1';
+import { useAuthLogin } from '@swp/api-client/e1';
 import { Banner, Button, Checkbox, FormField, Input } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Eye, Lock, Mail, ShieldX } from 'lucide-react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -12,8 +15,9 @@ import { z } from 'zod';
  * Login (F1.1 / authentication.md). Built from the .pen frames `E1 · Login (Web)` (lKRjr),
  * `… — Gagal` (JRq3Z), `… — Terkunci sementara` (N2IdlJ), `… — Akun nonaktif` (QVifb) per G0.
  * Split-screen via the shared `AuthLayout`. The error state is taken from the typed `error`
- * search param (set by the future auth mutation / redirect); the real /auth call + token model
- * land with the Go endpoints (WEB-STACK §6) — this stub sets a dev session so the shell is reachable.
+ * search param (set by the login mutation redirect). Calls the real useAuthLogin() hook.
+ * Error codes: INVALID_CREDENTIALS→'invalid', ACCOUNT_DISABLED→'disabled',
+ * ACCOUNT_LOCKED/429→'locked' (ENGINEERING.md B1 / authentication.md AU-5).
  */
 const loginSchema = z.object({
   email: z.string().email(),
@@ -25,6 +29,8 @@ export function LoginScreen() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { error } = useSearch({ from: '/login' });
+  const [rememberMe, setRememberMe] = useState(true);
+  const loginMut = useAuthLogin();
   const {
     register,
     handleSubmit,
@@ -37,16 +43,27 @@ export function LoginScreen() {
   const onSubmit = handleSubmit(async (values) => {
     const parsed = loginSchema.safeParse(values);
     if (!parsed.success) return;
-    // TODO(E1): replace with the generated useAuthLogin() mutation. On 401 → redirect with
-    // ?error=invalid; on 423/429 → ?error=locked; on a disabled account → ?error=disabled.
-    // The user (name/role/initials) comes from the auth/`/me` response; stubbed here.
-    auth.login('dev-token', {
-      name: 'Sari Hadi',
-      role: 'hr_admin',
-      permissions: permissionsForRole('hr_admin'),
-      initials: 'SH',
-    });
-    await navigate({ to: '/' });
+    try {
+      const res = await loginMut.mutateAsync({
+        data: { email: parsed.data.email, password: parsed.data.password, stay_signed_in: rememberMe },
+      });
+      const body = res.data as LoginResponse;
+      auth.login(body.access_token, buildSessionUser(body.user));
+      await navigate({ to: '/' });
+    } catch (e) {
+      if (e instanceof ApiError) {
+        if (e.code === 'ACCOUNT_DISABLED') {
+          void navigate({ to: '/login', search: { error: 'disabled' } });
+        } else if (e.code === 'ACCOUNT_LOCKED' || e.status === 429) {
+          void navigate({ to: '/login', search: { error: 'locked' } });
+        } else {
+          // INVALID_CREDENTIALS or any other auth error → generic invalid banner
+          void navigate({ to: '/login', search: { error: 'invalid' } });
+        }
+      } else {
+        void navigate({ to: '/login', search: { error: 'invalid' } });
+      }
+    }
   });
 
   return (
@@ -112,7 +129,12 @@ export function LoginScreen() {
         </FormField>
 
         <div className="flex items-center justify-between">
-          <Checkbox id="remember" label={t('auth.rememberMe')} defaultChecked />
+          <Checkbox
+            id="remember"
+            label={t('auth.rememberMe')}
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+          />
           <Link to="/forgot-password" className="font-semibold text-[13px] text-primary">
             {t('auth.forgot')}
           </Link>
@@ -123,7 +145,7 @@ export function LoginScreen() {
             {t('auth.lockedRetry')}
           </Button>
         ) : (
-          <Button type="submit" className="w-full" disabled={disabled || isSubmitting}>
+          <Button type="submit" className="w-full" disabled={disabled || isSubmitting || loginMut.isPending}>
             {t('auth.login')}
           </Button>
         )}

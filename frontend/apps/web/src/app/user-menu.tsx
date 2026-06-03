@@ -1,4 +1,4 @@
-import { type SessionUser, auth } from '@/lib/auth.ts';
+import type { SessionUser } from '@/lib/auth.ts';
 import { TopbarUser, cn } from '@swp/ui';
 import { useNavigate } from '@tanstack/react-router';
 import { LogOut, Settings } from 'lucide-react';
@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
  * packages/ui per ENGINEERING.md G2). `TopbarUser` is the trigger; a lightweight popover holds
  * Settings (admins) + Sign out. Closes on outside-click and Escape.
  */
-export function UserMenu({ user }: { user: SessionUser }) {
+export function UserMenu({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -36,8 +36,7 @@ export function UserMenu({ user }: { user: SessionUser }) {
 
   function handleLogout() {
     setOpen(false);
-    auth.clear();
-    void navigate({ to: '/login' });
+    onLogout();
   }
 
   return (

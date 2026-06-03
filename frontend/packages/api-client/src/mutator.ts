@@ -27,7 +27,10 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
   const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
   let res: Response;
   try {
-    res = await fetch(fullUrl, { ...options, headers });
+    // credentials:'include' is required for the httpOnly refresh cookie to be sent/received
+    // cross-origin between FE (:4173 / :5173) and BE (:8081). The BE sets CORS
+    // allow-origin for those origins with SameSite=Lax; Secure=false in the test env.
+    res = await fetch(fullUrl, { ...options, headers, credentials: 'include' });
   } catch (cause) {
     throw new ApiError(0, undefined, 'Network error');
   }
