@@ -2110,7 +2110,7 @@ export const en: Messages = {
       flagNoPreapproval: 'No pre-approval',
       selectAll: 'Select all',
       selectRow: 'Select row {{id}}',
-      bulkApprove: 'Approve {{count}} selected',
+      bulkApprove: 'Bulk approve',
       bulkReject: 'Reject {{count}} selected',
       approve: 'Approve',
       reject: 'Reject',

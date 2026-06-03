@@ -2118,7 +2118,7 @@ export const id = {
       flagNoPreapproval: 'Tanpa pra-approval',
       selectAll: 'Pilih semua',
       selectRow: 'Pilih baris {{id}}',
-      bulkApprove: 'Setujui {{count}} terpilih',
+      bulkApprove: 'Setujui massal',
       bulkReject: 'Tolak {{count}} terpilih',
       approve: 'Setujui',
       reject: 'Tolak',

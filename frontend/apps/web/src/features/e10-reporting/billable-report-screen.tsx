@@ -120,7 +120,7 @@ interface BillableReportScreenInnerProps {
 }
 
 function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenInnerProps) {
-  const { t } = useTranslation('report');
+  const { t } = useTranslation();
   const user = useCurrentUser();
   const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
 
@@ -500,7 +500,7 @@ interface TitleBandProps {
 }
 
 function TitleBand({ onExportClick }: TitleBandProps) {
-  const { t } = useTranslation('report');
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between">
       <div className="flex flex-col gap-1">
