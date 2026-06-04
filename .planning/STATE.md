@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-e1-foundations/02-04-PLAN.md
-last_updated: "2026-06-04T02:46:24.181Z"
+stopped_at: Completed 03-e2-org-master-data/03-01-PLAN.md
+last_updated: "2026-06-04T03:04:19.673Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
+  total_plans: 15
+  completed_plans: 10
   percent: 8
 ---
 
@@ -50,6 +50,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 02-e1-foundations P02 | 25 | 3 tasks | 9 files |
 | Phase 02-e1-foundations P03 | 15 | 2 tasks | 1 files |
 | Phase 02-e1-foundations P04 | 107 | 2 tasks | 7 files |
+| Phase 03-e2-org-master-data P01 | 25 | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 02-e1-foundations]: tryRestoreSession hydrates in-memory accessToken from httpOnly cookie before React mounts — enables page.goto() on authed routes in E2E
 - [Phase 02-e1-foundations]: DataTable rows are div.border-b not tr — all E2E row locators must use div.border-b.filter() pattern
 - [Phase 02-e1-foundations]: playwright.config.ts timeout: 90s to accommodate cold Vite compilation on first test run
+- [Phase 03-e2-org-master-data]: geo_lat/geo_lng stored as nullable double precision; geofence_active derived at DTO boundary (not stored)
+- [Phase 03-e2-org-master-data]: ListClientCompanies service_line+has_leader narg params accepted but (IS NULL OR TRUE) — no placements table in Phase 3
+- [Phase 03-e2-org-master-data]: ids.go NOT modified — CMP/SITE/SVC/POS/LT/AC/OTR prefixes already existed
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T02:40:33.870Z
-Stopped at: Completed 02-e1-foundations/02-04-PLAN.md
+Last session: 2026-06-04T03:04:19.670Z
+Stopped at: Completed 03-e2-org-master-data/03-01-PLAN.md
 Resume file: None

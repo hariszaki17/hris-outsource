@@ -72,7 +72,7 @@ Plans:
   2. HR can manage service lines + positions (create/update/discontinue/soft-delete) and the master-data sets (leave types, attendance codes, overtime rules).
   3. Picker endpoints return the picker-shaped lists the FE expects (CONVENTIONS §18).
   4. Exhaustive Playwright E2E for E2 org/master-data features is green.
-**Plans:** 6 plans
+**Plans:** 1/6 plans executed
 
 Plans:
 - [ ] 03-01-PLAN.md (wave 1) — Migrations 00009–00015 + sqlc queries for all 7 E2 org/master entities (make gen)
@@ -227,7 +227,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Test Harness + Auth | 5/5 | Complete    | 2026-06-04 |
 | 2. E1 Foundations | 4/4 | Complete    | 2026-06-04 |
-| 3. E2 Org & Master Data | 0/6 | Not started | - |
+| 3. E2 Org & Master Data | 1/6 | In Progress|  |
 | 4. E2 People | 0/4 | Not started | - |
 | 5. E3 Placement | 0/4 | Not started | - |
 | 6. E4 Schedule & Shifts | 0/4 | Not started | - |
