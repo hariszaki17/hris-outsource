@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-e1-foundations/02-04-PLAN.md
-last_updated: "2026-06-04T02:40:33.873Z"
+last_updated: "2026-06-04T02:46:24.181Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
