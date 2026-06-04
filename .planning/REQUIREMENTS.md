@@ -23,10 +23,10 @@
 - [x] **FND-03**: Platform settings read.
 
 ### E2 Org & Master Data (Phase 3)
-- [ ] **ORG-01**: Client companies — list/detail/create/update/reactivate.
-- [ ] **ORG-02**: Sites (per company) — list/create/update, with geofence.
-- [ ] **ORG-03**: Service lines + positions — list/detail/create/update/discontinue/soft-delete.
-- [ ] **ORG-04**: Master data — leave types, attendance codes, overtime rules (list/create/update/soft-delete).
+- [x] **ORG-01**: Client companies — list/detail/create/update/reactivate.
+- [x] **ORG-02**: Sites (per company) — list/create/update, with geofence.
+- [x] **ORG-03**: Service lines + positions — list/detail/create/update/discontinue/soft-delete.
+- [x] **ORG-04**: Master data — leave types, attendance codes, overtime rules (list/create/update/soft-delete).
 
 ### E2 People (Phase 4)
 - [ ] **PPL-01**: Employees — list/detail/create/update/deactivate/reactivate.
@@ -82,7 +82,7 @@
 |-------------|-------|--------|
 | HARN-01, HARN-02, AUTH-01..04 | Phase 1 | Pending |
 | FND-01..03 | Phase 2 | Pending |
-| ORG-01..04 | Phase 3 | Pending |
+| ORG-01..04 | Phase 3 | Complete (03-02..05) |
 | PPL-01..03 | Phase 4 | Pending |
 | PLC-01..04 | Phase 5 | Pending |
 | SCH-01..03 | Phase 6 | Pending |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-e2-org-master-data/03-04-PLAN.md
-last_updated: "2026-06-04T03:33:53.324Z"
-last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
+stopped_at: Completed 03-e2-org-master-data/03-05-PLAN.md
+last_updated: "2026-06-04T04:05:00.000Z"
+last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 15
-  completed_plans: 13
-  percent: 8
+  completed_plans: 14
+  percent: 9
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 1 of 11 (Test Harness + Auth)
-Plan: 4 of 5 in current phase (next: 01-05 E2E auth spec)
+Phase: 3 of 11 (E2 Org/Master Data)
+Plan: 5 of 5 in current phase — Phase 03 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport.
+Last activity: 2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0.
 
 Progress: [█░░░░░░░░░] 8%
 
@@ -54,6 +54,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 03-e2-org-master-data P02 | 452 | 3 tasks | 8 files |
 | Phase 03-e2-org-master-data P03 | 6 | 3 tasks | 8 files |
 | Phase 03-e2-org-master-data P04 | 12 | 3 tasks | 8 files |
+| Phase 03-e2-org-master-data P05 | 20 | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -116,6 +117,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T03:33:53.321Z
-Stopped at: Completed 03-e2-org-master-data/03-04-PLAN.md
+Last session: 2026-06-04T04:05:00.000Z
+Stopped at: Completed 03-e2-org-master-data/03-05-PLAN.md
 Resume file: None
