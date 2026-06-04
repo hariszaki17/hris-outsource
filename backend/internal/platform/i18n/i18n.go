@@ -50,6 +50,11 @@ var messages = map[Lang]map[string]string{
 
 		// E2 people — employees (EP-2)
 		"DUPLICATE_NIK": "NIK sudah terdaftar untuk karyawan lain.",
+
+		// E2 people — agreements (EA-1..EA-5, CONVENTIONS §15)
+		"PKWT_PERIOD_EXCEEDS_MAX": "Periode PKWT melebihi batas 5 tahun yang diizinkan UU Ketenagakerjaan.",
+		"ACTIVE_AGREEMENT_EXISTS": "Karyawan sudah memiliki perjanjian aktif. Gunakan endpoint :renew untuk perpanjangan.",
+		"FILE_TOO_LARGE":          "Ukuran file melebihi batas maksimum 10 MB.",
 	},
 	EN: {
 		"INVALID_REQUEST": "The request is invalid.",
@@ -78,6 +83,11 @@ var messages = map[Lang]map[string]string{
 
 		// E2 people — employees (EP-2)
 		"DUPLICATE_NIK": "NIK is already registered to another employee.",
+
+		// E2 people — agreements (EA-1..EA-5, CONVENTIONS §15)
+		"PKWT_PERIOD_EXCEEDS_MAX": "PKWT period exceeds the 5-year maximum allowed by Indonesian labor law.",
+		"ACTIVE_AGREEMENT_EXISTS": "The employee already has an active agreement. Use :renew to extend.",
+		"FILE_TOO_LARGE":          "File size exceeds the 10 MB limit.",
 	},
 }
 

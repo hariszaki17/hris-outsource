@@ -71,3 +71,71 @@ type EmployeeFilter struct {
 	CursorCreatedAt *time.Time
 	CursorID        *string
 }
+
+// --- Employment Agreements (EA-*) ---
+
+// BpjsTerms holds the four BPJS percentage deduction fields stored as JSONB.
+type BpjsTerms struct {
+	KesehatanEmployerPct         *float64 `json:"kesehatan_employer_pct"`
+	KesehatanEmployeePct         *float64 `json:"kesehatan_employee_pct"`
+	KetenagakerjaanEmployerPct   *float64 `json:"ketenagakerjaan_employer_pct"`
+	KetenagakerjaanEmployeePct   *float64 `json:"ketenagakerjaan_employee_pct"`
+}
+
+// CompensationTerms groups all compensation fields stored on an employment agreement.
+// Stored plaintext this milestone; encryption at rest deferred (EA-4).
+type CompensationTerms struct {
+	BaseSalaryIDR  *float64   // base_salary_idr numeric
+	BpjsTerms      BpjsTerms  // bpjs_terms jsonb
+	TaxProfile     *string    // PTKP code e.g. PTKP_K0
+	EffectiveDate  *time.Time // comp_effective_date date
+}
+
+// Agreement is the domain entity for an employment agreement (F2.2 / EA-*).
+//
+// Status is the DB value ("active"|"superseded"|"closed") — uppercased only at DTO boundary.
+// Type is "PKWT" or "PKWTT" (stored uppercase, DB-checked).
+// EndDate is nil for PKWTT agreements.
+type Agreement struct {
+	ID             string
+	EmployeeID     string
+	Type           string     // "PKWT" | "PKWTT"
+	AgreementNo    string
+	StartDate      time.Time
+	EndDate        *time.Time // nil for PKWTT
+	Status         string     // "active" | "superseded" | "closed"
+	PredecessorID  *string
+	SuccessorID    *string
+	ClosedReason   *string
+	ClosedAt       *time.Time
+	Compensation   CompensationTerms
+	CreatedBy      *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// AgreementFilter holds the decoded query parameters for GET /agreements.
+type AgreementFilter struct {
+	EmployeeID      *string
+	Status          *string
+	Type            *string
+	EndDateLTE      *time.Time // for EXPIRING virtual status pre-filter
+	Limit           int
+	CursorCreatedAt *time.Time
+	CursorID        *string
+}
+
+// Attachment is the domain entity for an agreement_attachments row.
+// Blob holds the file bytes (read from bytea); only populated by GetAttachmentByID.
+type Attachment struct {
+	ID          string
+	AgreementID string
+	Category    string
+	Caption     string
+	FileName    string
+	MIME        string
+	SizeBytes   int64
+	Blob        []byte
+	UploadedBy  *string
+	CreatedAt   time.Time
+}
