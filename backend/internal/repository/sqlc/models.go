@@ -233,6 +233,68 @@ type IdempotencyKey struct {
 	ExpiresAt      time.Time
 }
 
+type LeaveApproval struct {
+	ID             int64
+	LeaveRequestID string
+	Stage          string
+	Decision       string
+	ActorID        *string
+	ActorRole      *string
+	DecisionNote   *string
+	RejectReason   *string
+	IsOverride     bool
+	OverrideReason *string
+	OccurredAt     time.Time
+}
+
+type LeaveQuota struct {
+	ID             string
+	EmployeeID     string
+	LeaveTypeID    string
+	Period         int32
+	PeriodStart    pgtype.Date
+	PeriodEnd      pgtype.Date
+	Total          int32
+	Used           int32
+	Pending        int32
+	IsProrated     bool
+	ProrateMonths  int32
+	Closed         bool
+	LastAdjustment []byte
+	LastOverride   []byte
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type LeaveRequest struct {
+	ID                      string
+	EmployeeID              string
+	PlacementID             *string
+	CompanyID               *string
+	ServiceLineID           *string
+	LeaveTypeID             string
+	StartDate               pgtype.Date
+	EndDate                 pgtype.Date
+	DurationDays            int32
+	Reason                  *string
+	Notes                   *string
+	Status                  string
+	DelegateID              *string
+	DocumentFileID          *string
+	Backdated               bool
+	ClockInConflict         bool
+	NoLeader                bool
+	AssignedLeaderID        *string
+	BalanceQuotaID          *string
+	BalanceRequestedDays    *int32
+	BalanceRemainingAtCheck *int32
+	BalanceRequiresOverride *bool
+	CreatedBy               *string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	DeletedAt               *time.Time
+}
+
 type LeaveType struct {
 	ID                 string
 	Name               string

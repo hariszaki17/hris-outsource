@@ -9,6 +9,9 @@ import (
 )
 
 type Querier interface {
+	// :adjust — signed delta on total + audited last_adjustment snapshot. Service
+	// guards delta cannot drop total below used (422 RULE_VIOLATION) before calling.
+	AdjustLeaveQuotaTotal(ctx context.Context, arg AdjustLeaveQuotaTotalParams) (LeaveQuota, error)
 	// Apply an approved correction's whitelisted proposed_* fields to the target row:
 	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
 	// (de-duped via array_remove first); sets last_correction_id.
@@ -22,6 +25,9 @@ type Querier interface {
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// Soft-reservation recompute: sum duration_days of this employee+leave_type's open
+	// PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
+	CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPendingLeaveDaysForQuotaParams) (int64, error)
 	// Allocates the SWP-AG id inline from the per-prefix sequence.
 	CreateAgreement(ctx context.Context, arg CreateAgreementParams) (CreateAgreementRow, error)
 	// Allocates the SWP-FILE id inline from the per-prefix sequence.
@@ -35,6 +41,11 @@ type Querier interface {
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
 	// Allocates the SWP-EMP id inline from the per-prefix sequence.
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
+	// Seed / HR-on-behalf path (FE/web does not create — mobile/agent does). id
+	// allocated by the column DEFAULT ('SWP-LR-' || swp_next_id('LR')) when omitted.
+	CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequestParams) (CreateLeaveRequestRow, error)
+	// Seed / test variant that supplies an explicit id (deterministic E2E targets).
+	CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveRequestWithIDParams) (CreateLeaveRequestWithIDRow, error)
 	// Allocates the SWP-LT id inline from the per-prefix sequence.
 	CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams) (CreateLeaveTypeRow, error)
 	// Allocates the SWP-OTR id inline from the per-prefix sequence.
@@ -56,6 +67,8 @@ type Querier interface {
 	CreateSite(ctx context.Context, arg CreateSiteParams) (CreateSiteRow, error)
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// Final-approval deduct: move days from the soft-reservation into used.
+	DeductLeaveQuota(ctx context.Context, arg DeductLeaveQuotaParams) (LeaveQuota, error)
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
@@ -72,6 +85,8 @@ type Querier interface {
 	// DOUBLE_SHIFT pre-check / replace lookup: the live entry (if any) for an
 	// agent on a date. Mirrors the INV-1 partial unique index predicate.
 	FindLiveEntryForAgentDate(ctx context.Context, arg FindLiveEntryForAgentDateParams) (FindLiveEntryForAgentDateRow, error)
+	// INV-1 quota guard lookup by (employee_id, leave_type_id, period).
+	FindQuotaForEmployeeTypePeriod(ctx context.Context, arg FindQuotaForEmployeeTypePeriodParams) (LeaveQuota, error)
 	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
 	// INV-3 lock: the employee's active leadership assignment, row-locked.
@@ -104,6 +119,14 @@ type Querier interface {
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
+	GetLeaveQuota(ctx context.Context, id string) (GetLeaveQuotaRow, error)
+	// Row-lock for :adjust and the final-approval deduct/restore.
+	GetLeaveQuotaForUpdate(ctx context.Context, id string) (LeaveQuota, error)
+	// Single request with denormalized names.
+	GetLeaveRequest(ctx context.Context, id string) (GetLeaveRequestRow, error)
+	// Row-lock for the state-machine transitions (approve-l1/final/override/reject).
+	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
+	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
 	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
@@ -127,11 +150,18 @@ type Querier interface {
 	// Login lookup: active, non-deleted user by case-insensitive email.
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
+	// E6 leave-approval decision-trail queries. Append-only; drives the
+	// LeaveRequest.timeline[] the FE renders (ordered by occurred_at).
+	// One immutable decision row per approval action (L1/HR approve, override, reject).
+	InsertLeaveApproval(ctx context.Context, arg InsertLeaveApprovalParams) (LeaveApproval, error)
 	// E3 placement_history queries — one row per lifecycle transition.
 	InsertPlacementHistory(ctx context.Context, arg InsertPlacementHistoryParams) (PlacementHistory, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
+	// bulk-grant employee_ids:["all"] sentinel + pro-rate join-date source: employees
+	// with an ACTIVE/EXPIRING placement covering any day of the [period_start,period_end].
+	ListActivePlacedEmployeesForGrant(ctx context.Context, arg ListActivePlacedEmployeesForGrantParams) ([]ListActivePlacedEmployeesForGrantRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
@@ -151,6 +181,11 @@ type Querier interface {
 	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
 	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	// E6 leave-calendar query (GET /leave-calendar). Returns leave entries overlapping
+	// a [from,to] date range, scoped by company / service-line / leave-type. The status
+	// filter is a text[] the service builds: APPROVED only when show_pending=false, else
+	// APPROVED + PENDING_L1 + PENDING_HR. Denormalized names via LEFT JOINs.
+	ListCalendarEntries(ctx context.Context, arg ListCalendarEntriesParams) ([]ListCalendarEntriesRow, error)
 	// Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, employee_id, request_type.
 	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ChangeRequest, error)
@@ -172,6 +207,23 @@ type Querier interface {
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
 	ListExpiringPlacements(ctx context.Context, arg ListExpiringPlacementsParams) ([]ListExpiringPlacementsRow, error)
+	// Timeline source: all decisions for a request, chronological.
+	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
+	// E6 leave-quota queries (F6.3 / SWP-LQ-*). remaining = total-used-pending is a
+	// DERIVED domain method (not a column). Reads LEFT JOIN employees/leave_types for
+	// denormalized names. Dates come back as pgtype.Date (08-02 repo converts).
+	// last_adjustment / last_override are jsonb → []byte in sqlc (08-02 marshals).
+	// Keyset cursor (created_at,id) DESC. Filters (narg): employee_id, leave_type_id,
+	// period, company_id (via the employee's covering placement), include_closed.
+	ListLeaveQuotas(ctx context.Context, arg ListLeaveQuotasParams) ([]ListLeaveQuotasRow, error)
+	// E6 leave-request queries (F6.1/F6.2 / SWP-LR-*). Reads LEFT JOIN employees for
+	// employee_name, client_companies for company_name, leave_types for
+	// leave_type_name. Dates come back as pgtype.Date (08-02 repo converts <-> time.Time
+	// like Phase-5/6). Keyset cursor on (created_at DESC, id) per CONVENTIONS §11.
+	// Queue / list load. Keyset cursor (created_at,id) DESC. Filters (all optional via
+	// narg): company_id, status, status__in (text[] → status = ANY), employee_id,
+	// leave_type_id, start_date >= / <=, q free-text (ILIKE employee name + id + reason).
+	ListLeaveRequests(ctx context.Context, arg ListLeaveRequestsParams) ([]ListLeaveRequestsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_annual.
 	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
@@ -233,6 +285,8 @@ type Querier interface {
 	// Drives :approve (status='approved') and :reject (status='rejected').
 	// Sets resolved_at, resolved_by (optional), and rejection_reason (on reject).
 	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ChangeRequest, error)
+	// Cancel/withdraw restore: return days to the balance (used - delta).
+	RestoreLeaveQuota(ctx context.Context, arg RestoreLeaveQuotaParams) (LeaveQuota, error)
 	// Invalidates every live session for a user (AU-6: called on password reset).
 	RevokeAllRefreshForUser(ctx context.Context, userID string) error
 	// Reuse detection: kill every live token in the family.
@@ -256,6 +310,8 @@ type Querier interface {
 	SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusParams) (SetEmployeeStatusRow, error)
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
+	// HR override that drove remaining negative (LA-8): records last_override.
+	SetLeaveQuotaOverride(ctx context.Context, arg SetLeaveQuotaOverrideParams) (LeaveQuota, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatusParams) (SetLeaveTypeStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
@@ -284,6 +340,9 @@ type Querier interface {
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
+	// The approval state transitions (PENDING_L1→PENDING_HR→APPROVED, →REJECTED,
+	// →CANCELLED). Also refreshes the routing + balance_check snapshot columns.
+	UpdateLeaveRequestStatus(ctx context.Context, arg UpdateLeaveRequestStatusParams) (UpdateLeaveRequestStatusRow, error)
 	UpdateLeaveType(ctx context.Context, arg UpdateLeaveTypeParams) (UpdateLeaveTypeRow, error)
 	UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
@@ -299,6 +358,9 @@ type Querier interface {
 	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
 	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)
+	// Bulk-grant: insert or update entitlement total for a (employee,type,period).
+	// DOES NOT overwrite used/pending. id allocated by column DEFAULT when inserting.
+	UpsertLeaveQuota(ctx context.Context, arg UpsertLeaveQuotaParams) (LeaveQuota, error)
 	// Approve an exception record. Only PENDING/ESCALATED are verifiable; zero rows
 	// returned ⇒ terminal state (service emits 409 ALREADY_VERIFIED/REJECTED).
 	VerifyAttendance(ctx context.Context, arg VerifyAttendanceParams) (VerifyAttendanceRow, error)
