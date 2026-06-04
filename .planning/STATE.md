@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-e3-placement/05-04-PLAN.md
-last_updated: "2026-06-04T15:40:42.508Z"
-last_activity: "2026-06-04 — Plan 05-04 complete: E3 full-stack Playwright E2E — 30 tests across 5 specs (agent-placement, lifecycle, transfer, shift-leader, roster) green against real FE↔Go API↔ephemeral Postgres. Real-409 invariant negatives (INV-1 +details.current_placement, INV-2, INV-4, TERMINAL_STATE_IMMUTABLE, PLACEMENT_PERIOD_OVERLAP, COMPANY_INACTIVE, ALREADY_ENDED, RULE_VIOLATION) + RBAC (agent-403, OUT_OF_SCOPE). Auto-fixed 3 bugs: ApiError dropped error.details (INV-1 banner), roster filters navigated to wrong route, Phase-5 seed regression in e2 AG-create. `pnpm e2e` green, no e1/e2 regressions."
+stopped_at: Completed 06-e4-schedule-shifts/06-01-PLAN.md
+last_updated: "2026-06-04T16:04:49.860Z"
+last_activity: "2026-06-04 — Plan 06-01 complete: E4 data layer. 3 goose migrations (00023 shift_masters, 00024 schedule_entries, 00025 approved_leave_days), new `scheduling` sqlc package, domain.ShiftMaster/ScheduleEntry/filters. INV-1 DOUBLE_SHIFT backstop = partial unique index on schedule_entries(employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq). approved_leave_days is an E4-owned over-leave read source with NO leave_requests FK (E6 owns SWP-LR). `make gen && go build ./... && go vet ./...` clean; ids.go untouched. 0 deviations."
 progress:
   total_phases: 11
   completed_phases: 5
-  total_plans: 25
-  completed_plans: 25
-  percent: 100
+  total_plans: 29
+  completed_plans: 26
+  percent: 90
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 5 of 11 (E3 Placement)
-Plan: 4 of 4 in current phase — Plan 05-04 COMPLETE (phase 5 done)
+Phase: 6 of 11 (E4 Schedule & Shifts)
+Plan: 1 of 4 in current phase — Plan 06-01 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 05-04 complete: E3 full-stack Playwright E2E — 30 tests across 5 specs (agent-placement, lifecycle, transfer, shift-leader, roster) green against real FE↔Go API↔ephemeral Postgres. Real-409 invariant negatives (INV-1 +details.current_placement, INV-2, INV-4, TERMINAL_STATE_IMMUTABLE, PLACEMENT_PERIOD_OVERLAP, COMPANY_INACTIVE, ALREADY_ENDED, RULE_VIOLATION) + RBAC (agent-403, OUT_OF_SCOPE). Auto-fixed 3 bugs: ApiError dropped error.details (INV-1 banner), roster filters navigated to wrong route, Phase-5 seed regression in e2 AG-create. `pnpm e2e` green, no e1/e2 regressions.
+Last activity: 2026-06-04 — Plan 06-01 complete: E4 data layer. 3 goose migrations (00023 shift_masters, 00024 schedule_entries, 00025 approved_leave_days), new `scheduling` sqlc package, domain.ShiftMaster/ScheduleEntry/filters. INV-1 DOUBLE_SHIFT backstop = partial unique index on schedule_entries(employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq). approved_leave_days is an E4-owned over-leave read source with NO leave_requests FK (E6 owns SWP-LR). `make gen && go build ./... && go vet ./...` clean; ids.go untouched. 0 deviations.
 
-Progress: [██████████] 100%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [██████████] 100%
 | Phase 05-e3-placement P02 | 18 | 3 tasks | 16 files |
 | Phase 05-e3-placement P03 | 7 | 2 tasks | 3 files |
 | Phase 05-e3-placement P04 | 75 | 3 tasks | 11 files |
+| Phase 06-e4-schedule-shifts P01 | 5 | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -150,6 +151,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 05-e3-placement]: [05-04] roster filters/pagination navigate to /client-companies/{id}/roster (was the company detail route) + route gains validateSearch; fixed all roster filter/toggle interactions
 - [Phase 05-e3-placement]: [05-04] INV-3 unreachable in company-scope FE (INV-4 precedence + INV-1); E2E asserts reachable 409, pure INV_3 envelope is contract-tested in 05-03; negative invariants asserted via apiAs real-409 + INV-1 also via the create-form Banner
 - [Phase 05-e3-placement]: [05-04] e3-helpers (apiAs token-fetch + pickCombobox + comboFieldById) is the reusable E2E pattern for token API calls + FK-picker driving; status filters match PERSISTED lifecycle_status (EXPIRING is DTO-derived, not server-filterable)
+- [Phase 06-e4-schedule-shifts]: [06-01]: INV-1 DOUBLE_SHIFT backstop = partial unique index schedule_entries_active_agent_date_uq on (employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq); service pre-checks via FindLiveEntryForAgentDate then catches 23505
+- [Phase 06-e4-schedule-shifts]: [06-01]: over-leave = minimal E4-owned approved_leave_days table (bigserial PK, employee_id+leave_date unique, denormalized leave_request_id with NO FK) — exercises SHIFT_OVER_LEAVE now without colliding with E6's leave_requests / SWP-LR namespace; E6 (Phase 8) later populates/supersedes
+- [Phase 06-e4-schedule-shifts]: [06-01]: shift/schedule time columns are text HH:MM (not SQL time) matching openapi/FE snapshot render; sqlc returns date cols as pgtype.Date (06-02 repo converts <-> time.Time like Phase-5); in_use_count is int64; ids.go untouched (SHF/SCH prefixes already present)
 
 ### Pending Todos
 
@@ -161,6 +165,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T15:34:17.241Z
-Stopped at: Completed 05-e3-placement/05-04-PLAN.md
+Last session: 2026-06-04T16:04:37.668Z
+Stopped at: Completed 06-e4-schedule-shifts/06-01-PLAN.md
 Resume file: None

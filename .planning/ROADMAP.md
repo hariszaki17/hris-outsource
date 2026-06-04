@@ -127,7 +127,7 @@ Plans:
   2. Conflict check returns double-shift / over-leave / outside-placement-period violations with the correct codes; bulk apply reports partial success.
   3. Schedule lists are cursor-paginated and scoped (leader sees own company).
   4. Exhaustive Playwright E2E for E4 features is green.
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 - [ ] 06-01-PLAN.md (wave 1) — Migrations 00023-00025 + sqlc queries (shift_masters, schedule_entries, E4-owned approved_leave_days) + INV-1 partial unique index + domain types
@@ -232,7 +232,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. E2 Org & Master Data | 6/6 | Complete    | 2026-06-04 |
 | 4. E2 People | 6/6 | Complete    | 2026-06-04 |
 | 5. E3 Placement | 1/4 | In Progress | - |
-| 6. E4 Schedule & Shifts | 0/4 | Not started | - |
+| 6. E4 Schedule & Shifts | 1/4 | In Progress|  |
 | 7. E5 Attendance | 0/4 | Not started | - |
 | 8. E6 Leave | 0/4 | Not started | - |
 | 9. E7 Overtime | 0/4 | Not started | - |

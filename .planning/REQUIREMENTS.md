@@ -40,9 +40,9 @@
 - [x] **PLC-04**: Company roster view.
 
 ### E4 Schedule & Shifts (Phase 6)
-- [ ] **SCH-01**: Shift masters — list/create/update/deactivate/reactivate.
-- [ ] **SCH-02**: Schedule entries — list/create/update/delete.
-- [ ] **SCH-03**: Conflict check + bulk apply (double-shift / over-leave / outside-placement guards).
+- [ ] **SCH-01**: Shift masters — list/create/update/deactivate/reactivate. _(06-01 data layer done; endpoints land in 06-02)_
+- [ ] **SCH-02**: Schedule entries — list/create/update/delete. _(06-01 data layer done; endpoints land in 06-02)_
+- [ ] **SCH-03**: Conflict check + bulk apply (double-shift / over-leave / outside-placement guards). _(06-01 data layer done; engine + bulk-apply land in 06-02)_
 
 ### E5 Attendance (Phase 7)
 - [ ] **ATT-01**: Attendance — list/detail, verify/reject, bulk verify/reject.
