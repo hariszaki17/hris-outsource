@@ -113,19 +113,25 @@ func run() error {
 	peopleSvc := peoplesvc.NewService(peopleRepo, txm)
 	peopleHandler := peoplehttp.NewHandler(peopleSvc)
 
+	// People agreements slice (04-03): employment agreements + attachments + file download (PPL-02).
+	agreementsRepo := peoplerepo.NewAgreementRepo(pool)
+	agreementsSvc := peoplesvc.NewAgreementService(agreementsRepo, txm)
+	agreementsHandler := peoplehttp.NewAgreementHandler(agreementsSvc)
+
 	handler := server.New(server.Deps{
-		AllowedOrigins:  cfg.HTTP.AllowedOrigins,
-		RatePerMinute:   cfg.Rate.PerMinute,
-		RateBurst:       cfg.Rate.Burst,
-		Auth:            idHandler,
-		Foundations:     fndHandler,
-		OrgCompanies:    orgCompaniesHandler,
-		OrgServiceLines: orgServiceLinesHandler,
-		OrgMasterData:   orgMasterDataHandler,
-		People:          peopleHandler,
-		Authn:           authn,
-		Idempotency:     idempotency.New(pool),
-		Obs:             observ,
+		AllowedOrigins:   cfg.HTTP.AllowedOrigins,
+		RatePerMinute:    cfg.Rate.PerMinute,
+		RateBurst:        cfg.Rate.Burst,
+		Auth:             idHandler,
+		Foundations:      fndHandler,
+		OrgCompanies:     orgCompaniesHandler,
+		OrgServiceLines:  orgServiceLinesHandler,
+		OrgMasterData:    orgMasterDataHandler,
+		People:           peopleHandler,
+		PeopleAgreements: agreementsHandler,
+		Authn:            authn,
+		Idempotency:      idempotency.New(pool),
+		Obs:              observ,
 	})
 
 	srv := &http.Server{

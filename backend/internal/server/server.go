@@ -39,7 +39,8 @@ type Deps struct {
 	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
-	People      *peoplehttp.Handler
+	People           *peoplehttp.Handler
+	PeopleAgreements *peoplehttp.AgreementHandler // 04-03: agreements + attachments + file download
 	Authn           *auth.Authenticator
 	Idempotency     *idempotency.Middleware
 	Obs             *obs.Providers
@@ -230,6 +231,35 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:reactivate", d.People.ReactivateEmployee)
 			})
 			// PEOPLE slice end (04-02). 04-03 agreements: append r.Group{} here.
+
+			// ---------------------------------------------------------------
+			// PEOPLE agreements slice (04-03): employment agreements + attachments
+			// + authenticated file download (E2 F2.2 / PPL-02).
+			// COORDINATION POINT: 04-04 (change-requests) appends its OWN Group
+			// block after the "PEOPLE agreements slice end" marker below.
+			// ---------------------------------------------------------------
+
+			// Agreement reads: hr_admin, super_admin (global scope).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Get("/agreements", d.PeopleAgreements.ListAgreements)
+				r.Get("/agreements/{agreement_id}", d.PeopleAgreements.GetAgreement)
+				// Authenticated file download — served in same read group so
+				// shift_leader or agent could be added later without refactor.
+				r.Get("/files/{file_id}", d.PeopleAgreements.DownloadFile)
+			})
+
+			// Agreement writes: hr_admin, super_admin.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/agreements", d.PeopleAgreements.CreateAgreement)
+				r.With(d.Idempotency.Handler).Post("/agreements/{agreement_id}:renew", d.PeopleAgreements.RenewAgreement)
+				r.With(d.Idempotency.Handler).Post("/agreements/{agreement_id}:close", d.PeopleAgreements.CloseAgreement)
+				// Multipart upload — NO idempotency (binary body, not JSON; idempotency
+				// middleware expects JSON or no-body; spec does not flag this op).
+				r.Post("/agreements/{agreement_id}/attachments", d.PeopleAgreements.UploadAttachment)
+			})
+			// PEOPLE agreements slice end (04-03). 04-04 change-requests: append here.
 		})
 	})
 
