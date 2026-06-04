@@ -20,6 +20,14 @@ type Querier interface {
 	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
 	// decidable; zero rows ⇒ terminal state (service emits 409).
 	ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error)
+	// INV-3 loop-closer (E6 / Phase 8): cancel overlapping live schedule entries for
+	// the leave dates on final/override approval. status='CANCELLED_BY_LEAVE' is the
+	// ONLY value the schedule_entries CHECK (migration 00024) permits for this
+	// transition — NEVER write 'LEAVE' to the column ('LEAVE' is the DTO boundary
+	// value the service maps to). The `status <> 'CANCELLED_BY_LEAVE'` guard makes the
+	// cancel idempotent across re-runs. RETURNING drives schedule_impact[] (id + date +
+	// the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
+	CancelScheduleEntriesForLeave(ctx context.Context, arg CancelScheduleEntriesForLeaveParams) ([]CancelScheduleEntriesForLeaveRow, error)
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
 	// Used to populate position_count in the ServiceLine DTO and to guard :discontinue.
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
@@ -69,6 +77,8 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	// Final-approval deduct: move days from the soft-reservation into used.
 	DeductLeaveQuota(ctx context.Context, arg DeductLeaveQuotaParams) (LeaveQuota, error)
+	// INV-3 reverse (cancel/shorten restore — used by later cancel paths; added now).
+	DeleteApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) (int64, error)
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
@@ -150,6 +160,11 @@ type Querier interface {
 	// Login lookup: active, non-deleted user by case-insensitive email.
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
+	// INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
+	// leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
+	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
+	// not 23505).
+	InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error
 	// E6 leave-approval decision-trail queries. Append-only; drives the
 	// LeaveRequest.timeline[] the FE renders (ordered by occurred_at).
 	// One immutable decision row per approval action (L1/HR approve, override, reject).

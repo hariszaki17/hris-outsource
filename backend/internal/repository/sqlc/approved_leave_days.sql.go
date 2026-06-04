@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteApprovedLeaveDaysForRequest = `-- name: DeleteApprovedLeaveDaysForRequest :execrows
+DELETE FROM approved_leave_days
+WHERE leave_request_id = $1
+`
+
+// INV-3 reverse (cancel/shorten restore — used by later cancel paths; added now).
+func (q *Queries) DeleteApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteApprovedLeaveDaysForRequest, leaveRequestID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findApprovedLeaveForAgentDate = `-- name: FindApprovedLeaveForAgentDate :one
 
 SELECT ald.leave_request_id, ald.leave_type, ald.leave_date
@@ -40,4 +54,32 @@ func (q *Queries) FindApprovedLeaveForAgentDate(ctx context.Context, arg FindApp
 	var i FindApprovedLeaveForAgentDateRow
 	err := row.Scan(&i.LeaveRequestID, &i.LeaveType, &i.LeaveDate)
 	return i, err
+}
+
+const insertApprovedLeaveDay = `-- name: InsertApprovedLeaveDay :exec
+INSERT INTO approved_leave_days (employee_id, leave_date, leave_request_id, leave_type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (employee_id, leave_date) DO UPDATE
+  SET leave_request_id = EXCLUDED.leave_request_id, leave_type = EXCLUDED.leave_type
+`
+
+type InsertApprovedLeaveDayParams struct {
+	EmployeeID     string
+	LeaveDate      pgtype.Date
+	LeaveRequestID *string
+	LeaveType      *string
+}
+
+// INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
+// leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
+// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
+// not 23505).
+func (q *Queries) InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error {
+	_, err := q.db.Exec(ctx, insertApprovedLeaveDay,
+		arg.EmployeeID,
+		arg.LeaveDate,
+		arg.LeaveRequestID,
+		arg.LeaveType,
+	)
+	return err
 }

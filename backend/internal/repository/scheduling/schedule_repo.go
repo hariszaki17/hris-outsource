@@ -14,6 +14,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	sqlcgen "github.com/hariszaki17/hris-outsource/backend/internal/repository/sqlc"
+	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
@@ -182,4 +183,51 @@ func (r *ScheduleRepo) UpdateScheduleEntry(ctx context.Context, tx pgx.Tx, p svc
 
 func (r *ScheduleRepo) SoftDeleteScheduleEntry(ctx context.Context, tx pgx.Tx, id string) (int64, error) {
 	return r.q.WithTx(tx).SoftDeleteScheduleEntry(ctx, id)
+}
+
+// --- INV-3 loop-closer (E6 / Phase 8) ---
+//
+// These two methods are the cross-epic write surface the E6 leave service calls
+// inside its final/override approval tx. They are NOT part of svc.ScheduleRepository;
+// they satisfy leavesvc.SchedulePort (defined in service/leave). The scheduling repo
+// importing service/leave does NOT create a cycle (service/leave does not import
+// repository/scheduling).
+
+var _ leavesvc.SchedulePort = (*ScheduleRepo)(nil)
+
+// CancelScheduleEntriesForLeave cancels overlapping live schedule entries on the
+// leave dates (DB status='CANCELLED_BY_LEAVE' — the only value the schedule_entries
+// CHECK permits for this transition; the leave service maps it to the DTO
+// new_status='LEAVE'). RETURNING drives schedule_impact[].
+func (r *ScheduleRepo) CancelScheduleEntriesForLeave(ctx context.Context, tx pgx.Tx, employeeID string, start, end time.Time) ([]leavesvc.ScheduleImpact, error) {
+	rows, err := r.q.WithTx(tx).CancelScheduleEntriesForLeave(ctx, sqlcgen.CancelScheduleEntriesForLeaveParams{
+		EmployeeID: employeeID,
+		StartDate:  timeToPgDate(start),
+		EndDate:    timeToPgDate(end),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]leavesvc.ScheduleImpact, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, leavesvc.ScheduleImpact{
+			ScheduleID: row.ID,
+			Date:       pgDateToTime(row.WorkDate),
+			NewStatus:  row.Status, // 'CANCELLED_BY_LEAVE'
+		})
+	}
+	return out, nil
+}
+
+// InsertApprovedLeaveDay upserts the INV-3 production approved-leave row (the real
+// leave_requests.id replaces the Phase-6 fixture). ON CONFLICT keeps it idempotent.
+func (r *ScheduleRepo) InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error {
+	lrID := leaveRequestID
+	lt := leaveType
+	return r.q.WithTx(tx).InsertApprovedLeaveDay(ctx, sqlcgen.InsertApprovedLeaveDayParams{
+		EmployeeID:     employeeID,
+		LeaveDate:      timeToPgDate(date),
+		LeaveRequestID: &lrID,
+		LeaveType:      &lt,
+	})
 }

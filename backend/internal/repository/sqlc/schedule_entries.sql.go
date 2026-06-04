@@ -12,6 +12,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelScheduleEntriesForLeave = `-- name: CancelScheduleEntriesForLeave :many
+UPDATE schedule_entries
+SET status = 'CANCELLED_BY_LEAVE', updated_at = now()
+WHERE employee_id = $1
+  AND work_date BETWEEN $2::date AND $3::date
+  AND status <> 'CANCELLED_BY_LEAVE'
+  AND deleted_at IS NULL
+RETURNING id, work_date, status
+`
+
+type CancelScheduleEntriesForLeaveParams struct {
+	EmployeeID string
+	StartDate  pgtype.Date
+	EndDate    pgtype.Date
+}
+
+type CancelScheduleEntriesForLeaveRow struct {
+	ID       string
+	WorkDate pgtype.Date
+	Status   string
+}
+
+// INV-3 loop-closer (E6 / Phase 8): cancel overlapping live schedule entries for
+// the leave dates on final/override approval. status='CANCELLED_BY_LEAVE' is the
+// ONLY value the schedule_entries CHECK (migration 00024) permits for this
+// transition — NEVER write 'LEAVE' to the column ('LEAVE' is the DTO boundary
+// value the service maps to). The `status <> 'CANCELLED_BY_LEAVE'` guard makes the
+// cancel idempotent across re-runs. RETURNING drives schedule_impact[] (id + date +
+// the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
+func (q *Queries) CancelScheduleEntriesForLeave(ctx context.Context, arg CancelScheduleEntriesForLeaveParams) ([]CancelScheduleEntriesForLeaveRow, error) {
+	rows, err := q.db.Query(ctx, cancelScheduleEntriesForLeave, arg.EmployeeID, arg.StartDate, arg.EndDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CancelScheduleEntriesForLeaveRow{}
+	for rows.Next() {
+		var i CancelScheduleEntriesForLeaveRow
+		if err := rows.Scan(&i.ID, &i.WorkDate, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createScheduleEntry = `-- name: CreateScheduleEntry :one
 INSERT INTO schedule_entries (
     employee_id, placement_id, service_line_id, shift_master_id,

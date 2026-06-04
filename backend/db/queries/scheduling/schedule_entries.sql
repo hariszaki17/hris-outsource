@@ -112,6 +112,22 @@ SET deleted_at = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
+-- name: CancelScheduleEntriesForLeave :many
+-- INV-3 loop-closer (E6 / Phase 8): cancel overlapping live schedule entries for
+-- the leave dates on final/override approval. status='CANCELLED_BY_LEAVE' is the
+-- ONLY value the schedule_entries CHECK (migration 00024) permits for this
+-- transition — NEVER write 'LEAVE' to the column ('LEAVE' is the DTO boundary
+-- value the service maps to). The `status <> 'CANCELLED_BY_LEAVE'` guard makes the
+-- cancel idempotent across re-runs. RETURNING drives schedule_impact[] (id + date +
+-- the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
+UPDATE schedule_entries
+SET status = 'CANCELLED_BY_LEAVE', updated_at = now()
+WHERE employee_id = sqlc.arg(employee_id)
+  AND work_date BETWEEN sqlc.arg(start_date)::date AND sqlc.arg(end_date)::date
+  AND status <> 'CANCELLED_BY_LEAVE'
+  AND deleted_at IS NULL
+RETURNING id, work_date, status;
+
 -- name: FindActivePlacementForAgentDate :one
 -- INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement
 -- whose period covers work_date (open-ended end_date treated as +inf).
