@@ -156,6 +156,17 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed audit_log: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 3 (03-02): Seed client companies + sites.
+	// "Plaza Senayan" SWP-CMP-0021 is the shift_leader persona's company scope
+	// target — its literal ID is referenced in the Phase-1 persona and must
+	// exist in client_companies for FK to resolve. Inserted with ON CONFLICT DO
+	// NOTHING so re-runs are idempotent.
+	// -----------------------------------------------------------------------
+	if err := seedClientCompanies(ctx, pool); err != nil {
+		return fmt.Errorf("seed client_companies: %w", err)
+	}
+
 	return nil
 }
 
@@ -246,5 +257,106 @@ func seedAuditLog(ctx context.Context, pool *db.Pool) error {
 		}
 	}
 	slog.Info("seed: inserted audit_log rows", "count", len(rows))
+	return nil
+}
+
+// seedClientCompanies inserts the Phase-3 client company + site fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// Companies:
+//   - SWP-CMP-0021  "Plaza Senayan"     — shift_leader persona's company scope target
+//   - SWP-CMP-0022  "Mall Kelapa Gading" — extra company for list/pagination E2E
+//
+// Sites:
+//   - SWP-SITE-0001  Plaza Senayan Main (primary, geo set → geofence_active=true)
+//   - SWP-SITE-0002  Mall Kelapa Gading Main (primary, no geo)
+func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
+	type company struct {
+		id          string
+		name        string
+		address     string
+		leaderScope string
+	}
+	companies := []company{
+		{
+			id:          "SWP-CMP-0021",
+			name:        "Plaza Senayan",
+			address:     "Jl. Asia Afrika No. 8, Jakarta Pusat 10270",
+			leaderScope: "company",
+		},
+		{
+			id:          "SWP-CMP-0022",
+			name:        "Mall Kelapa Gading",
+			address:     "Jl. Boulevard Raya, Jakarta Utara 14240",
+			leaderScope: "company",
+		},
+	}
+
+	const companyQ = `
+		INSERT INTO client_companies (id, name, address, leader_scope, status)
+		VALUES ($1, $2, $3, $4, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, c := range companies {
+		if _, err := pool.Pool.Exec(ctx, companyQ, c.id, c.name, c.address, c.leaderScope); err != nil {
+			return fmt.Errorf("seed company %q: %w", c.id, err)
+		}
+		slog.Info("seed: upserted client company", "id", c.id, "name", c.name)
+	}
+
+	// Sites — use explicit IDs so E2E tests can reference them deterministically.
+	// SWP-SITE-0001: Plaza Senayan Main — geo set so geofence_active=true.
+	// SWP-SITE-0002: Mall Kelapa Gading Main — no geo (geofence_active=false).
+	type site struct {
+		id              string
+		companyID       string
+		name            string
+		address         string
+		geoLat          *float64
+		geoLng          *float64
+		geofenceRadiusM int
+		isPrimary       bool
+	}
+	lat := -6.2253
+	lng := 106.7995
+	sites := []site{
+		{
+			id:              "SWP-SITE-0001",
+			companyID:       "SWP-CMP-0021",
+			name:            "Plaza Senayan Main",
+			address:         "Jl. Asia Afrika No. 8, Jakarta Pusat 10270",
+			geoLat:          &lat,
+			geoLng:          &lng,
+			geofenceRadiusM: 100,
+			isPrimary:       true,
+		},
+		{
+			id:              "SWP-SITE-0002",
+			companyID:       "SWP-CMP-0022",
+			name:            "Mall Kelapa Gading Main",
+			address:         "Jl. Boulevard Raya, Jakarta Utara 14240",
+			geoLat:          nil,
+			geoLng:          nil,
+			geofenceRadiusM: 100,
+			isPrimary:       true,
+		},
+	}
+
+	const siteQ = `
+		INSERT INTO client_sites
+			(id, client_company_id, name, address, geo_lat, geo_lng, geofence_radius_m, is_primary, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, s := range sites {
+		if _, err := pool.Pool.Exec(ctx, siteQ,
+			s.id, s.companyID, s.name, s.address,
+			s.geoLat, s.geoLng, s.geofenceRadiusM, s.isPrimary,
+		); err != nil {
+			return fmt.Errorf("seed site %q: %w", s.id, err)
+		}
+		slog.Info("seed: upserted client site", "id", s.id, "name", s.name)
+	}
+
 	return nil
 }

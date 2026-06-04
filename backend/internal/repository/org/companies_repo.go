@@ -65,9 +65,9 @@ func (r *Repository) ListClientCompanies(ctx context.Context, f domain.CompanyFi
 			Phone:                row.Phone,
 			Email:                row.Email,
 			Status:               row.Status,
-			HasLeader:            false,         // TODO(Phase-5): wire to shift_leader assignment
+			HasLeader:            false, // TODO(Phase-5): wire to shift_leader assignment
 			SiteCount:            int(siteCount),
-			ActivePlacementCount: 0,             // TODO(Phase-5): wire to placements table
+			ActivePlacementCount: 0, // TODO(Phase-5): wire to placements table
 			CreatedAt:            row.CreatedAt,
 			UpdatedAt:            row.UpdatedAt,
 		})
@@ -95,9 +95,9 @@ func (r *Repository) GetCompanyByID(ctx context.Context, id string) (domain.Clie
 		Phone:                row.Phone,
 		Email:                row.Email,
 		Status:               row.Status,
-		HasLeader:            false,         // TODO(Phase-5): wire to shift_leader assignment
+		HasLeader:            false, // TODO(Phase-5): wire to shift_leader assignment
 		SiteCount:            int(siteCount),
-		ActivePlacementCount: 0,             // TODO(Phase-5): wire to placements table
+		ActivePlacementCount: 0, // TODO(Phase-5): wire to placements table
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
 	}, nil
@@ -128,8 +128,8 @@ func (r *Repository) CreateCompany(ctx context.Context, tx pgx.Tx, p svc.CreateC
 		Email:                row.Email,
 		Status:               row.Status,
 		HasLeader:            false, // TODO(Phase-5)
-		SiteCount:            0,    // caller increments after CreateSite
-		ActivePlacementCount: 0,    // TODO(Phase-5)
+		SiteCount:            0,     // caller increments after CreateSite
+		ActivePlacementCount: 0,     // TODO(Phase-5)
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
 	}, nil
@@ -164,9 +164,9 @@ func (r *Repository) UpdateCompany(ctx context.Context, tx pgx.Tx, p svc.UpdateC
 		Phone:                row.Phone,
 		Email:                row.Email,
 		Status:               row.Status,
-		HasLeader:            false,         // TODO(Phase-5)
+		HasLeader:            false, // TODO(Phase-5)
 		SiteCount:            int(siteCount),
-		ActivePlacementCount: 0,             // TODO(Phase-5)
+		ActivePlacementCount: 0, // TODO(Phase-5)
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
 	}, nil
@@ -195,9 +195,9 @@ func (r *Repository) SetCompanyStatus(ctx context.Context, tx pgx.Tx, id, status
 		Phone:                row.Phone,
 		Email:                row.Email,
 		Status:               row.Status,
-		HasLeader:            false,         // TODO(Phase-5)
+		HasLeader:            false, // TODO(Phase-5)
 		SiteCount:            int(siteCount),
-		ActivePlacementCount: 0,             // TODO(Phase-5)
+		ActivePlacementCount: 0, // TODO(Phase-5)
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
 	}, nil

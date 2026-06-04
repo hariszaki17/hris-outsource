@@ -11,6 +11,7 @@ import (
 
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
+	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -26,9 +27,15 @@ type Deps struct {
 
 	Auth        *identityhttp.Handler
 	Foundations *foundationshttp.Handler
-	Authn       *auth.Authenticator
-	Idempotency *idempotency.Middleware
-	Obs         *obs.Providers
+	// ORG slice (03-02): client companies + sites.
+	// Siblings 03-03 (service lines + positions) and 03-04 (master data) should
+	// add their own Deps fields here (OrgServiceLines, OrgMasterData) — or reuse
+	// OrgCompanies if they share the same handler package (they don't in this plan;
+	// they use separate packages). See 03-02-SUMMARY.md for the coordination contract.
+	OrgCompanies *orghttp.Handler
+	Authn        *auth.Authenticator
+	Idempotency  *idempotency.Middleware
+	Obs          *obs.Providers
 }
 
 // New builds the root HTTP handler.
@@ -92,6 +99,35 @@ func New(d Deps) http.Handler {
 				// Platform settings (read-only)
 				r.Get("/platform/settings", d.Foundations.GetPlatformSettings)
 			})
+
+			// ---------------------------------------------------------------
+			// ORG slice (03-02): client companies + sites (E2 F2.3 + F2.6).
+			// COORDINATION POINT: 03-03 and 03-04 append THEIR OWN Group
+			// blocks immediately after this closing brace. Do NOT modify the
+			// foundations group above. Each sibling owns its own r.Group{}.
+			// ---------------------------------------------------------------
+
+			// Reads: hr_admin, super_admin, shift_leader (company_or_global scope).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/client-companies", d.OrgCompanies.ListClientCompanies)
+				r.Get("/client-companies/{client_company_id}", d.OrgCompanies.GetClientCompany)
+				r.Get("/client-companies/{client_company_id}/sites", d.OrgCompanies.ListSites)
+				r.Get("/sites/{site_id}", d.OrgCompanies.GetSite)
+			})
+
+			// Writes: hr_admin, super_admin (global scope).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/client-companies", d.OrgCompanies.CreateClientCompany)
+				r.Patch("/client-companies/{client_company_id}", d.OrgCompanies.UpdateClientCompany)
+				r.With(d.Idempotency.Handler).Post("/client-companies/{client_company_id}:deactivate", d.OrgCompanies.DeactivateClientCompany)
+				r.With(d.Idempotency.Handler).Post("/client-companies/{client_company_id}:reactivate", d.OrgCompanies.ReactivateClientCompany)
+				r.With(d.Idempotency.Handler).Post("/client-companies/{client_company_id}/sites", d.OrgCompanies.CreateSite)
+				r.Patch("/sites/{site_id}", d.OrgCompanies.UpdateSite)
+				r.With(d.Idempotency.Handler).Post("/sites/{site_id}:deactivate", d.OrgCompanies.DeactivateSite)
+			})
+			// ORG slice end (03-02). 03-03 sibling: append r.Group{} here.
 		})
 	})
 

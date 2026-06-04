@@ -38,26 +38,26 @@ type reasonRequest struct {
 
 // createSiteRequest is the POST /client-companies/{id}/sites body (SiteWriteRequest).
 type createSiteRequest struct {
-	Name            *string  `json:"name"`
-	Code            *string  `json:"code"`
-	Address         *string  `json:"address"`
-	Geo             *geoReq  `json:"geo"`
-	GeofenceRadiusM *int     `json:"geofence_radius_m"`
-	IsPrimary       *bool    `json:"is_primary"`
-	PICName         *string  `json:"pic_name"`
-	Phone           *string  `json:"phone"`
+	Name            *string `json:"name"`
+	Code            *string `json:"code"`
+	Address         *string `json:"address"`
+	Geo             *geoReq `json:"geo"`
+	GeofenceRadiusM *int    `json:"geofence_radius_m"`
+	IsPrimary       *bool   `json:"is_primary"`
+	PICName         *string `json:"pic_name"`
+	Phone           *string `json:"phone"`
 }
 
 // updateSiteRequest is the PATCH /sites/{site_id} body (SiteWriteRequest).
 type updateSiteRequest struct {
-	Name            *string  `json:"name"`
-	Code            *string  `json:"code"`
-	Address         *string  `json:"address"`
-	Geo             *geoReq  `json:"geo"`
-	GeofenceRadiusM *int     `json:"geofence_radius_m"`
-	IsPrimary       *bool    `json:"is_primary"`
-	PICName         *string  `json:"pic_name"`
-	Phone           *string  `json:"phone"`
+	Name            *string `json:"name"`
+	Code            *string `json:"code"`
+	Address         *string `json:"address"`
+	Geo             *geoReq `json:"geo"`
+	GeofenceRadiusM *int    `json:"geofence_radius_m"`
+	IsPrimary       *bool   `json:"is_primary"`
+	PICName         *string `json:"pic_name"`
+	Phone           *string `json:"phone"`
 }
 
 // geoReq is the nested geo object in the site write request.
@@ -79,7 +79,7 @@ type clientCompanyResponse struct {
 	PICName              *string `json:"pic_name"`
 	Phone                *string `json:"phone"`
 	Email                *string `json:"email"`
-	Status               string  `json:"status"`               // ACTIVE | INACTIVE
+	Status               string  `json:"status"` // ACTIVE | INACTIVE
 	HasLeader            bool    `json:"has_leader"`
 	SiteCount            int     `json:"site_count"`
 	ActivePlacementCount int     `json:"active_placement_count"`
@@ -102,9 +102,9 @@ type siteResponse struct {
 	Name                 string   `json:"name"`
 	Code                 *string  `json:"code"`
 	Address              string   `json:"address"`
-	Geo                  *geoResp `json:"geo"`               // null when no coordinates
+	Geo                  *geoResp `json:"geo"` // null when no coordinates
 	GeofenceRadiusM      int      `json:"geofence_radius_m"`
-	GeofenceActive       bool     `json:"geofence_active"`   // derived: geo != nil
+	GeofenceActive       bool     `json:"geofence_active"` // derived: geo != nil
 	IsPrimary            bool     `json:"is_primary"`
 	PICName              *string  `json:"pic_name"`
 	Phone                *string  `json:"phone"`

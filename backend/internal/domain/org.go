@@ -30,12 +30,12 @@ type Site struct {
 	ID                   string
 	ClientCompanyID      string
 	Name                 string
-	Code                 *string  // optional short code (unique within company when set)
+	Code                 *string // optional short code (unique within company when set)
 	Address              string
 	GeoLat               *float64 // nullable; geofence_active = GeoLat != nil && GeoLng != nil
 	GeoLng               *float64
-	GeofenceRadiusM      int      // valid range 25–1000 (GEOFENCE_RADIUS_INVALID)
-	IsPrimary            bool     // exactly one per company (INV-5)
+	GeofenceRadiusM      int  // valid range 25–1000 (GEOFENCE_RADIUS_INVALID)
+	IsPrimary            bool // exactly one per company (INV-5)
 	PICName              *string
 	Phone                *string
 	Status               string // "active" | "inactive"

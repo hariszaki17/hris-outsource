@@ -16,6 +16,7 @@ import (
 
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
+	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -24,9 +25,11 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
+	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
+	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
 )
 
 func main() {
@@ -85,12 +88,18 @@ func run() error {
 	fndSvc := foundationssvc.NewService(fndRepo, txm)
 	fndHandler := foundationshttp.NewHandler(fndSvc)
 
+	// Org slice (03-02): client companies + sites (E2 F2.3 + F2.6).
+	orgCompaniesRepo := orgrepo.New(pool)
+	orgCompaniesSvc := orgsvc.NewService(orgCompaniesRepo, txm)
+	orgCompaniesHandler := orghttp.NewHandler(orgCompaniesSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins: cfg.HTTP.AllowedOrigins,
 		RatePerMinute:  cfg.Rate.PerMinute,
 		RateBurst:      cfg.Rate.Burst,
 		Auth:           idHandler,
 		Foundations:    fndHandler,
+		OrgCompanies:   orgCompaniesHandler,
 		Authn:          authn,
 		Idempotency:    idempotency.New(pool),
 		Obs:            observ,
