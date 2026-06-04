@@ -199,6 +199,17 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed master_data: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 4 (04-03): Seed employment agreements + attachments.
+	// FK: employment_agreements → employees (must run AFTER seedEmployees).
+	// FK: agreement_attachments → employment_agreements (must run after agreements).
+	// -----------------------------------------------------------------------
+	if err := seedAgreements(ctx, pool); err != nil {
+		return fmt.Errorf("seed agreements: %w", err)
+	}
+
+	// 04-04 change-requests: append seedChangeRequests call here.
+
 	return nil
 }
 
@@ -569,6 +580,69 @@ func seedServiceLines(ctx context.Context, pool *db.Pool) error {
 		}
 		slog.Info("seed: upserted position", "id", p.id, "name", p.name)
 	}
+
+	return nil
+}
+
+// seedAgreements inserts Phase-4 employment-agreement + attachment fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// Agreements:
+//   - SWP-AG-7001  ACTIVE PKWT for Budi Santoso (SWP-EMP-2891)
+//     contract "PKWT/SWP/2026/0142", 2026-06-01 → 2027-05-31
+//
+// Attachments:
+//   - SWP-FILE-9001  signed_agreement for SWP-AG-7001 — minimal valid PDF bytes
+func seedAgreements(ctx context.Context, pool *db.Pool) error {
+	// Insert the PKWT agreement.
+	const agQ = `
+		INSERT INTO employment_agreements
+			(id, employee_id, type, agreement_no, start_date, end_date, status,
+			 base_salary_idr, bpjs_terms, tax_profile, comp_effective_date, created_by)
+		VALUES
+			($1, $2, $3, $4, $5::date, $6::date, 'active',
+			 5200000,
+			 '{"kesehatan_employer_pct":4.0,"kesehatan_employee_pct":1.0,"ketenagakerjaan_employer_pct":6.24,"ketenagakerjaan_employee_pct":3.0}'::jsonb,
+			 'PTKP_K0', '2026-06-01'::date, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	if _, err := pool.Pool.Exec(ctx, agQ,
+		"SWP-AG-7001",
+		"SWP-EMP-2891",
+		"PKWT",
+		"PKWT/SWP/2026/0142",
+		"2026-06-01",
+		"2027-05-31",
+	); err != nil {
+		return fmt.Errorf("seed agreement SWP-AG-7001: %w", err)
+	}
+	slog.Info("seed: upserted agreement", "id", "SWP-AG-7001", "employee_id", "SWP-EMP-2891")
+
+	// Insert the signed-agreement attachment.
+	// Blob is a minimal valid 1.4 PDF (enough for the download handler to serve bytes).
+	minimalPDF := []byte("%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n" +
+		"2 0 obj<</Type /Pages /Kids[3 0 R]/Count 1>>endobj\n" +
+		"3 0 obj<</Type /Page /Parent 2 0 R /MediaBox[0 0 3 3]>>endobj\n" +
+		"xref\n0 4\n0000000000 65535 f \n" +
+		"trailer<</Size 4 /Root 1 0 R>>\nstartxref\n%%EOF\n")
+
+	const attQ = `
+		INSERT INTO agreement_attachments
+			(id, agreement_id, category, caption, file_name, mime, size_bytes, blob, uploaded_by)
+		VALUES
+			($1, $2, 'signed_agreement', 'PKWT Budi Santoso 2026', $3, 'application/pdf', $4, $5, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	if _, err := pool.Pool.Exec(ctx, attQ,
+		"SWP-FILE-9001",
+		"SWP-AG-7001",
+		"pkwt-budi.pdf",
+		int64(len(minimalPDF)),
+		minimalPDF,
+	); err != nil {
+		return fmt.Errorf("seed attachment SWP-FILE-9001: %w", err)
+	}
+	slog.Info("seed: upserted attachment", "id", "SWP-FILE-9001", "agreement_id", "SWP-AG-7001")
 
 	return nil
 }
