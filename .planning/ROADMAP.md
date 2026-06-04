@@ -91,7 +91,7 @@ Plans:
   2. HR can manage employment agreements (create/renew/close) and upload an attachment (multipart, ≤10MB).
   3. HR can review and approve/reject change requests; PKWT/PKWTT cross-field rules enforced (422 with field errors).
   4. Exhaustive Playwright E2E for E2 people features is green.
-**Plans:** 3/6 plans executed
+**Plans:** 4/6 plans executed
 
 Plans:
 - [ ] 04-01-PLAN.md (wave 1) — Migrations 00016–00019 + sqlc queries (employees, employment_agreements, agreement_attachments, change_requests) + File id prefix; make gen
@@ -230,7 +230,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Test Harness + Auth | 5/5 | Complete    | 2026-06-04 |
 | 2. E1 Foundations | 4/4 | Complete    | 2026-06-04 |
 | 3. E2 Org & Master Data | 6/6 | Complete    | 2026-06-04 |
-| 4. E2 People | 3/6 | In Progress|  |
+| 4. E2 People | 4/6 | In Progress|  |
 | 5. E3 Placement | 0/4 | Not started | - |
 | 6. E4 Schedule & Shifts | 0/4 | Not started | - |
 | 7. E5 Attendance | 0/4 | Not started | - |

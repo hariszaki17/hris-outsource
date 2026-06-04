@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-e2-people/04-03-PLAN.md
-last_updated: "2026-06-04T06:18:09.006Z"
+stopped_at: Completed 04-e2-people/04-04-PLAN.md
+last_updated: "2026-06-04T06:27:14.371Z"
 last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
   percent: 8
 ---
 
@@ -59,6 +59,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 04-e2-people P01 | 271 | 2 tasks | 13 files |
 | Phase 04-e2-people P02 | 447 | 3 tasks | 9 files |
 | Phase 04-e2-people P03 | 385 | 3 tasks | 9 files |
+| Phase 04-e2-people P04 | 329 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -122,6 +123,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 04-e2-people]: EXPIRING virtual status computed at DTO boundary (toAgreementResponse): status=active+PKWT+end_date<now+30d → emit EXPIRING; persisted DB status stays active
 - [Phase 04-e2-people]: FILE_TOO_LARGE uses apperr.Error{HTTPStatus:413} struct literal — bypasses statusForCode (no 413 mapping); same technique as GEOFENCE_RADIUS_INVALID in Phase 3
 - [Phase 04-e2-people]: ACTIVE_AGREEMENT_EXISTS uses apperr.Conflict() (409) not apperr.Rule() (422 default) — state-of-record constraint, not a semantic rule
+- [Phase 04-e2-people]: Approve applies whitelisted fields only (phone/address/bank_account): buildApproveParams overlays CR.Changes onto a full copy of current employee; statutory fields never touched
+- [Phase 04-e2-people]: Notification dispatch on CR resolution deferred: stub comment in ApproveChangeRequest + RejectChangeRequest marks Phase N (notifications epic) integration point
+- [Phase 04-e2-people]: Old->new diff computed live in GetChangeRequestDetail (not stored snapshot): old = current employee values at query time; audit_log captures exact before/after at approve time
 
 ### Pending Todos
 
@@ -133,6 +137,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T06:18:09.003Z
-Stopped at: Completed 04-e2-people/04-03-PLAN.md
+Last session: 2026-06-04T06:27:14.368Z
+Stopped at: Completed 04-e2-people/04-04-PLAN.md
 Resume file: None
