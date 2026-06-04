@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
@@ -47,7 +48,9 @@ type Deps struct {
 	// PLACEMENT slice (05-02): placements + lifecycle + shift-leader + roster (E3).
 	Placement *placementhttp.Handler
 	// SCHEDULING slice (06-02): shift masters + schedule grid + conflict engine (E4).
-	Scheduling  *schedulinghttp.Handler
+	Scheduling *schedulinghttp.Handler
+	// ATTENDANCE slice (07-02): verify/reject (+bulk) + corrections (E5).
+	Attendance  *attendancehttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -349,6 +352,31 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/shift-masters/{id}:reactivate", d.Scheduling.ReactivateShiftMaster)
 			})
 			// SCHEDULING slice end (06-02). Phase 6+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// ATTENDANCE slice (07-02): E5 verify/reject (+bulk) + corrections
+			// (F5.3/F5.4 / ATT-01/ATT-02). All web ops (reads + verify/reject/
+			// bulk + corrections approve/reject) per openapi x-rbac:
+			// super_admin, hr_admin, shift_leader (agent is mobile/self, not web).
+			// Leader scope is enforced in the service via rbac.GuardCompany.
+			// COORDINATION POINT: future Phase-7 slices append AFTER this block.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				// reads
+				r.Get("/attendance", d.Attendance.ListAttendance)
+				r.Get("/attendance/{id}", d.Attendance.GetAttendance)
+				r.Get("/corrections", d.Attendance.ListCorrections)
+				r.Get("/corrections/{id}", d.Attendance.GetCorrection)
+				// actions (idempotent per openapi — Idempotency-Key required)
+				r.With(d.Idempotency.Handler).Post("/attendance/{id}:verify", d.Attendance.VerifyAttendance)
+				r.With(d.Idempotency.Handler).Post("/attendance/{id}:reject", d.Attendance.RejectAttendance)
+				r.With(d.Idempotency.Handler).Post("/attendance:bulk-verify", d.Attendance.BulkVerify)
+				r.With(d.Idempotency.Handler).Post("/attendance:bulk-reject", d.Attendance.BulkReject)
+				r.With(d.Idempotency.Handler).Post("/corrections/{id}:approve", d.Attendance.ApproveCorrection)
+				r.With(d.Idempotency.Handler).Post("/corrections/{id}:reject", d.Attendance.RejectCorrection)
+			})
+			// ATTENDANCE slice end (07-02). Phase 7+ appends after this line.
 		})
 	})
 

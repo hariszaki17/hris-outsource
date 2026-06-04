@@ -72,6 +72,12 @@ const TRUNCATE_TABLES = [
   'leave_types',
   'attendance_codes',
   'overtime_rules',
+  // Phase 7: E5 attendance tables (FK order: most-dependent first).
+  // attendance_corrections FK to attendance; attendance FK to schedule_entries /
+  // placements / employees / client_companies. Both MUST be truncated before
+  // schedule_entries + placements + employees below. Reseeded by the Go seed.
+  'attendance_corrections',
+  'attendance',
   // Phase 6: E4 scheduling tables (FK order: most-dependent first).
   // schedule_entries / approved_leave_days FK to placements/employees/shift_masters,
   // so they MUST be truncated before placements + employees below. shift_masters has

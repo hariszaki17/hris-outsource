@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
@@ -26,6 +27,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
+	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
@@ -33,6 +35,7 @@ import (
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
 	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
+	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
@@ -148,6 +151,15 @@ func run() error {
 	scheduleSvc := schedulingsvc.NewScheduleService(scheduleRepo, txm)
 	schedulingHandler := schedulinghttp.NewHandler(shiftMasterSvc, scheduleSvc)
 
+	// Attendance slice (07-02): E5 verify/reject (+bulk) + corrections (F5.3/F5.4).
+	// The correction service needs the attendance repo to apply approved
+	// corrections to the target record in the same tx.
+	attendanceRepo := attendancerepo.NewAttendanceRepo(pool)
+	correctionRepo := attendancerepo.NewCorrectionRepo(pool)
+	attendanceSvc := attendancesvc.NewAttendanceService(attendanceRepo, txm)
+	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
+	attendanceHandler := attendancehttp.NewHandler(attendanceSvc, correctionSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -162,6 +174,7 @@ func run() error {
 		PeopleChangeRequests: crHandler,
 		Placement:            placementHandler,
 		Scheduling:           schedulingHandler,
+		Attendance:           attendanceHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,

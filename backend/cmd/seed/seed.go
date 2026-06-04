@@ -241,6 +241,21 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed scheduling: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 7 (07-02): Seed E5 attendance + correction fixtures.
+	// FK: attendance → placements/employees/schedule_entries/client_companies;
+	// attendance_corrections → attendance/employees/client_companies (must run
+	// AFTER seedScheduling). Plants AUTO_APPROVED + PENDING exceptions at
+	// CMP-0021/CMP-0022, a leader-own ESCALATED record (VERIFY_OWN_RECORD), and
+	// PENDING corrections (one in-window for approve, one for reject).
+	// -----------------------------------------------------------------------
+	if err := seedAttendance(ctx, pool); err != nil {
+		return fmt.Errorf("seed attendance: %w", err)
+	}
+	if err := seedCorrections(ctx, pool); err != nil {
+		return fmt.Errorf("seed corrections: %w", err)
+	}
+
 	return nil
 }
 
@@ -1072,4 +1087,234 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 	slog.Info("seed: upserted approved leave day", "employee_id", "SWP-EMP-3001", "leave_date", leaveDate, "leave_request_id", "SWP-LR-44210")
 
 	return nil
+}
+
+// seedAttendance inserts Phase-7 (E5) attendance fixtures so the verification
+// queue + detail + single + bulk flows have honest exception records to act on.
+// All inserts are idempotent (ON CONFLICT (id) DO NOTHING). Dates anchor a few
+// days into the CURRENT week (Asia/Jakarta-safe, well inside the correction
+// window) so the corrections approve/reject + window checks are exercisable.
+//
+// Geofence/lateness/auto-close are STORED columns (07-01) — set directly here;
+// there is no mobile clock pipeline. Site coords ~ Plaza Senayan; radius 100m.
+//
+// Records (explicit ids; column DEFAULT only fires when id is omitted):
+//   - SWP-ATT-9001  Dewi  @ CMP-0021/PL-5004  AUTO_APPROVED (clean; NOT in queue)
+//   - SWP-ATT-9002  Dewi  @ CMP-0021/PL-5004  PENDING, flags={LATE}, is_late, late_minutes=18
+//   - SWP-ATT-9003  Sari  @ CMP-0021/PL-5003  PENDING, flags={OUTSIDE_GEOFENCE}, in_geofence=false
+//   - SWP-ATT-9004  Dewi  @ CMP-0021/PL-5004  PENDING, flags={AUTO_CLOSED}, auto_closed, check_out_at NULL
+//   - SWP-ATT-9005  Budi  @ CMP-0022/PL-5002  PENDING, flags={LATE}  → cross-company OUT_OF_SCOPE target
+//   - SWP-ATT-9006  Rudi  @ CMP-0021/PL-5001  ESCALATED, flags={LATE,ESCALATED}  → VERIFY_OWN_RECORD target
+func seedAttendance(ctx context.Context, pool *db.Pool) error {
+	const attQ = `
+		INSERT INTO attendance
+			(id, employee_id, placement_id, schedule_id, company_id, service_line,
+			 shift_start_at, shift_end_at, check_in_at, check_out_at,
+			 lat_in, lng_in, lat_out, lng_out, wfo,
+			 is_late, late_minutes, worked_minutes, auto_closed,
+			 in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
+			 status, verification_status, flags)
+		VALUES
+			($1, $2, $3, NULL, $4, $5,
+			 $6, $7, $8, $9,
+			 $10, $11, $12, $13, true,
+			 $14, $15, $16, $17,
+			 $18, $19, $20, $21, 100,
+			 $22, $23, $24)
+		ON CONFLICT (id) DO NOTHING`
+
+	// Site centroid (Plaza Senayan-ish) — in-geofence captures sit near it.
+	const latC = -6.2256
+	const lngC = 106.7997
+
+	// Anchor shift instants a few days into the current week (in-window for
+	// corrections). check_in_at is a timestamptz; we render RFC3339 UTC.
+	monday := mondayOfCurrentWeek(time.Now())
+	shiftDay := monday.AddDate(0, 0, 1)                                                              // Tuesday of this week
+	shiftStart := time.Date(shiftDay.Year(), shiftDay.Month(), shiftDay.Day(), 0, 0, 0, 0, time.UTC) // 07:00 WIB = 00:00 UTC
+	shiftEnd := shiftStart.Add(8 * time.Hour)                                                        // 15:00 WIB
+	onTimeIn := shiftStart                                                                           // 07:00 WIB
+	lateIn := shiftStart.Add(18 * time.Minute)                                                       // 07:18 WIB (18m late)
+	normalOut := shiftEnd                                                                            // 15:00 WIB
+
+	ss := shiftStart.Format(time.RFC3339)
+	se := shiftEnd.Format(time.RFC3339)
+	worked := int32(480)
+
+	type att struct {
+		id, employeeID, placementID, companyID, serviceLine string
+		checkIn                                             time.Time
+		checkOut                                            *time.Time
+		latOut, lngOut                                      *float64
+		isLate                                              bool
+		lateMinutes                                         int32
+		workedMinutes                                       *int32
+		autoClosed                                          bool
+		inGeofence                                          *bool
+		inDistanceM                                         *int32
+		outGeofence                                         *bool
+		outDistanceM                                        *int32
+		status, verification                                string
+		flags                                               string // postgres array literal
+	}
+
+	out := normalOut
+	latOut := latC
+	lngOut := lngC
+	inTrue := true
+	inFalse := false
+	d32 := int32(32)
+	dFar := int32(420)
+
+	rows := []att{
+		// 9001 — clean AUTO_APPROVED (complete, on-time, in-geofence). NOT in queue.
+		{
+			id: "SWP-ATT-9001", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
+			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "PRESENT", verification: "AUTO_APPROVED", flags: "{}",
+		},
+		// 9002 — PENDING LATE (18m). Correction CHECK_IN target (in-window).
+		{
+			id: "SWP-ATT-9002", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
+			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "LATE", verification: "PENDING", flags: "{LATE}",
+		},
+		// 9003 — PENDING OUTSIDE_GEOFENCE (in_geofence=false).
+		{
+			id: "SWP-ATT-9003", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
+			companyID: "SWP-CMP-0021", serviceLine: "building_management",
+			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inFalse, inDistanceM: &dFar, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "PRESENT", verification: "PENDING", flags: "{OUTSIDE_GEOFENCE}",
+		},
+		// 9004 — PENDING AUTO_CLOSED (no clock-out). Correction CHECK_OUT target.
+		{
+			id: "SWP-ATT-9004", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
+			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			checkIn: onTimeIn, checkOut: nil, latOut: nil, lngOut: nil,
+			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: true,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: nil, outDistanceM: nil,
+			status: "INCOMPLETE", verification: "PENDING", flags: "{AUTO_CLOSED}",
+		},
+		// 9005 — CMP-0022 PENDING LATE → cross-company OUT_OF_SCOPE for Rudi.
+		{
+			id: "SWP-ATT-9005", employeeID: "SWP-EMP-2891", placementID: "SWP-PL-5002",
+			companyID: "SWP-CMP-0022", serviceLine: "parking",
+			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "LATE", verification: "PENDING", flags: "{LATE}",
+		},
+		// 9006 — Rudi's OWN ESCALATED record → VERIFY_OWN_RECORD target.
+		{
+			id: "SWP-ATT-9006", employeeID: "SWP-EMP-1108", placementID: "SWP-PL-5001",
+			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "LATE", verification: "ESCALATED", flags: "{LATE,ESCALATED}",
+		},
+	}
+
+	for _, a := range rows {
+		if _, err := pool.Pool.Exec(ctx, attQ,
+			a.id, a.employeeID, a.placementID, a.companyID, a.serviceLine,
+			ss, se, a.checkIn.Format(time.RFC3339), nullableTime(a.checkOut),
+			latC, lngC, a.latOut, a.lngOut,
+			a.isLate, a.lateMinutes, a.workedMinutes, a.autoClosed,
+			a.inGeofence, a.inDistanceM, a.outGeofence, a.outDistanceM,
+			a.status, a.verification, a.flags,
+		); err != nil {
+			return fmt.Errorf("seed attendance %q: %w", a.id, err)
+		}
+		slog.Info("seed: upserted attendance", "id", a.id, "employee_id", a.employeeID, "verification_status", a.verification)
+	}
+
+	return nil
+}
+
+// seedCorrections inserts Phase-7 (E5) PENDING correction fixtures so the
+// corrections queue + approve/reject flows have real targets. Idempotent
+// (ON CONFLICT (id) DO NOTHING). Both target CMP-0021 records inside the 7-day
+// window so HR/leader approve works; OUTSIDE_CORRECTION_WINDOW is driven directly
+// by the 07-03 contract test via the exported CheckCorrectionWindow seam (the
+// correction-CREATE endpoint is out of web scope).
+//
+//   - SWP-COR-8001  PENDING/CHECK_OUT on SWP-ATT-9004 (proposes a clock-out time;
+//     original_snapshot captures the auto_closed=true / INCOMPLETE state) → approve target.
+//   - SWP-COR-8002  PENDING/CHECK_IN on SWP-ATT-9002 (proposes an on-time check-in) → reject target.
+func seedCorrections(ctx context.Context, pool *db.Pool) error {
+	const corQ = `
+		INSERT INTO attendance_corrections
+			(id, attendance_id, requester_id, company_id, type,
+			 proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
+			 reason, evidence_file_id, status, original_snapshot, attendance_shift_date)
+		VALUES
+			($1, $2, $3, $4, $5,
+			 $6, $7, NULL,
+			 $8, $9, 'PENDING', $10::jsonb, $11::date)
+		ON CONFLICT (id) DO NOTHING`
+
+	monday := mondayOfCurrentWeek(time.Now())
+	shiftDay := monday.AddDate(0, 0, 1) // Tuesday (same as attendance records)
+	shiftDate := shiftDay.Format("2006-01-02")
+	shiftStart := time.Date(shiftDay.Year(), shiftDay.Month(), shiftDay.Day(), 0, 0, 0, 0, time.UTC)
+	proposedOut := shiftStart.Add(8*time.Hour + 10*time.Minute).Format(time.RFC3339) // 15:10 WIB
+	proposedIn := shiftStart.Format(time.RFC3339)                                    // 07:00 WIB (on time)
+
+	type correction struct {
+		id, attendanceID, requesterID, companyID, typ string
+		proposedIn, proposedOut                       *string
+		reason, evidenceFileID, snapshot              string
+	}
+	pOut := proposedOut
+	pIn := proposedIn
+	evidence := "SWP-FILE-cor-9001"
+	corrections := []correction{
+		{
+			id: "SWP-COR-8001", attendanceID: "SWP-ATT-9004", requesterID: "SWP-EMP-3001",
+			companyID: "SWP-CMP-0021", typ: "CHECK_OUT",
+			proposedIn: nil, proposedOut: &pOut,
+			reason:         "Lupa clock-out, sudah pulang pukul 15:10.",
+			evidenceFileID: evidence,
+			snapshot:       `{"check_out_at": null, "auto_closed": true, "status": "INCOMPLETE"}`,
+		},
+		{
+			id: "SWP-COR-8002", attendanceID: "SWP-ATT-9002", requesterID: "SWP-EMP-3001",
+			companyID: "SWP-CMP-0021", typ: "CHECK_IN",
+			proposedIn: &pIn, proposedOut: nil,
+			reason:         "Clock-in tercatat telat karena GPS lambat; sebenarnya tepat waktu.",
+			evidenceFileID: evidence,
+			snapshot:       `{"check_in_at": null, "is_late": true, "late_minutes": 18, "status": "LATE"}`,
+		},
+	}
+
+	for _, c := range corrections {
+		if _, err := pool.Pool.Exec(ctx, corQ,
+			c.id, c.attendanceID, c.requesterID, c.companyID, c.typ,
+			c.proposedIn, c.proposedOut,
+			c.reason, c.evidenceFileID, c.snapshot, shiftDate,
+		); err != nil {
+			return fmt.Errorf("seed correction %q: %w", c.id, err)
+		}
+		slog.Info("seed: upserted correction", "id", c.id, "attendance_id", c.attendanceID, "type", c.typ)
+	}
+
+	return nil
+}
+
+// nullableTime renders a *time.Time as an RFC3339 string or nil (for a NULL
+// timestamptz bind).
+func nullableTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
 }
