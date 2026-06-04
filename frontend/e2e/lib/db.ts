@@ -573,3 +573,94 @@ export async function countPrimarySitesForCompany(companyId: string): Promise<nu
     return parseInt(res.rows[0]?.cnt ?? '0', 10);
   });
 }
+
+// ---------------------------------------------------------------------------
+// E3 placement verification helpers (added in Phase 05-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * getPlacementLifecycleStatus — return the PERSISTED lifecycle_status for a placement,
+ * or null if not found. Note: the persisted column is the base status (ACTIVE / ENDED /
+ * TRANSFERRED / SUPERSEDED / TERMINATED / RESIGNED / PENDING_START); the EXPIRING +
+ * same-day-ACTIVE derivations happen at the DTO boundary, not in this column.
+ */
+export async function getPlacementLifecycleStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ lifecycle_status: string }>(
+      'SELECT lifecycle_status FROM placements WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.lifecycle_status ?? null;
+  });
+}
+
+/**
+ * setCompanyStatus — flip a client company's status (e.g. 'inactive') so the
+ * COMPANY_INACTIVE create path can be exercised against the real BE.
+ */
+export async function setCompanyStatus(id: string, status: string): Promise<void> {
+  await withClient(async (client) => {
+    const res = await client.query('UPDATE client_companies SET status = $2 WHERE id = $1', [
+      id,
+      status,
+    ]);
+    if ((res.rowCount ?? 0) === 0) {
+      throw new Error(`[setCompanyStatus] No company found with id: ${id}`);
+    }
+  });
+}
+
+/**
+ * getActiveLeaderEmployeeForCompany — return the employee_id of the company-scope
+ * (site_id IS NULL) ACTIVE shift-leader for a company, or null if vacant.
+ */
+export async function getActiveLeaderEmployeeForCompany(companyId: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ employee_id: string }>(
+      `SELECT employee_id FROM shift_leader_assignments
+       WHERE client_company_id = $1 AND site_id IS NULL AND unassigned_at IS NULL
+       ORDER BY assigned_at DESC LIMIT 1`,
+      [companyId],
+    );
+    return res.rows[0]?.employee_id ?? null;
+  });
+}
+
+/**
+ * getShiftLeaderAssignmentActive — return whether a SLA row is active
+ * (unassigned_at IS NULL) plus its vacated_reason; null if not found.
+ */
+export async function getShiftLeaderAssignment(
+  id: string,
+): Promise<{ active: boolean; vacated_reason: string | null } | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ unassigned_at: Date | null; vacated_reason: string | null }>(
+      'SELECT unassigned_at, vacated_reason FROM shift_leader_assignments WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    return {
+      active: res.rows[0].unassigned_at === null,
+      vacated_reason: res.rows[0].vacated_reason,
+    };
+  });
+}
+
+/**
+ * getPlacementIdForEmployeeAtCompany — return the id of the active/non-terminal placement
+ * for an employee at a company, or null. Used to resolve a created placement's id.
+ */
+export async function getPlacementIdForEmployeeAtCompany(
+  employeeId: string,
+  companyId: string,
+): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM placements
+       WHERE employee_id = $1 AND client_company_id = $2 AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [employeeId, companyId],
+    );
+    return res.rows[0]?.id ?? null;
+  });
+}

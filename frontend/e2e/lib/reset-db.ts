@@ -72,6 +72,11 @@ const TRUNCATE_TABLES = [
   'leave_types',
   'attendance_codes',
   'overtime_rules',
+  // Phase 5: E3 placement tables (FK order: most-dependent first).
+  // Truncated BEFORE people tables so placement FKs to employees/agreements drop cleanly.
+  'placement_history',
+  'shift_leader_assignments',
+  'placements',
   // Phase 4: E2 people tables (FK order: most-dependent first)
   'change_requests',
   'agreement_attachments',
