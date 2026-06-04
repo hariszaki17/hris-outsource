@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-e4-schedule-shifts/06-01-PLAN.md
-last_updated: "2026-06-04T16:04:49.860Z"
-last_activity: "2026-06-04 — Plan 06-01 complete: E4 data layer. 3 goose migrations (00023 shift_masters, 00024 schedule_entries, 00025 approved_leave_days), new `scheduling` sqlc package, domain.ShiftMaster/ScheduleEntry/filters. INV-1 DOUBLE_SHIFT backstop = partial unique index on schedule_entries(employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq). approved_leave_days is an E4-owned over-leave read source with NO leave_requests FK (E6 owns SWP-LR). `make gen && go build ./... && go vet ./...` clean; ids.go untouched. 0 deviations."
+stopped_at: Completed 06-e4-schedule-shifts/06-02-PLAN.md
+last_updated: "2026-06-04T16:20:37.757Z"
+last_activity: "2026-06-04 — Plan 06-02 complete: E4 service + handler layer. Shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply with exact codes+statuses+ConflictDetails. Shift-master CRUD + deactivate/reactivate; schedule CRUD; per-cell-atomic :bulk-apply (200 if >=1 succeeded else 422); side-effect-free :check. Leader scope via GuardCompany; audit-in-tx; TODO(Phase-11) notify stub. 11 routes mounted, main.go wired, seed plants SWP-SHF-001/002 + in-week entries (SWP-SCH-6001/6002) + approved_leave_days SWP-LR-44210 (EMP-3001) so SHIFT_OVER_LEAVE fires. go build/vet clean."
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 29
-  completed_plans: 26
-  percent: 90
+  completed_plans: 27
+  percent: 93
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 6 of 11 (E4 Schedule & Shifts)
-Plan: 1 of 4 in current phase — Plan 06-01 COMPLETE
+Plan: 2 of 4 in current phase — Plan 06-02 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 06-01 complete: E4 data layer. 3 goose migrations (00023 shift_masters, 00024 schedule_entries, 00025 approved_leave_days), new `scheduling` sqlc package, domain.ShiftMaster/ScheduleEntry/filters. INV-1 DOUBLE_SHIFT backstop = partial unique index on schedule_entries(employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq). approved_leave_days is an E4-owned over-leave read source with NO leave_requests FK (E6 owns SWP-LR). `make gen && go build ./... && go vet ./...` clean; ids.go untouched. 0 deviations.
+Last activity: 2026-06-04 — Plan 06-02 complete: E4 service + handler layer. Shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply with exact codes+statuses+ConflictDetails. Shift-master CRUD + deactivate/reactivate; schedule CRUD; per-cell-atomic :bulk-apply (200 if >=1 succeeded else 422); side-effect-free :check. Leader scope via GuardCompany; audit-in-tx; TODO(Phase-11) notify stub. 11 routes mounted, main.go wired, seed plants SWP-SHF-001/002 + in-week entries (SWP-SCH-6001/6002) + approved_leave_days SWP-LR-44210 (EMP-3001) so SHIFT_OVER_LEAVE fires. go build/vet clean.
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 90%
 | Phase 05-e3-placement P03 | 7 | 2 tasks | 3 files |
 | Phase 05-e3-placement P04 | 75 | 3 tasks | 11 files |
 | Phase 06-e4-schedule-shifts P01 | 5 | 3 tasks | 7 files |
+| Phase 06-e4-schedule-shifts P02 | 11 | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 06-e4-schedule-shifts]: [06-01]: INV-1 DOUBLE_SHIFT backstop = partial unique index schedule_entries_active_agent_date_uq on (employee_id, work_date) WHERE deleted_at IS NULL (mirrors Phase-5 placements_active_employee_uq); service pre-checks via FindLiveEntryForAgentDate then catches 23505
 - [Phase 06-e4-schedule-shifts]: [06-01]: over-leave = minimal E4-owned approved_leave_days table (bigserial PK, employee_id+leave_date unique, denormalized leave_request_id with NO FK) — exercises SHIFT_OVER_LEAVE now without colliding with E6's leave_requests / SWP-LR namespace; E6 (Phase 8) later populates/supersedes
 - [Phase 06-e4-schedule-shifts]: [06-01]: shift/schedule time columns are text HH:MM (not SQL time) matching openapi/FE snapshot render; sqlc returns date cols as pgtype.Date (06-02 repo converts <-> time.Time like Phase-5); in_use_count is int64; ids.go untouched (SHF/SCH prefixes already present)
+- [Phase 06-e4-schedule-shifts]: [06-02]: shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply; resolves placement first (scope source), emits OUTSIDE_PLACEMENT_PERIOD when no placement, OUT_OF_SCOPE before any 422 when placement found; each code carries explicit apperr HTTPStatus (403/422/409)
+- [Phase 06-e4-schedule-shifts]: [06-02]: bulk-apply = per-cell own-tx atomicity (CreateEntry loop); one failing cell never rolls back successes; handler 200 if >=1 succeeded else 422; :check runs the same expansion engine-only (no writes/audit/notify)
+- [Phase 06-e4-schedule-shifts]: [06-02]: over-leave delivered honestly via real approved_leave_days read; seed plants SWP-LR-44210 for EMP-3001 (monday+3) so SHIFT_OVER_LEAVE is exercisable now; PATCH /schedule re-runs engine with ForceReplace=true (self-edit not a double-shift); leader past-date DELETE → 403 (C-5)
 
 ### Pending Todos
 
@@ -165,6 +169,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T16:04:37.668Z
-Stopped at: Completed 06-e4-schedule-shifts/06-01-PLAN.md
+Last session: 2026-06-04T16:20:37.755Z
+Stopped at: Completed 06-e4-schedule-shifts/06-02-PLAN.md
 Resume file: None
