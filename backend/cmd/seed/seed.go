@@ -208,7 +208,17 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed agreements: %w", err)
 	}
 
-	// 04-04 change-requests: append seedChangeRequests call here.
+	// -----------------------------------------------------------------------
+	// Phase 4 (04-04): Seed pending change-requests.
+	// FK: change_requests → employees (must run AFTER seedEmployees).
+	// Two PENDING CRs against Budi Santoso (SWP-EMP-2891) so the HR queue
+	// renders content on first load and the diff (old→new) is meaningful:
+	//   SWP-CHG-2117  MULTIPLE (phone + bank_account change)
+	//   SWP-CHG-2118  ADDRESS change
+	// -----------------------------------------------------------------------
+	if err := seedChangeRequests(ctx, pool); err != nil {
+		return fmt.Errorf("seed change_requests: %w", err)
+	}
 
 	return nil
 }
@@ -784,6 +794,53 @@ func seedMasterData(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed overtime_rule SWP-OTR-001: %w", err)
 	}
 	slog.Info("seed: upserted overtime rule", "id", "SWP-OTR-001", "name", "Default OT")
+
+	return nil
+}
+
+// seedChangeRequests inserts Phase-4 pending change-request fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// Budi Santoso (SWP-EMP-2891) has phone "+62-812-3344-5566" and BCA bank
+// account "1234567890" seeded in seedEmployees — these are the "old" values
+// so the HR approval detail renders a meaningful old→new diff.
+//
+// Change requests:
+//
+//	SWP-CHG-2117  MULTIPLE  — phone + bank_account change (status: pending)
+//	SWP-CHG-2118  ADDRESS   — address change              (status: pending)
+func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
+	// SWP-CHG-2117: MULTIPLE (phone + bank_account).
+	const crQ = `
+		INSERT INTO change_requests
+			(id, employee_id, changes, request_type, note, submitted_at)
+		VALUES ($1, $2, $3::jsonb, $4, $5, $6::timestamptz)
+		ON CONFLICT (id) DO NOTHING`
+
+	if _, err := pool.Pool.Exec(ctx, crQ,
+		"SWP-CHG-2117",
+		"SWP-EMP-2891",
+		`{"phone":"+62-812-9988-7766","bank_account":{"bank_name":"BCA","account_number":"9999000011","account_holder_name":"Budi Santoso"}}`,
+		"MULTIPLE",
+		"Ganti nomor & rekening baru",
+		"2026-06-03T08:00:00Z",
+	); err != nil {
+		return fmt.Errorf("seed change_request SWP-CHG-2117: %w", err)
+	}
+	slog.Info("seed: upserted change request", "id", "SWP-CHG-2117", "type", "MULTIPLE")
+
+	// SWP-CHG-2118: ADDRESS change.
+	if _, err := pool.Pool.Exec(ctx, crQ,
+		"SWP-CHG-2118",
+		"SWP-EMP-2891",
+		`{"address":"Jl. Melati 5, Jakarta Selatan"}`,
+		"ADDRESS",
+		nil,
+		"2026-06-03T09:30:00Z",
+	); err != nil {
+		return fmt.Errorf("seed change_request SWP-CHG-2118: %w", err)
+	}
+	slog.Info("seed: upserted change request", "id", "SWP-CHG-2118", "type", "ADDRESS")
 
 	return nil
 }
