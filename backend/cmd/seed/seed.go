@@ -231,6 +231,16 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed placements: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 6 (06-02): Seed E4 scheduling fixtures.
+	// FK: schedule_entries → placements/employees/shift_masters (must run AFTER
+	// seedPlacements). Seeds shift masters, a couple of in-week schedule entries
+	// at CMP-0021, and one approved_leave_days row so SHIFT_OVER_LEAVE fires.
+	// -----------------------------------------------------------------------
+	if err := seedScheduling(ctx, pool); err != nil {
+		return fmt.Errorf("seed scheduling: %w", err)
+	}
+
 	return nil
 }
 
@@ -957,6 +967,109 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed shift_leader_assignment SWP-SLA-3001: %w", err)
 	}
 	slog.Info("seed: upserted shift_leader_assignment", "id", "SWP-SLA-3001", "employee_id", "SWP-EMP-1108")
+
+	return nil
+}
+
+// mondayOfCurrentWeek returns the Monday (00:00 Asia/Jakarta-anchored UTC date)
+// of the week containing now. Schedule fixtures are placed a few days INTO this
+// week so they land inside the visible grid AND avoid the Asia/Jakarta-vs-UTC
+// midnight boundary the fixed E2E clock derives statuses at (05-03 TZ note).
+func mondayOfCurrentWeek(now time.Time) time.Time {
+	d := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// Go: Sunday=0..Saturday=6. ISO Monday-start offset.
+	offset := (int(d.Weekday()) + 6) % 7
+	return d.AddDate(0, 0, -offset)
+}
+
+// seedScheduling inserts Phase-6 (E4) shift-master + schedule + approved-leave
+// fixtures. All inserts are idempotent (ON CONFLICT DO NOTHING). FK: schedule
+// entries → placements/employees/shift_masters (runs AFTER seedPlacements).
+//
+// Shift masters (explicit deterministic ids; column DEFAULT only fires when id
+// is omitted, an explicit id is honoured):
+//   - SWP-SHF-001  "Pagi"  07:00–15:00  break 12:00–13:00  service_line NULL (all lines)
+//   - SWP-SHF-002  "Malam" 23:00–07:00  (cross_midnight=true)  service_line SWP-SVC-003 (Parking)
+//
+// Schedule entries (so the grid renders agents at CMP-0021) — dated a few days
+// into the CURRENT week (Tuesday/Wednesday), inside each placement window:
+//   - SWP-SCH-6001  Rudi (SWP-EMP-1108, SWP-PL-5001) on monday+1 — "Pagi" SCHEDULED
+//   - SWP-SCH-6002  Dewi (SWP-EMP-3001, SWP-PL-5004) on monday+2 — "Pagi" SCHEDULED
+//
+// Approved-leave day (exercises SHIFT_OVER_LEAVE) — Thursday (monday+3), a date
+// NOT taken by Dewi's schedule entry so 06-04 can attempt to schedule her there:
+//   - approved_leave_days: SWP-EMP-3001 / leave_date=monday+3 / SWP-LR-44210 / ANNUAL
+//
+// NOTE for 06-03 / 06-04: Budi (SWP-EMP-2891) is placed at CMP-0022 (SWP-PL-5002)
+// — he is the leader-scope-403 target (Rudi leads CMP-0021, cannot touch Budi).
+func seedScheduling(ctx context.Context, pool *db.Pool) error {
+	// --- Shift masters ---
+	const shfQ = `
+		INSERT INTO shift_masters
+			(id, name, start_time, end_time, break_start, break_end,
+			 service_line_id, cross_midnight, is_active, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	type shiftMaster struct {
+		id, name, start, end string
+		breakStart, breakEnd *string
+		serviceLineID        *string
+		crossMidnight        bool
+	}
+	bs := "12:00"
+	be := "13:00"
+	parking := "SWP-SVC-003"
+	masters := []shiftMaster{
+		{id: "SWP-SHF-001", name: "Pagi", start: "07:00", end: "15:00", breakStart: &bs, breakEnd: &be, serviceLineID: nil, crossMidnight: false},
+		{id: "SWP-SHF-002", name: "Malam", start: "23:00", end: "07:00", breakStart: nil, breakEnd: nil, serviceLineID: &parking, crossMidnight: true},
+	}
+	for _, m := range masters {
+		if _, err := pool.Pool.Exec(ctx, shfQ,
+			m.id, m.name, m.start, m.end, m.breakStart, m.breakEnd,
+			m.serviceLineID, m.crossMidnight,
+		); err != nil {
+			return fmt.Errorf("seed shift_master %q: %w", m.id, err)
+		}
+		slog.Info("seed: upserted shift master", "id", m.id, "name", m.name)
+	}
+
+	monday := mondayOfCurrentWeek(time.Now())
+	rudiDate := monday.AddDate(0, 0, 1).Format("2006-01-02")  // Tuesday
+	dewiDate := monday.AddDate(0, 0, 2).Format("2006-01-02")  // Wednesday
+	leaveDate := monday.AddDate(0, 0, 3).Format("2006-01-02") // Thursday (over-leave target)
+
+	// --- Schedule entries (snapshot Pagi 07:00–15:00 onto each cell) ---
+	const schQ = `
+		INSERT INTO schedule_entries
+			(id, employee_id, placement_id, service_line_id, shift_master_id,
+			 start_time, end_time, cross_midnight, work_date, status, is_day_off, created_by)
+		VALUES ($1, $2, $3, $4, 'SWP-SHF-001', '07:00', '15:00', false, $5::date, 'SCHEDULED', false, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	type entry struct {
+		id, employeeID, placementID, serviceLineID, date string
+	}
+	entries := []entry{
+		{"SWP-SCH-6001", "SWP-EMP-1108", "SWP-PL-5001", "SWP-SVC-003", rudiDate},
+		{"SWP-SCH-6002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-SVC-003", dewiDate},
+	}
+	for _, e := range entries {
+		if _, err := pool.Pool.Exec(ctx, schQ, e.id, e.employeeID, e.placementID, e.serviceLineID, e.date); err != nil {
+			return fmt.Errorf("seed schedule_entry %q: %w", e.id, err)
+		}
+		slog.Info("seed: upserted schedule entry", "id", e.id, "employee_id", e.employeeID, "work_date", e.date)
+	}
+
+	// --- Approved-leave day (SHIFT_OVER_LEAVE fixture) ---
+	const aldQ = `
+		INSERT INTO approved_leave_days (employee_id, leave_date, leave_request_id, leave_type)
+		VALUES ($1, $2::date, $3, $4)
+		ON CONFLICT (employee_id, leave_date) DO NOTHING`
+	if _, err := pool.Pool.Exec(ctx, aldQ, "SWP-EMP-3001", leaveDate, "SWP-LR-44210", "ANNUAL"); err != nil {
+		return fmt.Errorf("seed approved_leave_days SWP-LR-44210: %w", err)
+	}
+	slog.Info("seed: upserted approved leave day", "employee_id", "SWP-EMP-3001", "leave_date", leaveDate, "leave_request_id", "SWP-LR-44210")
 
 	return nil
 }

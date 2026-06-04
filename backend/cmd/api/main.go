@@ -19,6 +19,7 @@ import (
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
+	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -30,12 +31,14 @@ import (
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
+	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
+	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
 func main() {
@@ -138,6 +141,13 @@ func run() error {
 	placementSvc.SetLeaderService(leaderSvc)
 	placementHandler := placementhttp.NewHandler(placementSvc, leaderSvc)
 
+	// Scheduling slice (06-02): E4 shift masters + schedule grid + conflict engine.
+	shiftMasterRepo := schedulingrepo.NewShiftMasterRepo(pool)
+	scheduleRepo := schedulingrepo.NewScheduleRepo(pool)
+	shiftMasterSvc := schedulingsvc.NewShiftMasterService(shiftMasterRepo, txm)
+	scheduleSvc := schedulingsvc.NewScheduleService(scheduleRepo, txm)
+	schedulingHandler := schedulinghttp.NewHandler(shiftMasterSvc, scheduleSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -151,6 +161,7 @@ func run() error {
 		PeopleAgreements:     agreementsHandler,
 		PeopleChangeRequests: crHandler,
 		Placement:            placementHandler,
+		Scheduling:           schedulingHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,

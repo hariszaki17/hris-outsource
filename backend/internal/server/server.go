@@ -14,6 +14,7 @@ import (
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
+	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -44,7 +45,9 @@ type Deps struct {
 	PeopleAgreements     *peoplehttp.AgreementHandler     // 04-03: agreements + attachments + file download
 	PeopleChangeRequests *peoplehttp.ChangeRequestHandler // 04-04: change-request HR approval queue
 	// PLACEMENT slice (05-02): placements + lifecycle + shift-leader + roster (E3).
-	Placement   *placementhttp.Handler
+	Placement *placementhttp.Handler
+	// SCHEDULING slice (06-02): shift masters + schedule grid + conflict engine (E4).
+	Scheduling  *schedulinghttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -315,6 +318,37 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments/{id}:end", d.Placement.EndShiftLeaderAssignment)
 			})
 			// PLACEMENT slice end (05-02). Phase 5+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// SCHEDULING slice (06-02): E4 shift masters + schedule grid +
+			// conflict engine + bulk-apply (F4.1/F4.2/F4.3 / SA-* / SM-*).
+			// COORDINATION POINT: future Phase-6 slices append AFTER this block.
+			// ---------------------------------------------------------------
+
+			// Shift-master reads + ALL schedule ops: super_admin, hr_admin,
+			// shift_leader (leader scope enforced in the service via GuardCompany).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/shift-masters", d.Scheduling.ListShiftMasters)
+				r.Get("/shift-masters/{id}", d.Scheduling.GetShiftMaster)
+				r.Get("/schedule", d.Scheduling.ListSchedule)
+				r.With(d.Idempotency.Handler).Post("/schedule", d.Scheduling.CreateScheduleEntry)
+				r.With(d.Idempotency.Handler).Patch("/schedule/{id}", d.Scheduling.UpdateScheduleEntry)
+				r.With(d.Idempotency.Handler).Delete("/schedule/{id}", d.Scheduling.DeleteScheduleEntry)
+				// :check is side-effect-free → NO idempotency wrapper.
+				r.Post("/schedule:check", d.Scheduling.CheckScheduleConflicts)
+				r.With(d.Idempotency.Handler).Post("/schedule:bulk-apply", d.Scheduling.BulkApplySchedule)
+			})
+
+			// Shift-master WRITES: super_admin, hr_admin (global scope).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/shift-masters", d.Scheduling.CreateShiftMaster)
+				r.Patch("/shift-masters/{id}", d.Scheduling.UpdateShiftMaster)
+				r.With(d.Idempotency.Handler).Post("/shift-masters/{id}:deactivate", d.Scheduling.DeactivateShiftMaster)
+				r.With(d.Idempotency.Handler).Post("/shift-masters/{id}:reactivate", d.Scheduling.ReactivateShiftMaster)
+			})
+			// SCHEDULING slice end (06-02). Phase 6+ appends after this line.
 		})
 	})
 
