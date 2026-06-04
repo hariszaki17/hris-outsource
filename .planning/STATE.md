@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-e2-org-master-data/03-02-PLAN.md
-last_updated: "2026-06-04T03:15:05.076Z"
+stopped_at: Completed 03-e2-org-master-data/03-03-PLAN.md
+last_updated: "2026-06-04T03:23:54.463Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 15
-  completed_plans: 11
+  completed_plans: 12
   percent: 8
 ---
 
@@ -52,6 +52,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 02-e1-foundations P04 | 107 | 2 tasks | 7 files |
 | Phase 03-e2-org-master-data P01 | 25 | 3 tasks | 22 files |
 | Phase 03-e2-org-master-data P02 | 452 | 3 tasks | 8 files |
+| Phase 03-e2-org-master-data P03 | 6 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 03-e2-org-master-data]: OrgCompanies Deps field in server.go; siblings 03-03/03-04 append their own r.Group{} after the ORG slice coordination point
 - [Phase 03-e2-org-master-data]: GEOFENCE_RADIUS_INVALID uses apperr.Error{HTTPStatus:400} struct literal — bypasses statusForCode (which defaults to 422)
 - [Phase 03-e2-org-master-data]: Seed uses explicit IDs SWP-CMP-0021/0022 + SWP-SITE-0001/0002 via direct INSERT with ON CONFLICT (id) DO NOTHING for deterministic E2E targets
+- [Phase 03-e2-org-master-data]: ServiceLineService is a separate struct from Service in the same org package; ServiceLineHandler in same orghttp package — OrgServiceLines Deps field type = *orghttp.ServiceLineHandler
+- [Phase 03-e2-org-master-data]: SoftDeletePosition uses repo.SoftDeletePosition (sets deleted_at) not SetPositionStatus — hard soft-delete matching 03-01 decision; SERVICE_LINE_IN_USE when CountActivePositionsForLine > 0; POSITION_IN_USE on unique (line,name) violation; seed uses explicit IDs SWP-SVC-001/002/003 + SWP-POS-014/015
 
 ### Pending Todos
 
@@ -109,6 +112,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T03:15:05.073Z
-Stopped at: Completed 03-e2-org-master-data/03-02-PLAN.md
+Last session: 2026-06-04T03:23:54.460Z
+Stopped at: Completed 03-e2-org-master-data/03-03-PLAN.md
 Resume file: None
