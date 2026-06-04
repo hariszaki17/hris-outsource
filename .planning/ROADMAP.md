@@ -230,7 +230,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Test Harness + Auth | 5/5 | Complete    | 2026-06-04 |
 | 2. E1 Foundations | 4/4 | Complete    | 2026-06-04 |
 | 3. E2 Org & Master Data | 6/6 | Complete    | 2026-06-04 |
-| 4. E2 People | 6/6 | Complete   | 2026-06-04 |
+| 4. E2 People | 6/6 | Complete    | 2026-06-04 |
 | 5. E3 Placement | 0/4 | Not started | - |
 | 6. E4 Schedule & Shifts | 0/4 | Not started | - |
 | 7. E5 Attendance | 0/4 | Not started | - |
