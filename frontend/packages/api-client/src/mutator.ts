@@ -17,7 +17,9 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
 
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  if (options.body && !headers.has('Content-Type')) {
+  // Set Content-Type only for non-FormData bodies (fetch auto-sets multipart/form-data
+  // with the correct boundary for FormData — overriding it breaks the upload boundary).
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
   if (MUTATION_METHODS.has(method) && !headers.has('Idempotency-Key')) {

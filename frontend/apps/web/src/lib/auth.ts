@@ -37,6 +37,16 @@ function emit() {
   for (const l of listeners) l();
 }
 
+// E2E test helper: expose access token on window so Playwright's page.evaluate
+// can construct authenticated API requests without going through the FE UI.
+// Only active when VITE_ENABLE_MSW='false' (E2E mode). No-op in production.
+if (typeof window !== 'undefined' && import.meta.env.VITE_ENABLE_MSW === 'false') {
+  Object.defineProperty(window, '__swp_get_token__', {
+    get: () => accessToken,
+    configurable: true,
+  });
+}
+
 export const auth = {
   getToken: () => accessToken,
   getUser: () => user,

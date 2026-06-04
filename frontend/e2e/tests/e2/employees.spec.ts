@@ -30,6 +30,11 @@ import {
 } from '../../lib/db.js';
 
 // ---------------------------------------------------------------------------
+// Use wider viewport so all DataTable columns (incl. AKSI/actions) are visible.
+// ---------------------------------------------------------------------------
+test.use({ viewport: { width: 1600, height: 900 } });
+
+// ---------------------------------------------------------------------------
 // Isolation — each test starts from a clean, fully-seeded DB.
 // ---------------------------------------------------------------------------
 test.beforeEach(async () => {

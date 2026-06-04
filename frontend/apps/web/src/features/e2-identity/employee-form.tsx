@@ -55,7 +55,11 @@ const employeeSchema = z
     nik: z.string().min(16).max(16, 'NIK harus 16 digit'),
     nip: z.string().optional(),
     join_at: z.string().min(1),
-    gender: z.nativeEnum(Gender).optional(),
+    // FilterSelect emits '' for the empty placeholder; coerce '' → undefined before enum check.
+    gender: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z.nativeEnum(Gender).optional(),
+    ),
     birth_date: z.string().optional(),
     birth_place: z.string().optional(),
     phone: z.string().optional(),
