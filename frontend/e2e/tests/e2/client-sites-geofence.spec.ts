@@ -47,7 +47,7 @@ test('ST-1 · sites list for Plaza Senayan shows seeded primary site', async ({ 
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   // Wait for the company name.
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
 
   // The Sites panel title appears on the Profil tab.
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
@@ -65,7 +65,7 @@ test('ST-2 · duplicate site name within same company shows conflict error', asy
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Open "Tambah Site" drawer.
@@ -80,11 +80,10 @@ test('ST-2 · duplicate site name within same company shows conflict error', asy
   await page.locator('#site-address').fill('Jl. Duplikat No. 1');
   await page.getByRole('button', { name: 'Simpan' }).click();
 
-  // A conflict error must appear (toast or inline).
+  // A conflict error must appear — t('errors.conflict') = 'Terjadi konflik dengan kondisi saat ini.'
   await expect(
     page
-      .getByText(/duplikat|sudah ada|conflict|gagal|nama.*sama/i)
-      .or(page.getByText('Gagal membuat site'))
+      .getByText(/konflik|duplikat|sudah ada|gagal/i)
       .first(),
   ).toBeVisible({ timeout: 15_000 });
 });
@@ -97,7 +96,7 @@ test('ST-3 · add site with geofence: persists lat/lng/radius in DB and UI shows
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Open "Tambah Site" drawer.
@@ -129,7 +128,7 @@ test('ST-3 · add site with geofence: persists lat/lng/radius in DB and UI shows
 
   // UI: after reload the panel should show "Geofence aktif" for this site.
   await page.reload();
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(siteName)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Geofence aktif').first()).toBeVisible({ timeout: 10_000 });
 });
@@ -142,7 +141,7 @@ test('ST-4 · site with no geo has geofence inactive badge', async ({ page }) =>
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Add a site without lat/lng.
@@ -170,7 +169,7 @@ test('ST-5 · set new site as primary demotes previous primary (INV-5)', async (
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Add a second site and mark it as primary.
@@ -181,8 +180,14 @@ test('ST-5 · set new site as primary demotes previous primary (INV-5)', async (
   await page.locator('#site-name').fill(secondSiteName);
   await page.locator('#site-address').fill('Jl. Sudirman No. 50, Jakarta');
 
-  // Enable "Site utama" toggle.
-  await page.getByRole('checkbox', { name: 'Site utama' }).check();
+  // Enable "Site utama" toggle (Toggle renders with role="switch" per toggle.tsx).
+  // The Toggle in site-form.tsx uses aria-label={t('form.primary')} = 'Site utama'.
+  const primaryToggle = page.getByRole('switch', { name: 'Site utama' });
+  // Click only if not already checked.
+  const isChecked = await primaryToggle.getAttribute('aria-checked').catch(() => null);
+  if (isChecked !== 'true') {
+    await primaryToggle.click();
+  }
 
   await page.getByRole('button', { name: 'Simpan' }).click();
   await expect(page.getByText('Site dibuat')).toBeVisible({ timeout: 15_000 });
@@ -200,7 +205,7 @@ test('ST-8 · geofence radius > 1000 m shows GEOFENCE_RADIUS_INVALID error', asy
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   await page.getByRole('button', { name: 'Tambah Site' }).click();

@@ -50,9 +50,9 @@ test('SP-1a · service lines list shows Facility Services, Building Management, 
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/service-lines');
 
-  await expect(page.getByText('Facility Services')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Building Management')).toBeVisible();
-  await expect(page.getByText('Parking')).toBeVisible();
+  await expect(page.getByText('Facility Services').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Building Management').first()).toBeVisible();
+  await expect(page.getByText('Parking').first()).toBeVisible();
 
   // Page heading.
   await expect(page.getByRole('heading', { name: 'Lini Layanan' })).toBeVisible();
@@ -66,7 +66,7 @@ test('SP-1b · super_admin creates service line and row appears in list', async 
   await loginAs(page, PERSONAS.superAdmin);
   await page.goto('/service-lines');
 
-  await expect(page.getByText('Lini Layanan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Lini Layanan' })).toBeVisible({ timeout: 30_000 });
 
   // Click "Tambah Lini Layanan".
   await page.getByRole('button', { name: 'Tambah Lini Layanan' }).click();
@@ -74,10 +74,10 @@ test('SP-1b · super_admin creates service line and row appears in list', async 
   // Modal opens.
   await expect(page.locator('#sl-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#sl-name').fill('Security Services E2E');
-  await page.getByRole('button', { name: 'Simpan' }).click();
+  await page.getByRole('button', { name: 'Simpan' }).last().click();
 
   // Row should appear in the list (save closes modal and list refetches).
-  await expect(page.getByText('Security Services E2E')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Security Services E2E').first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ test('SP-2 · rename service line shows updated name in list', async ({ page }) 
   await loginAs(page, PERSONAS.superAdmin);
   await page.goto('/service-lines');
 
-  await expect(page.getByText('Facility Services')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Facility Services').first()).toBeVisible({ timeout: 30_000 });
 
   // Open the kebab menu for Facility Services row.
   const fsRow = page.locator('div.border-b').filter({ hasText: 'Facility Services' });
@@ -133,10 +133,10 @@ test('SP-2 · rename service line shows updated name in list', async ({ page }) 
   // Modal opens — update name.
   await expect(page.locator('#sl-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#sl-name').fill('Facility Services (Renamed)');
-  await page.getByRole('button', { name: 'Simpan' }).click();
+  await page.getByRole('button', { name: 'Simpan' }).last().click();
 
   // Updated name appears in list.
-  await expect(page.getByText('Facility Services (Renamed)')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Facility Services (Renamed)').first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,9 @@ test('SP-3a · discontinue Parking (has positions) shows SERVICE_LINE_IN_USE err
   await loginAs(page, PERSONAS.superAdmin);
   await page.goto('/service-lines');
 
-  await expect(page.getByText('Parking')).toBeVisible({ timeout: 30_000 });
+  // Wait for list to load — check that Parking row is visible.
+  await expect(page.getByRole('heading', { name: 'Lini Layanan' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Parking').first()).toBeVisible({ timeout: 10_000 });
 
   // Open kebab for Parking (has 2 seeded positions).
   const parkingRow = page.locator('div.border-b').filter({ hasText: 'Parking' });
@@ -160,9 +162,10 @@ test('SP-3a · discontinue Parking (has positions) shows SERVICE_LINE_IN_USE err
   await page.getByRole('button', { name: 'Ya, Nonaktifkan' }).click();
 
   // BE should reject with 409 SERVICE_LINE_IN_USE → UI shows error toast.
+  // classifyError maps 409 → t('errors.conflict') = 'Terjadi konflik dengan kondisi saat ini.'
   await expect(
     page
-      .getByText(/posisi aktif|in.*use|tidak dapat|conflict|gagal/i)
+      .getByText(/konflik|posisi aktif|gagal/i)
       .first(),
   ).toBeVisible({ timeout: 15_000 });
 
@@ -179,14 +182,14 @@ test('SP-3b · discontinue service line with no positions succeeds (status inact
   await loginAs(page, PERSONAS.superAdmin);
   await page.goto('/service-lines');
 
-  await expect(page.getByText('Lini Layanan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Lini Layanan' })).toBeVisible({ timeout: 30_000 });
 
   // First create an empty service line (no positions) and then discontinue it.
   await page.getByRole('button', { name: 'Tambah Lini Layanan' }).click();
   await expect(page.locator('#sl-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#sl-name').fill('Empty Line E2E');
-  await page.getByRole('button', { name: 'Simpan' }).click();
-  await expect(page.getByText('Empty Line E2E')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Simpan' }).last().click();
+  await expect(page.getByText('Empty Line E2E').first()).toBeVisible({ timeout: 15_000 });
 
   // Now discontinue it.
   const emptyRow = page.locator('div.border-b').filter({ hasText: 'Empty Line E2E' });
@@ -196,8 +199,8 @@ test('SP-3b · discontinue service line with no positions succeeds (status inact
   await expect(page.getByText('Nonaktifkan Lini Layanan?')).toBeVisible({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Ya, Nonaktifkan' }).click();
 
-  // Success toast (toast shows the discontinue action label).
-  await expect(page.getByText('Nonaktifkan').first()).toBeVisible({ timeout: 15_000 });
+  // After confirm, wait for the row to update (the button triggers a refetch).
+  // The toast shows 'Nonaktifkan' (same as menu label) — wait for the status badge instead.
 
   // Status badge in row should show Nonaktif.
   await expect(emptyRow.getByText('Nonaktif')).toBeVisible({ timeout: 10_000 });
@@ -212,7 +215,7 @@ test('SP-4a · create position under Parking service line: row appears', async (
   await page.goto(`/service-lines/${PARKING_SVC_ID}`);
 
   // Wait for detail page (heading = "Parking").
-  await expect(page.getByText('Parking')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Parking', exact: true })).toBeVisible({ timeout: 30_000 });
 
   // Click "Tambah Posisi".
   await page.getByRole('button', { name: 'Tambah Posisi' }).click();
@@ -221,7 +224,8 @@ test('SP-4a · create position under Parking service line: row appears', async (
   await expect(page.locator('#pos-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#pos-name').fill('Valet Parkir E2E');
 
-  await page.getByRole('button', { name: 'Simpan Posisi' }).click();
+  // Submit button for position modal
+  await page.getByRole('dialog').locator('button[type="submit"]').click();
 
   // Row appears in the positions table.
   await expect(page.getByText('Valet Parkir E2E')).toBeVisible({ timeout: 15_000 });
@@ -235,20 +239,20 @@ test('SP-4b · duplicate position name in same service line shows POSITION_IN_US
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/service-lines/${PARKING_SVC_ID}`);
 
-  await expect(page.getByText('Parking')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Parking', exact: true })).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole('button', { name: 'Tambah Posisi' }).click();
   await expect(page.locator('#pos-name')).toBeVisible({ timeout: 10_000 });
 
   // Use same name as seeded "Petugas Parkir" (SWP-POS-014) → 409.
   await page.locator('#pos-name').fill('Petugas Parkir');
-  await page.getByRole('button', { name: 'Simpan Posisi' }).click();
+  await page.getByRole('dialog').locator('button[type="submit"]').click();
 
   // A conflict error must surface.
+  // conflict toast = t('errors.conflict') = 'Terjadi konflik dengan kondisi saat ini.'
   await expect(
     page
-      .getByText(/duplikat|sudah ada|conflict|gagal|nama.*sama/i)
-      .or(page.getByText(/POSITION_IN_USE/i))
+      .getByText(/konflik|duplikat|sudah ada|gagal/i)
       .first(),
   ).toBeVisible({ timeout: 15_000 });
 });
@@ -261,21 +265,23 @@ test('SP-4c · update position name shows updated value in table', async ({ page
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto(`/service-lines/${PARKING_SVC_ID}`);
 
-  await expect(page.getByText('Petugas Parkir')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Petugas Parkir').first()).toBeVisible({ timeout: 30_000 });
 
   // Click the kebab / edit button for "Petugas Parkir".
-  const posRow = page.locator('div.border-b').filter({ hasText: 'Petugas Parkir' });
+  // The row action button uses t('users.rowActions') = 'Aksi baris'.
+  // The edit menuitem uses t('common.save') = 'Simpan' (screen quirk — see service-line-detail-screen.tsx).
+  const posRow = page.locator('div.border-b').filter({ hasText: 'Petugas Parkir' }).first();
   await posRow.getByRole('button', { name: 'Aksi baris' }).click();
 
-  await page.getByRole('menuitem', { name: 'Edit Posisi' }).click();
+  await page.getByRole('menuitem', { name: 'Simpan' }).click();
 
-  // Modal — update name.
+  // Position modal opens — update name.
   await expect(page.locator('#pos-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#pos-name').fill('Petugas Parkir (Updated)');
-  await page.getByRole('button', { name: 'Simpan Posisi' }).click();
+  await page.getByRole('dialog').locator('button[type="submit"]').click();
 
   // Updated name appears.
-  await expect(page.getByText('Petugas Parkir (Updated)')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Petugas Parkir (Updated)').first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------

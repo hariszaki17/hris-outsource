@@ -175,7 +175,7 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} size="lg">
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <ModalHeader
           icon={CalendarOff}
           tone="info"

@@ -45,8 +45,8 @@ test('CC-1a · companies list renders seeded Plaza Senayan and Mall Kelapa Gadin
   await page.goto('/client-companies');
 
   // Wait for table to render (first-load 30s for Vite + session restore + API call).
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText('Mall Kelapa Gading')).toBeVisible();
+  await expect(page.getByText('Plaza Senayan').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Mall Kelapa Gading').first()).toBeVisible();
 
   // Page heading confirms correct screen.
   await expect(page.getByRole('heading', { name: 'Perusahaan Klien' })).toBeVisible();
@@ -61,7 +61,7 @@ test('CC-1b · create company: row appears in list with status Aktif', async ({ 
   await page.goto('/client-companies');
 
   // Wait for existing rows before adding.
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Plaza Senayan').first()).toBeVisible({ timeout: 30_000 });
 
   // Click "Tambah Perusahaan".
   await page.getByRole('button', { name: 'Tambah Perusahaan' }).click();
@@ -81,7 +81,7 @@ test('CC-1b · create company: row appears in list with status Aktif', async ({ 
   await expect(page.getByText('Perusahaan berhasil ditambahkan')).toBeVisible({ timeout: 15_000 });
 
   // After redirect → detail page should show the company name.
-  await expect(page.getByText(newName)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(newName).first()).toBeVisible({ timeout: 10_000 });
 
   // DB-side: status must be 'active'.
   const id = await getCompanyByName(newName);
@@ -104,7 +104,7 @@ test('CC-1c · create company auto-creates a primary site', async ({ page }) => 
   await page.getByRole('button', { name: 'Simpan' }).click();
 
   // Wait for success (redirect to detail).
-  await expect(page.getByText(newName)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(newName).first()).toBeVisible({ timeout: 15_000 });
 
   // DB-side: exactly 1 active site created.
   const id = await getCompanyByName(newName);
@@ -127,11 +127,11 @@ test('CC-2 · duplicate company name shows conflict error', async ({ page }) => 
   await page.getByRole('button', { name: 'Simpan' }).click();
 
   // A conflict/error message must surface — either inline field error or toast.
-  // The BE returns 409 COMPANY_NAME_IN_USE; classifyError maps to 'conflict'.
+  // The BE returns 409; classifyError maps to 'conflict' → t('errors.conflict')
+  // = 'Terjadi konflik dengan kondisi saat ini.' or toast 'Gagal membuat perusahaan'.
   await expect(
     page
-      .getByText(/nama.*sudah.*digunakan|duplikat|sudah ada|conflict|gagal/i)
-      .or(page.getByText('Gagal membuat perusahaan'))
+      .getByText(/konflik|duplikat|sudah ada|gagal/i)
       .first(),
   ).toBeVisible({ timeout: 15_000 });
 });
@@ -145,12 +145,13 @@ test('CC-3 · edit company pic_name shows updated value', async ({ page }) => {
   await page.goto('/client-companies');
 
   // Wait for list.
-  await expect(page.getByText('Plaza Senayan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Plaza Senayan').first()).toBeVisible({ timeout: 30_000 });
 
   // Open the kebab menu for Plaza Senayan's row.
   const senRow = page
     .locator('div.border-b')
-    .filter({ hasText: 'Plaza Senayan' });
+    .filter({ hasText: 'Plaza Senayan' })
+    .first();
   await senRow.getByRole('button', { name: 'Buka menu aksi' }).click();
 
   // Click Edit.
@@ -176,7 +177,7 @@ test('CC-4a · deactivate company: status badge Nonaktif + DB inactive', async (
   await page.goto('/client-companies');
 
   // Wait for list.
-  await expect(page.getByText('Mall Kelapa Gading')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Mall Kelapa Gading').first()).toBeVisible({ timeout: 30_000 });
 
   // Open kebab for Mall Kelapa Gading and deactivate.
   const mkgRow = page
@@ -212,7 +213,7 @@ test('CC-4b · reactivate company: status badge Aktif + DB active', async ({ pag
   await page.goto('/client-companies');
 
   // Wait for list.
-  await expect(page.getByText('Mall Kelapa Gading')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('Mall Kelapa Gading').first()).toBeVisible({ timeout: 30_000 });
 
   const mkgRow = () =>
     page.locator('div.border-b').filter({ hasText: 'Mall Kelapa Gading' });

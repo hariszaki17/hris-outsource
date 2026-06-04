@@ -175,7 +175,7 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} size="lg">
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <ModalHeader
           icon={Timer}
           tone="warn"

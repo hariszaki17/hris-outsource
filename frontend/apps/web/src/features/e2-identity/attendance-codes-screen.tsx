@@ -217,7 +217,7 @@ function AttendanceCodeModal({ open, onOpenChange, editing, onDone }: Attendance
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} size="lg">
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate>
         <ModalHeader
           icon={Clock3}
           tone="brand"
