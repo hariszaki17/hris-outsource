@@ -10,21 +10,70 @@ import (
 
 type Querier interface {
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
+	// Used to populate position_count in the ServiceLine DTO and to guard :discontinue.
+	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
+	// Used to populate site_count in the ClientCompany DTO.
+	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// Allocates the SWP-AC id inline from the per-prefix sequence.
+	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
+	// Allocates the SWP-CMP id inline from the per-prefix sequence.
+	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
+	// Allocates the SWP-LT id inline from the per-prefix sequence.
+	CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams) (CreateLeaveTypeRow, error)
+	// Allocates the SWP-OTR id inline from the per-prefix sequence.
+	CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error)
+	// Allocates the SWP-POS id inline from the per-prefix sequence.
+	CreatePosition(ctx context.Context, arg CreatePositionParams) (CreatePositionRow, error)
+	// Allocates the SWP-SVC id inline from the per-prefix sequence.
+	CreateServiceLine(ctx context.Context, name string) (CreateServiceLineRow, error)
+	// Allocates the SWP-SITE id inline from the per-prefix sequence.
+	CreateSite(ctx context.Context, arg CreateSiteParams) (CreateSiteRow, error)
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// Clears is_primary on all other sites of the company when a new primary is set.
+	// Call inside the same tx before SetSitePrimary (INV-5).
+	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
+	GetAttendanceCodeByID(ctx context.Context, id string) (GetAttendanceCodeByIDRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
+	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
+	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
+	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
+	GetPositionByID(ctx context.Context, id string) (GetPositionByIDRow, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
 	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
 	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
+	GetServiceLineByID(ctx context.Context, id string) (GetServiceLineByIDRow, error)
+	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
 	// Login lookup: active, non-deleted user by case-insensitive email.
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: status, is_billable.
+	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
 	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: q (ILIKE name), status. service_line and has_leader filters accepted
+	// but not applied at DB level (no placements/assignments table in Phase 3).
+	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: status, is_annual.
+	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: status, service_line (scopes to a specific line or global).
+	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
 	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
+	// Cursor page ordered by (created_at desc, id desc), scoped to one service line.
+	ListPositionsForLine(ctx context.Context, arg ListPositionsForLineParams) ([]ListPositionsForLineRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	ListServiceLines(ctx context.Context, arg ListServiceLinesParams) ([]ListServiceLinesRow, error)
+	// Cursor page: primary first, then created_at desc, id desc.
+	// Keyset cursor on (created_at, id); is_primary DESC is the primary sort but
+	// keyset uses the sub-sort (created_at, id) for stable pagination.
+	ListSitesForCompany(ctx context.Context, arg ListSitesForCompanyParams) ([]ListSitesForCompanyRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 to compute has_more.
 	// Filters are optional: a NULL sqlc.narg means "no filter" via the `(arg IS NULL OR col = arg)` idiom.
 	// Free-text q matches email or full_name (ILIKE '%' || q || '%').
@@ -36,12 +85,39 @@ type Querier interface {
 	// Reuse detection: kill every live token in the family.
 	RevokeFamily(ctx context.Context, familyID string) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetAttendanceCodeStatus(ctx context.Context, arg SetAttendanceCodeStatusParams) (SetAttendanceCodeStatusRow, error)
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetClientCompanyStatus(ctx context.Context, arg SetClientCompanyStatusParams) (SetClientCompanyStatusRow, error)
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatusParams) (SetLeaveTypeStatusRow, error)
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetOvertimeRuleStatus(ctx context.Context, arg SetOvertimeRuleStatusParams) (SetOvertimeRuleStatusRow, error)
+	// Drives soft-delete-like deactivation (status='inactive') or reactivation.
+	SetPositionStatus(ctx context.Context, arg SetPositionStatusParams) (SetPositionStatusRow, error)
+	// Drives :discontinue (status='inactive') and :reactivate (status='active').
+	SetServiceLineStatus(ctx context.Context, arg SetServiceLineStatusParams) (SetServiceLineStatusRow, error)
+	SetSitePrimary(ctx context.Context, id string) (SetSitePrimaryRow, error)
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetSiteStatus(ctx context.Context, arg SetSiteStatusParams) (SetSiteStatusRow, error)
 	// Used by :deactivate (status='disabled') and :reactivate (status='active').
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (SetUserStatusRow, error)
+	SoftDeleteAttendanceCode(ctx context.Context, id string) error
+	SoftDeleteLeaveType(ctx context.Context, id string) error
+	SoftDeleteOvertimeRule(ctx context.Context, id string) error
+	// Hard soft-delete: sets deleted_at so the position is invisible to all queries.
+	SoftDeletePosition(ctx context.Context, id string) error
+	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
+	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
+	UpdateLeaveType(ctx context.Context, arg UpdateLeaveTypeParams) (UpdateLeaveTypeRow, error)
+	UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
+	UpdateServiceLine(ctx context.Context, arg UpdateServiceLineParams) (UpdateServiceLineRow, error)
+	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
 	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)
 }

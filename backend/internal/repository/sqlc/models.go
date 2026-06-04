@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+type AttendanceCode struct {
+	ID                string
+	Code              string
+	Label             string
+	Description       string
+	Color             string
+	IsWorkday         bool
+	IsPaid            bool
+	IsBillable        bool
+	NeedsVerification bool
+	Status            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+}
+
 type AuditLog struct {
 	ID          string
 	ActorUserID *string
@@ -19,6 +35,39 @@ type AuditLog struct {
 	AfterState  []byte
 	RequestID   *string
 	CreatedAt   time.Time
+}
+
+type ClientCompany struct {
+	ID          string
+	Name        string
+	Address     string
+	LeaderScope string
+	Npwp        *string
+	PicName     *string
+	Phone       *string
+	Email       *string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
+}
+
+type ClientSite struct {
+	ID              string
+	ClientCompanyID string
+	Name            string
+	Code            *string
+	Address         string
+	GeoLat          *float64
+	GeoLng          *float64
+	GeofenceRadiusM int32
+	IsPrimary       bool
+	PicName         *string
+	Phone           *string
+	Status          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
 }
 
 type IDCounter struct {
@@ -33,6 +82,37 @@ type IdempotencyKey struct {
 	ResponseBody   []byte
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
+}
+
+type LeaveType struct {
+	ID                 string
+	Name               string
+	Code               string
+	Description        string
+	DefaultAnnualQuota int32
+	IsAnnual           bool
+	RequiresDocument   bool
+	Color              string
+	Status             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
+type OvertimeRule struct {
+	ID                  string
+	Name                string
+	ServiceLineID       *string
+	WeekdayRate         float32
+	RestdayRate         float32
+	HolidayRate         float32
+	MinMinutes          int32
+	MaxMinutesPerDay    int32
+	PreApprovalRequired bool
+	Status              string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	DeletedAt           *time.Time
 }
 
 type PasswordResetToken struct {
@@ -52,6 +132,17 @@ type PlatformSetting struct {
 	Sort   int32
 }
 
+type Position struct {
+	ID            string
+	ServiceLineID string
+	Name          string
+	Alias         string
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+}
+
 type RefreshToken struct {
 	ID          int64
 	UserID      string
@@ -63,6 +154,15 @@ type RefreshToken struct {
 	ExpiresAt   time.Time
 	RevokedAt   *time.Time
 	CreatedAt   time.Time
+}
+
+type ServiceLine struct {
+	ID        string
+	Name      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
 
 type User struct {
