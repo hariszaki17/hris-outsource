@@ -19,6 +19,7 @@ type Error struct {
 	Code       string            // UPPER_SNAKE machine code, stable for clients
 	Message    string            // optional override; usually filled from i18n by code
 	Fields     map[string]string // field -> message, only for 400/422
+	Details    any               // optional structured payload (e.g. INVViolationDetails); serialized as error.details
 	HTTPStatus int               // resolved from Code unless explicitly set
 	cause      error             // wrapped internal error (never serialized)
 }
@@ -78,6 +79,12 @@ func NotFound() *Error {
 // Conflict — 409, for INV_<N>_VIOLATION / DOUBLE_SHIFT / etc.
 func Conflict(code string) *Error {
 	return &Error{Code: code, HTTPStatus: http.StatusConflict}
+}
+
+// ConflictWithDetails — 409 carrying a structured error.details payload
+// (e.g. INVViolationDetails for INV-1..4) plus optional field-level errors.
+func ConflictWithDetails(code string, fields map[string]string, details any) *Error {
+	return &Error{Code: code, Fields: fields, Details: details, HTTPStatus: http.StatusConflict}
 }
 
 // Rule — 422, semantic business-rule failure (quota, geofence, period).

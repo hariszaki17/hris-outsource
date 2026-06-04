@@ -24,6 +24,7 @@ type errBody struct {
 	Code      string            `json:"code"`
 	Message   string            `json:"message"`
 	Fields    map[string]string `json:"fields,omitempty"`
+	Details   any               `json:"details,omitempty"`
 	RequestID string            `json:"request_id"`
 }
 
@@ -64,6 +65,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		Code:      ae.Code,
 		Message:   msg,
 		Fields:    ae.Fields,
+		Details:   ae.Details,
 		RequestID: reqID,
 	}})
 }

@@ -55,6 +55,19 @@ var messages = map[Lang]map[string]string{
 		"PKWT_PERIOD_EXCEEDS_MAX": "Periode PKWT melebihi batas 5 tahun yang diizinkan UU Ketenagakerjaan.",
 		"ACTIVE_AGREEMENT_EXISTS": "Karyawan sudah memiliki perjanjian aktif. Gunakan endpoint :renew untuk perpanjangan.",
 		"FILE_TOO_LARGE":          "Ukuran file melebihi batas maksimum 10 MB.",
+
+		// E3 placement — invariants + lifecycle (INV-1..4, PLC-*, SL-*)
+		"INV_1_VIOLATION":            "Agen sudah memiliki penempatan aktif. Akhiri atau transfer terlebih dahulu.",
+		"INV_2_VIOLATION":            "Perusahaan sudah memiliki shift leader aktif. Konfirmasi penggantian.",
+		"INV_3_VIOLATION":            "Kandidat sudah menjadi shift leader di perusahaan lain. Akhiri penugasan tersebut dulu.",
+		"INV_4_VIOLATION":            "Kandidat tidak ditempatkan secara aktif di perusahaan ini.",
+		"COMPANY_INACTIVE":           "Perusahaan klien tidak aktif. Tidak dapat membuat penempatan.",
+		"PLACEMENT_OUTSIDE_CONTRACT": "Periode penempatan di luar masa berlaku perjanjian kerja.",
+		"PLACEMENT_PERIOD_OVERLAP":   "Periode penempatan tumpang tindih dengan penempatan lain.",
+		"TERMINAL_STATE_IMMUTABLE":   "Penempatan sudah dalam status final dan tidak dapat diubah.",
+		"LEADER_NOT_ELIGIBLE":        "Karyawan tidak memenuhi syarat untuk peran shift leader.",
+		"ALREADY_ENDED":              "Penugasan sudah berakhir.",
+		"NO_ACTIVE_LEADER":           "Perusahaan ini belum memiliki shift leader.",
 	},
 	EN: {
 		"INVALID_REQUEST": "The request is invalid.",
@@ -88,6 +101,19 @@ var messages = map[Lang]map[string]string{
 		"PKWT_PERIOD_EXCEEDS_MAX": "PKWT period exceeds the 5-year maximum allowed by Indonesian labor law.",
 		"ACTIVE_AGREEMENT_EXISTS": "The employee already has an active agreement. Use :renew to extend.",
 		"FILE_TOO_LARGE":          "File size exceeds the 10 MB limit.",
+
+		// E3 placement — invariants + lifecycle (INV-1..4, PLC-*, SL-*)
+		"INV_1_VIOLATION":            "Agent already has an active placement. End or transfer it first.",
+		"INV_2_VIOLATION":            "The company already has an active shift leader. Confirm replacement.",
+		"INV_3_VIOLATION":            "Candidate already leads another company. End that assignment first.",
+		"INV_4_VIOLATION":            "Candidate is not actively placed at this company.",
+		"COMPANY_INACTIVE":           "Client company is not active. Cannot create the placement.",
+		"PLACEMENT_OUTSIDE_CONTRACT": "Placement period falls outside the employment agreement validity.",
+		"PLACEMENT_PERIOD_OVERLAP":   "Placement period overlaps another placement.",
+		"TERMINAL_STATE_IMMUTABLE":   "The placement is in a final state and cannot be modified.",
+		"LEADER_NOT_ELIGIBLE":        "The employee is not eligible for the shift leader role.",
+		"ALREADY_ENDED":              "The assignment has already ended.",
+		"NO_ACTIVE_LEADER":           "This company has no active shift leader.",
 	},
 }
 
