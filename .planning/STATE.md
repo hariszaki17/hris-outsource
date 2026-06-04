@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-test-harness-auth/01-05-PLAN.md
-last_updated: "2026-06-04T00:23:02.911Z"
+stopped_at: Completed 02-e1-foundations/02-01-PLAN.md
+last_updated: "2026-06-04T00:38:02.766Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 9
+  completed_plans: 6
   percent: 8
 ---
 
@@ -46,6 +46,7 @@ Progress: [█░░░░░░░░░] 8%
 | 01-test-harness-auth | 3 done / 5 total | ~105min | ~35min |
 | Phase 01 P03 | 690 | 3 tasks | 16 files |
 | Phase 01-test-harness-auth P05 | 2413 | 2 tasks | 4 files |
+| Phase 02-e1-foundations P01 | 2 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 01-test-harness-auth]: Reset token plaintext not emailed in Phase 1; E2E harness obtains token by querying password_reset_tokens directly (no mailer wired)
 - [Phase 01-test-harness-auth]: Reset-token E2E acquisition: seedResetToken(email, plaintext) inserts sha256(plaintext) directly into password_reset_tokens — no mailer needed; E2E controls the plaintext presented to the browser
 - [Phase 01-test-harness-auth]: Docker Scout CLI hook (config.json 'scout.hooks: pull') intercepts docker pull and hangs; workaround is to remove 'pull' from hooks and pull via curl --unix-socket docker.sock POST /images/create
+- [Phase 02-e1-foundations]: ids.go unchanged — platform_settings keys are plain text (not SWP-prefixed); USR and AL prefixes already existed
+- [Phase 02-e1-foundations]: foundations/ query package at db/queries/foundations/ — sqlc glob db/queries/* picks up new subdirectories automatically
+- [Phase 02-e1-foundations]: platform_settings stored as flat key/value table matching openapi PlatformSettings shape; wave-2 maps rows to response object
 
 ### Pending Todos
 
@@ -84,6 +88,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:17:09.853Z
-Stopped at: Completed 01-test-harness-auth/01-05-PLAN.md
+Last session: 2026-06-04T00:38:02.764Z
+Stopped at: Completed 02-e1-foundations/02-01-PLAN.md
 Resume file: None

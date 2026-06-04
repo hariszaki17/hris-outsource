@@ -55,7 +55,7 @@ Plans:
   2. The audit log lists entries with filters + cursor pagination and opens an entry detail; every write in this milestone produces an audit row.
   3. Platform settings load on the settings screen.
   4. Exhaustive Playwright E2E for E1 foundations features is green (headless).
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 - [ ] 02-01-PLAN.md (wave 1) — Migration 00008 platform_settings + sqlc queries: users list/update/role/status, audit-log list(+filters)/get, settings read; make gen
@@ -224,7 +224,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Test Harness + Auth | 5/5 | Complete    | 2026-06-04 |
-| 2. E1 Foundations | 0/4 | Not started | - |
+| 2. E1 Foundations | 1/4 | In Progress|  |
 | 3. E2 Org & Master Data | 0/4 | Not started | - |
 | 4. E2 People | 0/4 | Not started | - |
 | 5. E3 Placement | 0/4 | Not started | - |

@@ -18,9 +18,9 @@
 - [x] **AUTH-04**: Wrong credentials / disabled account / RBAC produce the correct error states in the UI.
 
 ### E1 Foundations & Settings (Phase 2)
-- [ ] **FND-01**: User management — list/create/update users, change role, deactivate/reactivate, send password reset.
-- [ ] **FND-02**: Audit log — list + entry detail with filters and cursor pagination.
-- [ ] **FND-03**: Platform settings read.
+- [x] **FND-01**: User management — list/create/update users, change role, deactivate/reactivate, send password reset.
+- [x] **FND-02**: Audit log — list + entry detail with filters and cursor pagination.
+- [x] **FND-03**: Platform settings read.
 
 ### E2 Org & Master Data (Phase 3)
 - [ ] **ORG-01**: Client companies — list/detail/create/update/reactivate.
