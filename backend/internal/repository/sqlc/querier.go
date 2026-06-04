@@ -35,10 +35,15 @@ type Querier interface {
 	CreatePlacement(ctx context.Context, arg CreatePlacementParams) (CreatePlacementRow, error)
 	// Allocates the SWP-POS id inline from the per-prefix sequence.
 	CreatePosition(ctx context.Context, arg CreatePositionParams) (CreatePositionRow, error)
+	// id allocated by the column DEFAULT ('SWP-SCH-' || swp_next_id('SCH')).
+	CreateScheduleEntry(ctx context.Context, arg CreateScheduleEntryParams) (CreateScheduleEntryRow, error)
 	// Allocates the SWP-SVC id inline from the per-prefix sequence.
 	CreateServiceLine(ctx context.Context, name string) (CreateServiceLineRow, error)
 	// id allocated by the column DEFAULT ('SWP-SLA-' || swp_next_id('SLA')).
 	CreateShiftLeaderAssignment(ctx context.Context, arg CreateShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
+	// id allocated by the column DEFAULT ('SWP-SHF-' || swp_next_id('SHF')).
+	// cross_midnight is server-derived (end<=start) and passed in by the 06-02 service.
+	CreateShiftMaster(ctx context.Context, arg CreateShiftMasterParams) (CreateShiftMasterRow, error)
 	// Allocates the SWP-SITE id inline from the per-prefix sequence.
 	CreateSite(ctx context.Context, arg CreateSiteParams) (CreateSiteRow, error)
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
@@ -48,6 +53,17 @@ type Querier interface {
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
 	// Sets unassigned_at=now() + vacated_reason (release the active partial unique index).
 	EndShiftLeaderAssignment(ctx context.Context, arg EndShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
+	// INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement
+	// whose period covers work_date (open-ended end_date treated as +inf).
+	FindActivePlacementForAgentDate(ctx context.Context, arg FindActivePlacementForAgentDateParams) (FindActivePlacementForAgentDateRow, error)
+	// E4-owned approved-leave read source (Phase 6). Drives the SHIFT_OVER_LEAVE /
+	// CANCELLED_BY_LEAVE conflict branch until E6 (Phase 8) wires the production
+	// leave_requests source. See migration 00025 for the ownership / hand-off note.
+	// SHIFT_OVER_LEAVE source: the approved-leave row (if any) for an agent on a date.
+	FindApprovedLeaveForAgentDate(ctx context.Context, arg FindApprovedLeaveForAgentDateParams) (FindApprovedLeaveForAgentDateRow, error)
+	// DOUBLE_SHIFT pre-check / replace lookup: the live entry (if any) for an
+	// agent on a date. Mirrors the INV-1 partial unique index predicate.
+	FindLiveEntryForAgentDate(ctx context.Context, arg FindLiveEntryForAgentDateParams) (FindLiveEntryForAgentDateRow, error)
 	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
 	// INV-3 lock: the employee's active leadership assignment, row-locked.
@@ -80,8 +96,15 @@ type Querier interface {
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
 	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
 	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
+	// Single entry with denormalized names + company_id (from placement).
+	GetScheduleEntry(ctx context.Context, id string) (GetScheduleEntryRow, error)
+	// Row-lock for PATCH / soft-delete (omits joins; service re-reads for DTO).
+	GetScheduleEntryForUpdate(ctx context.Context, id string) (GetScheduleEntryForUpdateRow, error)
 	GetServiceLineByID(ctx context.Context, id string) (GetServiceLineByIDRow, error)
 	GetShiftLeaderAssignmentByID(ctx context.Context, id string) (GetShiftLeaderAssignmentByIDRow, error)
+	GetShiftMaster(ctx context.Context, id string) (GetShiftMasterRow, error)
+	// Row-lock for the update / activate-toggle path (omits joins; service re-reads for DTO).
+	GetShiftMasterForUpdate(ctx context.Context, id string) (GetShiftMasterForUpdateRow, error)
 	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
 	// Login lookup: active, non-deleted user by case-insensitive email.
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
@@ -132,12 +155,28 @@ type Querier interface {
 	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
 	// Cursor page ordered by (created_at desc, id desc), scoped to one service line.
 	ListPositionsForLine(ctx context.Context, arg ListPositionsForLineParams) ([]ListPositionsForLineRow, error)
+	// E4 schedule-entry queries (F4.2/F4.3 / SWP-SCH-*). Reads LEFT JOIN employees for
+	// employee_name, shift_masters for shift_master_name, and JOIN placements →
+	// client_companies for company_id/company_name. Times are text columns (HH:MM).
+	// Grid load for a company over a date range. Joins placement → company.
+	// Filters: company_id (via placement), work_date BETWEEN start/end,
+	//   employee_id (optional), status__in (optional text[] → status = ANY).
+	// Ordered by employee_id, work_date for a stable grid layout.
+	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	ListServiceLines(ctx context.Context, arg ListServiceLinesParams) ([]ListServiceLinesRow, error)
 	// E3 shift_leader_assignments queries (F3.4 / SL-*). Reads LEFT JOIN the company
 	// and employee tables to fill the denormalized *_name fields.
 	// Filters: company_id, employee_id, active (unassigned_at IS NULL).
 	ListShiftLeaderAssignments(ctx context.Context, arg ListShiftLeaderAssignmentsParams) ([]ListShiftLeaderAssignmentsRow, error)
+	// E4 shift-master queries (F4.1 / SM-* / SWP-SHF-*). Reads LEFT JOIN service_lines
+	// for service_line_name and compute in_use_count via a correlated subquery over
+	// live schedule_entries. Times are text columns (HH:MM, Asia/Jakarta).
+	// Cursor page ordered by id desc. Filters:
+	//   service_line_id → masters tagged to that line OR untagged (NULL applies to all, SM-3),
+	//   status (ACTIVE→is_active=true / INACTIVE→false) via the is_active narg,
+	//   q ILIKE over name. in_use_count = live schedule_entries referencing this master.
+	ListShiftMasters(ctx context.Context, arg ListShiftMastersParams) ([]ListShiftMastersRow, error)
 	// Cursor page: primary first, then created_at desc, id desc.
 	// Keyset cursor on (created_at, id); is_primary DESC is the primary sort but
 	// keyset uses the sub-sort (created_at, id) for stable pagination.
@@ -188,6 +227,8 @@ type Querier interface {
 	SetPositionStatus(ctx context.Context, arg SetPositionStatusParams) (SetPositionStatusRow, error)
 	// Drives :discontinue (status='inactive') and :reactivate (status='active').
 	SetServiceLineStatus(ctx context.Context, arg SetServiceLineStatusParams) (SetServiceLineStatusRow, error)
+	// Drives :deactivate (active=false) / :reactivate (active=true).
+	SetShiftMasterActive(ctx context.Context, arg SetShiftMasterActiveParams) (SetShiftMasterActiveRow, error)
 	SetSitePrimary(ctx context.Context, id string) (SetSitePrimaryRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetSiteStatus(ctx context.Context, arg SetSiteStatusParams) (SetSiteStatusRow, error)
@@ -198,6 +239,7 @@ type Querier interface {
 	SoftDeleteOvertimeRule(ctx context.Context, id string) error
 	// Hard soft-delete: sets deleted_at so the position is invisible to all queries.
 	SoftDeletePosition(ctx context.Context, id string) error
+	SoftDeleteScheduleEntry(ctx context.Context, id string) (int64, error)
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
@@ -208,7 +250,11 @@ type Querier interface {
 	// Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
 	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
 	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
+	UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error)
 	UpdateServiceLine(ctx context.Context, arg UpdateServiceLineParams) (UpdateServiceLineRow, error)
+	// Full overwrite of the editable fields (06-02 builds the full param set from the
+	// current row + the PATCH overlay). cross_midnight re-derived by the service.
+	UpdateShiftMaster(ctx context.Context, arg UpdateShiftMasterParams) (UpdateShiftMasterRow, error)
 	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
 	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)

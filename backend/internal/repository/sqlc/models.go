@@ -23,6 +23,15 @@ type AgreementAttachment struct {
 	CreatedAt   time.Time
 }
 
+type ApprovedLeaveDay struct {
+	ID             int64
+	EmployeeID     string
+	LeaveDate      pgtype.Date
+	LeaveRequestID *string
+	LeaveType      *string
+	CreatedAt      time.Time
+}
+
 type AttendanceCode struct {
 	ID                string
 	Code              string
@@ -273,6 +282,25 @@ type RefreshToken struct {
 	CreatedAt   time.Time
 }
 
+type ScheduleEntry struct {
+	ID              string
+	EmployeeID      string
+	PlacementID     string
+	ServiceLineID   *string
+	ShiftMasterID   *string
+	StartTime       *string
+	EndTime         *string
+	CrossMidnight   bool
+	WorkDate        pgtype.Date
+	Status          string
+	IsDayOff        bool
+	ReplacedEntryID *string
+	CreatedBy       *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+}
+
 type ServiceLine struct {
 	ID        string
 	Name      string
@@ -294,6 +322,22 @@ type ShiftLeaderAssignment struct {
 	Notes           *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type ShiftMaster struct {
+	ID            string
+	Name          string
+	StartTime     string
+	EndTime       string
+	BreakStart    *string
+	BreakEnd      *string
+	ServiceLineID *string
+	CrossMidnight bool
+	IsActive      bool
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
 }
 
 type User struct {
