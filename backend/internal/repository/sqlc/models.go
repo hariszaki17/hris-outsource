@@ -32,6 +32,48 @@ type ApprovedLeaveDay struct {
 	CreatedAt      time.Time
 }
 
+type Attendance struct {
+	ID                 string
+	EmployeeID         string
+	PlacementID        string
+	ScheduleID         *string
+	CompanyID          string
+	ServiceLine        string
+	AttendanceCodeID   *string
+	ShiftStartAt       *time.Time
+	ShiftEndAt         *time.Time
+	CheckInAt          time.Time
+	CheckOutAt         *time.Time
+	LatIn              float64
+	LngIn              float64
+	LatOut             *float64
+	LngOut             *float64
+	PhotoInID          *string
+	PhotoOutID         *string
+	Wfo                bool
+	IsLate             bool
+	LateMinutes        int32
+	WorkedMinutes      *int32
+	AutoClosed         bool
+	InGeofence         *bool
+	InDistanceM        *int32
+	OutGeofence        *bool
+	OutDistanceM       *int32
+	GeofenceRadiusM    int32
+	Status             string
+	VerificationStatus string
+	Flags              []string
+	VerifiedBy         *string
+	VerifiedAt         *time.Time
+	RejectedBy         *string
+	RejectedAt         *time.Time
+	RejectReason       *string
+	LastCorrectionID   *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
 type AttendanceCode struct {
 	ID                string
 	Code              string
@@ -46,6 +88,28 @@ type AttendanceCode struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+}
+
+type AttendanceCorrection struct {
+	ID                       string
+	AttendanceID             string
+	RequesterID              string
+	CompanyID                string
+	Type                     string
+	ProposedCheckInAt        *time.Time
+	ProposedCheckOutAt       *time.Time
+	ProposedAttendanceCodeID *string
+	Reason                   string
+	EvidenceFileID           *string
+	Status                   string
+	DecidedBy                *string
+	DecidedAt                *time.Time
+	RejectReason             *string
+	OriginalSnapshot         []byte
+	AttendanceShiftDate      pgtype.Date
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	DeletedAt                *time.Time
 }
 
 type AuditLog struct {

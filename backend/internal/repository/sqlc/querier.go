@@ -9,6 +9,14 @@ import (
 )
 
 type Querier interface {
+	// Apply an approved correction's whitelisted proposed_* fields to the target row:
+	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
+	// (de-duped via array_remove first); sets last_correction_id.
+	ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorrectionToAttendanceParams) (ApplyCorrectionToAttendanceRow, error)
+	// Mark a PENDING correction APPLIED (the proposed change is applied to the target
+	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
+	// decidable; zero rows ⇒ terminal state (service emits 409).
+	ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error)
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
 	// Used to populate position_count in the ServiceLine DTO and to guard :discontinue.
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
@@ -79,10 +87,20 @@ type Querier interface {
 	GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error)
 	// Returns file metadata + blob for the authenticated file-download handler.
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
+	// Single record with denormalized names.
+	GetAttendance(ctx context.Context, id string) (GetAttendanceRow, error)
 	GetAttendanceCodeByID(ctx context.Context, id string) (GetAttendanceCodeByIDRow, error)
+	// Row-lock for verify/reject/bulk + correction-apply: reads company_id/employee_id/
+	// verification_status for scope + state guards (omits joins; service re-reads for DTO).
+	GetAttendanceForUpdate(ctx context.Context, id string) (GetAttendanceForUpdateRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
 	GetChangeRequestByID(ctx context.Context, id string) (ChangeRequest, error)
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
+	// Single correction with denormalized requester/company names.
+	GetCorrection(ctx context.Context, id string) (GetCorrectionRow, error)
+	// Row-lock for approve/reject: reads status/company_id/proposed_* for scope + state
+	// guards + apply (omits joins; service re-reads for DTO).
+	GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error)
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
@@ -117,6 +135,17 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
+	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
+	// employee_name and client_companies for company_name. Cursor lists keyset on
+	// (check_in_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// Geofence/lateness/auto-close are STORED columns (07-01 decision); no runtime compute.
+	// Verification queue / history for a company over filters, newest first.
+	// Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
+	// (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
+	//   verification_status_in / status_in: text[] = ANY membership.
+	//   date_from/date_to: bound on the shift-date basis (check_in_at::date).
+	//   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
+	ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_billable.
 	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
@@ -129,6 +158,14 @@ type Querier interface {
 	// Filters: q (ILIKE name), status. service_line and has_leader filters accepted
 	// but not applied at DB level (no placements/assignments table in Phase 3).
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
+	// E5 corrections queries (F5.3 / SWP-COR-*). Cursor lists keyset on
+	// (created_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// Corrections queue for a company over filters, newest first.
+	// Keyset cursor: pass cursor_created_at + cursor_id from the previous page tail.
+	//   status_in / type_in: text[] = ANY membership.
+	//   employee_id maps to requester_id.
+	//   date_from/date_to: bound on attendance_shift_date.
+	ListCorrections(ctx context.Context, arg ListCorrectionsParams) ([]ListCorrectionsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip/email_personal/phone), status.
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
@@ -189,6 +226,10 @@ type Querier interface {
 	LockEmployeePlacements(ctx context.Context, employeeID string) ([]LockEmployeePlacementsRow, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// Reject an exception record (reason required). Same PENDING/ESCALATED guard.
+	RejectAttendance(ctx context.Context, arg RejectAttendanceParams) (RejectAttendanceRow, error)
+	// Reject a PENDING correction (reason required). Same PENDING guard.
+	RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error)
 	// Drives :approve (status='approved') and :reject (status='rejected').
 	// Sets resolved_at, resolved_by (optional), and rejection_reason (on reject).
 	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ChangeRequest, error)
@@ -258,6 +299,9 @@ type Querier interface {
 	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
 	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)
+	// Approve an exception record. Only PENDING/ESCALATED are verifiable; zero rows
+	// returned ⇒ terminal state (service emits 409 ALREADY_VERIFIED/REJECTED).
+	VerifyAttendance(ctx context.Context, arg VerifyAttendanceParams) (VerifyAttendanceRow, error)
 }
 
 var _ Querier = (*Queries)(nil)
