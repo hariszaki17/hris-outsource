@@ -47,6 +47,9 @@ var messages = map[Lang]map[string]string{
 		// E1 foundations — user management
 		"ROLE_NOT_ALLOWED": "Perubahan peran tidak diizinkan.",
 		"CURSOR_MISMATCH":  "Kursor tidak valid.",
+
+		// E2 people — employees (EP-2)
+		"DUPLICATE_NIK": "NIK sudah terdaftar untuk karyawan lain.",
 	},
 	EN: {
 		"INVALID_REQUEST": "The request is invalid.",
@@ -72,6 +75,9 @@ var messages = map[Lang]map[string]string{
 		// E1 foundations — user management
 		"ROLE_NOT_ALLOWED": "Role change not allowed.",
 		"CURSOR_MISMATCH":  "Invalid cursor.",
+
+		// E2 people — employees (EP-2)
+		"DUPLICATE_NIK": "NIK is already registered to another employee.",
 	},
 }
 
