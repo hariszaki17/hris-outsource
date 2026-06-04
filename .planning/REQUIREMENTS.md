@@ -49,9 +49,9 @@
 - [x] **ATT-02**: Corrections — list/detail/approve/reject.
 
 ### E6 Leave (Phase 8)
-- [ ] **LVE-01**: Leave requests — list/detail, multi-step approve (L1/final/override)/reject.
-- [ ] **LVE-02**: Leave quotas — list/adjust/bulk-grant (quota-exceeded → 422).
-- [ ] **LVE-03**: Leave calendar.
+- [x] **LVE-01**: Leave requests — list/detail, multi-step approve (L1/final/override)/reject.
+- [x] **LVE-02**: Leave quotas — list/adjust/bulk-grant (quota-exceeded → 422).
+- [x] **LVE-03**: Leave calendar.
 
 ### E7 Overtime (Phase 9)
 - [ ] **OVT-01**: Overtime — list/detail, confirm/approve(L1/final)/reject/withdraw, bulk approve/reject.

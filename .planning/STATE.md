@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 07-e5-attendance/07-04-PLAN.md
-last_updated: "2026-06-04T23:22:13.268Z"
-last_activity: "2026-06-05 — Plan 07-04 complete: E5 FE wired off MSW + exhaustive full-stack Playwright E2E (5 specs / 18 tests) GREEN vs real FE + real Go API + ephemeral Postgres — list/scope/detail, single verify/reject (+validation) + inline-queue verify, corrections approve (target attendance gains CORRECTED) + reject, bulk partial-success (terminal CONFLICT + PENDING succeeded), Postgres-backed idempotency replay + IDEMPOTENCY_KEY_REUSED 409, leader OUT_OF_SCOPE + VERIFY_OWN_RECORD 403 on seeded fixtures. Full pnpm e2e green (163 passed / 6 skipped / 0 failed; no e1/e2/e3/e4 regressions). Auto-fixed a harness defect: go run ./cmd/api orphaned its exe/api child on :8081 (SIGTERM not forwarded) -> stale binary served old routes -> 404; fixed via freePort(8081) pre-boot + detached process-group kill on teardown. ATT-01 + ATT-02 closed. reset-db + FE conflict_details audits were no-ops (07-02 already truncated the tables; no conflict_details literal in e5-attendance)."
+status: executing
+stopped_at: Completed 08-e6-leave/08-01-PLAN.md
+last_updated: "2026-06-04T23:51:08.289Z"
+last_activity: "2026-06-05 — Plan 08-01 complete: E6 leave DATA LAYER. Migrations 00028 leave_requests (SWP-LR id, openapi LeaveStatus CHECK enum, denorm company_id/service_line, routing.*/balance_check.* snapshot cols) + 00029 leave_quotas (total/used/pending soft-reservation, remaining derived, (emp,type,period) unique, last_adjustment/last_override jsonb) + 00030 leave_approvals (bigserial decision-trail, stage L1/HR, decision APPROVED/REJECTED/OVERRIDE_APPROVED). db/queries/leave/* sqlc set covers every 08-02 read/write. internal/domain/leave types + LeaveQuota.Remaining(). make gen + go build + go vet clean. INV-3 loop-closer queries (InsertApprovedLeaveDay + CancelScheduleEntriesForLeave on the E4 scheduling dir) deferred to 08-02 — exact signatures + sqlc type quirks handed off in 08-01-SUMMARY "Reference for 08-02"."
 progress:
   total_phases: 11
   completed_phases: 7
-  total_plans: 33
-  completed_plans: 33
-  percent: 100
+  total_plans: 37
+  completed_plans: 34
+  percent: 92
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 7 — E5 Attendance COMPLETE (FE wired + full-stack E2E green); next: Phase 8 (E6 Leave)
+**Current focus:** Phase 8 — E6 Leave; Plan 08-01 (data layer) COMPLETE; next: 08-02 (services + handlers + INV-3 loop-closer + seed)
 
 ## Current Position
 
-Phase: 7 of 11 (E5 Attendance) — COMPLETE
-Plan: 4 of 4 in current phase — Plan 07-04 COMPLETE (phase done)
-Status: Phase complete
-Last activity: 2026-06-05 — Plan 07-04 complete: E5 FE wired off MSW + exhaustive full-stack Playwright E2E (5 specs / 18 tests) GREEN vs real FE + real Go API + ephemeral Postgres — list/scope/detail, single verify/reject (+validation) + inline-queue verify, corrections approve (target attendance gains CORRECTED) + reject, bulk partial-success (terminal CONFLICT + PENDING succeeded), Postgres-backed idempotency replay + IDEMPOTENCY_KEY_REUSED 409, leader OUT_OF_SCOPE + VERIFY_OWN_RECORD 403 on seeded fixtures. Full pnpm e2e green (163 passed / 6 skipped / 0 failed; no e1/e2/e3/e4 regressions). Auto-fixed a harness defect: go run ./cmd/api orphaned its exe/api child on :8081 (SIGTERM not forwarded) -> stale binary served old routes -> 404; fixed via freePort(8081) pre-boot + detached process-group kill on teardown. ATT-01 + ATT-02 closed. reset-db + FE conflict_details audits were no-ops (07-02 already truncated the tables; no conflict_details literal in e5-attendance).
+Phase: 8 of 11 (E6 Leave) — IN PROGRESS
+Plan: 1 of 4 in current phase — Plan 08-01 COMPLETE (data layer: migrations + sqlc + domain)
+Status: In progress
+Last activity: 2026-06-05 — Plan 08-01 complete: E6 leave DATA LAYER. Migrations 00028 leave_requests (SWP-LR id, openapi LeaveStatus CHECK enum, denorm company_id/service_line, routing.*/balance_check.* snapshot cols) + 00029 leave_quotas (total/used/pending soft-reservation, remaining derived, (emp,type,period) unique, last_adjustment/last_override jsonb) + 00030 leave_approvals (bigserial decision-trail, stage L1/HR, decision APPROVED/REJECTED/OVERRIDE_APPROVED). db/queries/leave/* sqlc set covers every 08-02 read/write. internal/domain/leave types + LeaveQuota.Remaining(). make gen + go build + go vet clean. INV-3 loop-closer queries (InsertApprovedLeaveDay + CancelScheduleEntriesForLeave on the E4 scheduling dir) deferred to 08-02 — exact signatures + sqlc type quirks handed off in 08-01-SUMMARY "Reference for 08-02".
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Progress: [██████████] 100%
 | Phase 07-e5-attendance P02 | 12 | 3 tasks | 16 files |
 | Phase 07-e5-attendance P03 | 5 | 2 tasks | 3 files |
 | Phase 07-e5-attendance P04 | 75 | 3 tasks | 7 files |
+| Phase 08-e6-leave P01 | 4 | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -181,6 +182,10 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 07-e5-attendance]: [07-03]: CORRECTION_ALREADY_PENDING asserted as a SEAM (create endpoint is mobile/agent-only, OUT of web scope; backstopped by the 07-01 partial-unique index) — fake countPending detects two PENDING corrections + the 409 + fields.pending_correction_id wire shape via apperr.ConflictWithDetails; OUTSIDE_CORRECTION_WINDOW 422 driven through the REAL CorrectionService.Approve for both leader-422 and HR-exempt branches
 - [Phase 07-e5-attendance]: [07-04]: harness orphan-API fix — go run ./cmd/api does not forward SIGTERM to its exe/api child; freePort(8081) before boot + detached process-group kill on teardown (stale binary was serving old routes → 404 on new E5 endpoints)
 - [Phase 07-e5-attendance]: [07-04]: E5 E2E = 5 specs/18 tests green vs real FE+Go+ephemeral PG; bulk partial-success + Postgres idempotency replay driven via apiAs for determinism; OUTSIDE_CORRECTION_WINDOW stays contract-only (mobile create path out of web scope); no conflict_details bug in E5 (FE audit no-op)
+- [Phase 08-e6-leave]: [08-01]: leave_approvals is a separate bigserial decision-trail table (not denormalized columns) — mirrors placement_history; feeds the FE timeline[] + the FEATURE ER decision log
+- [Phase 08-e6-leave]: [08-01]: leave_quotas remaining = total-used-pending is a DERIVED domain method (LeaveQuota.Remaining()), never stored; pending recompute is computed-on-read via CountPendingLeaveDaysForQuota (no trigger)
+- [Phase 08-e6-leave]: [08-01]: SWP-LR display id reconciled — new leave_requests.id shares swp_next_id('LR') with Phase-6's literal SWP-LR-44210 fixture (no collision); 08-02 INV-3 write-through inserts the REAL id into approved_leave_days, replacing the fixture mechanism
+- [Phase 08-e6-leave]: [08-01]: sqlc quirks for 08-02 repo — dates→pgtype.Date, jsonb(last_adjustment/last_override)→[]byte, ints→int32, CountPendingLeaveDaysForQuota→int64, leave_approvals.ID→int64; INV-3 loop-closer queries (InsertApprovedLeaveDay ON CONFLICT + CancelScheduleEntriesForLeave→CANCELLED_BY_LEAVE) live in scheduling/ dir, added by 08-02
 
 ### Pending Todos
 
@@ -192,6 +197,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T23:14:44.221Z
-Stopped at: Completed 07-e5-attendance/07-04-PLAN.md
+Last session: 2026-06-04T23:51:08.286Z
+Stopped at: Completed 08-e6-leave/08-01-PLAN.md
 Resume file: None
