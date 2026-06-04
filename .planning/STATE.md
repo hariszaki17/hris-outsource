@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-e1-foundations/02-03-PLAN.md
-last_updated: "2026-06-04T00:54:52.837Z"
+stopped_at: Completed 02-e1-foundations/02-04-PLAN.md
+last_updated: "2026-06-04T02:40:33.873Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
   percent: 8
 ---
 
@@ -49,6 +49,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 02-e1-foundations P01 | 2 | 2 tasks | 7 files |
 | Phase 02-e1-foundations P02 | 25 | 3 tasks | 9 files |
 | Phase 02-e1-foundations P03 | 15 | 2 tasks | 1 files |
+| Phase 02-e1-foundations P04 | 107 | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 02-e1-foundations]: Session revocation on deactivate: out of scope in Phase 2; only status set; auth-side revocation deferred
 - [Phase 02-e1-foundations]: fakeTx instead of nil pgx.Tx: foundations service calls audit.Record inside InTx closures (unlike identity service); nil tx panics; fakeTx implements pgx.Tx with only Exec as no-op
 - [Phase 02-e1-foundations]: Dynamic principal injection: harness.principal is a mutable field read by a closure middleware, so tests can swap roles without re-building the chi router
+- [Phase 02-e1-foundations]: tryRestoreSession hydrates in-memory accessToken from httpOnly cookie before React mounts — enables page.goto() on authed routes in E2E
+- [Phase 02-e1-foundations]: DataTable rows are div.border-b not tr — all E2E row locators must use div.border-b.filter() pattern
+- [Phase 02-e1-foundations]: playwright.config.ts timeout: 90s to accommodate cold Vite compilation on first test run
 
 ### Pending Todos
 
@@ -97,6 +101,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:54:52.835Z
-Stopped at: Completed 02-e1-foundations/02-03-PLAN.md
+Last session: 2026-06-04T02:40:33.870Z
+Stopped at: Completed 02-e1-foundations/02-04-PLAN.md
 Resume file: None
