@@ -161,18 +161,18 @@ type updateOvertimeRuleRequest struct {
 // service_line_id is nullable (omitempty would hide it — use explicit *string).
 // Status is uppercased at this boundary.
 type overtimeRuleResponse struct {
-	ID                  string   `json:"id"`
-	Name                string   `json:"name"`
-	ServiceLineID       *string  `json:"service_line_id"` // nullable
-	WeekdayRate         float64  `json:"weekday_rate"`
-	RestdayRate         float64  `json:"restday_rate"`
-	HolidayRate         float64  `json:"holiday_rate"`
-	MinMinutes          int      `json:"min_minutes"`
-	MaxMinutesPerDay    int      `json:"max_minutes_per_day"`
-	PreApprovalRequired bool     `json:"pre_approval_required"`
-	Status              string   `json:"status"` // ACTIVE | INACTIVE
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	ID                  string  `json:"id"`
+	Name                string  `json:"name"`
+	ServiceLineID       *string `json:"service_line_id"` // nullable
+	WeekdayRate         float64 `json:"weekday_rate"`
+	RestdayRate         float64 `json:"restday_rate"`
+	HolidayRate         float64 `json:"holiday_rate"`
+	MinMinutes          int     `json:"min_minutes"`
+	MaxMinutesPerDay    int     `json:"max_minutes_per_day"`
+	PreApprovalRequired bool    `json:"pre_approval_required"`
+	Status              string  `json:"status"` // ACTIVE | INACTIVE
+	CreatedAt           string  `json:"created_at"`
+	UpdatedAt           string  `json:"updated_at"`
 }
 
 func toOvertimeRuleResponse(or domain.OvertimeRule) overtimeRuleResponse {
