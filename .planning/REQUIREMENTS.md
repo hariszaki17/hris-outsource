@@ -45,8 +45,8 @@
 - [x] **SCH-03**: Conflict check + bulk apply (double-shift / over-leave / outside-placement guards). _(06-01 data layer done; engine + bulk-apply land in 06-02)_
 
 ### E5 Attendance (Phase 7)
-- [ ] **ATT-01**: Attendance — list/detail, verify/reject, bulk verify/reject.
-- [ ] **ATT-02**: Corrections — list/detail/approve/reject.
+- [x] **ATT-01**: Attendance — list/detail, verify/reject, bulk verify/reject.
+- [x] **ATT-02**: Corrections — list/detail/approve/reject.
 
 ### E6 Leave (Phase 8)
 - [ ] **LVE-01**: Leave requests — list/detail, multi-step approve (L1/final/override)/reject.

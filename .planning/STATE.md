@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 06-e4-schedule-shifts/06-04-PLAN.md
-last_updated: "2026-06-04T17:48:04.252Z"
-last_activity: "2026-06-04 — Plan 06-04 complete: E4 full-stack E2E + FE wiring off MSW. 5 new frontend/e2e/tests/e4/ specs (27 tests): shift-master CRUD, schedule-grid cell CRUD via the real ShiftPickerPopover, all reachable conflict codes (DOUBLE_SHIFT/OUTSIDE_PLACEMENT_PERIOD/SHIFT_OVER_LEAVE honestly seeded SWP-LR-44210/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE), bulk-apply partial success, leader-scope 403. Fixed FE conflict_details→error.details read + extended reset-db to truncate E4 tables + added waitForToken for the post-goto 401 race. pnpm e2e GREEN: 145 passed, 0 failed, no e1/e2/e3 regressions."
+status: executing
+stopped_at: Completed 07-e5-attendance/07-01-PLAN.md
+last_updated: "2026-06-04T18:07:15.451Z"
+last_activity: "2026-06-05 — Plan 07-01 complete: E5 attendance data layer. Migrations 00026 attendance + 00027 attendance_corrections (FKs to schedule_entries/placements/client_companies/employees; stored geofence+lateness+auto_closed exception columns; status + verification_status enums; flags text[]; one-pending-per-attendance partial unique index). sqlc queries (11 Querier methods: list/get/forUpdate + verify/reject/apply + correction approve/reject) and internal/domain/attendance package (Attendance/Correction/GeofenceCheck/DiffRow + enums). make gen / go build / go vet / gofmt all clean. Handoff for 07-02 in SUMMARY (sqlc type quirks: jsonb→[]byte, date→pgtype.Date, ints→int32, Wfo casing)."
 progress:
   total_phases: 11
   completed_phases: 6
-  total_plans: 29
-  completed_plans: 29
-  percent: 97
+  total_plans: 33
+  completed_plans: 30
+  percent: 91
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 6 — E4 Schedule & Shifts COMPLETE (Phase 7 — E5 Attendance next)
+**Current focus:** Phase 7 — E5 Attendance (data layer landed; services/handlers next)
 
 ## Current Position
 
-Phase: 6 of 11 (E4 Schedule & Shifts) — COMPLETE
-Plan: 4 of 4 in current phase — Plan 06-04 COMPLETE (phase done)
-Status: Phase complete
-Last activity: 2026-06-04 — Plan 06-04 complete: E4 full-stack E2E + FE wiring off MSW. 5 new frontend/e2e/tests/e4/ specs (27 tests): shift-master CRUD, schedule-grid cell CRUD via the real ShiftPickerPopover, all reachable conflict codes (DOUBLE_SHIFT/OUTSIDE_PLACEMENT_PERIOD/SHIFT_OVER_LEAVE honestly seeded SWP-LR-44210/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE), bulk-apply partial success, leader-scope 403. Fixed FE conflict_details→error.details read + extended reset-db to truncate E4 tables + added waitForToken for the post-goto 401 race. pnpm e2e GREEN: 145 passed, 0 failed, no e1/e2/e3 regressions.
+Phase: 7 of 11 (E5 Attendance) — IN PROGRESS
+Plan: 1 of 4 in current phase — Plan 07-01 COMPLETE
+Status: In progress
+Last activity: 2026-06-05 — Plan 07-01 complete: E5 attendance data layer. Migrations 00026 attendance + 00027 attendance_corrections (FKs to schedule_entries/placements/client_companies/employees; stored geofence+lateness+auto_closed exception columns; status + verification_status enums; flags text[]; one-pending-per-attendance partial unique index). sqlc queries (11 Querier methods: list/get/forUpdate + verify/reject/apply + correction approve/reject) and internal/domain/attendance package (Attendance/Correction/GeofenceCheck/DiffRow + enums). make gen / go build / go vet / gofmt all clean. Handoff for 07-02 in SUMMARY (sqlc type quirks: jsonb→[]byte, date→pgtype.Date, ints→int32, Wfo casing).
 
-Progress: [██████████] 97%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [██████████] 97%
 | Phase 06-e4-schedule-shifts P02 | 11 | 3 tasks | 13 files |
 | Phase 06-e4-schedule-shifts P03 | 4 | 2 tasks | 3 files |
 | Phase 06-e4-schedule-shifts P04 | 69 | 2 tasks | 8 files |
+| Phase 07-e5-attendance P01 | 5 | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,10 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 06-e4-schedule-shifts]: [06-04]: FE conflict-details fix — ShiftPickerPopover reads :check failed[].error.details (was conflict_details, always undefined) so DOUBLE_SHIFT/over-leave block messages render against the real BE (mirrors Phase-5 error.details precedent)
 - [Phase 06-e4-schedule-shifts]: [06-04]: reset-db truncates E4 tables (schedule_entries/approved_leave_days/shift_masters before placements) so test-created schedule entries reset (seed is ON CONFLICT DO NOTHING); waitForToken() added to dodge the post-goto 401 race (in-memory access token re-hydrated async by tryRestoreSession)
 - [Phase 06-e4-schedule-shifts]: [06-04]: SHIFT_OVER_LEAVE delivered honestly via the seeded approved_leave_days row (SWP-LR-44210) — asserted via real 409 details.leave_request_id AND the real popover :check block toast; E6 (Phase 8) wires the production leave source. CH-1 creates a future cell first (C-5 leader past-date DELETE guard)
+- [Phase 07-e5-attendance]: [07-01]: geofence/lateness/auto-close are plain STORED columns on attendance (in_geofence/in_distance_m/out_geofence/out_distance_m/geofence_radius_m + is_late/late_minutes/auto_closed) — no runtime Haversine, no clock pipeline; 07-02 seeds them directly for honest PENDING exceptions
+- [Phase 07-e5-attendance]: [07-01]: ApproveCorrection sets status='APPLIED' directly (no APPROVED intermediate) and 07-02 calls ApplyCorrectionToAttendance in the same tx (COALESCE whitelist of check_in/out + attendance_code; appends de-duped CORRECTED flag; sets last_correction_id)
+- [Phase 07-e5-attendance]: [07-01]: company_id + attendance_shift_date denormalized onto attendance_corrections so leader-scope queue + OUTSIDE_CORRECTION_WINDOW 7-day check need no JOIN; CORRECTION_ALREADY_PENDING backstopped by partial unique index (attendance_id) WHERE status='PENDING'
+- [Phase 07-e5-attendance]: [07-01]: sqlc quirks for 07-02 repo — original_snapshot jsonb→[]byte (json marshal/unmarshal map[string]any), attendance_shift_date date→pgtype.Date, integer cols→int32, wfo→Wfo, flags text[]→[]string; new internal/domain/attendance/ SUBPACKAGE (not flat package domain) per plan
 
 ### Pending Todos
 
@@ -176,6 +181,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T17:42:20.144Z
-Stopped at: Completed 06-e4-schedule-shifts/06-04-PLAN.md
+Last session: 2026-06-04T18:06:18.442Z
+Stopped at: Completed 07-e5-attendance/07-01-PLAN.md
 Resume file: None

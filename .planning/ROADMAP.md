@@ -147,7 +147,7 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 07-01-PLAN.md (wave 1) — Migrations 00026-00027 + sqlc queries (attendance, attendance_corrections) + domain types (FKs to schedule_entries/placements/employees; seeded exception flags + enums)
+- [x] 07-01-PLAN.md (wave 1) — Migrations 00026-00027 + sqlc queries (attendance, attendance_corrections) + domain types (FKs to schedule_entries/placements/employees; seeded exception flags + enums)
 - [ ] 07-02-PLAN.md (wave 2, deps 07-01) — Services + handlers: verify/reject (+bulk partial-success + Idempotency-Key), corrections approve-applies/reject, GuardCompany scope (OUT_OF_SCOPE), VERIFY_OWN_RECORD, terminal-state 409, OUTSIDE_CORRECTION_WINDOW, audit-in-tx + notify stub, routes/main.go, seed
 - [ ] 07-03-PLAN.md (wave 3, deps 07-02) — Go contract tests vs E5 openapi (every code + bulk partial-success envelope + idempotency replay + scope 403 + 422s + terminal 409 + cursor shapes)
 - [ ] 07-04-PLAN.md (wave 4, deps 07-02,07-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e5/ (list/detail, single + bulk verify/reject + idempotency, corrections approve/reject, scope 403, VERIFY_OWN_RECORD), green headless
@@ -233,7 +233,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. E2 People | 6/6 | Complete    | 2026-06-04 |
 | 5. E3 Placement | 1/4 | In Progress | - |
 | 6. E4 Schedule & Shifts | 1/4 | In Progress|  |
-| 7. E5 Attendance | 0/4 | Not started | - |
+| 7. E5 Attendance | 1/4 | In Progress | - |
 | 8. E6 Leave | 0/4 | Not started | - |
 | 9. E7 Overtime | 0/4 | Not started | - |
 | 10. E8 Payroll | 0/4 | Not started | - |
