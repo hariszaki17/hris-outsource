@@ -139,3 +139,62 @@ type Attachment struct {
 	UploadedBy  *string
 	CreatedAt   time.Time
 }
+
+// --- Change Requests (EP-5 HR approval queue) ---
+
+// ChangeRequestChanges holds the whitelisted fields that can be proposed via
+// a change request: phone, address, bank_account. All are optional.
+type ChangeRequestChanges struct {
+	Phone       *string      `json:"phone,omitempty"`
+	Address     *string      `json:"address,omitempty"`
+	BankAccount *BankAccount `json:"bank_account,omitempty"`
+}
+
+// ChangeRequest is the domain entity for a change_requests row.
+// Status is the DB lowercase value ("pending"|"approved"|"rejected") — uppercased only at DTO boundary.
+// RequestType is stored uppercase as a DB CHECK: PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE.
+type ChangeRequest struct {
+	ID              string
+	EmployeeID      string
+	Status          string               // "pending" | "approved" | "rejected" (DB lowercase)
+	SubmittedAt     time.Time
+	ResolvedAt      *time.Time
+	ResolvedBy      *string              // SWP-EMP-<N> of resolving HR user
+	RejectionReason *string
+	Note            *string
+	Changes         ChangeRequestChanges // deserialized from jsonb
+	RequestType     string               // PHONE | ADDRESS | BANK_ACCOUNT | MULTIPLE
+}
+
+// ChangeRequestDetail is a value object combining a ChangeRequest with the employee
+// summary and a per-field old→new diff (for the GET /change-requests/{id} detail view).
+type ChangeRequestDetail struct {
+	ChangeRequest
+	Employee EmployeeRef
+	Diff     map[string]ChangeRequestFieldDiff // keyed by field name: "phone", "address", "bank_account"
+}
+
+// EmployeeRef is the compact employee reference embedded in ChangeRequestDetail.
+type EmployeeRef struct {
+	ID       string
+	FullName string
+	NIP      string
+}
+
+// ChangeRequestFieldDiff holds the before and after value for one changed field.
+type ChangeRequestFieldDiff struct {
+	Old any `json:"old"`
+	New any `json:"new"`
+}
+
+// ChangeRequestFilter holds the decoded query parameters for GET /change-requests.
+// All fields optional; cursor fields are set when paginating past the first page.
+type ChangeRequestFilter struct {
+	Status            *string
+	EmployeeID        *string
+	RequestType       *string
+	Q                 *string // reserved for FTS (currently unused in query, passed through)
+	Limit             int
+	CursorSubmittedAt *time.Time
+	CursorID          *string
+}
