@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 05-e3-placement/05-04-PLAN.md
-last_updated: "2026-06-04T15:35:04.690Z"
+last_updated: "2026-06-04T15:40:42.508Z"
 last_activity: "2026-06-04 — Plan 05-04 complete: E3 full-stack Playwright E2E — 30 tests across 5 specs (agent-placement, lifecycle, transfer, shift-leader, roster) green against real FE↔Go API↔ephemeral Postgres. Real-409 invariant negatives (INV-1 +details.current_placement, INV-2, INV-4, TERMINAL_STATE_IMMUTABLE, PLACEMENT_PERIOD_OVERLAP, COMPANY_INACTIVE, ALREADY_ENDED, RULE_VIOLATION) + RBAC (agent-403, OUT_OF_SCOPE). Auto-fixed 3 bugs: ApiError dropped error.details (INV-1 banner), roster filters navigated to wrong route, Phase-5 seed regression in e2 AG-create. `pnpm e2e` green, no e1/e2 regressions."
 progress:
   total_phases: 11
