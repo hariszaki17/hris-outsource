@@ -34,6 +34,25 @@ import {
 
 export { API_BASE, apiAs, comboFieldById, errorCode, errorDetails, pickCombobox };
 
+/**
+ * waitForToken — block until the in-memory access token (window.__swp_get_token__) is
+ * hydrated. After a full page.goto(), JS module memory is reset and the token is
+ * repopulated ASYNCHRONOUSLY by tryRestoreSession (refresh-cookie → /auth/refresh).
+ * apiAs() needs the Bearer token, so call this before the first apiAs on a freshly
+ * navigated page to avoid a 401 race.
+ */
+export async function waitForToken(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as unknown as { __swp_get_token__?: string }).__swp_get_token__ ?? null,
+        ),
+      { timeout: 20_000 },
+    )
+    .toBeTruthy();
+}
+
 // ---------------------------------------------------------------------------
 // Asia/Jakarta-anchored week dates (mirror the seed's mondayOfCurrentWeek, which
 // uses the UTC calendar date — see backend/cmd/seed/seed.go). The seed plants:
