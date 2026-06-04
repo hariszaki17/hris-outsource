@@ -14,10 +14,19 @@ type Querier interface {
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// Allocates the SWP-AG id inline from the per-prefix sequence.
+	CreateAgreement(ctx context.Context, arg CreateAgreementParams) (CreateAgreementRow, error)
+	// Allocates the SWP-FILE id inline from the per-prefix sequence.
+	// Returns metadata only (not the blob) — callers use GetAttachmentByID for download.
+	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (CreateAttachmentRow, error)
 	// Allocates the SWP-AC id inline from the per-prefix sequence.
 	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
+	// Allocates the SWP-CHG id inline from the per-prefix sequence.
+	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (ChangeRequest, error)
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
+	// Allocates the SWP-EMP id inline from the per-prefix sequence.
+	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
 	// Allocates the SWP-LT id inline from the per-prefix sequence.
 	CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams) (CreateLeaveTypeRow, error)
 	// Allocates the SWP-OTR id inline from the per-prefix sequence.
@@ -33,9 +42,18 @@ type Querier interface {
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
+	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
+	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
+	GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error)
+	// Returns file metadata + blob for the authenticated file-download handler.
+	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
 	GetAttendanceCodeByID(ctx context.Context, id string) (GetAttendanceCodeByIDRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
+	GetChangeRequestByID(ctx context.Context, id string) (ChangeRequest, error)
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
+	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
+	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
+	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
 	GetPositionByID(ctx context.Context, id string) (GetPositionByIDRow, error)
@@ -51,14 +69,23 @@ type Querier interface {
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
+	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_billable.
 	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
 	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	// Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: status, employee_id, request_type.
+	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ChangeRequest, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE name), status. service_line and has_leader filters accepted
 	// but not applied at DB level (no placements/assignments table in Phase 3).
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: q (ILIKE over full_name/nik/nip/email_personal/phone), status.
+	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_annual.
 	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
@@ -80,15 +107,23 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// Drives :approve (status='approved') and :reject (status='rejected').
+	// Sets resolved_at, resolved_by (optional), and rejection_reason (on reject).
+	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ChangeRequest, error)
 	// Invalidates every live session for a user (AU-6: called on password reset).
 	RevokeAllRefreshForUser(ctx context.Context, userID string) error
 	// Reuse detection: kill every live token in the family.
 	RevokeFamily(ctx context.Context, familyID string) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
+	// Drives :close (status='closed') and supersede-on-renew (status='superseded').
+	// Also sets closed_reason, closed_at, successor_id as applicable.
+	SetAgreementStatus(ctx context.Context, arg SetAgreementStatusParams) (SetAgreementStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetAttendanceCodeStatus(ctx context.Context, arg SetAttendanceCodeStatusParams) (SetAttendanceCodeStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetClientCompanyStatus(ctx context.Context, arg SetClientCompanyStatusParams) (SetClientCompanyStatusRow, error)
+	// Drives :deactivate (status='inactive') and :reactivate (status='active').
+	SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusParams) (SetEmployeeStatusRow, error)
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
@@ -111,6 +146,7 @@ type Querier interface {
 	SoftDeletePosition(ctx context.Context, id string) error
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
+	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
 	UpdateLeaveType(ctx context.Context, arg UpdateLeaveTypeParams) (UpdateLeaveTypeRow, error)
 	UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).

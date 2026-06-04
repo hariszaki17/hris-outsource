@@ -6,7 +6,22 @@ package sqlcgen
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type AgreementAttachment struct {
+	ID          string
+	AgreementID string
+	Category    string
+	Caption     string
+	FileName    string
+	Mime        string
+	SizeBytes   int64
+	Blob        []byte
+	UploadedBy  *string
+	CreatedAt   time.Time
+}
 
 type AttendanceCode struct {
 	ID                string
@@ -35,6 +50,19 @@ type AuditLog struct {
 	AfterState  []byte
 	RequestID   *string
 	CreatedAt   time.Time
+}
+
+type ChangeRequest struct {
+	ID              string
+	EmployeeID      string
+	Status          string
+	Changes         []byte
+	RequestType     string
+	Note            *string
+	SubmittedAt     time.Time
+	ResolvedAt      *time.Time
+	ResolvedBy      *string
+	RejectionReason *string
 }
 
 type ClientCompany struct {
@@ -68,6 +96,54 @@ type ClientSite struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       *time.Time
+}
+
+type Employee struct {
+	ID                    string
+	UserID                *string
+	FullName              string
+	Nik                   string
+	Nip                   string
+	JoinAt                pgtype.Date
+	Gender                *string
+	BirthDate             pgtype.Date
+	BirthPlace            *string
+	Phone                 *string
+	EmailPersonal         *string
+	Address               *string
+	Npwp                  *string
+	BpjsKesehatan         *string
+	BpjsKetenagakerjaan   *string
+	BankName              *string
+	BankAccountNumber     *string
+	BankAccountHolderName *string
+	Status                string
+	CreatedBy             *string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
+}
+
+type EmploymentAgreement struct {
+	ID                string
+	EmployeeID        string
+	Type              string
+	AgreementNo       string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Status            string
+	PredecessorID     *string
+	SuccessorID       *string
+	ClosedReason      *string
+	ClosedAt          *time.Time
+	BaseSalaryIdr     pgtype.Numeric
+	BpjsTerms         []byte
+	TaxProfile        *string
+	CompEffectiveDate pgtype.Date
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
 }
 
 type IDCounter struct {

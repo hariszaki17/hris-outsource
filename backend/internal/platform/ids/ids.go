@@ -40,6 +40,7 @@ const (
 	Payslip             Prefix = "PS"
 	Notification        Prefix = "NTF"
 	ExportJob           Prefix = "EXP"
+	File                Prefix = "FILE"
 )
 
 const namespace = "SWP"
