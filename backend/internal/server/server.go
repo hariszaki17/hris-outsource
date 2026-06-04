@@ -12,6 +12,7 @@ import (
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
+	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -35,6 +36,10 @@ type Deps struct {
 	OrgCompanies    *orghttp.Handler
 	OrgServiceLines *orghttp.ServiceLineHandler // 03-03: service lines + positions
 	OrgMasterData   *orghttp.MasterDataHandler  // 03-04: leave types, attendance codes, overtime rules
+	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
+	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
+	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
+	People      *peoplehttp.Handler
 	Authn           *auth.Authenticator
 	Idempotency     *idempotency.Middleware
 	Obs             *obs.Providers
@@ -197,6 +202,34 @@ func New(d Deps) http.Handler {
 				r.Delete("/overtime-rules/{overtime_rule_id}", d.OrgMasterData.SoftDeleteOvertimeRule)
 			})
 			// ORG slice end (03-04). Phase 4+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
+			// COORDINATION POINT: 04-03 (agreements) and 04-04 (change-requests)
+			// append THEIR OWN Group blocks after the "PEOPLE slice end" marker
+			// below. Do NOT modify this group.
+			// ---------------------------------------------------------------
+
+			// Employee reads: super_admin, hr_admin, shift_leader.
+			// NOTE: OpenAPI x-rbac for GET /employees/{id} also lists agent, but
+			// the FE web app never calls the detail endpoint as an agent (agent
+			// self-service is mobile-only in this phase). Web roles only here.
+			// See 04-02-SUMMARY.md for the rationale.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/employees", d.People.ListEmployees)
+				r.Get("/employees/{employee_id}", d.People.GetEmployee)
+			})
+
+			// Employee writes: super_admin, hr_admin.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/employees", d.People.CreateEmployee)
+				r.Patch("/employees/{employee_id}", d.People.UpdateEmployee)
+				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:deactivate", d.People.DeactivateEmployee)
+				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:reactivate", d.People.ReactivateEmployee)
+			})
+			// PEOPLE slice end (04-02). 04-03 agreements: append r.Group{} here.
 		})
 	})
 

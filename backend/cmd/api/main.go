@@ -17,6 +17,7 @@ import (
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
+	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -26,10 +27,12 @@ import (
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
+	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
+	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 )
 
 func main() {
@@ -103,6 +106,13 @@ func run() error {
 	orgMasterDataSvc := orgsvc.NewMasterDataService(orgMasterDataRepo, txm)
 	orgMasterDataHandler := orghttp.NewMasterDataHandler(orgMasterDataSvc)
 
+	// People slice (04-02): employees (E2 F2.1 / PPL-01).
+	// 04-03 (agreements) and 04-04 (change-requests) append their own wiring
+	// after this block — see 04-02-SUMMARY.md for the coordination contract.
+	peopleRepo := peoplerepo.New(pool)
+	peopleSvc := peoplesvc.NewService(peopleRepo, txm)
+	peopleHandler := peoplehttp.NewHandler(peopleSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:  cfg.HTTP.AllowedOrigins,
 		RatePerMinute:   cfg.Rate.PerMinute,
@@ -112,6 +122,7 @@ func run() error {
 		OrgCompanies:    orgCompaniesHandler,
 		OrgServiceLines: orgServiceLinesHandler,
 		OrgMasterData:   orgMasterDataHandler,
+		People:          peopleHandler,
 		Authn:           authn,
 		Idempotency:     idempotency.New(pool),
 		Obs:             observ,
