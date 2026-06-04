@@ -93,16 +93,22 @@ func run() error {
 	orgCompaniesSvc := orgsvc.NewService(orgCompaniesRepo, txm)
 	orgCompaniesHandler := orghttp.NewHandler(orgCompaniesSvc)
 
+	// Org slice (03-03): service lines + positions (E2 F2.4).
+	orgServiceLinesRepo := orgrepo.NewServiceLineRepo(pool)
+	orgServiceLinesSvc := orgsvc.NewServiceLineService(orgServiceLinesRepo, txm)
+	orgServiceLinesHandler := orghttp.NewServiceLineHandler(orgServiceLinesSvc)
+
 	handler := server.New(server.Deps{
-		AllowedOrigins: cfg.HTTP.AllowedOrigins,
-		RatePerMinute:  cfg.Rate.PerMinute,
-		RateBurst:      cfg.Rate.Burst,
-		Auth:           idHandler,
-		Foundations:    fndHandler,
-		OrgCompanies:   orgCompaniesHandler,
-		Authn:          authn,
-		Idempotency:    idempotency.New(pool),
-		Obs:            observ,
+		AllowedOrigins:  cfg.HTTP.AllowedOrigins,
+		RatePerMinute:   cfg.Rate.PerMinute,
+		RateBurst:       cfg.Rate.Burst,
+		Auth:            idHandler,
+		Foundations:     fndHandler,
+		OrgCompanies:    orgCompaniesHandler,
+		OrgServiceLines: orgServiceLinesHandler,
+		Authn:           authn,
+		Idempotency:     idempotency.New(pool),
+		Obs:             observ,
 	})
 
 	srv := &http.Server{

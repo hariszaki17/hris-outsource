@@ -32,7 +32,8 @@ type Deps struct {
 	// add their own Deps fields here (OrgServiceLines, OrgMasterData) — or reuse
 	// OrgCompanies if they share the same handler package (they don't in this plan;
 	// they use separate packages). See 03-02-SUMMARY.md for the coordination contract.
-	OrgCompanies *orghttp.Handler
+	OrgCompanies    *orghttp.Handler
+	OrgServiceLines *orghttp.ServiceLineHandler // 03-03: service lines + positions
 	Authn        *auth.Authenticator
 	Idempotency  *idempotency.Middleware
 	Obs          *obs.Providers
@@ -128,6 +129,37 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/sites/{site_id}:deactivate", d.OrgCompanies.DeactivateSite)
 			})
 			// ORG slice end (03-02). 03-03 sibling: append r.Group{} here.
+
+			// ---------------------------------------------------------------
+			// ORG slice (03-03): service lines + positions (E2 F2.4).
+			// COORDINATION POINT: 03-04 appends its OWN Group block after this
+			// closing brace. Do NOT modify 03-02 or 03-03 groups.
+			// ---------------------------------------------------------------
+
+			// Service-line + position reads: all authenticated roles.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Get("/service-lines", d.OrgServiceLines.ListServiceLines)
+				r.Get("/service-lines/{service_line_id}", d.OrgServiceLines.GetServiceLine)
+				r.Get("/service-lines/{service_line_id}/positions", d.OrgServiceLines.ListPositionsInServiceLine)
+			})
+
+			// Service-line writes: super_admin only.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/service-lines", d.OrgServiceLines.CreateServiceLine)
+				r.Patch("/service-lines/{service_line_id}", d.OrgServiceLines.UpdateServiceLine)
+				r.With(d.Idempotency.Handler).Post("/service-lines/{service_line_id}:discontinue", d.OrgServiceLines.DiscontinueServiceLine)
+			})
+
+			// Position writes: super_admin + hr_admin.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/service-lines/{service_line_id}/positions", d.OrgServiceLines.CreatePosition)
+				r.Patch("/positions/{position_id}", d.OrgServiceLines.UpdatePosition)
+				r.Delete("/positions/{position_id}", d.OrgServiceLines.SoftDeletePosition)
+			})
+			// ORG slice end (03-03). 03-04 sibling: append r.Group{} here.
 		})
 	})
 

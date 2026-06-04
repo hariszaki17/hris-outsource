@@ -167,6 +167,16 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed client_companies: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 3 (03-03): Seed service lines + Parking positions.
+	// 3 canonical service lines (SWP-SVC-001/002/003) with explicit IDs so E2E
+	// tests can reference deterministic IDs. Parking gets 2 seeded positions
+	// (SWP-POS-014, SWP-POS-015) per the OpenAPI spec examples.
+	// -----------------------------------------------------------------------
+	if err := seedServiceLines(ctx, pool); err != nil {
+		return fmt.Errorf("seed service_lines: %w", err)
+	}
+
 	return nil
 }
 
@@ -356,6 +366,76 @@ func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
 			return fmt.Errorf("seed site %q: %w", s.id, err)
 		}
 		slog.Info("seed: upserted client site", "id", s.id, "name", s.name)
+	}
+
+	return nil
+}
+
+// seedServiceLines inserts the Phase-3 service line + position fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// Service lines (explicit IDs — deterministic for E2E):
+//   - SWP-SVC-001  "Facility Services"
+//   - SWP-SVC-002  "Building Management"
+//   - SWP-SVC-003  "Parking"
+//
+// Positions under Parking (per OpenAPI spec examples):
+//   - SWP-POS-014  "Petugas Parkir" alias "Parking Attendant"
+//   - SWP-POS-015  "Koordinator Lokasi" alias "Parking Supervisor"
+func seedServiceLines(ctx context.Context, pool *db.Pool) error {
+	type serviceLine struct {
+		id   string
+		name string
+	}
+	lines := []serviceLine{
+		{id: "SWP-SVC-001", name: "Facility Services"},
+		{id: "SWP-SVC-002", name: "Building Management"},
+		{id: "SWP-SVC-003", name: "Parking"},
+	}
+
+	const lineQ = `
+		INSERT INTO service_lines (id, name, status)
+		VALUES ($1, $2, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, l := range lines {
+		if _, err := pool.Pool.Exec(ctx, lineQ, l.id, l.name); err != nil {
+			return fmt.Errorf("seed service_line %q: %w", l.id, err)
+		}
+		slog.Info("seed: upserted service line", "id", l.id, "name", l.name)
+	}
+
+	type position struct {
+		id            string
+		serviceLineID string
+		name          string
+		alias         string
+	}
+	positions := []position{
+		{
+			id:            "SWP-POS-014",
+			serviceLineID: "SWP-SVC-003",
+			name:          "Petugas Parkir",
+			alias:         "Parking Attendant",
+		},
+		{
+			id:            "SWP-POS-015",
+			serviceLineID: "SWP-SVC-003",
+			name:          "Koordinator Lokasi",
+			alias:         "Parking Supervisor",
+		},
+	}
+
+	const posQ = `
+		INSERT INTO positions (id, service_line_id, name, alias, status)
+		VALUES ($1, $2, $3, $4, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, p := range positions {
+		if _, err := pool.Pool.Exec(ctx, posQ, p.id, p.serviceLineID, p.name, p.alias); err != nil {
+			return fmt.Errorf("seed position %q: %w", p.id, err)
+		}
+		slog.Info("seed: upserted position", "id", p.id, "name", p.name)
 	}
 
 	return nil
