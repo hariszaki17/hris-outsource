@@ -456,6 +456,91 @@ export async function getCompanyByName(name: string): Promise<string | null> {
   });
 }
 
+// ---------------------------------------------------------------------------
+// E2 people verification helpers (added in Phase 04-06)
+// ---------------------------------------------------------------------------
+
+/**
+ * getEmployeeStatus — return the status ('active' | 'inactive') for an employee by id,
+ * or null if not found.
+ */
+export async function getEmployeeStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM employees WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
+/**
+ * getEmployeePhone — return the phone number for an employee by id, or null if not found.
+ */
+export async function getEmployeePhone(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ phone: string | null }>(
+      'SELECT phone FROM employees WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.phone ?? null;
+  });
+}
+
+/**
+ * getEmployeeIdByNIK — return the id of an employee with the given NIK, or null if not found.
+ */
+export async function getEmployeeIdByNIK(nik: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ id: string }>(
+      'SELECT id FROM employees WHERE nik = $1',
+      [nik],
+    );
+    return res.rows[0]?.id ?? null;
+  });
+}
+
+/**
+ * getAgreementStatus — return the status for an employment agreement by id,
+ * or null if not found.
+ */
+export async function getAgreementStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM employment_agreements WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
+/**
+ * countAttachmentsForAgreement — count agreement_attachments rows for a given agreement id.
+ */
+export async function countAttachmentsForAgreement(agreementId: string): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM agreement_attachments WHERE agreement_id = $1',
+      [agreementId],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}
+
+/**
+ * getChangeRequestStatus — return the status ('pending' | 'approved' | 'rejected') for
+ * a change request by id, or null if not found.
+ */
+export async function getChangeRequestStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM change_requests WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
 /**
  * getSiteByName — return the id of a site by name within a company, or null if not found.
  */

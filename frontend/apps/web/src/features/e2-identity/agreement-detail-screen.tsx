@@ -427,6 +427,7 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
 
   const [renewOpen, setRenewOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Array<{ id: string; name: string }>>([]);
 
   const agreement = query.data?.data as import('@swp/api-client/e2').Agreement | undefined;
 
@@ -438,10 +439,15 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      await uploadMutation.mutateAsync({
+      const result = await uploadMutation.mutateAsync({
         agreementId,
         data: { file, category: 'signed_agreement' },
       });
+      // result.data is FileRef on success
+      const fileRef = result.data as import('@swp/api-client/e2').FileRef;
+      if (fileRef?.id && fileRef?.name) {
+        setUploadedFiles((prev) => [...prev, { id: fileRef.id, name: fileRef.name }]);
+      }
       toast({ tone: 'success', title: t('uploadSuccess') });
     } catch (err) {
       const { message } = classifyError(err);
@@ -652,10 +658,26 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
           <div className="flex w-[380px] shrink-0 flex-col gap-[16px]">
             {/* Card Berkas Perjanjian — a7IVS */}
             <DetailCard title={t('cardFile')}>
-              <div className="mx-5 my-[14px] flex min-h-[160px] flex-col items-center justify-center gap-[10px] rounded-lg border border-border-soft bg-surface-2 px-5 py-[24px]">
-                <Paperclip className="size-[32px] text-text-3" aria-hidden />
-                <p className="text-center text-[12px] text-text-3">{t('noAttachment')}</p>
-              </div>
+              {uploadedFiles.length > 0 ? (
+                <div className="mx-5 my-[14px] flex flex-col gap-[8px]">
+                  {uploadedFiles.map((f) => (
+                    <div
+                      key={f.id}
+                      className="flex items-center gap-[8px] rounded-lg border border-border-soft bg-surface-2 px-[12px] py-[10px]"
+                    >
+                      <Paperclip className="size-[14px] shrink-0 text-text-2" aria-hidden />
+                      <span className="text-[13px] font-medium text-text" data-testid="attachment-name">
+                        {f.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mx-5 my-[14px] flex min-h-[160px] flex-col items-center justify-center gap-[10px] rounded-lg border border-border-soft bg-surface-2 px-5 py-[24px]">
+                  <Paperclip className="size-[32px] text-text-3" aria-hidden />
+                  <p className="text-center text-[12px] text-text-3">{t('noAttachment')}</p>
+                </div>
+              )}
               <div className="flex items-center gap-[8px] border-t border-border-soft px-[14px] py-[14px]">
                 <Button
                   type="button"
@@ -683,6 +705,7 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
                 accept="application/pdf,image/jpeg,image/png"
                 className="sr-only"
                 aria-label={t('actionUpload')}
+                data-testid="agreement-attachment-input"
                 onChange={handleFileChange}
               />
             </DetailCard>

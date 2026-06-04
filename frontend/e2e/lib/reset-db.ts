@@ -72,6 +72,11 @@ const TRUNCATE_TABLES = [
   'leave_types',
   'attendance_codes',
   'overtime_rules',
+  // Phase 4: E2 people tables (FK order: most-dependent first)
+  'change_requests',
+  'agreement_attachments',
+  'employment_agreements',
+  'employees',
 ];
 
 // ---------------------------------------------------------------------------
