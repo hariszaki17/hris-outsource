@@ -37,7 +37,10 @@ import { MasterDataHubScreen } from '@/features/e2-identity/master-data-hub-scre
 import { OvertimeRulesScreen } from '@/features/e2-identity/overtime-rules-screen.tsx';
 import { ServiceLineDetailScreen } from '@/features/e2-identity/service-line-detail-screen.tsx';
 import { ServiceLinesScreen } from '@/features/e2-identity/service-lines-screen.tsx';
-import { CompanyRosterScreen } from '@/features/e3-placement/company-roster-screen.tsx';
+import {
+  CompanyRosterScreen,
+  type CompanyRosterSearch,
+} from '@/features/e3-placement/company-roster-screen.tsx';
 import { PlacementDetailScreen } from '@/features/e3-placement/placement-detail-screen.tsx';
 import { CreatePlacementScreen } from '@/features/e3-placement/placement-form.tsx';
 import {
@@ -411,6 +414,28 @@ const placementNewRoute = createRoute({
 const companyRosterRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/client-companies/$clientCompanyId/roster',
+  validateSearch: (search: Record<string, unknown>): CompanyRosterSearch => {
+    const out: CompanyRosterSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (typeof search.service_line_id === 'string' && search.service_line_id)
+      out.service_line_id = search.service_line_id;
+    if (
+      search.status === PlacementLifecycleStatus.PENDING_START ||
+      search.status === PlacementLifecycleStatus.ACTIVE ||
+      search.status === PlacementLifecycleStatus.EXTENDED ||
+      search.status === PlacementLifecycleStatus.EXPIRING ||
+      search.status === PlacementLifecycleStatus.ENDED ||
+      search.status === PlacementLifecycleStatus.TRANSFERRED ||
+      search.status === PlacementLifecycleStatus.TERMINATED ||
+      search.status === PlacementLifecycleStatus.RESIGNED ||
+      search.status === PlacementLifecycleStatus.SUPERSEDED
+    ) {
+      out.status = search.status;
+    }
+    if (typeof search.include_history === 'boolean') out.include_history = search.include_history;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    return out;
+  },
   component: function CompanyRosterRoute() {
     const { clientCompanyId } = companyRosterRoute.useParams();
     return <CompanyRosterScreen clientCompanyId={clientCompanyId} />;

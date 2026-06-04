@@ -141,7 +141,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
   function setSearch(patch: Partial<CompanyRosterSearch>) {
     const next: CompanyRosterSearch = { ...search, cursor: undefined, ...patch };
     void navigate({
-      to: '/client-companies/$clientCompanyId',
+      to: '/client-companies/$clientCompanyId/roster',
       params: { clientCompanyId },
       search: next,
     });
