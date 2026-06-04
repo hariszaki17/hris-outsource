@@ -164,10 +164,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 08-01: Migrations + sqlc queries (leave_requests, leave_quotas)
-- [ ] 08-02: Services + handlers (approval state machine, quota checks, calendar) + audit/notify
-- [ ] 08-03: Go contract tests vs E6 openapi examples
-- [ ] 08-04: Playwright E2E for E6 (per Gherkin AC)
+- [ ] 08-01-PLAN.md (wave 1) — Migrations 00028-00030 + sqlc queries + domain (leave_requests, leave_quotas, leave_approvals)
+- [ ] 08-02-PLAN.md (wave 2, deps 08-01) — Services + handlers: two-level approval state machine, quota guard/adjust/bulk-grant, INV-3 loop-closer (cancel schedule + populate approved_leave_days in-tx), calendar, scope, audit/notify, routes/main.go, seed
+- [ ] 08-03-PLAN.md (wave 3, deps 08-02) — Go contract tests vs E6 openapi (transitions + 409s, QUOTA_EXCEEDED/BALANCE_RECHECK 422, OUT_OF_SCOPE 403, bulk-grant partial success, calendar shape)
+- [ ] 08-04-PLAN.md (wave 4, deps 08-02,08-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e6/ (approvals/quotas/calendar/scope + the INV-3 loop-closer assertion)
 
 ### Phase 9: E7 Overtime
 **Goal:** Overtime workflow and public holidays work against the real BE.
