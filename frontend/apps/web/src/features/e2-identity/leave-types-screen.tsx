@@ -51,6 +51,9 @@ const PAGE_SIZE = 200;
 // Zod schema (hand-written — E2 Zod deferred per task spec)
 // ---------------------------------------------------------------------------
 
+// RHF stores type="number" input values as numbers (via valueAsNumber), so schemas for
+// optional number fields must use z.preprocess to handle both string (from reset/defaultValues)
+// and number (from RHF's internal state on submit).
 const leaveTypeSchema = z.object({
   name: z.string().min(1, 'Nama wajib diisi').max(100),
   code: z
@@ -58,17 +61,24 @@ const leaveTypeSchema = z.object({
     .min(1, 'Kode wajib diisi')
     .max(30)
     .regex(/^[A-Z0-9_]+$/, 'Kode harus huruf kapital/angka/underscore'),
-  default_annual_quota: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim() !== '' ? Number(v) : undefined))
-    .pipe(z.number().min(0).optional()),
+  // Optional quota: empty string / undefined / null → undefined; otherwise coerce to number.
+  default_annual_quota: z.preprocess(
+    (v) => (v === '' || v === undefined || v === null ? undefined : Number(v)),
+    z.number().min(0).optional(),
+  ),
   is_annual: z.boolean(),
   requires_document: z.boolean(),
   color: z.string().optional(),
 });
 
-type LeaveTypeFormValues = z.input<typeof leaveTypeSchema>;
+type LeaveTypeFormValues = {
+  name: string;
+  code: string;
+  default_annual_quota: number | string | undefined;
+  is_annual: boolean;
+  requires_document: boolean;
+  color: string | undefined;
+};
 
 // Predefined color palette (calendar colors)
 const COLOR_SWATCHES = [
@@ -107,7 +117,7 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
     defaultValues: {
       name: '',
       code: '',
-      default_annual_quota: '' as unknown as undefined,
+      default_annual_quota: '',
       is_annual: false,
       requires_document: false,
       color: COLOR_SWATCHES[0],
@@ -123,7 +133,8 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
         reset({
           name: editing.name,
           code: editing.code,
-          default_annual_quota: editing.default_annual_quota?.toString() as unknown as undefined,
+          // Store as number if defined (RHF will store it as number for type="number" inputs)
+          default_annual_quota: editing.default_annual_quota ?? '',
           is_annual: editing.is_annual,
           requires_document: editing.requires_document,
           color: editing.color ?? COLOR_SWATCHES[0],
@@ -132,7 +143,7 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
         reset({
           name: '',
           code: '',
-          default_annual_quota: '' as unknown as undefined,
+          default_annual_quota: '',
           is_annual: false,
           requires_document: false,
           color: COLOR_SWATCHES[0],

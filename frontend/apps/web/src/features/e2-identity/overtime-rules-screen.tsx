@@ -51,26 +51,35 @@ const PAGE_SIZE = 200;
 // Zod schema (hand-written — E2 Zod deferred)
 // ---------------------------------------------------------------------------
 
+// RHF stores type="number" input values as numbers (via valueAsNumber), so the schema
+// must use z.coerce.number() to accept both the initial string defaultValues and the
+// numbers that RHF gives to zodResolver on submit.
 const overtimeRuleSchema = z.object({
   name: z.string().min(1, 'Nama wajib diisi').max(100),
   service_line_id: z.string().optional(),
-  weekday_rate: z.string().min(1).transform(Number).pipe(z.number().positive('Harus > 0')),
-  restday_rate: z.string().min(1).transform(Number).pipe(z.number().positive('Harus > 0')),
-  holiday_rate: z.string().min(1).transform(Number).pipe(z.number().positive('Harus > 0')),
-  min_minutes: z
-    .string()
-    .min(1)
-    .transform(Number)
-    .pipe(z.number().int().min(30, 'Minimal 30 menit (D4)')),
-  max_minutes_per_day: z
-    .string()
-    .optional()
-    .transform((v) => (v && v.trim() !== '' ? Number(v) : undefined))
-    .pipe(z.number().int().positive().optional()),
+  weekday_rate: z.coerce.number().positive('Harus > 0'),
+  restday_rate: z.coerce.number().positive('Harus > 0'),
+  holiday_rate: z.coerce.number().positive('Harus > 0'),
+  min_minutes: z.coerce.number().int().min(30, 'Minimal 30 menit (D4)'),
+  // Optional number: empty string / undefined → undefined; otherwise coerce to positive int.
+  max_minutes_per_day: z.preprocess(
+    (v) => (v === '' || v === undefined || v === null ? undefined : Number(v)),
+    z.number().int().positive().optional(),
+  ),
   pre_approval_required: z.boolean(),
 });
 
-type OvertimeRuleFormValues = z.input<typeof overtimeRuleSchema>;
+// Explicit form shape — use number for fields that RHF stores as numbers (type="number" inputs).
+type OvertimeRuleFormValues = {
+  name: string;
+  service_line_id: string;
+  weekday_rate: number | string;
+  restday_rate: number | string;
+  holiday_rate: number | string;
+  min_minutes: number | string;
+  max_minutes_per_day: number | string | undefined;
+  pre_approval_required: boolean;
+};
 
 // ---------------------------------------------------------------------------
 // OvertimeRuleModal — Tambah/Edit
@@ -97,10 +106,10 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
     defaultValues: {
       name: '',
       service_line_id: '',
-      weekday_rate: '1.5',
-      restday_rate: '2.0',
-      holiday_rate: '3.0',
-      min_minutes: '30',
+      weekday_rate: 1.5,
+      restday_rate: 2.0,
+      holiday_rate: 3.0,
+      min_minutes: 30,
       max_minutes_per_day: '',
       pre_approval_required: false,
     },
@@ -115,23 +124,21 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
         reset({
           name: editing.name,
           service_line_id: editing.service_line_id ?? '',
-          weekday_rate: String(editing.weekday_rate),
-          restday_rate: String(editing.restday_rate),
-          holiday_rate: String(editing.holiday_rate),
-          min_minutes: String(editing.min_minutes),
-          max_minutes_per_day: editing.max_minutes_per_day
-            ? String(editing.max_minutes_per_day)
-            : '',
+          weekday_rate: editing.weekday_rate,
+          restday_rate: editing.restday_rate,
+          holiday_rate: editing.holiday_rate,
+          min_minutes: editing.min_minutes,
+          max_minutes_per_day: editing.max_minutes_per_day ?? '',
           pre_approval_required: editing.pre_approval_required,
         });
       } else {
         reset({
           name: '',
           service_line_id: '',
-          weekday_rate: '1.5',
-          restday_rate: '2.0',
-          holiday_rate: '3.0',
-          min_minutes: '30',
+          weekday_rate: 1.5,
+          restday_rate: 2.0,
+          holiday_rate: 3.0,
+          min_minutes: 30,
           max_minutes_per_day: '',
           pre_approval_required: false,
         });
@@ -140,14 +147,16 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
   }, [open, editing, reset]);
 
   async function onSubmit(values: OvertimeRuleFormValues) {
+    // zodResolver already validated + coerced — values are safe here; parse again to get
+    // the output type with numbers guaranteed by z.coerce.number().
     const parsed = overtimeRuleSchema.parse(values);
     const payload: OvertimeRuleWriteRequest = {
       name: parsed.name,
       service_line_id: parsed.service_line_id || null,
-      weekday_rate: parsed.weekday_rate,
-      restday_rate: parsed.restday_rate,
-      holiday_rate: parsed.holiday_rate,
-      min_minutes: parsed.min_minutes,
+      weekday_rate: parsed.weekday_rate as number,
+      restday_rate: parsed.restday_rate as number,
+      holiday_rate: parsed.holiday_rate as number,
+      min_minutes: parsed.min_minutes as number,
       max_minutes_per_day: parsed.max_minutes_per_day,
       pre_approval_required: parsed.pre_approval_required,
     };
