@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-test-harness-auth/01-05-PLAN.md
-last_updated: "2026-06-04T00:17:09.855Z"
+last_updated: "2026-06-04T00:23:02.911Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
