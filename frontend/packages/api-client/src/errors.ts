@@ -9,6 +9,14 @@ export interface ErrorEnvelope {
     message: string;
     fields?: Record<string, string>;
     request_id?: string;
+    /**
+     * Structured payload for codes that carry extra context — notably the E3
+     * INV_*_VIOLATION envelopes (INVViolationDetails: current_placement,
+     * current_assignment, existing_assignment, suggested_actions, …). The BE
+     * serializes this under `error.details`; consumers cast it to the relevant
+     * typed shape (e.g. INVViolationDetails) at the use site.
+     */
+    details?: unknown;
   };
 }
 
@@ -18,6 +26,8 @@ export class ApiError extends Error {
   readonly code: string;
   readonly fields?: Record<string, string>;
   readonly requestId?: string;
+  /** `error.details` from the envelope (e.g. INVViolationDetails on INV_* 409s). */
+  readonly details?: unknown;
 
   constructor(status: number, envelope?: ErrorEnvelope, fallbackMessage?: string) {
     super(envelope?.error.message ?? fallbackMessage ?? `HTTP ${status}`);
@@ -26,6 +36,7 @@ export class ApiError extends Error {
     this.code = envelope?.error.code ?? 'UNKNOWN';
     this.fields = envelope?.error.fields;
     this.requestId = envelope?.error.request_id;
+    this.details = envelope?.error.details;
   }
 
   get isUnauthenticated() {
