@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-e3-placement/05-03-PLAN.md
-last_updated: "2026-06-04T14:33:19.296Z"
-last_activity: "2026-06-04 — Plan 05-03 complete: E3 contract tests — 34 Go test functions across 3 files asserting every FE-used E3 endpoint vs docs/api/E3-placement/openapi.yaml (drift gate). INV-1..4 409 envelopes, terminal-immutability, transfer/renew chains, PENDING_START→INV-4 (C-2), site-scope leadership, OUT_OF_SCOPE roster, search+status filter passthrough. `go test ./... -count=1` exits 0; no regressions."
+stopped_at: Completed 05-e3-placement/05-04-PLAN.md
+last_updated: "2026-06-04T15:35:04.690Z"
+last_activity: "2026-06-04 — Plan 05-04 complete: E3 full-stack Playwright E2E — 30 tests across 5 specs (agent-placement, lifecycle, transfer, shift-leader, roster) green against real FE↔Go API↔ephemeral Postgres. Real-409 invariant negatives (INV-1 +details.current_placement, INV-2, INV-4, TERMINAL_STATE_IMMUTABLE, PLACEMENT_PERIOD_OVERLAP, COMPANY_INACTIVE, ALREADY_ENDED, RULE_VIOLATION) + RBAC (agent-403, OUT_OF_SCOPE). Auto-fixed 3 bugs: ApiError dropped error.details (INV-1 banner), roster filters navigated to wrong route, Phase-5 seed regression in e2 AG-create. `pnpm e2e` green, no e1/e2 regressions."
 progress:
   total_phases: 11
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 25
-  completed_plans: 24
-  percent: 96
+  completed_plans: 25
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 5 of 11 (E3 Placement)
-Plan: 3 of 4 in current phase — Plan 05-03 COMPLETE
+Plan: 4 of 4 in current phase — Plan 05-04 COMPLETE (phase 5 done)
 Status: In progress
-Last activity: 2026-06-04 — Plan 05-03 complete: E3 contract tests — 34 Go test functions across 3 files asserting every FE-used E3 endpoint vs docs/api/E3-placement/openapi.yaml (drift gate). INV-1..4 409 envelopes, terminal-immutability, transfer/renew chains, PENDING_START→INV-4 (C-2), site-scope leadership, OUT_OF_SCOPE roster, search+status filter passthrough. `go test ./... -count=1` exits 0; no regressions.
+Last activity: 2026-06-04 — Plan 05-04 complete: E3 full-stack Playwright E2E — 30 tests across 5 specs (agent-placement, lifecycle, transfer, shift-leader, roster) green against real FE↔Go API↔ephemeral Postgres. Real-409 invariant negatives (INV-1 +details.current_placement, INV-2, INV-4, TERMINAL_STATE_IMMUTABLE, PLACEMENT_PERIOD_OVERLAP, COMPANY_INACTIVE, ALREADY_ENDED, RULE_VIOLATION) + RBAC (agent-403, OUT_OF_SCOPE). Auto-fixed 3 bugs: ApiError dropped error.details (INV-1 banner), roster filters navigated to wrong route, Phase-5 seed regression in e2 AG-create. `pnpm e2e` green, no e1/e2 regressions.
 
-Progress: [██████████] 96%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [██████████] 96%
 | Phase 05-e3-placement P01 | 4 | 3 tasks | 9 files |
 | Phase 05-e3-placement P02 | 18 | 3 tasks | 16 files |
 | Phase 05-e3-placement P03 | 7 | 2 tasks | 3 files |
+| Phase 05-e3-placement P04 | 75 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -145,6 +146,10 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 05-e3-placement]: [05-03] E3 contract tests = drift gate: fakePlacementRepo+fakeShiftLeaderRepo (shared placement state) + fakeTx httptest harness mirroring Phase-4 agreements; INV-4 join + current-leader resolve off the same fixtures
 - [Phase 05-e3-placement]: [05-03] Site-scope leadership is contract-tested here (distinct per-site unit); 05-04 FE E2E targets company-scope only per CONTEXT.md deferred decision
 - [Phase 05-e3-placement]: [05-03] Asia/Jakarta-midnight vs UTC-midnight boundary: a same-day start derives PENDING_START under the fixed clock; ACTIVE-on-create asserted via backdated start — 05-04 E2E must respect this when picking dates
+- [Phase 05-e3-placement]: [05-04] ApiError now captures error.details (was dropped) so the INV-1 conflict Banner renders current_placement; Phase 1-4 errors unaffected (details optional)
+- [Phase 05-e3-placement]: [05-04] roster filters/pagination navigate to /client-companies/{id}/roster (was the company detail route) + route gains validateSearch; fixed all roster filter/toggle interactions
+- [Phase 05-e3-placement]: [05-04] INV-3 unreachable in company-scope FE (INV-4 precedence + INV-1); E2E asserts reachable 409, pure INV_3 envelope is contract-tested in 05-03; negative invariants asserted via apiAs real-409 + INV-1 also via the create-form Banner
+- [Phase 05-e3-placement]: [05-04] e3-helpers (apiAs token-fetch + pickCombobox + comboFieldById) is the reusable E2E pattern for token API calls + FK-picker driving; status filters match PERSISTED lifecycle_status (EXPIRING is DTO-derived, not server-filterable)
 
 ### Pending Todos
 
@@ -156,6 +161,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T14:32:47.191Z
-Stopped at: Completed 05-e3-placement/05-03-PLAN.md
+Last session: 2026-06-04T15:34:17.241Z
+Stopped at: Completed 05-e3-placement/05-04-PLAN.md
 Resume file: None
