@@ -241,14 +241,25 @@ func (s *AgreementService) RenewAgreement(ctx context.Context, predecessorID str
 
 	var newAgreement domain.Agreement
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		// Create successor.
-		var inErr error
+		// Supersede predecessor FIRST so the partial unique index
+		// (employment_agreements_active_employee_uq) is released before inserting
+		// the new active agreement for the same employee.
+		_, inErr := s.repo.SetAgreementStatus(ctx, tx, SetAgreementStatusParams{
+			ID:     predecessorID,
+			Status: "superseded",
+			// SuccessorID is backfilled after we know the new ID.
+		})
+		if inErr != nil {
+			return inErr
+		}
+
+		// Now create the successor (unique constraint no longer blocks it).
 		newAgreement, inErr = s.repo.CreateAgreement(ctx, tx, p)
 		if inErr != nil {
 			return inErr
 		}
 
-		// Supersede predecessor.
+		// Backfill successor_id on the superseded predecessor.
 		succID := newAgreement.ID
 		_, inErr = s.repo.SetAgreementStatus(ctx, tx, SetAgreementStatusParams{
 			ID:          predecessorID,
@@ -258,6 +269,10 @@ func (s *AgreementService) RenewAgreement(ctx context.Context, predecessorID str
 		if inErr != nil {
 			return inErr
 		}
+
+		// Set predecessor_id on new agreement (link back).
+		predID := predecessorID
+		newAgreement.PredecessorID = &predID
 
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.Action("agreement.renew"),

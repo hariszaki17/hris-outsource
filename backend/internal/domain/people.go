@@ -5,10 +5,13 @@ package domain
 import "time"
 
 // BankAccount holds the flat bank_account fields stored on an employee.
+// JSON tags are required so that when BankAccount is embedded as `any` in the
+// diff response (changeRequestFieldDiffResp.New / .Old), the serialized keys
+// match what the FE formatDiffValue() expects (snake_case).
 type BankAccount struct {
-	BankName          string // nullable: empty string means not set
-	AccountNumber     string
-	AccountHolderName string
+	BankName          string `json:"bank_name"`
+	AccountNumber     string `json:"account_number"`
+	AccountHolderName string `json:"account_holder_name"`
 }
 
 // Employee is the domain entity for an SWP employee (F2.1 / EP-*).

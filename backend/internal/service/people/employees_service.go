@@ -154,7 +154,7 @@ func (s *Service) GetEmployee(ctx context.Context, id string) (domain.Employee, 
 // EP-2: pre-checks for duplicate NIK → 409 DUPLICATE_NIK.
 // EP-3 (Phase-4 stub): provision_login/login_email fields are accepted but UserID
 // stays NULL in this milestone; linked E1 login provisioning is deferred.
-func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams, actorID string) (domain.Employee, error) {
+func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (domain.Employee, error) {
 	// Required field validation.
 	fields := map[string]string{}
 	if strings.TrimSpace(p.FullName) == "" {
@@ -211,7 +211,7 @@ func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams, ac
 
 // UpdateEmployee patches a mutable employee fields.
 // EP-2: if NIK changes, re-runs the duplicate check.
-func (s *Service) UpdateEmployee(ctx context.Context, p UpdateEmployeeParams, actorID string) (domain.Employee, error) {
+func (s *Service) UpdateEmployee(ctx context.Context, p UpdateEmployeeParams) (domain.Employee, error) {
 	// Load existing (404 if missing).
 	current, err := s.repo.GetEmployeeByID(ctx, p.ID)
 	if errors.Is(err, domain.ErrNotFound) {
