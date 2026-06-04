@@ -9,11 +9,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
 
 // Deps are everything the router needs, built in cmd/api.
@@ -23,6 +25,7 @@ type Deps struct {
 	RateBurst      int
 
 	Auth        *identityhttp.Handler
+	Foundations *foundationshttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -67,10 +70,28 @@ func New(d Deps) http.Handler {
 			r.Use(rl.Middleware)
 			r.Get("/auth/me", d.Auth.Me)
 
-			// Mount resource epics here, e.g.:
-			//   e2.HandlerFromMux(e2impl, r)        // oapi-codegen ServerInterface
-			//   wrapped with rbac.RequireRole(...) and d.Idempotency.Handler where flagged.
-			_ = d.Idempotency // used by write endpoints as they land
+			// E1 Foundations: user management, audit-log, platform settings.
+			// All endpoints require super_admin or hr_admin (CONVENTIONS §17 x-rbac).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+
+				// Users management
+				r.Get("/users", d.Foundations.ListUsers)
+				r.With(d.Idempotency.Handler).Post("/users", d.Foundations.CreateUser)
+				r.Patch("/users/{user_id}", d.Foundations.UpdateUser)
+				// Action endpoints: chi matches the literal ':' suffix on the path param route.
+				r.With(d.Idempotency.Handler).Post("/users/{user_id}:change-role", d.Foundations.ChangeUserRole)
+				r.With(d.Idempotency.Handler).Post("/users/{user_id}:deactivate", d.Foundations.DeactivateUser)
+				r.With(d.Idempotency.Handler).Post("/users/{user_id}:reactivate", d.Foundations.ReactivateUser)
+				r.Post("/users/{user_id}:send-password-reset", d.Foundations.SendUserPasswordReset)
+
+				// Audit log
+				r.Get("/audit-log", d.Foundations.ListAuditLog)
+				r.Get("/audit-log/{audit_log_id}", d.Foundations.GetAuditLogEntry)
+
+				// Platform settings (read-only)
+				r.Get("/platform/settings", d.Foundations.GetPlatformSettings)
+			})
 		})
 	})
 

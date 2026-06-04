@@ -43,6 +43,10 @@ var messages = map[Lang]map[string]string{
 		"RESET_TOKEN_EXPIRED":  "Tautan reset sudah kedaluwarsa. Mohon minta tautan baru.",
 		"WEAK_PASSWORD":        "Kata sandi tidak memenuhi kebijakan.",
 		"FORGOT_PASSWORD_SENT": "Jika email terdaftar, tautan reset telah dikirim.",
+
+		// E1 foundations — user management
+		"ROLE_NOT_ALLOWED": "Perubahan peran tidak diizinkan.",
+		"CURSOR_MISMATCH":  "Kursor tidak valid.",
 	},
 	EN: {
 		"INVALID_REQUEST": "The request is invalid.",
@@ -64,6 +68,10 @@ var messages = map[Lang]map[string]string{
 		"RESET_TOKEN_EXPIRED":  "The reset link has expired. Please request a new one.",
 		"WEAK_PASSWORD":        "The password does not meet the policy requirements.",
 		"FORGOT_PASSWORD_SENT": "If the email is registered, a reset link has been sent.",
+
+		// E1 foundations — user management
+		"ROLE_NOT_ALLOWED": "Role change not allowed.",
+		"CURSOR_MISMATCH":  "Invalid cursor.",
 	},
 }
 

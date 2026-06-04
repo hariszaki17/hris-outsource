@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
@@ -21,8 +22,10 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
+	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
+	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 )
 
@@ -77,11 +80,17 @@ func run() error {
 		Secure: cfg.Auth.CookieSecure,
 	}, cfg.Auth.AccessTTL)
 
+	// Foundations slice (E1 user management, audit-log, platform settings).
+	fndRepo := foundationsrepo.New(pool)
+	fndSvc := foundationssvc.NewService(fndRepo, txm)
+	fndHandler := foundationshttp.NewHandler(fndSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins: cfg.HTTP.AllowedOrigins,
 		RatePerMinute:  cfg.Rate.PerMinute,
 		RateBurst:      cfg.Rate.Burst,
 		Auth:           idHandler,
+		Foundations:    fndHandler,
 		Authn:          authn,
 		Idempotency:    idempotency.New(pool),
 		Obs:            observ,

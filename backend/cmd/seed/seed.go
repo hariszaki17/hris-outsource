@@ -82,6 +82,35 @@ var personas = []persona{
 	},
 }
 
+// extraPersonas are additional users added in Phase 2 so the user list
+// has enough rows to exercise cursor pagination in the E1 screens.
+var extraPersonas = []persona{
+	{
+		email:      "dewi.lestari@swp.test",
+		password:   "Dew1-Lestari-2026!",
+		role:       "agent",
+		fullName:   "Dewi Lestari",
+		employeeID: strPtr("SWP-EMP-3001"),
+		companyID:  nil,
+	},
+	{
+		email:      "agus.pratama@swp.test",
+		password:   "Agus-Pr4tama-2026!",
+		role:       "shift_leader",
+		fullName:   "Agus Pratama",
+		employeeID: strPtr("SWP-EMP-3002"),
+		companyID:  strPtr("SWP-CMP-0021"),
+	},
+	{
+		email:      "bambang.admin@swp.test",
+		password:   "B4mbang-Admin-2026!",
+		role:       "hr_admin",
+		fullName:   "Bambang Sutrisno",
+		employeeID: strPtr("SWP-EMP-3003"),
+		companyID:  nil,
+	},
+}
+
 // Seed inserts the deterministic test personas into the database. It is
 // idempotent: if a non-deleted user with the same email already exists, that
 // persona is skipped (no error, no duplicate). Safe to re-run between test
@@ -89,7 +118,9 @@ var personas = []persona{
 func Seed(ctx context.Context, pool *db.Pool) error {
 	q := sqlcgen.New(pool.Pool)
 
-	for _, p := range personas {
+	allPersonas := append(personas, extraPersonas...)
+
+	for _, p := range allPersonas {
 		existing, err := q.GetUserByEmail(ctx, p.email)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("check existing user %q: %w", p.email, err)
@@ -119,5 +150,101 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: created user", "email", user.Email, "id", user.ID, "role", user.Role)
 	}
 
+	// Seed audit_log rows so the E1 audit-log screen has content.
+	// Guard: skip if we already have audit rows (idempotent re-runs).
+	if err := seedAuditLog(ctx, pool); err != nil {
+		return fmt.Errorf("seed audit_log: %w", err)
+	}
+
+	return nil
+}
+
+// seedAuditLog inserts ~5 audit_log rows covering entity_types user and placement,
+// including one system row (actor_user_id NULL). Idempotent: skips if any rows exist.
+func seedAuditLog(ctx context.Context, pool *db.Pool) error {
+	var count int
+	if err := pool.Pool.QueryRow(ctx, "SELECT count(*) FROM audit_log").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		slog.Info("seed: audit_log already has rows, skipping", "count", count)
+		return nil
+	}
+
+	type auditRow struct {
+		actorUserID *string
+		actorRole   *string
+		action      string
+		entityType  string
+		entityID    string
+		before      *string // JSON or nil
+		after       *string // JSON or nil
+	}
+
+	rows := []auditRow{
+		{
+			actorUserID: nil,
+			actorRole:   nil,
+			action:      "CREATE",
+			entityType:  "user",
+			entityID:    "SWP-USR-system-init",
+			before:      nil,
+			after:       strPtr(`{"note":"system initialised"}`),
+		},
+		{
+			actorUserID: strPtr("SWP-USR-00001"),
+			actorRole:   strPtr("super_admin"),
+			action:      "CREATE",
+			entityType:  "user",
+			entityID:    "SWP-USR-00002",
+			before:      nil,
+			after:       strPtr(`{"email":"sari.hadi@swp.test","role":"hr_admin"}`),
+		},
+		{
+			actorUserID: strPtr("SWP-USR-00001"),
+			actorRole:   strPtr("hr_admin"),
+			action:      "user.change_role",
+			entityType:  "user",
+			entityID:    "SWP-USR-00003",
+			before:      strPtr(`{"role":"agent"}`),
+			after:       strPtr(`{"role":"shift_leader","reason":"promoted on site"}`),
+		},
+		{
+			actorUserID: strPtr("SWP-USR-00001"),
+			actorRole:   strPtr("hr_admin"),
+			action:      "CREATE",
+			entityType:  "placement",
+			entityID:    "SWP-PL-00001",
+			before:      nil,
+			after:       strPtr(`{"employee_id":"SWP-EMP-1042","company_id":"SWP-CMP-0021"}`),
+		},
+		{
+			actorUserID: strPtr("SWP-USR-00001"),
+			actorRole:   strPtr("hr_admin"),
+			action:      "user.deactivate",
+			entityType:  "user",
+			entityID:    "SWP-USR-00004",
+			before:      strPtr(`{"status":"active"}`),
+			after:       strPtr(`{"status":"disabled","reason":"contract ended"}`),
+		},
+	}
+
+	const insertQ = `
+		INSERT INTO audit_log
+			(id, actor_user_id, actor_role, action, entity_type, entity_id,
+			 before_state, after_state, request_id, created_at)
+		VALUES
+			('SWP-AL-' || swp_next_id('AL'), $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, NULL, now())`
+
+	for _, row := range rows {
+		if _, err := pool.Pool.Exec(ctx, insertQ,
+			row.actorUserID, row.actorRole,
+			row.action, row.entityType, row.entityID,
+			row.before, row.after,
+		); err != nil {
+			return err
+		}
+	}
+	slog.Info("seed: inserted audit_log rows", "count", len(rows))
 	return nil
 }
