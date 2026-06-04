@@ -189,7 +189,7 @@ export function ShiftPickerPopover({
       const result = checkResult.data as
         | {
             succeeded?: unknown[];
-            failed?: Array<{ error?: { code?: string }; conflict_details?: ConflictDetails }>;
+            failed?: Array<{ error?: { code?: string; details?: ConflictDetails } }>;
           }
         | undefined;
       const failures = result?.failed ?? [];
@@ -197,7 +197,11 @@ export function ShiftPickerPopover({
       if (failures.length > 0) {
         const first = failures[0];
         const code = first?.error?.code ?? 'UNKNOWN';
-        const details = first?.conflict_details;
+        // The real BE envelope nests conflict details under `error.details` (the
+        // bulk/:check `failed[].error` location, mirroring the Phase-5 error.details
+        // precedent), NOT a top-level `conflict_details`. Read it from there so the
+        // DOUBLE_SHIFT / SHIFT_OVER_LEAVE / over-leave block messages render.
+        const details = first?.error?.details;
 
         if (code === 'DOUBLE_SHIFT') {
           // SA-2: double-shift asks for force_replace confirmation

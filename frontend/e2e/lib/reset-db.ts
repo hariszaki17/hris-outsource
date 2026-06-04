@@ -72,6 +72,13 @@ const TRUNCATE_TABLES = [
   'leave_types',
   'attendance_codes',
   'overtime_rules',
+  // Phase 6: E4 scheduling tables (FK order: most-dependent first).
+  // schedule_entries / approved_leave_days FK to placements/employees/shift_masters,
+  // so they MUST be truncated before placements + employees below. shift_masters has
+  // no inbound FK from kept tables. Reseeded by `go run ./cmd/seed` afterwards.
+  'schedule_entries',
+  'approved_leave_days',
+  'shift_masters',
   // Phase 5: E3 placement tables (FK order: most-dependent first).
   // Truncated BEFORE people tables so placement FKs to employees/agreements drop cleanly.
   'placement_history',
