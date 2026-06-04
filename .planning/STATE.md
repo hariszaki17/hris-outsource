@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-e3-placement/05-02-PLAN.md
-last_updated: "2026-06-04T14:21:39.337Z"
-last_activity: "2026-06-04 — Plan 05-02 complete: E3 placement service+handler layer — 13 FE-used endpoints, INV-1..4 enforcement (service pre-check + FOR UPDATE locks + 23505 DB backstop), lifecycle state machine (renew/transfer/end/resign/terminate), transfer/renew atomicity, placement_history+audit on every action, error.details envelope for INV violations, roster scope guard, seed extended. `make gen` + `go build ./...` + `go vet ./...` + `gofmt -l` clean."
+stopped_at: Completed 05-e3-placement/05-03-PLAN.md
+last_updated: "2026-06-04T14:33:19.296Z"
+last_activity: "2026-06-04 — Plan 05-03 complete: E3 contract tests — 34 Go test functions across 3 files asserting every FE-used E3 endpoint vs docs/api/E3-placement/openapi.yaml (drift gate). INV-1..4 409 envelopes, terminal-immutability, transfer/renew chains, PENDING_START→INV-4 (C-2), site-scope leadership, OUT_OF_SCOPE roster, search+status filter passthrough. `go test ./... -count=1` exits 0; no regressions."
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 25
-  completed_plans: 23
-  percent: 88
+  completed_plans: 24
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 5 of 11 (E3 Placement)
-Plan: 2 of 4 in current phase — Plan 05-02 COMPLETE
+Plan: 3 of 4 in current phase — Plan 05-03 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 05-02 complete: E3 placement service+handler layer — 13 FE-used endpoints, INV-1..4 enforcement (service pre-check + FOR UPDATE locks + 23505 DB backstop), lifecycle state machine (renew/transfer/end/resign/terminate), transfer/renew atomicity, placement_history+audit on every action, error.details envelope for INV violations, roster scope guard, seed extended. `make gen` + `go build ./...` + `go vet ./...` + `gofmt -l` clean.
+Last activity: 2026-06-04 — Plan 05-03 complete: E3 contract tests — 34 Go test functions across 3 files asserting every FE-used E3 endpoint vs docs/api/E3-placement/openapi.yaml (drift gate). INV-1..4 409 envelopes, terminal-immutability, transfer/renew chains, PENDING_START→INV-4 (C-2), site-scope leadership, OUT_OF_SCOPE roster, search+status filter passthrough. `go test ./... -count=1` exits 0; no regressions.
 
-Progress: [█████████░] 88%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [█████████░] 88%
 | Phase 04-e2-people P06 | 5400 | 4 tasks | 9 files |
 | Phase 05-e3-placement P01 | 4 | 3 tasks | 9 files |
 | Phase 05-e3-placement P02 | 18 | 3 tasks | 16 files |
+| Phase 05-e3-placement P03 | 7 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -141,6 +142,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 05-e3-placement]: INV-1 = service pre-check + FOR UPDATE re-check + 23505 partial-unique backstop; INV-2/3/4 enforced in one InTx with the 05-01 ...ForUpdate locks; PENDING_START does not satisfy INV-4
 - [Phase 05-e3-placement]: lifecycle_status derived at the DTO boundary (Asia/Jakarta): persisted ACTIVE+end<=today+30d -> EXPIRING; PENDING_START+start<=today -> ACTIVE (mirrors Phase-4 toAgreementResponse)
 - [Phase 05-e3-placement]: PlacementService + ShiftLeaderService mutually referential via SetLeaderService (current-leader joins + SL-6 auto-vacate); transfer reuses source site_id (no site in FE request / no primary-site query in 05-01)
+- [Phase 05-e3-placement]: [05-03] E3 contract tests = drift gate: fakePlacementRepo+fakeShiftLeaderRepo (shared placement state) + fakeTx httptest harness mirroring Phase-4 agreements; INV-4 join + current-leader resolve off the same fixtures
+- [Phase 05-e3-placement]: [05-03] Site-scope leadership is contract-tested here (distinct per-site unit); 05-04 FE E2E targets company-scope only per CONTEXT.md deferred decision
+- [Phase 05-e3-placement]: [05-03] Asia/Jakarta-midnight vs UTC-midnight boundary: a same-day start derives PENDING_START under the fixed clock; ACTIVE-on-create asserted via backdated start — 05-04 E2E must respect this when picking dates
 
 ### Pending Todos
 
@@ -152,6 +156,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T14:21:31.383Z
-Stopped at: Completed 05-e3-placement/05-02-PLAN.md
+Last session: 2026-06-04T14:32:47.191Z
+Stopped at: Completed 05-e3-placement/05-03-PLAN.md
 Resume file: None
