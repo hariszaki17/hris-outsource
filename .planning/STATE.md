@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-e5-attendance/07-01-PLAN.md
-last_updated: "2026-06-04T18:07:15.451Z"
-last_activity: "2026-06-05 — Plan 07-01 complete: E5 attendance data layer. Migrations 00026 attendance + 00027 attendance_corrections (FKs to schedule_entries/placements/client_companies/employees; stored geofence+lateness+auto_closed exception columns; status + verification_status enums; flags text[]; one-pending-per-attendance partial unique index). sqlc queries (11 Querier methods: list/get/forUpdate + verify/reject/apply + correction approve/reject) and internal/domain/attendance package (Attendance/Correction/GeofenceCheck/DiffRow + enums). make gen / go build / go vet / gofmt all clean. Handoff for 07-02 in SUMMARY (sqlc type quirks: jsonb→[]byte, date→pgtype.Date, ints→int32, Wfo casing)."
+stopped_at: Completed 07-e5-attendance/07-02-PLAN.md
+last_updated: "2026-06-04T18:26:06.017Z"
+last_activity: "2026-06-04 — Plan 07-02 complete: E5 verification + corrections service/handler slice. The 10 FE-used endpoints run against the real BE — repository over the 07-01 sqlc; AttendanceService verify/reject + bulk partial-success ({succeeded,failed} 200/422, router-idempotent) with OUT_OF_SCOPE (403), VERIFY_OWN_RECORD (403), terminal-state (409 CONFLICT) guards; CorrectionService approve-applies (one-tx APPLIED + CORRECTED flag) + reject + exported CheckCorrectionWindow (OUTSIDE_CORRECTION_WINDOW 422); audit-in-tx + notify stub on every write; hand-written chi handlers + openapi-exact DTOs; routes mounted under RequireRole(super_admin,hr_admin,shift_leader) + idempotency wrap; main.go wired; seed plants 6 attendance (SWP-ATT-9001..9006 incl. CMP-0022 out-of-scope + Rudi-own escalated) + 2 corrections (SWP-COR-8001/8002). make gen / go build / go vet / gofmt clean; full Go test suite green (no regressions). Ready for 07-03 contract tests."
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 33
-  completed_plans: 30
-  percent: 91
+  completed_plans: 31
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 7 of 11 (E5 Attendance) — IN PROGRESS
-Plan: 1 of 4 in current phase — Plan 07-01 COMPLETE
+Plan: 2 of 4 in current phase — Plan 07-02 COMPLETE
 Status: In progress
-Last activity: 2026-06-05 — Plan 07-01 complete: E5 attendance data layer. Migrations 00026 attendance + 00027 attendance_corrections (FKs to schedule_entries/placements/client_companies/employees; stored geofence+lateness+auto_closed exception columns; status + verification_status enums; flags text[]; one-pending-per-attendance partial unique index). sqlc queries (11 Querier methods: list/get/forUpdate + verify/reject/apply + correction approve/reject) and internal/domain/attendance package (Attendance/Correction/GeofenceCheck/DiffRow + enums). make gen / go build / go vet / gofmt all clean. Handoff for 07-02 in SUMMARY (sqlc type quirks: jsonb→[]byte, date→pgtype.Date, ints→int32, Wfo casing).
+Last activity: 2026-06-04 — Plan 07-02 complete: E5 verification + corrections service/handler slice. The 10 FE-used endpoints run against the real BE — repository over the 07-01 sqlc; AttendanceService verify/reject + bulk partial-success ({succeeded,failed} 200/422, router-idempotent) with OUT_OF_SCOPE (403), VERIFY_OWN_RECORD (403), terminal-state (409 CONFLICT) guards; CorrectionService approve-applies (one-tx APPLIED + CORRECTED flag) + reject + exported CheckCorrectionWindow (OUTSIDE_CORRECTION_WINDOW 422); audit-in-tx + notify stub on every write; hand-written chi handlers + openapi-exact DTOs; routes mounted under RequireRole(super_admin,hr_admin,shift_leader) + idempotency wrap; main.go wired; seed plants 6 attendance (SWP-ATT-9001..9006 incl. CMP-0022 out-of-scope + Rudi-own escalated) + 2 corrections (SWP-COR-8001/8002). make gen / go build / go vet / gofmt clean; full Go test suite green (no regressions). Ready for 07-03 contract tests.
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [█████████░] 91%
 | Phase 06-e4-schedule-shifts P03 | 4 | 2 tasks | 3 files |
 | Phase 06-e4-schedule-shifts P04 | 69 | 2 tasks | 8 files |
 | Phase 07-e5-attendance P01 | 5 | 2 tasks | 8 files |
+| Phase 07-e5-attendance P02 | 12 | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 07-e5-attendance]: [07-01]: ApproveCorrection sets status='APPLIED' directly (no APPROVED intermediate) and 07-02 calls ApplyCorrectionToAttendance in the same tx (COALESCE whitelist of check_in/out + attendance_code; appends de-duped CORRECTED flag; sets last_correction_id)
 - [Phase 07-e5-attendance]: [07-01]: company_id + attendance_shift_date denormalized onto attendance_corrections so leader-scope queue + OUTSIDE_CORRECTION_WINDOW 7-day check need no JOIN; CORRECTION_ALREADY_PENDING backstopped by partial unique index (attendance_id) WHERE status='PENDING'
 - [Phase 07-e5-attendance]: [07-01]: sqlc quirks for 07-02 repo — original_snapshot jsonb→[]byte (json marshal/unmarshal map[string]any), attendance_shift_date date→pgtype.Date, integer cols→int32, wfo→Wfo, flags text[]→[]string; new internal/domain/attendance/ SUBPACKAGE (not flat package domain) per plan
+- [Phase 07-e5-attendance]: [07-02]: VERIFY_OWN_RECORD=403 + terminal verify/reject=409 CONFLICT(fields.verification_status) + terminal correction=409 CONFLICT(fields.status) — matched openapi over CONTEXT; bulk verify/reject = loop-single + apperr.As → {succeeded,failed} 200/422, idempotency owned by the router middleware (not the service)
+- [Phase 07-e5-attendance]: [07-02]: CorrectionService.Approve applies the proposed change to the target attendance in the SAME tx (attRepo.ApplyCorrectionToAttendance COALESCE whitelist + CORRECTED flag + last_correction_id) then ApproveCorrection→APPLIED; OUTSIDE_CORRECTION_WINDOW exposed as exported CheckCorrectionWindow(shiftDate,isHR,now) seam for 07-03 (correction-CREATE is out of web scope)
+- [Phase 07-e5-attendance]: [07-02]: DTO required-nullable openapi fields (check_out_at/schedule_id/geofence_out/verified_by/lat_out...) are pointers WITHOUT omitempty → serialize as JSON null; denormalized display names use omitempty; cross-scope reads return 404 (hide existence), write-path scope returns 403 OUT_OF_SCOPE
 
 ### Pending Todos
 
@@ -181,6 +185,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T18:06:18.442Z
-Stopped at: Completed 07-e5-attendance/07-01-PLAN.md
+Last session: 2026-06-04T18:25:29.116Z
+Stopped at: Completed 07-e5-attendance/07-02-PLAN.md
 Resume file: None
