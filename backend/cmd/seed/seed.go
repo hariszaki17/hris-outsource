@@ -177,6 +177,15 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed service_lines: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 3 (03-04): Seed operational master data.
+	// Canonical leave types, attendance codes, and default overtime rule so the
+	// E2 master-data screens have content on first load.
+	// -----------------------------------------------------------------------
+	if err := seedMasterData(ctx, pool); err != nil {
+		return fmt.Errorf("seed master_data: %w", err)
+	}
+
 	return nil
 }
 
@@ -437,6 +446,147 @@ func seedServiceLines(ctx context.Context, pool *db.Pool) error {
 		}
 		slog.Info("seed: upserted position", "id", p.id, "name", p.name)
 	}
+
+	return nil
+}
+
+// seedMasterData inserts Phase-3 operational master-data fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// Leave types:
+//   - SWP-LT-001  "Cuti Tahunan"   code ANNUAL  is_annual=true  requires_document=false
+//   - SWP-LT-002  "Cuti Sakit"     code SICK    is_annual=false requires_document=true
+//
+// Attendance codes:
+//   - SWP-AC-001  code PRESENT  label "Hadir"     color #0F8B8D  is_workday=true  is_paid=true  is_billable=true  needs_verification=true
+//   - SWP-AC-002  code LATE     label "Terlambat"  color #E07A2A  same flags as PRESENT
+//
+// Overtime rules:
+//   - SWP-OTR-001  "Default OT"  service_line_id=NULL  weekday_rate=1.5 restday_rate=2.0 holiday_rate=3.0
+//     min_minutes=30 max_minutes_per_day=240 pre_approval_required=true
+func seedMasterData(ctx context.Context, pool *db.Pool) error {
+	// --- Leave types ---
+	type leaveType struct {
+		id                 string
+		name               string
+		code               string
+		description        string
+		defaultAnnualQuota int
+		isAnnual           bool
+		requiresDocument   bool
+		color              string
+	}
+
+	leaveTypes := []leaveType{
+		{
+			id:                 "SWP-LT-001",
+			name:               "Cuti Tahunan",
+			code:               "ANNUAL",
+			description:        "Cuti tahunan wajib sesuai peraturan ketenagakerjaan.",
+			defaultAnnualQuota: 12,
+			isAnnual:           true,
+			requiresDocument:   false,
+			color:              "#188E4D",
+		},
+		{
+			id:                 "SWP-LT-002",
+			name:               "Cuti Sakit",
+			code:               "SICK",
+			description:        "Cuti sakit dengan surat dokter.",
+			defaultAnnualQuota: 0,
+			isAnnual:           false,
+			requiresDocument:   true,
+			color:              "#E07A2A",
+		},
+	}
+
+	const ltQ = `
+		INSERT INTO leave_types
+			(id, name, code, description, default_annual_quota, is_annual, requires_document, color, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, lt := range leaveTypes {
+		if _, err := pool.Pool.Exec(ctx, ltQ,
+			lt.id, lt.name, lt.code, lt.description,
+			lt.defaultAnnualQuota, lt.isAnnual, lt.requiresDocument, lt.color,
+		); err != nil {
+			return fmt.Errorf("seed leave_type %q: %w", lt.id, err)
+		}
+		slog.Info("seed: upserted leave type", "id", lt.id, "code", lt.code)
+	}
+
+	// --- Attendance codes ---
+	type attendanceCode struct {
+		id                string
+		code              string
+		label             string
+		description       string
+		color             string
+		isWorkday         bool
+		isPaid            bool
+		isBillable        bool
+		needsVerification bool
+	}
+
+	attendanceCodes := []attendanceCode{
+		{
+			id:                "SWP-AC-001",
+			code:              "PRESENT",
+			label:             "Hadir",
+			description:       "Agen hadir dan bekerja pada hari yang bersangkutan.",
+			color:             "#0F8B8D",
+			isWorkday:         true,
+			isPaid:            true,
+			isBillable:        true,
+			needsVerification: true,
+		},
+		{
+			id:                "SWP-AC-002",
+			code:              "LATE",
+			label:             "Terlambat",
+			description:       "Agen hadir namun melewati jam masuk yang ditetapkan.",
+			color:             "#E07A2A",
+			isWorkday:         true,
+			isPaid:            true,
+			isBillable:        true,
+			needsVerification: true,
+		},
+	}
+
+	const acQ = `
+		INSERT INTO attendance_codes
+			(id, code, label, description, color, is_workday, is_paid, is_billable, needs_verification, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, ac := range attendanceCodes {
+		if _, err := pool.Pool.Exec(ctx, acQ,
+			ac.id, ac.code, ac.label, ac.description, ac.color,
+			ac.isWorkday, ac.isPaid, ac.isBillable, ac.needsVerification,
+		); err != nil {
+			return fmt.Errorf("seed attendance_code %q: %w", ac.id, err)
+		}
+		slog.Info("seed: upserted attendance code", "id", ac.id, "code", ac.code)
+	}
+
+	// --- Overtime rules ---
+	// SWP-OTR-001: global default overtime rule (service_line_id = NULL).
+	const otrQ = `
+		INSERT INTO overtime_rules
+			(id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+			 min_minutes, max_minutes_per_day, pre_approval_required, status)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, 'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	if _, err := pool.Pool.Exec(ctx, otrQ,
+		"SWP-OTR-001", "Default OT",
+		1.5, 2.0, 3.0,
+		30, 240, true,
+	); err != nil {
+		return fmt.Errorf("seed overtime_rule SWP-OTR-001: %w", err)
+	}
+	slog.Info("seed: upserted overtime rule", "id", "SWP-OTR-001", "name", "Default OT")
 
 	return nil
 }

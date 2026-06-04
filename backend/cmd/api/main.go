@@ -98,6 +98,11 @@ func run() error {
 	orgServiceLinesSvc := orgsvc.NewServiceLineService(orgServiceLinesRepo, txm)
 	orgServiceLinesHandler := orghttp.NewServiceLineHandler(orgServiceLinesSvc)
 
+	// Org slice (03-04): operational master data — leave types, attendance codes, overtime rules.
+	orgMasterDataRepo := orgrepo.NewMasterDataRepo(pool)
+	orgMasterDataSvc := orgsvc.NewMasterDataService(orgMasterDataRepo, txm)
+	orgMasterDataHandler := orghttp.NewMasterDataHandler(orgMasterDataSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:  cfg.HTTP.AllowedOrigins,
 		RatePerMinute:   cfg.Rate.PerMinute,
@@ -106,6 +111,7 @@ func run() error {
 		Foundations:     fndHandler,
 		OrgCompanies:    orgCompaniesHandler,
 		OrgServiceLines: orgServiceLinesHandler,
+		OrgMasterData:   orgMasterDataHandler,
 		Authn:           authn,
 		Idempotency:     idempotency.New(pool),
 		Obs:             observ,

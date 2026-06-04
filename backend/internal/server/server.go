@@ -34,9 +34,10 @@ type Deps struct {
 	// they use separate packages). See 03-02-SUMMARY.md for the coordination contract.
 	OrgCompanies    *orghttp.Handler
 	OrgServiceLines *orghttp.ServiceLineHandler // 03-03: service lines + positions
-	Authn        *auth.Authenticator
-	Idempotency  *idempotency.Middleware
-	Obs          *obs.Providers
+	OrgMasterData   *orghttp.MasterDataHandler  // 03-04: leave types, attendance codes, overtime rules
+	Authn           *auth.Authenticator
+	Idempotency     *idempotency.Middleware
+	Obs             *obs.Providers
 }
 
 // New builds the root HTTP handler.
@@ -160,6 +161,42 @@ func New(d Deps) http.Handler {
 				r.Delete("/positions/{position_id}", d.OrgServiceLines.SoftDeletePosition)
 			})
 			// ORG slice end (03-03). 03-04 sibling: append r.Group{} here.
+
+			// ---------------------------------------------------------------
+			// ORG slice (03-04): operational master data — leave types,
+			// attendance codes, overtime rules (E2 F2.5 / ORG-04).
+			// ---------------------------------------------------------------
+
+			// Leave-type + attendance-code reads: all roles (including agent).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Get("/leave-types", d.OrgMasterData.ListLeaveTypes)
+				r.Get("/attendance-codes", d.OrgMasterData.ListAttendanceCodes)
+			})
+
+			// Overtime-rule reads: super_admin, hr_admin, shift_leader (agent excluded per spec x-rbac).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/overtime-rules", d.OrgMasterData.ListOvertimeRules)
+			})
+
+			// All master-data writes: super_admin, hr_admin.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				// Leave types
+				r.With(d.Idempotency.Handler).Post("/leave-types", d.OrgMasterData.CreateLeaveType)
+				r.Patch("/leave-types/{leave_type_id}", d.OrgMasterData.UpdateLeaveType)
+				r.Delete("/leave-types/{leave_type_id}", d.OrgMasterData.SoftDeleteLeaveType)
+				// Attendance codes
+				r.With(d.Idempotency.Handler).Post("/attendance-codes", d.OrgMasterData.CreateAttendanceCode)
+				r.Patch("/attendance-codes/{attendance_code_id}", d.OrgMasterData.UpdateAttendanceCode)
+				r.Delete("/attendance-codes/{attendance_code_id}", d.OrgMasterData.SoftDeleteAttendanceCode)
+				// Overtime rules
+				r.With(d.Idempotency.Handler).Post("/overtime-rules", d.OrgMasterData.CreateOvertimeRule)
+				r.Patch("/overtime-rules/{overtime_rule_id}", d.OrgMasterData.UpdateOvertimeRule)
+				r.Delete("/overtime-rules/{overtime_rule_id}", d.OrgMasterData.SoftDeleteOvertimeRule)
+			})
+			// ORG slice end (03-04). Phase 4+ appends after this line.
 		})
 	})
 
