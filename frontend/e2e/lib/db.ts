@@ -299,3 +299,192 @@ export async function insertAuditRows(count: number): Promise<void> {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// E2 org/master-data verification helpers (added in Phase 03-06)
+// ---------------------------------------------------------------------------
+
+/**
+ * getCompanyStatus — return the status ('active' | 'inactive') for a client company by id,
+ * or null if not found.
+ */
+export async function getCompanyStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM client_companies WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
+/**
+ * countSitesForCompany — count client_sites rows for a given company id
+ * where deleted_at IS NULL and status = 'active'.
+ */
+export async function countSitesForCompany(companyId: string): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*) AS cnt FROM client_sites
+       WHERE client_company_id = $1 AND deleted_at IS NULL AND status = 'active'`,
+      [companyId],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}
+
+/**
+ * getSiteGeofence — return geo_lat, geo_lng, geofence_radius_m for a site, or null if not found.
+ */
+export async function getSiteGeofence(
+  siteId: string,
+): Promise<{ lat: number | null; lng: number | null; radius: number } | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{
+      geo_lat: number | null;
+      geo_lng: number | null;
+      geofence_radius_m: number;
+    }>(
+      'SELECT geo_lat, geo_lng, geofence_radius_m FROM client_sites WHERE id = $1',
+      [siteId],
+    );
+    if (res.rows.length === 0) return null;
+    const row = res.rows[0];
+    return { lat: row.geo_lat, lng: row.geo_lng, radius: row.geofence_radius_m };
+  });
+}
+
+/**
+ * getServiceLineStatus — return the status for a service line by id, or null if not found.
+ */
+export async function getServiceLineStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM service_lines WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
+/**
+ * getPositionStatus — return the status for a position by id, or null if not found.
+ * Note: soft-deleted positions have deleted_at set; status column may not exist —
+ * check deleted_at IS NULL as the "active" indicator.
+ */
+export async function getPositionStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ deleted_at: Date | null }>(
+      'SELECT deleted_at FROM positions WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    return res.rows[0].deleted_at === null ? 'active' : 'inactive';
+  });
+}
+
+/**
+ * countActivePositionsForLine — count positions for a service line where deleted_at IS NULL.
+ */
+export async function countActivePositionsForLine(lineId: string): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM positions WHERE service_line_id = $1 AND deleted_at IS NULL',
+      [lineId],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}
+
+/**
+ * getLeaveTypeStatus — return the status for a leave type by id, or null if not found.
+ * Soft-deleted rows have deleted_at set; check for that.
+ */
+export async function getLeaveTypeStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string; deleted_at: Date | null }>(
+      'SELECT status, deleted_at FROM leave_types WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    if (res.rows[0].deleted_at !== null) return 'inactive';
+    return res.rows[0].status ?? null;
+  });
+}
+
+/**
+ * getAttendanceCodeStatus — return the status for an attendance code by id, or null if not found.
+ */
+export async function getAttendanceCodeStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string; deleted_at: Date | null }>(
+      'SELECT status, deleted_at FROM attendance_codes WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    if (res.rows[0].deleted_at !== null) return 'inactive';
+    return res.rows[0].status ?? null;
+  });
+}
+
+/**
+ * getOvertimeRuleStatus — return the status for an overtime rule by id, or null if not found.
+ */
+export async function getOvertimeRuleStatus(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string; deleted_at: Date | null }>(
+      'SELECT status, deleted_at FROM overtime_rules WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    if (res.rows[0].deleted_at !== null) return 'inactive';
+    return res.rows[0].status ?? null;
+  });
+}
+
+/**
+ * getCompanyByName — return the id of a client company by name, or null if not found.
+ * Useful when a test creates a company and needs the generated id.
+ */
+export async function getCompanyByName(name: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ id: string }>(
+      'SELECT id FROM client_companies WHERE name = $1 ORDER BY created_at DESC LIMIT 1',
+      [name],
+    );
+    return res.rows[0]?.id ?? null;
+  });
+}
+
+/**
+ * getSiteByName — return the id of a site by name within a company, or null if not found.
+ */
+export async function getSiteByName(
+  companyId: string,
+  name: string,
+): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM client_sites
+       WHERE client_company_id = $1 AND name = $2 AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [companyId, name],
+    );
+    return res.rows[0]?.id ?? null;
+  });
+}
+
+/**
+ * countPrimarySitesForCompany — count how many sites have is_primary=true for a company.
+ * INV-5: exactly 1 primary site must exist at all times.
+ */
+export async function countPrimarySitesForCompany(companyId: string): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*) AS cnt FROM client_sites
+       WHERE client_company_id = $1 AND is_primary = true AND deleted_at IS NULL`,
+      [companyId],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}

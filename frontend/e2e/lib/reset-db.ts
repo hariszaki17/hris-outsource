@@ -64,7 +64,14 @@ const TRUNCATE_TABLES = [
   'password_reset_tokens',
   'refresh_tokens',
   'audit_log',
-  // Phase 2+: add company, site, employee, placement tables here when they land.
+  // Phase 3: E2 org/master-data tables (FK order: most-dependent first)
+  'positions',
+  'service_lines',
+  'client_sites',
+  'client_companies',
+  'leave_types',
+  'attendance_codes',
+  'overtime_rules',
 ];
 
 // ---------------------------------------------------------------------------
