@@ -14,7 +14,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
 
 ## Phases
 
-- [ ] **Phase 1: Test Harness + Auth** - Playwright full-stack harness + real login/refresh/logout/forgot/reset, FE wired to BE
+- [x] **Phase 1: Test Harness + Auth** - Playwright full-stack harness + real login/refresh/logout/forgot/reset, FE wired to BE (completed 2026-06-04)
 - [ ] **Phase 2: E1 Foundations** - Users, roles, audit log, platform settings
 - [ ] **Phase 3: E2 Org & Master Data** - Client companies, sites, service lines, positions, leave/attendance/overtime master data
 - [ ] **Phase 4: E2 People** - Employees, employment agreements, change requests
@@ -37,7 +37,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
   2. `backend/cmd/seed` seeds the four personas and minimal data; the harness migrates + seeds automatically in globalSetup.
   3. A user can log in via the web login screen (real `POST /auth/login`), reach the dashboard, refresh the token, and log out; `GET /auth/me` drives the session.
   4. Forgot-password and reset-password screens call the real BE; wrong-credentials / disabled-account / RBAC errors render the correct UI states.
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [ ] 01-01: Playwright harness — `frontend/e2e` package, `playwright.config.ts`, scripts (headless/headed/ui/debug/report), `docker-compose.e2e.yml`, globalSetup/Teardown booting BE+PG+migrate+seed
@@ -223,7 +223,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Test Harness + Auth | 4/5 | In Progress|  |
+| 1. Test Harness + Auth | 5/5 | Complete   | 2026-06-04 |
 | 2. E1 Foundations | 0/4 | Not started | - |
 | 3. E2 Org & Master Data | 0/4 | Not started | - |
 | 4. E2 People | 0/4 | Not started | - |
