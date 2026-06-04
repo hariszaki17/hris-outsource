@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-e1-foundations/02-01-PLAN.md
-last_updated: "2026-06-04T00:38:02.766Z"
+stopped_at: Completed 02-e1-foundations/02-02-PLAN.md
+last_updated: "2026-06-04T00:48:18.789Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 8
 ---
 
@@ -47,6 +47,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 01 P03 | 690 | 3 tasks | 16 files |
 | Phase 01-test-harness-auth P05 | 2413 | 2 tasks | 4 files |
 | Phase 02-e1-foundations P01 | 2 | 2 tasks | 7 files |
+| Phase 02-e1-foundations P02 | 25 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,11 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 02-e1-foundations]: ids.go unchanged — platform_settings keys are plain text (not SWP-prefixed); USR and AL prefixes already existed
 - [Phase 02-e1-foundations]: foundations/ query package at db/queries/foundations/ — sqlc glob db/queries/* picks up new subdirectories automatically
 - [Phase 02-e1-foundations]: platform_settings stored as flat key/value table matching openapi PlatformSettings shape; wave-2 maps rows to response object
+- [Phase 02-e1-foundations]: chi ':' action suffix routes match natively: '/users/{user_id}:change-role' works without sub-router
+- [Phase 02-e1-foundations]: status mapping: DB lowercase 'active'/'disabled' uppercased to ACTIVE/DISABLED only at DTO boundary
+- [Phase 02-e1-foundations]: ip field always null in audit responses — audit_log table has no ip column (migration 00004 omission)
+- [Phase 02-e1-foundations]: send-password-reset reuses auth.NewRefreshToken()+InsertResetToken (sha256, 1h TTL); no mailer; E2E reads from DB
+- [Phase 02-e1-foundations]: Session revocation on deactivate: out of scope in Phase 2; only status set; auth-side revocation deferred
 
 ### Pending Todos
 
@@ -88,6 +94,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:38:02.764Z
-Stopped at: Completed 02-e1-foundations/02-01-PLAN.md
+Last session: 2026-06-04T00:48:18.787Z
+Stopped at: Completed 02-e1-foundations/02-02-PLAN.md
 Resume file: None
