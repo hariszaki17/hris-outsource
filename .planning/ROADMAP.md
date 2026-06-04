@@ -130,10 +130,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 06-01: Migrations + sqlc queries (shift_masters, schedule_entries)
-- [ ] 06-02: Services + handlers (conflict engine, bulk-apply, scope guards)
-- [ ] 06-03: Go contract tests vs E4 openapi examples
-- [ ] 06-04: Playwright E2E for E4 (per Gherkin AC)
+- [ ] 06-01-PLAN.md (wave 1) — Migrations 00023-00025 + sqlc queries (shift_masters, schedule_entries, E4-owned approved_leave_days) + INV-1 partial unique index + domain types
+- [ ] 06-02-PLAN.md (wave 2, deps 06-01) — Services + handlers: conflict engine (all 6 codes, honest over-leave), :check dry-run, :bulk-apply partial success, shift-master CRUD + deactivate/reactivate, schedule CRUD, leader scope (GuardCompany), audit + notify stub, routes/main.go, seed
+- [ ] 06-03-PLAN.md (wave 3, deps 06-02) — Go contract tests vs E4 openapi (every conflict code, bulk-apply partial-success envelope, scope 403, cursor/list shapes)
+- [ ] 06-04-PLAN.md (wave 4, deps 06-02,06-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e4/ (shift-master CRUD, grid CRUD, conflict negatives incl. SHIFT_OVER_LEAVE, bulk-apply partial success, leader-scope 403), green headless
 
 ### Phase 7: E5 Attendance
 **Goal:** Attendance verification (incl. bulk) and corrections work against the real BE.
