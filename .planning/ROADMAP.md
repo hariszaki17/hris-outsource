@@ -58,10 +58,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 02-01: Migrations + sqlc queries (users already exist; audit_log exists; add platform_settings, user actions)
-- [ ] 02-02: Services + handlers + RBAC/idempotency/audit for users, audit-log, settings
-- [ ] 02-03: Go contract tests vs E1 openapi examples
-- [ ] 02-04: Playwright E2E for E1 foundations (per Gherkin AC)
+- [ ] 02-01-PLAN.md (wave 1) — Migration 00008 platform_settings + sqlc queries: users list/update/role/status, audit-log list(+filters)/get, settings read; make gen
+- [ ] 02-02-PLAN.md (wave 2, deps 02-01) — Foundations domain/repo/service/handlers + routes: users mgmt, audit-log read, settings; RBAC(super_admin,hr_admin) + idempotency + audit on writes; seed extension
+- [ ] 02-03-PLAN.md (wave 3, deps 02-02) — Go contract tests vs E1 openapi: exact shapes, status codes, cursor envelope, RBAC 403
+- [ ] 02-04-PLAN.md (wave 3, deps 02-02) — FE wiring (MSW off) + exhaustive Playwright E2E per E1 PRDs (users CRUD/role/status/reset, audit list/filter/paginate/detail, settings, RBAC negatives), green headless
 
 ### Phase 3: E2 Org & Master Data
 **Goal:** Client companies, sites, service lines, positions, and master data (leave types, attendance codes, overtime rules) work against the real BE.
