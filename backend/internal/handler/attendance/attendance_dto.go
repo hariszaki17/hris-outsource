@@ -1,0 +1,189 @@
+// Package attendance (handler) — attendance request/response DTOs + snake_case
+// mappers. The Attendance response matches the openapi byte-for-shape: nullable
+// required fields (check_out_at, schedule_id, geofence_out, verified_by, …) are
+// emitted as JSON `null` (pointer, NO omitempty). Timestamps are UTC RFC3339.
+package attendance
+
+import (
+	"time"
+
+	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
+	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
+)
+
+// --- request DTOs ---
+
+type verifyRequest struct {
+	Note string `json:"note"`
+}
+
+type rejectRequest struct {
+	Reason string `json:"reason"`
+}
+
+type bulkVerifyRequest struct {
+	IDs  []string `json:"ids"`
+	Note string   `json:"note"`
+}
+
+type bulkRejectRequest struct {
+	IDs    []string `json:"ids"`
+	Reason string   `json:"reason"`
+}
+
+// --- response DTOs ---
+
+// geofenceResponse is the openapi GeofenceCheck (omitted/null when no capture).
+type geofenceResponse struct {
+	Inside    bool `json:"inside"`
+	DistanceM int  `json:"distance_m"`
+	RadiusM   int  `json:"radius_m"`
+}
+
+// attendanceResponse is the openapi Attendance object. Required-nullable fields
+// use pointers WITHOUT omitempty so they serialize as `null`, not absent.
+type attendanceResponse struct {
+	ID               string  `json:"id"`
+	EmployeeID       string  `json:"employee_id"`
+	EmployeeName     *string `json:"employee_name,omitempty"`
+	PlacementID      string  `json:"placement_id"`
+	ScheduleID       *string `json:"schedule_id"`
+	CompanyID        string  `json:"company_id"`
+	CompanyName      *string `json:"company_name,omitempty"`
+	ServiceLine      string  `json:"service_line"`
+	AttendanceCodeID *string `json:"attendance_code_id"`
+
+	ShiftStartAt *string `json:"shift_start_at"`
+	ShiftEndAt   *string `json:"shift_end_at"`
+
+	CheckInAt  string   `json:"check_in_at"`
+	CheckOutAt *string  `json:"check_out_at"`
+	LatIn      float64  `json:"lat_in"`
+	LngIn      float64  `json:"lng_in"`
+	LatOut     *float64 `json:"lat_out"`
+	LngOut     *float64 `json:"lng_out"`
+	PhotoInID  *string  `json:"photo_in_id"`
+	PhotoOutID *string  `json:"photo_out_id"`
+
+	WFO           bool `json:"wfo"`
+	LateMinutes   int  `json:"late_minutes"`
+	WorkedMinutes *int `json:"worked_minutes"`
+	AutoClosed    bool `json:"auto_closed"`
+
+	Status             string   `json:"status"`
+	VerificationStatus string   `json:"verification_status"`
+	Flags              []string `json:"flags"`
+
+	GeofenceIn  *geofenceResponse `json:"geofence_in"`
+	GeofenceOut *geofenceResponse `json:"geofence_out"`
+
+	VerifiedBy       *string `json:"verified_by"`
+	VerifiedAt       *string `json:"verified_at"`
+	RejectedBy       *string `json:"rejected_by"`
+	RejectedAt       *string `json:"rejected_at"`
+	RejectReason     *string `json:"reject_reason"`
+	LastCorrectionID *string `json:"last_correction_id"`
+
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// dataResponse[T] is the generic single-object envelope `{ "data": ... }`.
+type dataResponse[T any] struct {
+	Data T `json:"data"`
+}
+
+// bulkActionResponse is the openapi BulkActionResponse (200 ≥1 succeeded / 422 all failed).
+type bulkActionResponse struct {
+	Succeeded []string         `json:"succeeded"`
+	Failed    []bulkFailedItem `json:"failed"`
+}
+
+type bulkFailedItem struct {
+	ID    string        `json:"id"`
+	Error bulkFailedErr `json:"error"`
+}
+
+type bulkFailedErr struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// --- mappers ---
+
+func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+func rfc3339Ptr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
+func toGeofenceResponse(g *att.GeofenceCheck) *geofenceResponse {
+	if g == nil {
+		return nil
+	}
+	return &geofenceResponse{Inside: g.Inside, DistanceM: g.DistanceM, RadiusM: g.RadiusM}
+}
+
+func toAttendanceResponse(a att.Attendance) attendanceResponse {
+	flags := make([]string, 0, len(a.Flags))
+	for _, f := range a.Flags {
+		flags = append(flags, string(f))
+	}
+	return attendanceResponse{
+		ID:                 a.ID,
+		EmployeeID:         a.EmployeeID,
+		EmployeeName:       a.EmployeeName,
+		PlacementID:        a.PlacementID,
+		ScheduleID:         a.ScheduleID,
+		CompanyID:          a.CompanyID,
+		CompanyName:        a.CompanyName,
+		ServiceLine:        a.ServiceLine,
+		AttendanceCodeID:   a.AttendanceCodeID,
+		ShiftStartAt:       rfc3339Ptr(a.ShiftStartAt),
+		ShiftEndAt:         rfc3339Ptr(a.ShiftEndAt),
+		CheckInAt:          rfc3339(a.CheckInAt),
+		CheckOutAt:         rfc3339Ptr(a.CheckOutAt),
+		LatIn:              a.LatIn,
+		LngIn:              a.LngIn,
+		LatOut:             a.LatOut,
+		LngOut:             a.LngOut,
+		PhotoInID:          a.PhotoInID,
+		PhotoOutID:         a.PhotoOutID,
+		WFO:                a.WFO,
+		LateMinutes:        a.LateMinutes,
+		WorkedMinutes:      a.WorkedMinutes,
+		AutoClosed:         a.AutoClosed,
+		Status:             string(a.Status),
+		VerificationStatus: string(a.VerificationStatus),
+		Flags:              flags,
+		GeofenceIn:         toGeofenceResponse(a.GeofenceIn),
+		GeofenceOut:        toGeofenceResponse(a.GeofenceOut),
+		VerifiedBy:         a.VerifiedBy,
+		VerifiedAt:         rfc3339Ptr(a.VerifiedAt),
+		RejectedBy:         a.RejectedBy,
+		RejectedAt:         rfc3339Ptr(a.RejectedAt),
+		RejectReason:       a.RejectReason,
+		LastCorrectionID:   a.LastCorrectionID,
+		CreatedAt:          rfc3339(a.CreatedAt),
+		UpdatedAt:          rfc3339(a.UpdatedAt),
+	}
+}
+
+func toBulkActionResponse(r svc.BulkResult) bulkActionResponse {
+	out := bulkActionResponse{
+		Succeeded: make([]string, 0, len(r.Succeeded)),
+		Failed:    make([]bulkFailedItem, 0, len(r.Failed)),
+	}
+	out.Succeeded = append(out.Succeeded, r.Succeeded...)
+	for _, f := range r.Failed {
+		out.Failed = append(out.Failed, bulkFailedItem{
+			ID:    f.ID,
+			Error: bulkFailedErr{Code: f.Code, Message: f.Message},
+		})
+	}
+	return out
+}
