@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: completed
 stopped_at: Completed 07-e5-attendance/07-04-PLAN.md
-last_updated: "2026-06-04T23:14:55.315Z"
-last_activity: "2026-06-04 — Plan 07-03 complete: E5 contract tests = the drift gate. 31 table-driven Go tests over the REAL attendance + correction services/handlers (chi router + mutable principal, in-memory fake repos): list/cursor envelopes {data,next_cursor,has_more}, leader-scope + OUT_OF_SCOPE 403, cross-scope 404, verify/reject 200, VERIFY_OWN_RECORD 403, terminal CONFLICT 409 (fields.verification_status/status), missing-reason 400 INVALID_REQUEST, bulk partial-success {succeeded,failed} 200/422, idempotency replay + IDEMPOTENCY_KEY_REUSED 409 (in-memory stub middleware mirroring the Postgres contract — real store covered by 07-04 E2E), correction get-with-diff (check_out_at row), approve→APPLIED (+ attendance CORRECTED), OUTSIDE_CORRECTION_WINDOW 422 (fields.attendance_date + window_days="7", HR exempt), and the CORRECTION_ALREADY_PENDING seam. All byte-for-shape vs docs/api/E5-attendance/openapi.yaml. go test ./... / go build / go vet / gofmt clean; no regressions. Ready for 07-04 FE wiring + E2E."
+last_updated: "2026-06-04T23:22:13.268Z"
+last_activity: "2026-06-05 — Plan 07-04 complete: E5 FE wired off MSW + exhaustive full-stack Playwright E2E (5 specs / 18 tests) GREEN vs real FE + real Go API + ephemeral Postgres — list/scope/detail, single verify/reject (+validation) + inline-queue verify, corrections approve (target attendance gains CORRECTED) + reject, bulk partial-success (terminal CONFLICT + PENDING succeeded), Postgres-backed idempotency replay + IDEMPOTENCY_KEY_REUSED 409, leader OUT_OF_SCOPE + VERIFY_OWN_RECORD 403 on seeded fixtures. Full pnpm e2e green (163 passed / 6 skipped / 0 failed; no e1/e2/e3/e4 regressions). Auto-fixed a harness defect: go run ./cmd/api orphaned its exe/api child on :8081 (SIGTERM not forwarded) -> stale binary served old routes -> 404; fixed via freePort(8081) pre-boot + detached process-group kill on teardown. ATT-01 + ATT-02 closed. reset-db + FE conflict_details audits were no-ops (07-02 already truncated the tables; no conflict_details literal in e5-attendance)."
 progress:
   total_phases: 11
   completed_phases: 7
