@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Completed 06-e4-schedule-shifts/06-04-PLAN.md
-last_updated: "2026-06-04T17:43:12.209Z"
+last_updated: "2026-06-04T17:48:04.252Z"
 last_activity: "2026-06-04 — Plan 06-04 complete: E4 full-stack E2E + FE wiring off MSW. 5 new frontend/e2e/tests/e4/ specs (27 tests): shift-master CRUD, schedule-grid cell CRUD via the real ShiftPickerPopover, all reachable conflict codes (DOUBLE_SHIFT/OUTSIDE_PLACEMENT_PERIOD/SHIFT_OVER_LEAVE honestly seeded SWP-LR-44210/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE), bulk-apply partial success, leader-scope 403. Fixed FE conflict_details→error.details read + extended reset-db to truncate E4 tables + added waitForToken for the post-goto 401 race. pnpm e2e GREEN: 145 passed, 0 failed, no e1/e2/e3 regressions."
 progress:
   total_phases: 11
