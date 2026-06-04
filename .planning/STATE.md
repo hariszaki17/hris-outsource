@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 06-e4-schedule-shifts/06-03-PLAN.md
-last_updated: "2026-06-04T16:28:42.835Z"
-last_activity: "2026-06-04 — Plan 06-03 complete: E4 Go contract tests (drift gate). Three files in internal/handler/scheduling/ over in-memory fakes (fakeShiftMasterRepo + fakeScheduleRepo with placements/approvedLeave/liveEntry maps) and the REAL services+handler. All six conflict codes asserted with exact status+code+details (OUT_OF_SCOPE 403, OUTSIDE_PLACEMENT_PERIOD/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE 422, SHIFT_OVER_LEAVE/DOUBLE_SHIFT 409), bulk-apply partial 200 / all-failed 422 / weekdays_mask, :check side-effect-free, force_replace MODIFIED+replaced_entry_id, list envelopes, DELETE 204 + leader past-date 403, shift-master DUPLICATE_NAME/BREAK_OUTSIDE_WINDOW/ALREADY_INACTIVE + leader-write 403. go test ./... green, zero regressions; vet+gofmt clean."
+status: completed
+stopped_at: Completed 06-e4-schedule-shifts/06-04-PLAN.md
+last_updated: "2026-06-04T17:43:12.209Z"
+last_activity: "2026-06-04 — Plan 06-04 complete: E4 full-stack E2E + FE wiring off MSW. 5 new frontend/e2e/tests/e4/ specs (27 tests): shift-master CRUD, schedule-grid cell CRUD via the real ShiftPickerPopover, all reachable conflict codes (DOUBLE_SHIFT/OUTSIDE_PLACEMENT_PERIOD/SHIFT_OVER_LEAVE honestly seeded SWP-LR-44210/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE), bulk-apply partial success, leader-scope 403. Fixed FE conflict_details→error.details read + extended reset-db to truncate E4 tables + added waitForToken for the post-goto 401 race. pnpm e2e GREEN: 145 passed, 0 failed, no e1/e2/e3 regressions."
 progress:
   total_phases: 11
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 29
-  completed_plans: 28
-  percent: 93
+  completed_plans: 29
+  percent: 97
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 5 — E3 Placement (next)
+**Current focus:** Phase 6 — E4 Schedule & Shifts COMPLETE (Phase 7 — E5 Attendance next)
 
 ## Current Position
 
-Phase: 6 of 11 (E4 Schedule & Shifts)
-Plan: 3 of 4 in current phase — Plan 06-03 COMPLETE
-Status: In progress
-Last activity: 2026-06-04 — Plan 06-03 complete: E4 Go contract tests (drift gate). Three files in internal/handler/scheduling/ over in-memory fakes (fakeShiftMasterRepo + fakeScheduleRepo with placements/approvedLeave/liveEntry maps) and the REAL services+handler. All six conflict codes asserted with exact status+code+details, bulk-apply partial 200 / all-failed 422 / weekdays_mask, :check side-effect-free, force_replace MODIFIED+replaced_entry_id, list envelopes, DELETE 204 + leader past-date 403, shift-master DUPLICATE_NAME/BREAK_OUTSIDE_WINDOW/ALREADY_INACTIVE + leader-write 403. go test ./... green, zero regressions; vet+gofmt clean.
+Phase: 6 of 11 (E4 Schedule & Shifts) — COMPLETE
+Plan: 4 of 4 in current phase — Plan 06-04 COMPLETE (phase done)
+Status: Phase complete
+Last activity: 2026-06-04 — Plan 06-04 complete: E4 full-stack E2E + FE wiring off MSW. 5 new frontend/e2e/tests/e4/ specs (27 tests): shift-master CRUD, schedule-grid cell CRUD via the real ShiftPickerPopover, all reachable conflict codes (DOUBLE_SHIFT/OUTSIDE_PLACEMENT_PERIOD/SHIFT_OVER_LEAVE honestly seeded SWP-LR-44210/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE), bulk-apply partial success, leader-scope 403. Fixed FE conflict_details→error.details read + extended reset-db to truncate E4 tables + added waitForToken for the post-goto 401 race. pnpm e2e GREEN: 145 passed, 0 failed, no e1/e2/e3 regressions.
 
 Progress: [██████████] 97%
 
@@ -69,6 +69,7 @@ Progress: [██████████] 97%
 | Phase 06-e4-schedule-shifts P01 | 5 | 3 tasks | 7 files |
 | Phase 06-e4-schedule-shifts P02 | 11 | 3 tasks | 13 files |
 | Phase 06-e4-schedule-shifts P03 | 4 | 2 tasks | 3 files |
+| Phase 06-e4-schedule-shifts P04 | 69 | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 06-e4-schedule-shifts]: [06-02]: over-leave delivered honestly via real approved_leave_days read; seed plants SWP-LR-44210 for EMP-3001 (monday+3) so SHIFT_OVER_LEAVE is exercisable now; PATCH /schedule re-runs engine with ForceReplace=true (self-edit not a double-shift); leader past-date DELETE → 403 (C-5)
 - [Phase 06-e4-schedule-shifts]: [06-03]: E4 contract tests = drift gate; fakeShiftMasterRepo (nameIndex DUPLICATE_NAME sentinel) + fakeScheduleRepo (placements/approvedLeave/liveEntry maps) over the REAL services+handler; all six conflict codes asserted with exact status+code+details, bulk-apply 200/422/weekdays_mask, :check no-write, force_replace MODIFIED+replaced_entry_id, leader past-date DELETE 403
 - [Phase 06-e4-schedule-shifts]: [06-03]: OUTSIDE_PLACEMENT_PERIOD asserted on code+422 only (engine emits it precisely when NO placement covers the date, so there is no placement to populate the detail — honest, not weakened); other detail-bearing codes assert full details
+- [Phase 06-e4-schedule-shifts]: [06-04]: FE conflict-details fix — ShiftPickerPopover reads :check failed[].error.details (was conflict_details, always undefined) so DOUBLE_SHIFT/over-leave block messages render against the real BE (mirrors Phase-5 error.details precedent)
+- [Phase 06-e4-schedule-shifts]: [06-04]: reset-db truncates E4 tables (schedule_entries/approved_leave_days/shift_masters before placements) so test-created schedule entries reset (seed is ON CONFLICT DO NOTHING); waitForToken() added to dodge the post-goto 401 race (in-memory access token re-hydrated async by tryRestoreSession)
+- [Phase 06-e4-schedule-shifts]: [06-04]: SHIFT_OVER_LEAVE delivered honestly via the seeded approved_leave_days row (SWP-LR-44210) — asserted via real 409 details.leave_request_id AND the real popover :check block toast; E6 (Phase 8) wires the production leave source. CH-1 creates a future cell first (C-5 leader past-date DELETE guard)
 
 ### Pending Todos
 
@@ -172,6 +176,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T16:28:33.411Z
-Stopped at: Completed 06-e4-schedule-shifts/06-03-PLAN.md
+Last session: 2026-06-04T17:42:20.144Z
+Stopped at: Completed 06-e4-schedule-shifts/06-04-PLAN.md
 Resume file: None

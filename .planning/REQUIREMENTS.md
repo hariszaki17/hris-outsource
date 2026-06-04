@@ -85,7 +85,7 @@
 | ORG-01..04 | Phase 3 | Complete (03-02..05) |
 | PPL-01..03 | Phase 4 | Pending |
 | PLC-01..04 | Phase 5 | Complete (05-01..04) |
-| SCH-01..03 | Phase 6 | Pending |
+| SCH-01..03 | Phase 6 | Complete (06-01..04) |
 | ATT-01..02 | Phase 7 | Pending |
 | LVE-01..03 | Phase 8 | Pending |
 | OVT-01..02 | Phase 9 | Pending |
