@@ -39,8 +39,9 @@ type Deps struct {
 	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
-	People           *peoplehttp.Handler
-	PeopleAgreements *peoplehttp.AgreementHandler // 04-03: agreements + attachments + file download
+	People                *peoplehttp.Handler
+	PeopleAgreements      *peoplehttp.AgreementHandler      // 04-03: agreements + attachments + file download
+	PeopleChangeRequests  *peoplehttp.ChangeRequestHandler  // 04-04: change-request HR approval queue
 	Authn           *auth.Authenticator
 	Idempotency     *idempotency.Middleware
 	Obs             *obs.Providers
@@ -260,6 +261,22 @@ func New(d Deps) http.Handler {
 				r.Post("/agreements/{agreement_id}/attachments", d.PeopleAgreements.UploadAttachment)
 			})
 			// PEOPLE agreements slice end (04-03). 04-04 change-requests: append here.
+
+			// ---------------------------------------------------------------
+			// PEOPLE change-requests slice (04-04): HR approval queue for
+			// agent-submitted profile-change requests (E2 F2.1 EP-5 / PPL-03).
+			// x-rbac: hr_admin, super_admin — no shift_leader or agent access.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				// List + detail reads.
+				r.Get("/change-requests", d.PeopleChangeRequests.ListPendingChangeRequests)
+				r.Get("/change-requests/{change_request_id}", d.PeopleChangeRequests.GetChangeRequest)
+				// Approve / reject actions.
+				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:approve", d.PeopleChangeRequests.ApproveChangeRequest)
+				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:reject", d.PeopleChangeRequests.RejectChangeRequest)
+			})
+			// PEOPLE change-requests slice end (04-04). Phase 5+ appends after this line.
 		})
 	})
 

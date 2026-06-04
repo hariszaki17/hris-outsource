@@ -118,6 +118,12 @@ func run() error {
 	agreementsSvc := peoplesvc.NewAgreementService(agreementsRepo, txm)
 	agreementsHandler := peoplehttp.NewAgreementHandler(agreementsSvc)
 
+	// People change-requests slice (04-04): HR approval queue for agent-submitted
+	// profile-change requests (E2 F2.1 EP-5 / PPL-03).
+	crRepo := peoplerepo.NewChangeRequestRepo(pool)
+	crSvc := peoplesvc.NewChangeRequestService(crRepo, txm)
+	crHandler := peoplehttp.NewChangeRequestHandler(crSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:   cfg.HTTP.AllowedOrigins,
 		RatePerMinute:    cfg.Rate.PerMinute,
@@ -127,9 +133,10 @@ func run() error {
 		OrgCompanies:     orgCompaniesHandler,
 		OrgServiceLines:  orgServiceLinesHandler,
 		OrgMasterData:    orgMasterDataHandler,
-		People:           peopleHandler,
-		PeopleAgreements: agreementsHandler,
-		Authn:            authn,
+		People:               peopleHandler,
+		PeopleAgreements:     agreementsHandler,
+		PeopleChangeRequests: crHandler,
+		Authn:                authn,
 		Idempotency:      idempotency.New(pool),
 		Obs:              observ,
 	})
