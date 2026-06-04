@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-e1-foundations/02-02-PLAN.md
-last_updated: "2026-06-04T00:48:18.789Z"
+stopped_at: Completed 02-e1-foundations/02-03-PLAN.md
+last_updated: "2026-06-04T00:54:52.837Z"
 last_activity: "2026-06-04 — Plan 01-04 complete: login/forgot/reset/logout wired to real @swp/api-client E1 hooks; SessionUser from MeResponse; credentials:'include' for cross-origin cookie refresh transport."
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 8
 ---
 
@@ -48,6 +48,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 01-test-harness-auth P05 | 2413 | 2 tasks | 4 files |
 | Phase 02-e1-foundations P01 | 2 | 2 tasks | 7 files |
 | Phase 02-e1-foundations P02 | 25 | 3 tasks | 9 files |
+| Phase 02-e1-foundations P03 | 15 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 02-e1-foundations]: ip field always null in audit responses — audit_log table has no ip column (migration 00004 omission)
 - [Phase 02-e1-foundations]: send-password-reset reuses auth.NewRefreshToken()+InsertResetToken (sha256, 1h TTL); no mailer; E2E reads from DB
 - [Phase 02-e1-foundations]: Session revocation on deactivate: out of scope in Phase 2; only status set; auth-side revocation deferred
+- [Phase 02-e1-foundations]: fakeTx instead of nil pgx.Tx: foundations service calls audit.Record inside InTx closures (unlike identity service); nil tx panics; fakeTx implements pgx.Tx with only Exec as no-op
+- [Phase 02-e1-foundations]: Dynamic principal injection: harness.principal is a mutable field read by a closure middleware, so tests can swap roles without re-building the chi router
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T00:48:18.787Z
-Stopped at: Completed 02-e1-foundations/02-02-PLAN.md
+Last session: 2026-06-04T00:54:52.835Z
+Stopped at: Completed 02-e1-foundations/02-03-PLAN.md
 Resume file: None
