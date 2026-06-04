@@ -190,13 +190,45 @@ function generateKeypair(): { privateKey: string; publicKey: string } {
 // ---------------------------------------------------------------------------
 // Step 7: Start Go API
 // ---------------------------------------------------------------------------
+/**
+ * freePort — kill any process still bound to a TCP port. `go run ./cmd/api` execs the
+ * compiled binary as a CHILD; a SIGTERM to the `go run` parent is NOT forwarded to that
+ * child, so a previous run can leave an ORPHAN `exe/api` holding :8081. The next run's
+ * fresh API then fails to bind and exits, while the orphan keeps serving the STALE binary
+ * (→ 404 on newly-added routes). Reaping the port-holder before boot guarantees the new
+ * binary actually serves. Best-effort: ignore "no such process" / empty results.
+ */
+function freePort(port: number): void {
+  try {
+    const pids = execSync(`lsof -ti tcp:${port} || true`, { encoding: 'utf8' })
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const pid of pids) {
+      console.log(`[e2e] freeing port ${port}: killing orphan pid ${pid}`);
+      try {
+        process.kill(Number(pid), 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    }
+  } catch {
+    /* lsof unavailable or nothing bound — fine */
+  }
+}
+
 function startApiProcess(testEnv: NodeJS.ProcessEnv): void {
+  // Reap any orphaned API from a prior run that still holds :8081 (go run doesn't
+  // forward SIGTERM to its child binary — see freePort docstring).
+  freePort(8081);
   console.log('[e2e] Starting Go API on :8081 (go run ./cmd/api) …');
   apiProcess = spawn('go', ['run', './cmd/api'], {
     cwd: BACKEND_DIR,
     env: { ...process.env, ...testEnv },
     stdio: ['ignore', 'inherit', 'inherit'],
-    detached: false,
+    // Own process group so stopBackend can SIGTERM the WHOLE tree (go run + exe/api),
+    // not just the `go run` parent (which would orphan the bound child).
+    detached: true,
   });
 
   apiProcess.on('error', (err) => {
@@ -260,11 +292,19 @@ export async function startBackend(): Promise<void> {
 export function stopBackend(): void {
   console.log('[e2e] ── stopBackend ─────────────────────────────────────────');
 
-  // Terminate the Go API process
-  if (apiProcess && !apiProcess.killed) {
-    apiProcess.kill('SIGTERM');
+  // Terminate the Go API. The API was spawned detached (its own process group), so
+  // signal the WHOLE group (negative pid) to also reap the `exe/api` child that `go run`
+  // execs — a plain apiProcess.kill() would only hit the `go run` parent and orphan the
+  // bound child. Fall back to freeing the port directly if anything slips through.
+  if (apiProcess && apiProcess.pid && !apiProcess.killed) {
+    try {
+      process.kill(-apiProcess.pid, 'SIGTERM');
+    } catch {
+      apiProcess.kill('SIGTERM');
+    }
     apiProcess = null;
   }
+  freePort(8081);
 
   // Tear down the Postgres container (including volumes)
   try {
