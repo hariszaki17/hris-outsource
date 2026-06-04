@@ -25,6 +25,12 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
 
+  // Allow 90 s per test: the first few tests hit a cold Vite dev server
+  // (first compilation + tryRestoreSession + real API round-trip) which can
+  // take 20-50 s on a warm machine. After the first load, all subsequent
+  // tests complete in 1-3 s.
+  timeout: 90_000,
+
   retries: process.env.CI ? 1 : 0,
 
   reporter: [['list'], ['html', { open: 'never' }]],

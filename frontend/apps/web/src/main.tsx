@@ -1,6 +1,6 @@
 import { Providers } from '@/app/providers.tsx';
 import { router } from '@/app/router.tsx';
-import { auth, installAuth } from '@/lib/auth.ts';
+import { auth, installAuth, tryRestoreSession } from '@/lib/auth.ts';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -17,14 +17,16 @@ async function enableMocking() {
   await worker.start({ onUnhandledRequest: 'bypass' });
 }
 
-void enableMocking().then(() => {
-  const root = document.getElementById('root');
-  if (!root) throw new Error('#root not found');
-  createRoot(root).render(
-    <StrictMode>
-      <Providers>
-        <RouterProvider router={router} />
-      </Providers>
-    </StrictMode>,
-  );
-});
+void enableMocking()
+  .then(() => tryRestoreSession())
+  .then(() => {
+    const root = document.getElementById('root');
+    if (!root) throw new Error('#root not found');
+    createRoot(root).render(
+      <StrictMode>
+        <Providers>
+          <RouterProvider router={router} />
+        </Providers>
+      </StrictMode>,
+    );
+  });

@@ -202,3 +202,100 @@ export async function countResetTokensFor(email: string): Promise<number> {
     return parseInt(res.rows[0]?.cnt ?? '0', 10);
   });
 }
+
+// ---------------------------------------------------------------------------
+// E1 foundations helpers (added in Phase 02-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * getUserStatus — return the status ('active' | 'disabled') for a user, or null if not found.
+ *
+ * Used to assert both sides of deactivate → reactivate flows.
+ *
+ * @param email The user's email address (case-insensitive).
+ * @returns     'active' | 'disabled' | null
+ */
+export async function getUserStatus(email: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ status: string }>(
+      'SELECT status FROM users WHERE lower(email) = lower($1)',
+      [email],
+    );
+    return res.rows[0]?.status ?? null;
+  });
+}
+
+/**
+ * getUserRole — return the role for a user, or null if not found.
+ *
+ * Used to assert DB-side after change-role operations.
+ *
+ * @param email The user's email address (case-insensitive).
+ * @returns     'super_admin' | 'hr_admin' | 'shift_leader' | 'agent' | null
+ */
+export async function getUserRole(email: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ role: string }>(
+      'SELECT role FROM users WHERE lower(email) = lower($1)',
+      [email],
+    );
+    return res.rows[0]?.role ?? null;
+  });
+}
+
+/**
+ * countAuditRowsByEntityType — count rows in audit_log where entity_type = $1.
+ *
+ * Used to verify that mutations write audit records (e.g. after change-role).
+ *
+ * @param entityType The entity_type to count (e.g. 'user', 'placement').
+ * @returns          The row count.
+ */
+export async function countAuditRowsByEntityType(entityType: string): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM audit_log WHERE entity_type = $1',
+      [entityType],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}
+
+/**
+ * getLatestAuditAction — return the most recent action value from audit_log, or null.
+ *
+ * Used to verify the exact action recorded after a mutation (e.g. 'user.change_role').
+ *
+ * @returns The action string of the most recent audit_log row, or null if table is empty.
+ */
+export async function getLatestAuditAction(): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ action: string }>(
+      'SELECT action FROM audit_log ORDER BY created_at DESC LIMIT 1',
+    );
+    return res.rows[0]?.action ?? null;
+  });
+}
+
+/**
+ * insertAuditRows — insert N synthetic audit_log rows for pagination tests.
+ *
+ * Each row is a 'user.create' action targeting a synthetic entity id so it
+ * fills the page without conflicting with real seeded rows.
+ * Columns match migration 00004: before_state/after_state (jsonb), id via swp_next_id('AL').
+ *
+ * @param count How many rows to insert.
+ */
+export async function insertAuditRows(count: number): Promise<void> {
+  await withClient(async (client) => {
+    for (let i = 0; i < count; i++) {
+      // Use a synthetic entity_id (no FK) — audit_log has no FK on entity_id.
+      // The id column is a generated SWP-AL-<N> using the id_counters sequence.
+      await client.query(
+        `INSERT INTO audit_log (id, actor_user_id, actor_role, action, entity_type, entity_id, before_state, after_state, request_id)
+         VALUES ('SWP-AL-' || swp_next_id('AL'), NULL, NULL, 'user.create', 'user', $1, NULL, '{}'::jsonb, 'req-synthetic-' || $2::text)`,
+        [`SWP-USR-SYNTH-${i.toString().padStart(5, '0')}`, i],
+      );
+    }
+  });
+}

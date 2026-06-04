@@ -102,3 +102,53 @@ export function installAuth() {
     onUnauthenticated: () => auth.clear(),
   });
 }
+
+/**
+ * tryRestoreSession — attempt to hydrate the auth state from the httpOnly refresh cookie.
+ *
+ * Called once at app bootstrap (before React mounts). If the user previously logged in
+ * and the refresh cookie is still valid, this restores the in-memory access token so that
+ * the TanStack Router `beforeLoad` guard does not redirect authenticated users to /login
+ * on page reload.
+ *
+ * Flow:
+ *   1. POST /auth/refresh with credentials:'include' — cookie is read by the BE.
+ *   2. If 200, extract access_token and call GET /auth/me with the token.
+ *   3. Set auth.login(token, sessionUser) so `isAuthenticated()` returns true.
+ *   4. On any failure (401, network error) — silently leave auth as unauthenticated.
+ *      The router guards handle the redirect to /login.
+ */
+export async function tryRestoreSession(): Promise<void> {
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api/v1';
+  try {
+    // Step 1: Refresh. The BE reads the token from the httpOnly cookie.
+    // We send an empty body (cookie is the real source per readRefreshToken in handler.go).
+    const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: '' }),
+    });
+    if (!refreshRes.ok) return; // No valid cookie → stay unauthenticated.
+
+    const refreshData = (await refreshRes.json()) as { access_token: string };
+    const token = refreshData.access_token;
+    if (!token) return;
+
+    // Step 2: Fetch the current user.
+    const meRes = await fetch(`${baseUrl}/auth/me`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!meRes.ok) return;
+
+    const meData = (await meRes.json()) as Parameters<typeof buildSessionUser>[0];
+    const sessionUser = buildSessionUser(meData);
+
+    // Step 3: Hydrate the in-memory auth state.
+    auth.login(token, sessionUser);
+  } catch {
+    // Network error or JSON parse failure — remain unauthenticated.
+  }
+}
