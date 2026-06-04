@@ -29,9 +29,9 @@
 - [x] **ORG-04**: Master data — leave types, attendance codes, overtime rules (list/create/update/soft-delete).
 
 ### E2 People (Phase 4)
-- [ ] **PPL-01**: Employees — list/detail/create/update/deactivate/reactivate.
-- [ ] **PPL-02**: Employment agreements — list/detail/create/renew/close + attachment upload.
-- [ ] **PPL-03**: Change requests — list/detail/approve/reject (HR approval queue).
+- [x] **PPL-01**: Employees — list/detail/create/update/deactivate/reactivate.
+- [x] **PPL-02**: Employment agreements — list/detail/create/renew/close + attachment upload.
+- [x] **PPL-03**: Change requests — list/detail/approve/reject (HR approval queue).
 
 ### E3 Placement (Phase 5)
 - [ ] **PLC-01**: Placements — list (incl. expiring)/detail/create with INV-1..4 enforcement.
