@@ -200,6 +200,47 @@ type PasswordResetToken struct {
 	CreatedAt time.Time
 }
 
+type Placement struct {
+	ID                         string
+	EmployeeID                 string
+	AgreementID                string
+	ClientCompanyID            string
+	SiteID                     string
+	ServiceLineID              string
+	PositionID                 string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	AnnualLeaveEntitlementDays *int32
+	BaseSalaryRefIdr           *int64
+	Notes                      *string
+	LifecycleStatus            string
+	StatusChangedAt            time.Time
+	EndedReason                *string
+	EndedAt                    pgtype.Date
+	TerminationReason          *string
+	ResignAt                   pgtype.Date
+	PredecessorID              *string
+	SuccessorID                *string
+	BackdateReason             *string
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+	DeletedAt                  *time.Time
+}
+
+type PlacementHistory struct {
+	ID            int64
+	PlacementID   string
+	Action        string
+	ActorUserID   *string
+	Reason        *string
+	EffectiveDate pgtype.Date
+	StatusBefore  *string
+	StatusAfter   *string
+	Notes         *string
+	CreatedAt     time.Time
+}
+
 type PlatformSetting struct {
 	Key    string
 	Value  string
@@ -239,6 +280,20 @@ type ServiceLine struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
+}
+
+type ShiftLeaderAssignment struct {
+	ID              string
+	ClientCompanyID string
+	SiteID          *string
+	EmployeeID      string
+	AssignedAt      time.Time
+	UnassignedAt    *time.Time
+	AssignedBy      *string
+	VacatedReason   *string
+	Notes           *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type User struct {

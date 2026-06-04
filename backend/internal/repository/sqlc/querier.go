@@ -31,10 +31,14 @@ type Querier interface {
 	CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams) (CreateLeaveTypeRow, error)
 	// Allocates the SWP-OTR id inline from the per-prefix sequence.
 	CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error)
+	// id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
+	CreatePlacement(ctx context.Context, arg CreatePlacementParams) (CreatePlacementRow, error)
 	// Allocates the SWP-POS id inline from the per-prefix sequence.
 	CreatePosition(ctx context.Context, arg CreatePositionParams) (CreatePositionRow, error)
 	// Allocates the SWP-SVC id inline from the per-prefix sequence.
 	CreateServiceLine(ctx context.Context, name string) (CreateServiceLineRow, error)
+	// id allocated by the column DEFAULT ('SWP-SLA-' || swp_next_id('SLA')).
+	CreateShiftLeaderAssignment(ctx context.Context, arg CreateShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
 	// Allocates the SWP-SITE id inline from the per-prefix sequence.
 	CreateSite(ctx context.Context, arg CreateSiteParams) (CreateSiteRow, error)
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
@@ -42,8 +46,20 @@ type Querier interface {
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
+	// Sets unassigned_at=now() + vacated_reason (release the active partial unique index).
+	EndShiftLeaderAssignment(ctx context.Context, arg EndShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
 	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
+	// INV-3 lock: the employee's active leadership assignment, row-locked.
+	GetActiveAssignmentForEmployeeForUpdate(ctx context.Context, employeeID string) (ShiftLeaderAssignment, error)
+	// INV-2 company-scope lock: active leader of a company-scope unit, row-locked.
+	GetActiveLeaderForCompanyForUpdate(ctx context.Context, clientCompanyID string) (ShiftLeaderAssignment, error)
+	// INV-2 site-scope lock: active leader of a site-scope unit, row-locked.
+	GetActiveLeaderForSiteForUpdate(ctx context.Context, siteID *string) (ShiftLeaderAssignment, error)
+	// INV-1 service pre-check (friendly 409 before hitting the partial unique index).
+	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (GetActivePlacementForEmployeeRow, error)
+	// INV-4 lock: the agent's active placement at a specific company, row-locked.
+	GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Context, arg GetActivePlacementForEmployeeAtCompanyForUpdateParams) (GetActivePlacementForEmployeeAtCompanyForUpdateRow, error)
 	GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error)
 	// Returns file metadata + blob for the authenticated file-download handler.
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
@@ -56,15 +72,22 @@ type Querier interface {
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
+	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
+	// All placements sharing a predecessor/successor chain with the given placement
+	// (for history_chain). Walks both directions from the seed via a recursive CTE.
+	GetPlacementChain(ctx context.Context, id string) ([]GetPlacementChainRow, error)
 	GetPositionByID(ctx context.Context, id string) (GetPositionByIDRow, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
 	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
 	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetServiceLineByID(ctx context.Context, id string) (GetServiceLineByIDRow, error)
+	GetShiftLeaderAssignmentByID(ctx context.Context, id string) (GetShiftLeaderAssignmentByIDRow, error)
 	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
 	// Login lookup: active, non-deleted user by case-insensitive email.
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
+	// E3 placement_history queries — one row per lifecycle transition.
+	InsertPlacementHistory(ctx context.Context, arg InsertPlacementHistoryParams) (PlacementHistory, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
@@ -86,17 +109,35 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip/email_personal/phone), status.
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
+	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
+	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
+	ListExpiringPlacements(ctx context.Context, arg ListExpiringPlacementsParams) ([]ListExpiringPlacementsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_annual.
 	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, service_line (scopes to a specific line or global).
 	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
+	ListPlacementHistory(ctx context.Context, placementID string) ([]PlacementHistory, error)
+	// E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
+	// master tables to fill the denormalized *_name fields the spec returns.
+	// Param→column note: the FE/spec params are `status` / `status__in`; both filter
+	// the `lifecycle_status` column. No param is literally named `lifecycle_status`.
+	// Cursor page ordered by (status_changed_at desc, id desc). Fetch limit+1 for has_more.
+	// Filters: company_id, service_line_id, employee_id, agreement_id,
+	//   status (single → lifecycle_status =), status__in (CSV → lifecycle_status = ANY),
+	//   q (ILIKE over agent name / employee_id / company name),
+	//   end_date__lte (expiring cutoff), include_history (exclude terminal states unless true).
+	ListPlacements(ctx context.Context, arg ListPlacementsParams) ([]ListPlacementsRow, error)
 	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
 	// Cursor page ordered by (created_at desc, id desc), scoped to one service line.
 	ListPositionsForLine(ctx context.Context, arg ListPositionsForLineParams) ([]ListPositionsForLineRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	ListServiceLines(ctx context.Context, arg ListServiceLinesParams) ([]ListServiceLinesRow, error)
+	// E3 shift_leader_assignments queries (F3.4 / SL-*). Reads LEFT JOIN the company
+	// and employee tables to fill the denormalized *_name fields.
+	// Filters: company_id, employee_id, active (unassigned_at IS NULL).
+	ListShiftLeaderAssignments(ctx context.Context, arg ListShiftLeaderAssignmentsParams) ([]ListShiftLeaderAssignmentsRow, error)
 	// Cursor page: primary first, then created_at desc, id desc.
 	// Keyset cursor on (created_at, id); is_primary DESC is the primary sort but
 	// keyset uses the sub-sort (created_at, id) for stable pagination.
@@ -105,6 +146,8 @@ type Querier interface {
 	// Filters are optional: a NULL sqlc.narg means "no filter" via the `(arg IS NULL OR col = arg)` idiom.
 	// Free-text q matches email or full_name (ILIKE '%' || q || '%').
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
+	// INV-1 / period-overlap lock: all of the agent's placements, row-locked.
+	LockEmployeePlacements(ctx context.Context, employeeID string) ([]LockEmployeePlacementsRow, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
 	// Drives :approve (status='approved') and :reject (status='rejected').
@@ -115,6 +158,13 @@ type Querier interface {
 	// Reuse detection: kill every live token in the family.
 	RevokeFamily(ctx context.Context, familyID string) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
+	// Company roster (RO-*). Filters: status (single), status__in (CSV),
+	// service_line_id, include_history. Keyset on (status_changed_at desc, id desc).
+	RosterForCompany(ctx context.Context, arg RosterForCompanyParams) ([]RosterForCompanyRow, error)
+	// CompanyRosterSummary by_service_line counts (active placements only).
+	RosterSummaryByServiceLine(ctx context.Context, clientCompanyID string) ([]RosterSummaryByServiceLineRow, error)
+	// CompanyRosterSummary by_status counts (non-deleted; non-terminal unless caller filters).
+	RosterSummaryByStatus(ctx context.Context, clientCompanyID string) ([]RosterSummaryByStatusRow, error)
 	// Drives :close (status='closed') and supersede-on-renew (status='superseded').
 	// Also sets closed_reason, closed_at, successor_id as applicable.
 	SetAgreementStatus(ctx context.Context, arg SetAgreementStatusParams) (SetAgreementStatusRow, error)
@@ -130,6 +180,10 @@ type Querier interface {
 	SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatusParams) (SetLeaveTypeStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetOvertimeRuleStatus(ctx context.Context, arg SetOvertimeRuleStatusParams) (SetOvertimeRuleStatusRow, error)
+	// Drives end/terminate/resign/transfer/supersede. status_changed_at=now().
+	SetPlacementLifecycle(ctx context.Context, arg SetPlacementLifecycleParams) (SetPlacementLifecycleRow, error)
+	SetPlacementPredecessor(ctx context.Context, arg SetPlacementPredecessorParams) error
+	SetPlacementSuccessor(ctx context.Context, arg SetPlacementSuccessorParams) error
 	// Drives soft-delete-like deactivation (status='inactive') or reactivation.
 	SetPositionStatus(ctx context.Context, arg SetPositionStatusParams) (SetPositionStatusRow, error)
 	// Drives :discontinue (status='inactive') and :reactivate (status='active').
@@ -151,6 +205,8 @@ type Querier interface {
 	UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	// Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
+	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
 	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
 	UpdateServiceLine(ctx context.Context, arg UpdateServiceLineParams) (UpdateServiceLineRow, error)
 	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
