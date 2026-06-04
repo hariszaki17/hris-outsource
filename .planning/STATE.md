@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-e2-people/04-05-PLAN.md
-last_updated: "2026-06-04T06:38:14.624Z"
+stopped_at: Completed 04-e2-people/04-06-PLAN.md
+last_updated: "2026-06-04T13:06:33.321Z"
 last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
 progress:
   total_phases: 11
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
   percent: 8
 ---
 
@@ -61,6 +61,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 04-e2-people P03 | 385 | 3 tasks | 9 files |
 | Phase 04-e2-people P04 | 329 | 3 tasks | 8 files |
 | Phase 04-e2-people P05 | 25 | 3 tasks | 3 files |
+| Phase 04-e2-people P06 | 5400 | 4 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 04-e2-people]: Notification dispatch on CR resolution deferred: stub comment in ApproveChangeRequest + RejectChangeRequest marks Phase N (notifications epic) integration point
 - [Phase 04-e2-people]: Old->new diff computed live in GetChangeRequestDetail (not stored snapshot): old = current employee values at query time; audit_log captures exact before/after at approve time
 - [Phase 04-e2-people]: FILE_TOO_LARGE 413 and PKWT_PERIOD_EXCEEDS_MAX 422 confirmed by contract tests: apperr.Error struct literals bypass statusForCode
+- [Phase 04-e2-people]: BankAccount json tags: added snake_case json tags to domain.BankAccount so diff serialization uses keys FE formatDiffValue expects; also fixes jsonb unmarshal from DB seed
+- [Phase 04-e2-people]: RenewAgreement: supersede predecessor before insert — releases partial unique index on active employee; prevents ACTIVE_AGREEMENT_EXISTS on renew
+- [Phase 04-e2-people]: window.__swp_get_token__ E2E helper: exposes in-memory access token on window in VITE_ENABLE_MSW=false mode; allows page.evaluate() to make authenticated API requests
 
 ### Pending Todos
 
@@ -139,6 +143,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T06:38:14.621Z
-Stopped at: Completed 04-e2-people/04-05-PLAN.md
+Last session: 2026-06-04T13:06:33.318Z
+Stopped at: Completed 04-e2-people/04-06-PLAN.md
 Resume file: None
