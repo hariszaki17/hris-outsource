@@ -118,6 +118,19 @@ var extraPersonas = []persona{
 func Seed(ctx context.Context, pool *db.Pool) error {
 	q := sqlcgen.New(pool.Pool)
 
+	// -----------------------------------------------------------------------
+	// Phase 4 (04-02): Seed employee rows BEFORE the persona user loop.
+	//
+	// CRITICAL ORDERING: The persona user rows reference employeeID literals
+	// (SWP-EMP-1042, SWP-EMP-1108, SWP-EMP-2891, SWP-EMP-3001/3002/3003).
+	// Those IDs must exist in the employees table before CreateUser sets
+	// employee_id on each user (FK not enforced but the row must exist for
+	// /auth/me to resolve the employee record).
+	// -----------------------------------------------------------------------
+	if err := seedEmployees(ctx, pool); err != nil {
+		return fmt.Errorf("seed employees: %w", err)
+	}
+
 	allPersonas := append(personas, extraPersonas...)
 
 	for _, p := range allPersonas {
@@ -276,6 +289,116 @@ func seedAuditLog(ctx context.Context, pool *db.Pool) error {
 		}
 	}
 	slog.Info("seed: inserted audit_log rows", "count", len(rows))
+	return nil
+}
+
+// seedEmployees inserts Phase-4 employee fixtures for all persona IDs.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// ORDERING CONTRACT: This function MUST be called before the persona user-seed
+// loop (which sets employee_id on each user row). See Seed() for details.
+//
+// Personas:
+//   - SWP-EMP-1042  Sari Hadi       (hr_admin persona)
+//   - SWP-EMP-1108  Rudi Wijaya     (shift_leader persona)
+//   - SWP-EMP-2891  Budi Santoso    (agent persona — has phone + BCA bank for change-request E2E)
+//   - SWP-EMP-3001  Dewi Lestari    (extra agent persona)
+//   - SWP-EMP-3002  Agus Pratama    (extra shift_leader persona)
+//   - SWP-EMP-3003  Bambang Sutrisno (extra hr_admin persona)
+func seedEmployees(ctx context.Context, pool *db.Pool) error {
+	type employee struct {
+		id                    string
+		fullName              string
+		nik                   string
+		nip                   string
+		joinAt                string // YYYY-MM-DD
+		gender                string
+		phone                 *string
+		bankName              *string
+		bankAccountNumber     *string
+		bankAccountHolderName *string
+	}
+
+	bca := "BCA"
+	bcaAccount := "1234567890"
+	budiName := "Budi Santoso"
+	budiPhone := "+62-812-3344-5566"
+
+	employees := []employee{
+		{
+			id:       "SWP-EMP-1042",
+			fullName: "Sari Hadi",
+			nik:      "3175001505900042",
+			nip:      "1042",
+			joinAt:   "2020-03-01",
+			gender:   "FEMALE",
+		},
+		{
+			id:       "SWP-EMP-1108",
+			fullName: "Rudi Wijaya",
+			nik:      "3175001505900108",
+			nip:      "1108",
+			joinAt:   "2019-07-15",
+			gender:   "MALE",
+		},
+		{
+			id:                    "SWP-EMP-2891",
+			fullName:              "Budi Santoso",
+			nik:                   "3175001505902891",
+			nip:                   "2891",
+			joinAt:                "2021-01-10",
+			gender:                "MALE",
+			phone:                 &budiPhone,
+			bankName:              &bca,
+			bankAccountNumber:     &bcaAccount,
+			bankAccountHolderName: &budiName,
+		},
+		{
+			id:       "SWP-EMP-3001",
+			fullName: "Dewi Lestari",
+			nik:      "3175001505903001",
+			nip:      "3001",
+			joinAt:   "2022-04-01",
+			gender:   "FEMALE",
+		},
+		{
+			id:       "SWP-EMP-3002",
+			fullName: "Agus Pratama",
+			nik:      "3175001505903002",
+			nip:      "3002",
+			joinAt:   "2022-04-01",
+			gender:   "MALE",
+		},
+		{
+			id:       "SWP-EMP-3003",
+			fullName: "Bambang Sutrisno",
+			nik:      "3175001505903003",
+			nip:      "3003",
+			joinAt:   "2022-04-01",
+			gender:   "MALE",
+		},
+	}
+
+	const empQ = `
+		INSERT INTO employees
+			(id, full_name, nik, nip, join_at, gender,
+			 phone, bank_name, bank_account_number, bank_account_holder_name,
+			 status)
+		VALUES ($1, $2, $3, $4, $5::date, $6,
+		        $7, $8, $9, $10,
+		        'active')
+		ON CONFLICT (id) DO NOTHING`
+
+	for _, e := range employees {
+		if _, err := pool.Pool.Exec(ctx, empQ,
+			e.id, e.fullName, e.nik, e.nip, e.joinAt, e.gender,
+			e.phone, e.bankName, e.bankAccountNumber, e.bankAccountHolderName,
+		); err != nil {
+			return fmt.Errorf("seed employee %q: %w", e.id, err)
+		}
+		slog.Info("seed: upserted employee", "id", e.id, "name", e.fullName)
+	}
+
 	return nil
 }
 
