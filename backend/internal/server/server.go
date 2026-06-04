@@ -13,6 +13,7 @@ import (
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
+	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -39,12 +40,14 @@ type Deps struct {
 	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
-	People                *peoplehttp.Handler
-	PeopleAgreements      *peoplehttp.AgreementHandler      // 04-03: agreements + attachments + file download
-	PeopleChangeRequests  *peoplehttp.ChangeRequestHandler  // 04-04: change-request HR approval queue
-	Authn           *auth.Authenticator
-	Idempotency     *idempotency.Middleware
-	Obs             *obs.Providers
+	People               *peoplehttp.Handler
+	PeopleAgreements     *peoplehttp.AgreementHandler     // 04-03: agreements + attachments + file download
+	PeopleChangeRequests *peoplehttp.ChangeRequestHandler // 04-04: change-request HR approval queue
+	// PLACEMENT slice (05-02): placements + lifecycle + shift-leader + roster (E3).
+	Placement   *placementhttp.Handler
+	Authn       *auth.Authenticator
+	Idempotency *idempotency.Middleware
+	Obs         *obs.Providers
 }
 
 // New builds the root HTTP handler.
@@ -277,6 +280,41 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:reject", d.PeopleChangeRequests.RejectChangeRequest)
 			})
 			// PEOPLE change-requests slice end (04-04). Phase 5+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// PLACEMENT slice (05-02): E3 placement CRUD + lifecycle actions,
+			// shift-leader assignment (INV-2/3/4), and the company roster.
+			// COORDINATION POINT: future Phase-5 slices append AFTER this block.
+			// ---------------------------------------------------------------
+
+			// Placement reads: super_admin, hr_admin, shift_leader (company_or_global).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/placements", d.Placement.ListPlacements)
+				// DEDICATED expiring endpoint — the FE useListExpiringPlacements toggle hits
+				// GET /placements/expiring?within_days=N. In chi a static segment wins over a
+				// {param} at the same position regardless of order; register it BEFORE
+				// "/placements/{id}" for clarity so it is never shadowed.
+				r.Get("/placements/expiring", d.Placement.ListExpiringPlacements)
+				r.Get("/placements/{id}", d.Placement.GetPlacement)
+				r.Get("/client-companies/{company_id}/roster", d.Placement.GetCompanyRoster)
+			})
+
+			// Placement + shift-leader writes: super_admin, hr_admin (global).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/placements", d.Placement.CreatePlacement)
+				r.Patch("/placements/{id}", d.Placement.UpdatePlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:renew", d.Placement.RenewPlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:transfer", d.Placement.TransferPlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:end", d.Placement.EndPlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:resign", d.Placement.ResignPlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:terminate", d.Placement.TerminatePlacement)
+				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments", d.Placement.CreateShiftLeaderAssignment)
+				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments/{id}:replace", d.Placement.ReplaceShiftLeaderAssignment)
+				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments/{id}:end", d.Placement.EndShiftLeaderAssignment)
+			})
+			// PLACEMENT slice end (05-02). Phase 5+ appends after this line.
 		})
 	})
 

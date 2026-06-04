@@ -18,6 +18,7 @@ import (
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
+	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -28,11 +29,13 @@ import (
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
+	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
+	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
 )
 
 func main() {
@@ -124,21 +127,33 @@ func run() error {
 	crSvc := peoplesvc.NewChangeRequestService(crRepo, txm)
 	crHandler := peoplehttp.NewChangeRequestHandler(crSvc)
 
+	// Placement slice (05-02): E3 placement CRUD + lifecycle + shift-leader + roster.
+	// The placement and shift-leader services are mutually referential (the
+	// placement service auto-vacates leadership on resolution; both join the
+	// current leader), so wire the leader service into the placement service.
+	placementRepo := placementrepo.NewPlacementRepo(pool)
+	leaderRepo := placementrepo.NewShiftLeaderRepo(pool)
+	placementSvc := placementsvc.NewPlacementService(placementRepo, txm)
+	leaderSvc := placementsvc.NewShiftLeaderService(leaderRepo, txm)
+	placementSvc.SetLeaderService(leaderSvc)
+	placementHandler := placementhttp.NewHandler(placementSvc, leaderSvc)
+
 	handler := server.New(server.Deps{
-		AllowedOrigins:   cfg.HTTP.AllowedOrigins,
-		RatePerMinute:    cfg.Rate.PerMinute,
-		RateBurst:        cfg.Rate.Burst,
-		Auth:             idHandler,
-		Foundations:      fndHandler,
-		OrgCompanies:     orgCompaniesHandler,
-		OrgServiceLines:  orgServiceLinesHandler,
-		OrgMasterData:    orgMasterDataHandler,
+		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
+		RatePerMinute:        cfg.Rate.PerMinute,
+		RateBurst:            cfg.Rate.Burst,
+		Auth:                 idHandler,
+		Foundations:          fndHandler,
+		OrgCompanies:         orgCompaniesHandler,
+		OrgServiceLines:      orgServiceLinesHandler,
+		OrgMasterData:        orgMasterDataHandler,
 		People:               peopleHandler,
 		PeopleAgreements:     agreementsHandler,
 		PeopleChangeRequests: crHandler,
+		Placement:            placementHandler,
 		Authn:                authn,
-		Idempotency:      idempotency.New(pool),
-		Obs:              observ,
+		Idempotency:          idempotency.New(pool),
+		Obs:                  observ,
 	})
 
 	srv := &http.Server{

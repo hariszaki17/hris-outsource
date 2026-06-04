@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -218,6 +219,16 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	// -----------------------------------------------------------------------
 	if err := seedChangeRequests(ctx, pool); err != nil {
 		return fmt.Errorf("seed change_requests: %w", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// Phase 5 (05-02): Seed placements + shift-leader assignment (E3).
+	// FK: placements → employees / agreements / client_companies / client_sites /
+	// service_lines / positions (must run AFTER seedAgreements + seedServiceLines +
+	// seedClientCompanies). Adds the persona agreements that were missing first.
+	// -----------------------------------------------------------------------
+	if err := seedPlacements(ctx, pool); err != nil {
+		return fmt.Errorf("seed placements: %w", err)
 	}
 
 	return nil
@@ -841,6 +852,111 @@ func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed change_request SWP-CHG-2118: %w", err)
 	}
 	slog.Info("seed: upserted change request", "id", "SWP-CHG-2118", "type", "ADDRESS")
+
+	return nil
+}
+
+// seedPlacements inserts Phase-5 (E3) placement + shift-leader fixtures.
+// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+//
+// First adds the persona agreements that seedAgreements did not create
+// (only SWP-AG-7001/Budi exists), since a placement references an active
+// agreement:
+//   - SWP-AG-7002  ACTIVE PKWTT  for Sari Hadi   (SWP-EMP-1042)
+//   - SWP-AG-7003  ACTIVE PKWT   for Rudi Wijaya (SWP-EMP-1108)
+//   - SWP-AG-7004  ACTIVE PKWT   for Dewi Lestari (SWP-EMP-3001)
+//
+// Placements (lifecycle_status=ACTIVE):
+//   - SWP-PL-5001  Rudi  @ SWP-CMP-0021 / SWP-SITE-0001 / Parking      (he leads where he is placed → INV-2/4 hold)
+//   - SWP-PL-5002  Budi  @ SWP-CMP-0022 / SWP-SITE-0002 / Parking
+//   - SWP-PL-5003  Sari  @ SWP-CMP-0021 / SWP-SITE-0001 / Building Mgmt (open-ended)
+//   - SWP-PL-5004  Dewi  @ SWP-CMP-0021 / SWP-SITE-0001 / Parking      (end_date = today+20d → DTO derives EXPIRING)
+//
+// Shift-leader assignment:
+//   - SWP-SLA-3001  Rudi (SWP-EMP-1108) @ SWP-CMP-0021 (company-scope, assigned_by 'system-seed')
+func seedPlacements(ctx context.Context, pool *db.Pool) error {
+	const agQ = `
+		INSERT INTO employment_agreements
+			(id, employee_id, type, agreement_no, start_date, end_date, status,
+			 base_salary_idr, bpjs_terms, tax_profile, comp_effective_date, created_by)
+		VALUES
+			($1, $2, $3, $4, $5::date, $6, 'active',
+			 4900000,
+			 '{"kesehatan_employer_pct":4.0,"kesehatan_employee_pct":1.0,"ketenagakerjaan_employer_pct":6.24,"ketenagakerjaan_employee_pct":3.0}'::jsonb,
+			 'PTKP_K0', $5::date, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	type agreement struct {
+		id, employeeID, typ, no, start string
+		end                            *string
+	}
+	endPKWT := "2026-12-31"
+	agreements := []agreement{
+		{"SWP-AG-7002", "SWP-EMP-1042", "PKWTT", "PKWTT/SWP/2026/0042", "2020-03-01", nil},
+		{"SWP-AG-7003", "SWP-EMP-1108", "PKWT", "PKWT/SWP/2026/0108", "2026-01-01", &endPKWT},
+		{"SWP-AG-7004", "SWP-EMP-3001", "PKWT", "PKWT/SWP/2026/3001", "2026-01-01", &endPKWT},
+	}
+	for _, a := range agreements {
+		if _, err := pool.Pool.Exec(ctx, agQ, a.id, a.employeeID, a.typ, a.no, a.start, a.end); err != nil {
+			return fmt.Errorf("seed agreement %q: %w", a.id, err)
+		}
+		slog.Info("seed: upserted agreement", "id", a.id, "employee_id", a.employeeID)
+	}
+
+	// Placements. Insert with explicit IDs (the column DEFAULT only fires when id
+	// is omitted; an explicit id is honoured) so E2E targets are deterministic.
+	const plQ = `
+		INSERT INTO placements
+			(id, employee_id, agreement_id, client_company_id, site_id, service_line_id,
+			 position_id, start_date, end_date, lifecycle_status, status_changed_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, now(), 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	today := time.Now()
+	expEnd := today.AddDate(0, 0, 20).Format("2006-01-02") // SWP-PL-5004 EXPIRING window
+	dewiStart := today.AddDate(0, 0, -100).Format("2006-01-02")
+
+	type placement struct {
+		id, employeeID, agreementID, companyID, siteID, serviceLineID, positionID, start string
+		end                                                                              *string
+	}
+	endRudi := "2026-12-31"
+	endBudi := "2026-12-31"
+	placements := []placement{
+		{"SWP-PL-5001", "SWP-EMP-1108", "SWP-AG-7003", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-003", "SWP-POS-014", "2026-01-01", &endRudi},
+		{"SWP-PL-5002", "SWP-EMP-2891", "SWP-AG-7001", "SWP-CMP-0022", "SWP-SITE-0002", "SWP-SVC-003", "SWP-POS-014", "2026-02-01", &endBudi},
+		{"SWP-PL-5003", "SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-002", "SWP-POS-015", "2026-03-01", nil},
+		{"SWP-PL-5004", "SWP-EMP-3001", "SWP-AG-7004", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-003", "SWP-POS-014", dewiStart, &expEnd},
+	}
+	for _, p := range placements {
+		if _, err := pool.Pool.Exec(ctx, plQ,
+			p.id, p.employeeID, p.agreementID, p.companyID, p.siteID, p.serviceLineID,
+			p.positionID, p.start, p.end, "ACTIVE",
+		); err != nil {
+			return fmt.Errorf("seed placement %q: %w", p.id, err)
+		}
+		slog.Info("seed: upserted placement", "id", p.id, "employee_id", p.employeeID)
+
+		// One "create" history row per placement (so the detail Riwayat panel renders).
+		const histQ = `
+			INSERT INTO placement_history (placement_id, action, status_after, effective_date)
+			VALUES ($1, 'create', 'ACTIVE', $2::date)
+			ON CONFLICT DO NOTHING`
+		if _, err := pool.Pool.Exec(ctx, histQ, p.id, p.start); err != nil {
+			return fmt.Errorf("seed placement_history for %q: %w", p.id, err)
+		}
+	}
+
+	// One active shift-leader assignment at SWP-CMP-0021: Rudi (company-scope).
+	const slaQ = `
+		INSERT INTO shift_leader_assignments
+			(id, client_company_id, site_id, employee_id, assigned_by)
+		VALUES ($1, $2, NULL, $3, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+	if _, err := pool.Pool.Exec(ctx, slaQ, "SWP-SLA-3001", "SWP-CMP-0021", "SWP-EMP-1108"); err != nil {
+		return fmt.Errorf("seed shift_leader_assignment SWP-SLA-3001: %w", err)
+	}
+	slog.Info("seed: upserted shift_leader_assignment", "id", "SWP-SLA-3001", "employee_id", "SWP-EMP-1108")
 
 	return nil
 }

@@ -267,19 +267,17 @@ func (s *PlacementService) ListPlacements(ctx context.Context, f domain.Placemen
 }
 
 // ListExpiringPlacements backs GET /placements/expiring (sorted end_date:asc).
-func (s *PlacementService) ListExpiringPlacements(ctx context.Context, withinDays int, companyID *string, limit int, cursor *expiringCursor) ([]domain.Placement, *string, error) {
+func (s *PlacementService) ListExpiringPlacements(ctx context.Context, withinDays int, companyID *string, limit int, cursorEndDate *time.Time, cursorID *string) ([]domain.Placement, *string, error) {
 	if withinDays <= 0 {
 		withinDays = expiringWindowDays
 	}
 	clamped := httpx.ClampLimit(limit)
 	f := domain.ExpiringFilter{
-		Cutoff:    s.today().AddDate(0, 0, withinDays),
-		CompanyID: companyID,
-		Limit:     clamped + 1,
-	}
-	if cursor != nil {
-		f.CursorEndDate = &cursor.EndDate
-		f.CursorID = &cursor.ID
+		Cutoff:        s.today().AddDate(0, 0, withinDays),
+		CompanyID:     companyID,
+		Limit:         clamped + 1,
+		CursorEndDate: cursorEndDate,
+		CursorID:      cursorID,
 	}
 
 	rows, err := s.repo.ListExpiringPlacements(ctx, f)
@@ -679,17 +677,17 @@ func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placeme
 
 // TransferParams carries the transfer request fields.
 type TransferParams struct {
-	ID                         string
-	NewClientCompanyID         string
-	NewServiceLineID           string
-	NewPositionID              string
-	NewStartDate               time.Time
-	NewEndDate                 *time.Time
-	NewAgreementID             *string
-	NewAnnualLeaveEntitlement  *int32
-	NewBaseSalaryRefIDR        *int64
-	TransferReason             string
-	ActorUserID                *string
+	ID                        string
+	NewClientCompanyID        string
+	NewServiceLineID          string
+	NewPositionID             string
+	NewStartDate              time.Time
+	NewEndDate                *time.Time
+	NewAgreementID            *string
+	NewAnnualLeaveEntitlement *int32
+	NewBaseSalaryRefIDR       *int64
+	TransferReason            string
+	ActorUserID               *string
 }
 
 // TransferResult bundles the closed predecessor + new successor + warnings.
