@@ -164,6 +164,18 @@ func mapMDConflict(err error) error {
 // Leave Types
 // =============================================================================
 
+// GetLeaveType returns a single leave type by id.
+func (s *MasterDataService) GetLeaveType(ctx context.Context, id string) (domain.LeaveType, error) {
+	lt, err := s.repo.GetLeaveTypeByID(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.LeaveType{}, apperr.NotFound()
+	}
+	if err != nil {
+		return domain.LeaveType{}, apperr.Internal(err)
+	}
+	return lt, nil
+}
+
 // ListLeaveTypes returns a cursor-paginated page of leave types.
 func (s *MasterDataService) ListLeaveTypes(ctx context.Context, f domain.LeaveTypeFilter) ([]domain.LeaveType, *string, error) {
 	limit := httpx.ClampLimit(f.Limit)
@@ -279,6 +291,18 @@ func (s *MasterDataService) SoftDeleteLeaveType(ctx context.Context, id string) 
 // =============================================================================
 // Attendance Codes
 // =============================================================================
+
+// GetAttendanceCode returns a single attendance code by id.
+func (s *MasterDataService) GetAttendanceCode(ctx context.Context, id string) (domain.AttendanceCode, error) {
+	ac, err := s.repo.GetAttendanceCodeByID(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.AttendanceCode{}, apperr.NotFound()
+	}
+	if err != nil {
+		return domain.AttendanceCode{}, apperr.Internal(err)
+	}
+	return ac, nil
+}
 
 // ListAttendanceCodes returns a cursor-paginated page of attendance codes.
 func (s *MasterDataService) ListAttendanceCodes(ctx context.Context, f domain.AttendanceCodeFilter) ([]domain.AttendanceCode, *string, error) {
