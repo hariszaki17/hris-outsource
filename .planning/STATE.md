@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-e2-org-master-data/03-05-PLAN.md
-last_updated: "2026-06-04T04:05:00.000Z"
+stopped_at: Completed 03-e2-org-master-data/03-06-PLAN.md
+last_updated: "2026-06-04T05:09:47.907Z"
 last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
 progress:
   total_phases: 11
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 15
-  completed_plans: 14
-  percent: 9
+  completed_plans: 15
+  percent: 8
 ---
 
 # Project State
@@ -55,6 +55,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 03-e2-org-master-data P03 | 6 | 3 tasks | 8 files |
 | Phase 03-e2-org-master-data P04 | 12 | 3 tasks | 8 files |
 | Phase 03-e2-org-master-data P05 | 20 | 3 tasks | 4 files |
+| Phase 03-e2-org-master-data P06 | 75 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 03-e2-org-master-data]: MasterDataService is a separate struct from Service and ServiceLineService in org package; MasterDataHandler in same orghttp package; OrgMasterData Deps field type = *orghttp.MasterDataHandler
 - [Phase 03-e2-org-master-data]: min_minutes<30 validation uses apperr.Rule('RULE_VIOLATION') before tx; OvertimeRule uses float64 in domain+DTO (float32 in sqlc); service_line_id is *string (nullable JSON null, never omitempty)
 - [Phase 03-e2-org-master-data]: 3 master-data route groups: LT+AC reads all 4 roles; OTR reads excl agent (spec x-rbac); writes super_admin+hr_admin; seed explicit IDs SWP-LT-001/002 + SWP-AC-001/002 + SWP-OTR-001
+- [Phase 03-e2-org-master-data]: Conflict toast text: t('errors.conflict')='Terjadi konflik dengan kondisi saat ini.' — regex /konflik/i not /conflict/i
+- [Phase 03-e2-org-master-data]: noValidate required on RHF+Zod modal forms with type=number inputs to prevent browser native validation blocking submission
+- [Phase 03-e2-org-master-data]: Toggle role=switch (not checkbox/button) per toggle.tsx — Playwright must use getByRole('switch')
 
 ### Pending Todos
 
@@ -117,6 +121,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T04:05:00.000Z
-Stopped at: Completed 03-e2-org-master-data/03-05-PLAN.md
+Last session: 2026-06-04T05:09:47.904Z
+Stopped at: Completed 03-e2-org-master-data/03-06-PLAN.md
 Resume file: None
