@@ -91,13 +91,15 @@ Plans:
   2. HR can manage employment agreements (create/renew/close) and upload an attachment (multipart, ≤10MB).
   3. HR can review and approve/reject change requests; PKWT/PKWTT cross-field rules enforced (422 with field errors).
   4. Exhaustive Playwright E2E for E2 people features is green.
-**Plans:** 4 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] 04-01: Migrations + sqlc queries (employees, agreements, attachments, change_requests)
-- [ ] 04-02: Services + handlers (incl. multipart upload, agreement period rules, change-request workflow)
-- [ ] 04-03: Go contract tests vs E2 openapi examples
-- [ ] 04-04: Playwright E2E for E2 people (per Gherkin AC)
+- [ ] 04-01-PLAN.md (wave 1) — Migrations 00016–00019 + sqlc queries (employees, employment_agreements, agreement_attachments, change_requests) + File id prefix; make gen
+- [ ] 04-02-PLAN.md (wave 2, deps 04-01) — Employees slice (domain/repo/service/handlers/routes/RBAC/audit, DUPLICATE_NIK) + seed persona employees [shared server.go/main.go/seed.go — sequential]
+- [ ] 04-03-PLAN.md (wave 3, deps 04-02) — Agreements + attachments slice (PKWT/PKWTT rules, renew/close, multipart upload + authenticated download) + seed agreement+attachment [sequential]
+- [ ] 04-04-PLAN.md (wave 4, deps 04-03) — Change-requests queue slice (list/detail-diff/approve-applies/reject) + seed pending CRs [sequential]
+- [ ] 04-05-PLAN.md (wave 5, deps 04-02..04) — Go contract tests for all people endpoints (incl. multipart FileRef + PKWT 422 + CR transitions)
+- [ ] 04-06-PLAN.md (wave 5, deps 04-02..04) — FE wiring (MSW off) + exhaustive Playwright E2E per the E2 people PRDs (real file upload), green headless [parallel with 04-05]
 
 ### Phase 5: E3 Placement
 **Goal:** Placement as a first-class entity — lifecycle + shift-leader assignments + roster — works against the real BE with invariants enforced.
