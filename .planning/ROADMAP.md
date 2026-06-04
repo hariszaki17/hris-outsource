@@ -113,10 +113,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 05-01: Migrations + sqlc queries (placements, placement_history, shift_leader_assignments)
-- [ ] 05-02: Services + handlers with INV-1..4 + lifecycle state machine + scope guards + notifications
-- [ ] 05-03: Go contract tests vs E3 openapi examples
-- [ ] 05-04: Playwright E2E for E3 placement (per Gherkin AC, incl. invariant conflicts)
+- [ ] 05-01-PLAN.md (wave 1) — Migrations 00020-00022 + sqlc queries (placements, placement_history, shift_leader_assignments) + INV-1/INV-2/INV-3 partial unique indexes + domain types
+- [ ] 05-02-PLAN.md (wave 2, deps 05-01) — Services + handlers: INV-1..4 enforcement (DB index + FOR UPDATE locks + leader_scope), lifecycle state machine, transfer/renew atomicity, history+audit, roster, routes/main.go, seed; + error-envelope details extension
+- [ ] 05-03-PLAN.md (wave 3, deps 05-02) — Go contract tests vs E3 openapi examples (all invariant 409 envelopes + site-scope leadership)
+- [ ] 05-04-PLAN.md (wave 4, deps 05-02,05-03) — FE wiring (MSW off) + exhaustive Playwright E2E per the 5 E3 PRDs (incl. INV-1/2/3/4 negatives + RBAC scope), green headless
 
 ### Phase 6: E4 Schedule & Shifts
 **Goal:** Shift masters and scheduling (with conflict checks + bulk apply) work against the real BE.
