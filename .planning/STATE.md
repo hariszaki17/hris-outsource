@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 1 — Test Harness + Auth
+**Current focus:** Phase 5 — E3 Placement (next)
 
 ## Current Position
 
