@@ -9,8 +9,10 @@ import (
 )
 
 type Querier interface {
+	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
 	// Allocates the SWP-USR id inline from the per-prefix sequence.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
 	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
 	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
@@ -20,6 +22,13 @@ type Querier interface {
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
+	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
+	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
+	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 to compute has_more.
+	// Filters are optional: a NULL sqlc.narg means "no filter" via the `(arg IS NULL OR col = arg)` idiom.
+	// Free-text q matches email or full_name (ILIKE '%' || q || '%').
+	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
 	// Invalidates every live session for a user (AU-6: called on password reset).
@@ -29,8 +38,12 @@ type Querier interface {
 	RevokeRefreshToken(ctx context.Context, id int64) error
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
+	// Used by :deactivate (status='disabled') and :reactivate (status='active').
+	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (SetUserStatusRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
+	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
+	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

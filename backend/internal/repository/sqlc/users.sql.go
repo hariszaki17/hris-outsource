@@ -10,6 +10,49 @@ import (
 	"time"
 )
 
+const changeUserRole = `-- name: ChangeUserRole :one
+UPDATE users
+SET role = $1, updated_at = now()
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+`
+
+type ChangeUserRoleParams struct {
+	Role string
+	ID   string
+}
+
+type ChangeUserRoleRow struct {
+	ID          string
+	Email       string
+	Role        string
+	EmployeeID  *string
+	CompanyID   *string
+	Status      string
+	FullName    string
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error) {
+	row := q.db.QueryRow(ctx, changeUserRole, arg.Role, arg.ID)
+	var i ChangeUserRoleRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Role,
+		&i.EmployeeID,
+		&i.CompanyID,
+		&i.Status,
+		&i.FullName,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, password_hash, role, employee_id, company_id, status, full_name)
 VALUES (
@@ -168,6 +211,88 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, email, role, employee_id, company_id, status, full_name,
+       last_login_at, created_at, updated_at
+FROM users
+WHERE deleted_at IS NULL
+  AND ($1::text       IS NULL OR role = $1)
+  AND ($2::text     IS NULL OR status = $2)
+  AND ($3::text IS NULL OR company_id = $3)
+  AND ($4::text          IS NULL OR email ILIKE '%' || $4 || '%' OR full_name ILIKE '%' || $4 || '%')
+  AND (
+        $5::timestamptz IS NULL
+        OR (created_at, id) < ($5::timestamptz, $6::text)
+      )
+ORDER BY created_at DESC, id DESC
+LIMIT $7
+`
+
+type ListUsersParams struct {
+	Role            *string
+	Status          *string
+	CompanyID       *string
+	Q               *string
+	CursorCreatedAt *time.Time
+	CursorID        *string
+	RowLimit        int32
+}
+
+type ListUsersRow struct {
+	ID          string
+	Email       string
+	Role        string
+	EmployeeID  *string
+	CompanyID   *string
+	Status      string
+	FullName    string
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 to compute has_more.
+// Filters are optional: a NULL sqlc.narg means "no filter" via the `(arg IS NULL OR col = arg)` idiom.
+// Free-text q matches email or full_name (ILIKE '%' || q || '%').
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers,
+		arg.Role,
+		arg.Status,
+		arg.CompanyID,
+		arg.Q,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Role,
+			&i.EmployeeID,
+			&i.CompanyID,
+			&i.Status,
+			&i.FullName,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setLastLogin = `-- name: SetLastLogin :exec
 UPDATE users
 SET last_login_at = now(),
@@ -179,6 +304,50 @@ WHERE id = $1
 func (q *Queries) SetLastLogin(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, setLastLogin, id)
 	return err
+}
+
+const setUserStatus = `-- name: SetUserStatus :one
+UPDATE users
+SET status = $1, updated_at = now()
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+`
+
+type SetUserStatusParams struct {
+	Status string
+	ID     string
+}
+
+type SetUserStatusRow struct {
+	ID          string
+	Email       string
+	Role        string
+	EmployeeID  *string
+	CompanyID   *string
+	Status      string
+	FullName    string
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Used by :deactivate (status='disabled') and :reactivate (status='active').
+func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (SetUserStatusRow, error) {
+	row := q.db.QueryRow(ctx, setUserStatus, arg.Status, arg.ID)
+	var i SetUserStatusRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Role,
+		&i.EmployeeID,
+		&i.CompanyID,
+		&i.Status,
+		&i.FullName,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updatePassword = `-- name: UpdatePassword :exec
@@ -197,4 +366,48 @@ type UpdatePasswordParams struct {
 func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
 	_, err := q.db.Exec(ctx, updatePassword, arg.PasswordHash, arg.ID)
 	return err
+}
+
+const updateUserEmail = `-- name: UpdateUserEmail :one
+UPDATE users
+SET email = $1, updated_at = now()
+WHERE id = $2 AND deleted_at IS NULL
+RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+`
+
+type UpdateUserEmailParams struct {
+	Email string
+	ID    string
+}
+
+type UpdateUserEmailRow struct {
+	ID          string
+	Email       string
+	Role        string
+	EmployeeID  *string
+	CompanyID   *string
+	Status      string
+	FullName    string
+	LastLoginAt *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
+func (q *Queries) UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error) {
+	row := q.db.QueryRow(ctx, updateUserEmail, arg.Email, arg.ID)
+	var i UpdateUserEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Role,
+		&i.EmployeeID,
+		&i.CompanyID,
+		&i.Status,
+		&i.FullName,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

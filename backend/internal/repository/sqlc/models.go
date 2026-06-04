@@ -44,6 +44,14 @@ type PasswordResetToken struct {
 	CreatedAt time.Time
 }
 
+type PlatformSetting struct {
+	Key    string
+	Value  string
+	Label  string
+	Locked bool
+	Sort   int32
+}
+
 type RefreshToken struct {
 	ID          int64
 	UserID      string
