@@ -147,10 +147,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 07-01: Migrations + sqlc queries (attendance, corrections)
-- [ ] 07-02: Services + handlers (verify/reject, bulk, corrections) + scope/idempotency/audit/notify
-- [ ] 07-03: Go contract tests vs E5 openapi examples
-- [ ] 07-04: Playwright E2E for E5 (per Gherkin AC)
+- [ ] 07-01-PLAN.md (wave 1) — Migrations 00026-00027 + sqlc queries (attendance, attendance_corrections) + domain types (FKs to schedule_entries/placements/employees; seeded exception flags + enums)
+- [ ] 07-02-PLAN.md (wave 2, deps 07-01) — Services + handlers: verify/reject (+bulk partial-success + Idempotency-Key), corrections approve-applies/reject, GuardCompany scope (OUT_OF_SCOPE), VERIFY_OWN_RECORD, terminal-state 409, OUTSIDE_CORRECTION_WINDOW, audit-in-tx + notify stub, routes/main.go, seed
+- [ ] 07-03-PLAN.md (wave 3, deps 07-02) — Go contract tests vs E5 openapi (every code + bulk partial-success envelope + idempotency replay + scope 403 + 422s + terminal 409 + cursor shapes)
+- [ ] 07-04-PLAN.md (wave 4, deps 07-02,07-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e5/ (list/detail, single + bulk verify/reject + idempotency, corrections approve/reject, scope 403, VERIFY_OWN_RECORD), green headless
 
 ### Phase 8: E6 Leave
 **Goal:** Leave requests (multi-step approval), quotas, and the calendar work against the real BE.
