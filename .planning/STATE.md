@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-e5-attendance/07-03-PLAN.md
-last_updated: "2026-06-04T18:36:46.536Z"
+stopped_at: Completed 07-e5-attendance/07-04-PLAN.md
+last_updated: "2026-06-04T23:14:55.315Z"
 last_activity: "2026-06-04 — Plan 07-03 complete: E5 contract tests = the drift gate. 31 table-driven Go tests over the REAL attendance + correction services/handlers (chi router + mutable principal, in-memory fake repos): list/cursor envelopes {data,next_cursor,has_more}, leader-scope + OUT_OF_SCOPE 403, cross-scope 404, verify/reject 200, VERIFY_OWN_RECORD 403, terminal CONFLICT 409 (fields.verification_status/status), missing-reason 400 INVALID_REQUEST, bulk partial-success {succeeded,failed} 200/422, idempotency replay + IDEMPOTENCY_KEY_REUSED 409 (in-memory stub middleware mirroring the Postgres contract — real store covered by 07-04 E2E), correction get-with-diff (check_out_at row), approve→APPLIED (+ attendance CORRECTED), OUTSIDE_CORRECTION_WINDOW 422 (fields.attendance_date + window_days="7", HR exempt), and the CORRECTION_ALREADY_PENDING seam. All byte-for-shape vs docs/api/E5-attendance/openapi.yaml. go test ./... / go build / go vet / gofmt clean; no regressions. Ready for 07-04 FE wiring + E2E."
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 33
-  completed_plans: 32
-  percent: 97
+  completed_plans: 33
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 7 — E5 Attendance (data layer landed; services/handlers next)
+**Current focus:** Phase 7 — E5 Attendance COMPLETE (FE wired + full-stack E2E green); next: Phase 8 (E6 Leave)
 
 ## Current Position
 
-Phase: 7 of 11 (E5 Attendance) — IN PROGRESS
-Plan: 3 of 4 in current phase — Plan 07-03 COMPLETE
-Status: In progress
-Last activity: 2026-06-04 — Plan 07-03 complete: E5 contract tests = the drift gate. 31 table-driven Go tests over the REAL attendance + correction services/handlers (chi router + mutable principal, in-memory fake repos): list/cursor envelopes {data,next_cursor,has_more}, leader-scope + OUT_OF_SCOPE 403, cross-scope 404, verify/reject 200, VERIFY_OWN_RECORD 403, terminal CONFLICT 409 (fields.verification_status/status), missing-reason 400 INVALID_REQUEST, bulk partial-success {succeeded,failed} 200/422, idempotency replay + IDEMPOTENCY_KEY_REUSED 409 (in-memory stub middleware mirroring the Postgres contract — real store covered by 07-04 E2E), correction get-with-diff (check_out_at row), approve→APPLIED (+ attendance CORRECTED), OUTSIDE_CORRECTION_WINDOW 422 (fields.attendance_date + window_days="7", HR exempt), and the CORRECTION_ALREADY_PENDING seam. All byte-for-shape vs docs/api/E5-attendance/openapi.yaml. go test ./... / go build / go vet / gofmt clean; no regressions. Ready for 07-04 FE wiring + E2E.
+Phase: 7 of 11 (E5 Attendance) — COMPLETE
+Plan: 4 of 4 in current phase — Plan 07-04 COMPLETE (phase done)
+Status: Phase complete
+Last activity: 2026-06-05 — Plan 07-04 complete: E5 FE wired off MSW + exhaustive full-stack Playwright E2E (5 specs / 18 tests) GREEN vs real FE + real Go API + ephemeral Postgres — list/scope/detail, single verify/reject (+validation) + inline-queue verify, corrections approve (target attendance gains CORRECTED) + reject, bulk partial-success (terminal CONFLICT + PENDING succeeded), Postgres-backed idempotency replay + IDEMPOTENCY_KEY_REUSED 409, leader OUT_OF_SCOPE + VERIFY_OWN_RECORD 403 on seeded fixtures. Full pnpm e2e green (163 passed / 6 skipped / 0 failed; no e1/e2/e3/e4 regressions). Auto-fixed a harness defect: go run ./cmd/api orphaned its exe/api child on :8081 (SIGTERM not forwarded) -> stale binary served old routes -> 404; fixed via freePort(8081) pre-boot + detached process-group kill on teardown. ATT-01 + ATT-02 closed. reset-db + FE conflict_details audits were no-ops (07-02 already truncated the tables; no conflict_details literal in e5-attendance).
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -73,6 +73,7 @@ Progress: [██████████] 97%
 | Phase 07-e5-attendance P01 | 5 | 2 tasks | 8 files |
 | Phase 07-e5-attendance P02 | 12 | 3 tasks | 16 files |
 | Phase 07-e5-attendance P03 | 5 | 2 tasks | 3 files |
+| Phase 07-e5-attendance P04 | 75 | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -178,6 +179,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 07-e5-attendance]: [07-03]: E5 contract tests mirror the Phase-6 scheduling harness EXACTLY — fakeTx (Exec no-op for audit-in-tx) + fakeTxRunner + in-memory fake repos over the REAL svc.AttendanceRepository/CorrectionRepository ports + newHarness(role,company,employee) mounting the real services+handler on chi with a mutable-principal closure middleware; this is the drift gate replacing server codegen
 - [Phase 07-e5-attendance]: [07-03]: idempotency replay asserted via an in-memory stubIdempotency middleware (scoped by principal UserID) mirroring the Postgres contract at the same router position as server.go — same key+body replays status/body (+ Idempotent-Replayed); same key+different body → 409 IDEMPOTENCY_KEY_REUSED. Real Postgres-backed store (needs *db.Pool) is exercised by 07-04 E2E (documented seam)
 - [Phase 07-e5-attendance]: [07-03]: CORRECTION_ALREADY_PENDING asserted as a SEAM (create endpoint is mobile/agent-only, OUT of web scope; backstopped by the 07-01 partial-unique index) — fake countPending detects two PENDING corrections + the 409 + fields.pending_correction_id wire shape via apperr.ConflictWithDetails; OUTSIDE_CORRECTION_WINDOW 422 driven through the REAL CorrectionService.Approve for both leader-422 and HR-exempt branches
+- [Phase 07-e5-attendance]: [07-04]: harness orphan-API fix — go run ./cmd/api does not forward SIGTERM to its exe/api child; freePort(8081) before boot + detached process-group kill on teardown (stale binary was serving old routes → 404 on new E5 endpoints)
+- [Phase 07-e5-attendance]: [07-04]: E5 E2E = 5 specs/18 tests green vs real FE+Go+ephemeral PG; bulk partial-success + Postgres idempotency replay driven via apiAs for determinism; OUTSIDE_CORRECTION_WINDOW stays contract-only (mobile create path out of web scope); no conflict_details bug in E5 (FE audit no-op)
 
 ### Pending Todos
 
@@ -189,6 +192,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T18:35:57.495Z
-Stopped at: Completed 07-e5-attendance/07-03-PLAN.md
+Last session: 2026-06-04T23:14:44.221Z
+Stopped at: Completed 07-e5-attendance/07-04-PLAN.md
 Resume file: None
