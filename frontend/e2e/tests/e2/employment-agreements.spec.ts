@@ -81,18 +81,21 @@ test('AG-list · agreements list renders seeded SWP-AG-7001 (Budi PKWT)', async 
 });
 
 // ---------------------------------------------------------------------------
-// AG-create-PKWT — create PKWT for Rudi (no active agreement) → toast
+// AG-create-PKWT — create PKWT for Agus (no active agreement) → toast
+// (Phase 5 seed gave Rudi/Dewi active agreements via seedPlacements, so the
+//  agreement-less unplaced agents Agus/Bambang are the right targets here — EA-2
+//  blocks a 2nd active agreement.)
 // ---------------------------------------------------------------------------
 
-test('AG-create-PKWT · create PKWT for Rudi: toast + redirect to detail', async ({ page }) => {
+test('AG-create-PKWT · create PKWT for Agus: toast + redirect to detail', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/agreements/new');
 
   // Wait for the form to load.
   await expect(page.getByRole('heading', { name: 'Buat Perjanjian Kerja' })).toBeVisible({ timeout: 30_000 });
 
-  // Type is already PKWT by default; select employee Rudi Wijaya (SWP-EMP-1108, no active agreement).
-  await selectEmployee(page, 'Rudi Wijaya');
+  // Type is already PKWT by default; select Agus Pratama (SWP-EMP-3002, no active agreement).
+  await selectEmployee(page, 'Agus Pratama');
 
   // Fill start and end dates (2-year PKWT — within 5-year max).
   await page.locator('#start_date').fill('2026-07-01');
@@ -109,7 +112,7 @@ test('AG-create-PKWT · create PKWT for Rudi: toast + redirect to detail', async
 // AG-create-PKWTT — create PKWTT (no end date) → succeeds
 // ---------------------------------------------------------------------------
 
-test('AG-create-PKWTT · create PKWTT for Dewi (no end date): succeeds', async ({ page }) => {
+test('AG-create-PKWTT · create PKWTT for Bambang (no end date): succeeds', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/agreements/new');
 
@@ -118,8 +121,8 @@ test('AG-create-PKWTT · create PKWTT for Dewi (no end date): succeeds', async (
   // Switch type to PKWTT.
   await page.locator('#type').selectOption('PKWTT');
 
-  // Select Dewi Lestari (SWP-EMP-3001, no active agreement).
-  await selectEmployee(page, 'Dewi Lestari');
+  // Select Bambang Sutrisno (SWP-EMP-3003, no active agreement).
+  await selectEmployee(page, 'Bambang Sutrisno');
 
   // Fill only start date (no end date for PKWTT).
   await page.locator('#start_date').fill('2026-08-01');
