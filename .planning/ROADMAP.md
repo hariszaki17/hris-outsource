@@ -72,13 +72,15 @@ Plans:
   2. HR can manage service lines + positions (create/update/discontinue/soft-delete) and the master-data sets (leave types, attendance codes, overtime rules).
   3. Picker endpoints return the picker-shaped lists the FE expects (CONVENTIONS §18).
   4. Exhaustive Playwright E2E for E2 org/master-data features is green.
-**Plans:** 4 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] 03-01: Migrations + sqlc queries (companies, sites, service_lines, positions, leave_types, attendance_codes, overtime_rules)
-- [ ] 03-02: Services + handlers + RBAC/scope/audit for org & master data
-- [ ] 03-03: Go contract tests vs E2 openapi examples
-- [ ] 03-04: Playwright E2E for E2 org/master-data (per Gherkin AC)
+- [ ] 03-01-PLAN.md (wave 1) — Migrations 00009–00015 + sqlc queries for all 7 E2 org/master entities (make gen)
+- [ ] 03-02-PLAN.md (wave 2, deps 03-01) — Client companies + sites slice (services/handlers/routes/RBAC/audit/geofence) + seed Plaza Senayan (SWP-CMP-0021)
+- [ ] 03-03-PLAN.md (wave 2, deps 03-01,03-02) — Service lines + positions slice (discontinue/soft-delete/in-use guards) + seed
+- [ ] 03-04-PLAN.md (wave 2, deps 03-01,03-02) — Master data slice (leave types, attendance codes, overtime rules; min_minutes rule) + seed
+- [ ] 03-05-PLAN.md (wave 3, deps 03-02..04) — Go contract tests for all E2 org/master endpoints
+- [ ] 03-06-PLAN.md (wave 3, deps 03-02..04) — FE wiring (MSW off) + exhaustive Playwright E2E per the 4 E2 PRDs, green headless
 
 ### Phase 4: E2 People
 **Goal:** Employees, employment agreements, and the change-request approval queue work against the real BE.
@@ -225,7 +227,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Test Harness + Auth | 5/5 | Complete    | 2026-06-04 |
 | 2. E1 Foundations | 4/4 | Complete    | 2026-06-04 |
-| 3. E2 Org & Master Data | 0/4 | Not started | - |
+| 3. E2 Org & Master Data | 0/6 | Not started | - |
 | 4. E2 People | 0/4 | Not started | - |
 | 5. E3 Placement | 0/4 | Not started | - |
 | 6. E4 Schedule & Shifts | 0/4 | Not started | - |
