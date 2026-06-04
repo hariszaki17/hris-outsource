@@ -34,10 +34,10 @@
 - [x] **PPL-03**: Change requests — list/detail/approve/reject (HR approval queue).
 
 ### E3 Placement (Phase 5)
-- [ ] **PLC-01**: Placements — list (incl. expiring)/detail/create with INV-1..4 enforcement.
-- [ ] **PLC-02**: Placement lifecycle — renew/transfer/end/resign/terminate.
-- [ ] **PLC-03**: Shift-leader assignments — create/replace/end (one leader per company).
-- [ ] **PLC-04**: Company roster view.
+- [x] **PLC-01**: Placements — list (incl. expiring)/detail/create with INV-1..4 enforcement.
+- [x] **PLC-02**: Placement lifecycle — renew/transfer/end/resign/terminate.
+- [x] **PLC-03**: Shift-leader assignments — create/replace/end (one leader per company).
+- [x] **PLC-04**: Company roster view.
 
 ### E4 Schedule & Shifts (Phase 6)
 - [ ] **SCH-01**: Shift masters — list/create/update/deactivate/reactivate.

@@ -113,7 +113,7 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 05-01-PLAN.md (wave 1) — Migrations 00020-00022 + sqlc queries (placements, placement_history, shift_leader_assignments) + INV-1/INV-2/INV-3 partial unique indexes + domain types
+- [x] 05-01-PLAN.md (wave 1) — Migrations 00020-00022 + sqlc queries (placements, placement_history, shift_leader_assignments) + INV-1/INV-2/INV-3 partial unique indexes + domain types
 - [ ] 05-02-PLAN.md (wave 2, deps 05-01) — Services + handlers: INV-1..4 enforcement (DB index + FOR UPDATE locks + leader_scope), lifecycle state machine, transfer/renew atomicity, history+audit, roster, routes/main.go, seed; + error-envelope details extension
 - [ ] 05-03-PLAN.md (wave 3, deps 05-02) — Go contract tests vs E3 openapi examples (all invariant 409 envelopes + site-scope leadership)
 - [ ] 05-04-PLAN.md (wave 4, deps 05-02,05-03) — FE wiring (MSW off) + exhaustive Playwright E2E per the 5 E3 PRDs (incl. INV-1/2/3/4 negatives + RBAC scope), green headless
@@ -231,7 +231,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. E1 Foundations | 4/4 | Complete    | 2026-06-04 |
 | 3. E2 Org & Master Data | 6/6 | Complete    | 2026-06-04 |
 | 4. E2 People | 6/6 | Complete    | 2026-06-04 |
-| 5. E3 Placement | 0/4 | Not started | - |
+| 5. E3 Placement | 1/4 | In Progress | - |
 | 6. E4 Schedule & Shifts | 0/4 | Not started | - |
 | 7. E5 Attendance | 0/4 | Not started | - |
 | 8. E6 Leave | 0/4 | Not started | - |

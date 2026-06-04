@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-e2-people/04-06-PLAN.md
-last_updated: "2026-06-04T13:13:25.475Z"
-last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
+stopped_at: Completed 05-e3-placement/05-01-PLAN.md
+last_updated: "2026-06-04T14:00:27.414Z"
+last_activity: "2026-06-04 — Plan 05-01 complete: E3 placement data layer — migrations 00020/00021/00022 (placements + INV-1 partial unique index, placement_history, shift_leader_assignments + INV-2/INV-3 indexes), 24 sqlc queries (incl. FOR UPDATE invariant locks), domain types. `make gen` + `go build ./...` + `go vet ./...` clean."
 progress:
   total_phases: 11
   completed_phases: 4
-  total_plans: 21
-  completed_plans: 21
-  percent: 8
+  total_plans: 25
+  completed_plans: 22
+  percent: 88
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 3 of 11 (E2 Org/Master Data)
-Plan: 5 of 5 in current phase — Phase 03 COMPLETE
+Phase: 5 of 11 (E3 Placement)
+Plan: 1 of 4 in current phase — Plan 05-01 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0.
+Last activity: 2026-06-04 — Plan 05-01 complete: E3 placement data layer — migrations 00020/00021/00022 (placements + INV-1 partial unique index, placement_history, shift_leader_assignments + INV-2/INV-3 indexes), 24 sqlc queries (incl. FOR UPDATE invariant locks), domain types. `make gen` + `go build ./...` + `go vet ./...` clean.
 
-Progress: [█░░░░░░░░░] 8%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 04-e2-people P04 | 329 | 3 tasks | 8 files |
 | Phase 04-e2-people P05 | 25 | 3 tasks | 3 files |
 | Phase 04-e2-people P06 | 5400 | 4 tasks | 9 files |
+| Phase 05-e3-placement P01 | 4 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -132,6 +133,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 04-e2-people]: BankAccount json tags: added snake_case json tags to domain.BankAccount so diff serialization uses keys FE formatDiffValue expects; also fixes jsonb unmarshal from DB seed
 - [Phase 04-e2-people]: RenewAgreement: supersede predecessor before insert — releases partial unique index on active employee; prevents ACTIVE_AGREEMENT_EXISTS on renew
 - [Phase 04-e2-people]: window.__swp_get_token__ E2E helper: exposes in-memory access token on window in VITE_ENABLE_MSW=false mode; allows page.evaluate() to make authenticated API requests
+- [Phase 05-e3-placement]: Placement id allocated via column DEFAULT ('SWP-PL-'||swp_next_id('PL')) — CreatePlacement/CreateShiftLeaderAssignment omit id from the INSERT column list (DEFAULT fires); diverges from Phase-4 inline-INSERT allocation site but behaviour-identical
+- [Phase 05-e3-placement]: INV-1 enforced by placements_active_employee_uq partial unique index WHERE lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START','SCHEDULED') AND deleted_at IS NULL ('SCHEDULED' inert forward-compat); INV-2 via sla_active_company_uq + sla_active_site_uq; INV-3 via sla_active_employee_uq
+- [Phase 05-e3-placement]: placement_history uses bigserial PK (no SWP id, avoids touching ids.go); GetPlacementChain via recursive CTE walks predecessor+successor links
 
 ### Pending Todos
 
@@ -143,6 +147,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T13:06:33.318Z
-Stopped at: Completed 04-e2-people/04-06-PLAN.md
+Last session: 2026-06-04T13:59:44.685Z
+Stopped at: Completed 05-e3-placement/05-01-PLAN.md
 Resume file: None
