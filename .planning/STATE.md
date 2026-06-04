@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-e2-people/04-01-PLAN.md
-last_updated: "2026-06-04T05:57:44.593Z"
+stopped_at: Completed 04-e2-people/04-02-PLAN.md
+last_updated: "2026-06-04T06:08:02.140Z"
 last_activity: "2026-06-04 — Plan 03-05 complete: Go contract tests for all 29 E2 org/master endpoints (companies, sites, service-lines, positions, leave-types, attendance-codes, overtime-rules); drift gate for FE OpenAPI client. `go test ./... -count=1` exits 0."
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 21
-  completed_plans: 16
+  completed_plans: 17
   percent: 8
 ---
 
@@ -57,6 +57,7 @@ Progress: [█░░░░░░░░░] 8%
 | Phase 03-e2-org-master-data P05 | 20 | 3 tasks | 4 files |
 | Phase 03-e2-org-master-data P06 | 75 | 3 tasks | 9 files |
 | Phase 04-e2-people P01 | 271 | 2 tasks | 13 files |
+| Phase 04-e2-people P02 | 447 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 04-e2-people]: Bytea blob for agreement_attachments: simplest approach that passes E2E and survives container teardown via reseed; no external storage dependency
 - [Phase 04-e2-people]: EA-2 enforced at DB level via partial unique index on employment_agreements(employee_id) WHERE status='active' AND deleted_at IS NULL
 - [Phase 04-e2-people]: File prefix FILE added to ids.go for SWP-FILE attachment IDs
+- [Phase 04-e2-people]: GET /employees/{id} RBAC: web roles only (super_admin, hr_admin, shift_leader) — agent excluded; agent self-service is mobile-only in Phase 4
+- [Phase 04-e2-people]: EP-3 login provisioning stub: provision_login/login_email accepted but UserID stays NULL; no E1 user created in Phase 4 employees milestone
+- [Phase 04-e2-people]: seedEmployees() called before persona user loop in Seed() — ordering contract for /auth/me employee resolution
 
 ### Pending Todos
 
@@ -125,6 +129,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T05:57:44.589Z
-Stopped at: Completed 04-e2-people/04-01-PLAN.md
+Last session: 2026-06-04T06:08:02.135Z
+Stopped at: Completed 04-e2-people/04-02-PLAN.md
 Resume file: None
