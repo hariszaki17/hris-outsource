@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-e4-schedule-shifts/06-02-PLAN.md
-last_updated: "2026-06-04T16:20:37.757Z"
-last_activity: "2026-06-04 — Plan 06-02 complete: E4 service + handler layer. Shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply with exact codes+statuses+ConflictDetails. Shift-master CRUD + deactivate/reactivate; schedule CRUD; per-cell-atomic :bulk-apply (200 if >=1 succeeded else 422); side-effect-free :check. Leader scope via GuardCompany; audit-in-tx; TODO(Phase-11) notify stub. 11 routes mounted, main.go wired, seed plants SWP-SHF-001/002 + in-week entries (SWP-SCH-6001/6002) + approved_leave_days SWP-LR-44210 (EMP-3001) so SHIFT_OVER_LEAVE fires. go build/vet clean."
+stopped_at: Completed 06-e4-schedule-shifts/06-03-PLAN.md
+last_updated: "2026-06-04T16:28:42.835Z"
+last_activity: "2026-06-04 — Plan 06-03 complete: E4 Go contract tests (drift gate). Three files in internal/handler/scheduling/ over in-memory fakes (fakeShiftMasterRepo + fakeScheduleRepo with placements/approvedLeave/liveEntry maps) and the REAL services+handler. All six conflict codes asserted with exact status+code+details (OUT_OF_SCOPE 403, OUTSIDE_PLACEMENT_PERIOD/SHIFT_DEACTIVATED/SHIFT_NOT_FOR_SERVICE_LINE 422, SHIFT_OVER_LEAVE/DOUBLE_SHIFT 409), bulk-apply partial 200 / all-failed 422 / weekdays_mask, :check side-effect-free, force_replace MODIFIED+replaced_entry_id, list envelopes, DELETE 204 + leader past-date 403, shift-master DUPLICATE_NAME/BREAK_OUTSIDE_WINDOW/ALREADY_INACTIVE + leader-write 403. go test ./... green, zero regressions; vet+gofmt clean."
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 29
-  completed_plans: 27
+  completed_plans: 28
   percent: 93
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 6 of 11 (E4 Schedule & Shifts)
-Plan: 2 of 4 in current phase — Plan 06-02 COMPLETE
+Plan: 3 of 4 in current phase — Plan 06-03 COMPLETE
 Status: In progress
-Last activity: 2026-06-04 — Plan 06-02 complete: E4 service + handler layer. Shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply with exact codes+statuses+ConflictDetails. Shift-master CRUD + deactivate/reactivate; schedule CRUD; per-cell-atomic :bulk-apply (200 if >=1 succeeded else 422); side-effect-free :check. Leader scope via GuardCompany; audit-in-tx; TODO(Phase-11) notify stub. 11 routes mounted, main.go wired, seed plants SWP-SHF-001/002 + in-week entries (SWP-SCH-6001/6002) + approved_leave_days SWP-LR-44210 (EMP-3001) so SHIFT_OVER_LEAVE fires. go build/vet clean.
+Last activity: 2026-06-04 — Plan 06-03 complete: E4 Go contract tests (drift gate). Three files in internal/handler/scheduling/ over in-memory fakes (fakeShiftMasterRepo + fakeScheduleRepo with placements/approvedLeave/liveEntry maps) and the REAL services+handler. All six conflict codes asserted with exact status+code+details, bulk-apply partial 200 / all-failed 422 / weekdays_mask, :check side-effect-free, force_replace MODIFIED+replaced_entry_id, list envelopes, DELETE 204 + leader past-date 403, shift-master DUPLICATE_NAME/BREAK_OUTSIDE_WINDOW/ALREADY_INACTIVE + leader-write 403. go test ./... green, zero regressions; vet+gofmt clean.
 
-Progress: [█████████░] 93%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 93%
 | Phase 05-e3-placement P04 | 75 | 3 tasks | 11 files |
 | Phase 06-e4-schedule-shifts P01 | 5 | 3 tasks | 7 files |
 | Phase 06-e4-schedule-shifts P02 | 11 | 3 tasks | 13 files |
+| Phase 06-e4-schedule-shifts P03 | 4 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 06-e4-schedule-shifts]: [06-02]: shared ordered 6-check conflict engine (Evaluate) reused by create/update/:check/:bulk-apply; resolves placement first (scope source), emits OUTSIDE_PLACEMENT_PERIOD when no placement, OUT_OF_SCOPE before any 422 when placement found; each code carries explicit apperr HTTPStatus (403/422/409)
 - [Phase 06-e4-schedule-shifts]: [06-02]: bulk-apply = per-cell own-tx atomicity (CreateEntry loop); one failing cell never rolls back successes; handler 200 if >=1 succeeded else 422; :check runs the same expansion engine-only (no writes/audit/notify)
 - [Phase 06-e4-schedule-shifts]: [06-02]: over-leave delivered honestly via real approved_leave_days read; seed plants SWP-LR-44210 for EMP-3001 (monday+3) so SHIFT_OVER_LEAVE is exercisable now; PATCH /schedule re-runs engine with ForceReplace=true (self-edit not a double-shift); leader past-date DELETE → 403 (C-5)
+- [Phase 06-e4-schedule-shifts]: [06-03]: E4 contract tests = drift gate; fakeShiftMasterRepo (nameIndex DUPLICATE_NAME sentinel) + fakeScheduleRepo (placements/approvedLeave/liveEntry maps) over the REAL services+handler; all six conflict codes asserted with exact status+code+details, bulk-apply 200/422/weekdays_mask, :check no-write, force_replace MODIFIED+replaced_entry_id, leader past-date DELETE 403
+- [Phase 06-e4-schedule-shifts]: [06-03]: OUTSIDE_PLACEMENT_PERIOD asserted on code+422 only (engine emits it precisely when NO placement covers the date, so there is no placement to populate the detail — honest, not weakened); other detail-bearing codes assert full details
 
 ### Pending Todos
 
@@ -169,6 +172,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T16:20:37.755Z
-Stopped at: Completed 06-e4-schedule-shifts/06-02-PLAN.md
+Last session: 2026-06-04T16:28:33.411Z
+Stopped at: Completed 06-e4-schedule-shifts/06-03-PLAN.md
 Resume file: None
