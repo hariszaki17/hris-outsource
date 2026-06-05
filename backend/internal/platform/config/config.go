@@ -15,11 +15,12 @@ type Config struct {
 	ServiceName string `env:"SERVICE_NAME" envDefault:"hris-api"`
 	LogLevel    string `env:"LOG_LEVEL" envDefault:"info"`
 
-	HTTP HTTP
-	DB   DB
-	Auth Auth
-	OTel OTel
-	Rate Rate
+	HTTP   HTTP
+	DB     DB
+	Auth   Auth
+	Crypto Crypto
+	OTel   OTel
+	Rate   Rate
 }
 
 type HTTP struct {
@@ -42,6 +43,16 @@ type Auth struct {
 	RefreshTTL    time.Duration `env:"AUTH_REFRESH_TTL" envDefault:"720h"`
 	CookieDomain  string        `env:"AUTH_COOKIE_DOMAIN"`
 	CookieSecure  bool          `env:"AUTH_COOKIE_SECURE" envDefault:"true"`
+}
+
+type Crypto struct {
+	// PayrollKey is the AES-256 key (base64 std-encoded 32 raw bytes) for payslip
+	// monetary encryption-at-rest (INV-2). Milestone-scoped env constant — NOT a
+	// KMS. For the E2E harness / dev a deterministic base64 32-byte key is
+	// supplied via env (10-04 wires it into .env.e2e / the seed env so the seed
+	// encrypts with the SAME key the API decrypts with). Do NOT hardcode a
+	// production key.
+	PayrollKey string `env:"PAYROLL_ENCRYPTION_KEY"`
 }
 
 type OTel struct {
