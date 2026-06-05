@@ -53,12 +53,14 @@ func (c *Client) Enqueue(ctx context.Context, args river.JobArgs) error {
 func NewWorkerClient(pool *db.Pool) (*river.Client[pgx.Tx], error) {
 	workers := river.NewWorkers()
 	registerWorkers(workers)
-	// The PayslipExportWorker is the FIRST worker whose Work() writes to the
-	// application DB (it drives export_jobs RUNNING→DONE via UpdateExportJobStatus),
-	// so it must be constructed WITH the pool. The pool is only in scope here in
-	// NewWorkerClient, so it is registered here rather than in the no-dependency
-	// registerWorkers below.
+	// Workers whose Work() writes to the application DB are constructed WITH the
+	// pool (only in scope here in NewWorkerClient, not in the no-dependency
+	// registerWorkers below):
+	//   - PayslipExportWorker drives export_jobs RUNNING→DONE.
+	//   - NotificationWorker (E10, 11-02) INSERTs a notifications row — un-stubbed
+	//     from its former no-op, so it now needs the pool too.
 	river.AddWorker(workers, NewPayslipExportWorker(pool))
+	river.AddWorker(workers, NewNotificationWorker(pool))
 
 	return river.NewClient(riverpgxv5.New(pool.Pool), &river.Config{
 		Queues: map[string]river.QueueConfig{
@@ -70,7 +72,8 @@ func NewWorkerClient(pool *db.Pool) (*river.Client[pgx.Tx], error) {
 	})
 }
 
-// registerWorkers wires every job type to its worker. One line per job kind.
-func registerWorkers(w *river.Workers) {
-	river.AddWorker(w, &NotificationWorker{})
-}
+// registerWorkers wires pool-less job types to their workers. (Pool-backed
+// workers — PayslipExportWorker, NotificationWorker — are registered in
+// NewWorkerClient where the pool is in scope.) Currently empty; kept as the
+// extension point for future no-dependency workers.
+func registerWorkers(_ *river.Workers) {}
