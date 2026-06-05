@@ -62,9 +62,9 @@
 - [x] **PAY-02**: Payslip export (async job → 202 + job id).
 
 ### E10 Reporting, Notifications & Exports (Phase 11)
-- [ ] **RPT-01**: My dashboard (role-aware).
+- [x] **RPT-01**: My dashboard (role-aware).
 - [x] **RPT-02**: Billable attendance report.
-- [ ] **RPT-03**: Notifications — list/mark-read/mark-all-read.
+- [x] **RPT-03**: Notifications — list/mark-read/mark-all-read.
 - [ ] **RPT-04**: Export framework — create/get/cancel (async).
 
 ## Out of Scope
