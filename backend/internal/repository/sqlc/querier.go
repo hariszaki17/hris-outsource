@@ -38,6 +38,11 @@ type Querier interface {
 	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
 	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)
+	// The service computes next seq = count + 1 for the composite id.
+	CountPayslipAuditNotes(ctx context.Context, payslipID string) (int64, error)
+	// EXPORT_TOO_LARGE guard (10-02 compares to the threshold). Same period/year/
+	// employee_ids scope as the export request.
+	CountPayslipsInScope(ctx context.Context, arg CountPayslipsInScopeParams) (int64, error)
 	// Soft-reservation recompute: sum duration_days of this employee+leave_type's open
 	// PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
 	CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPendingLeaveDaysForQuotaParams) (int64, error)
@@ -134,6 +139,7 @@ type Querier interface {
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
+	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	// Single holiday (for GET after create/update).
 	GetHoliday(ctx context.Context, id string) (GetHolidayRow, error)
 	// HOLIDAY_DATE_CLASH pre-check: does a non-deleted holiday already exist on this
@@ -158,6 +164,8 @@ type Querier interface {
 	// reject/withdraw). Omits joins; the service re-reads via GetOvertime for the DTO.
 	GetOvertimeForUpdate(ctx context.Context, id string) (GetOvertimeForUpdateRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
+	// Single payslip with all columns incl. ENCRYPTED money (for GET /payslips/{id}).
+	GetPayslip(ctx context.Context, id string) (GetPayslipRow, error)
 	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
 	// All placements sharing a predecessor/successor chain with the given placement
 	// (for history_chain). Walks both directions from the seed via a recursive CTE.
@@ -184,6 +192,15 @@ type Querier interface {
 	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
 	// not 23505).
 	InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error
+	// E8 payslip-export job queries (SWP-EXP-*). InsertExportJob writes a QUEUED row
+	// inside the tx that EnqueueTx's the River job (transactional outbox, 10-02); the
+	// PayslipExportWorker drives the lifecycle via UpdateExportJobStatus. status enum
+	// pinned to openapi PayslipExportJob.status (QUEUED/RUNNING/DONE/FAILED — DONE is
+	// the terminal-success value).
+	// Queue a payslip export. status defaults QUEUED, confidential server-enforced
+	// true, kind PAYSLIP_EXPORT, format XLSX. id allocated by the column DEFAULT
+	// ('SWP-EXP-' || swp_next_id('EXP')) when omitted.
+	InsertExportJob(ctx context.Context, arg InsertExportJobParams) (ExportJob, error)
 	// Create (POST /holidays). id allocated by the column DEFAULT
 	// ('SWP-HOL-' || swp_next_id('HOL')) when omitted, OR supplied explicitly
 	// (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
@@ -199,6 +216,17 @@ type Querier interface {
 	// One immutable decision-trail row per approval action (L1/HR approve, override,
 	// reject) — written in-tx with each transition.
 	InsertOvertimeApproval(ctx context.Context, arg InsertOvertimeApprovalParams) (OvertimeApproval, error)
+	// Seed path (10-02 inserts ciphertext produced by the crypto helper). id
+	// allocated by the column DEFAULT ('SWP-PS-' || swp_next_id('PS')) when omitted,
+	// OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
+	InsertPayslip(ctx context.Context, arg InsertPayslipParams) (InsertPayslipRow, error)
+	// Append one immutable note. id is the service-assigned composite
+	// "{payslip_id}-NOTE-{seq}".
+	InsertPayslipAuditNote(ctx context.Context, arg InsertPayslipAuditNoteParams) (PayslipAuditNote, error)
+	// Seed: one employer-borne benefit line.
+	InsertPayslipBenefit(ctx context.Context, arg InsertPayslipBenefitParams) (PayslipBenefit, error)
+	// Seed: one earning/deduction line (value_enc = crypto.Encrypt of the Money string).
+	InsertPayslipComponent(ctx context.Context, arg InsertPayslipComponentParams) (PayslipComponent, error)
 	// E3 placement_history queries — one row per lifecycle transition.
 	InsertPlacementHistory(ctx context.Context, arg InsertPlacementHistoryParams) (PlacementHistory, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
@@ -294,6 +322,30 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, service_line (scopes to a specific line or global).
 	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
+	// E8 payslip audit-note queries (PA-7, §8). Append-only HR annotations keyed to
+	// a payslip. The id is a composite "{payslip_id}-NOTE-{seq}" assigned by the
+	// service (seq = CountPayslipAuditNotes + 1 in the insert tx). Notes may exist on
+	// DECRYPT_FAIL payslips and are never nulled.
+	// Chronological (oldest-first per openapi) list for GET /payslips/{id}/audit-notes.
+	// Keyset cursor on (created_at ASC, seq ASC): rows strictly after the cursor.
+	ListPayslipAuditNotes(ctx context.Context, arg ListPayslipAuditNotesParams) ([]PayslipAuditNote, error)
+	// Employer-borne benefits (HR-only). value_enc ENCRYPTED.
+	ListPayslipBenefits(ctx context.Context, payslipID string) ([]PayslipBenefit, error)
+	// Earnings + deductions breakdown for the detail view. value_enc is ENCRYPTED
+	// (decrypted at the boundary). Ordered kind then sort_order.
+	ListPayslipComponents(ctx context.Context, payslipID string) ([]PayslipComponent, error)
+	// E8 payroll queries (F8.1/F8.2 / SWP-PS-*). Historical, read-only archive.
+	// Monetary columns come back as ENCRYPTED ciphertext (gross_*_enc /
+	// take_home_pay_enc / value_enc bytea) — the 10-02 repo/service decrypts at the
+	// boundary via internal/platform/crypto, NOT in SQL. paid_on comes back as
+	// pgtype.Date (10-02 repo converts <-> time.Time like Phase-5/6/8/9). Keyset
+	// cursor on (paid_on DESC NULLS LAST, id DESC) per CONVENTIONS §11 (default sort
+	// paid_on:desc).
+	// Archive / list load. Keyset cursor on (paid_on, id) DESC, NULL paid_on sorts
+	// last. Filters (all optional via narg): employee_id, year, month (from the
+	// period YYYY-MM), status. Summary only — NO components/benefits join. Returns
+	// the *_enc ciphertext (repo decrypts in 10-02).
+	ListPayslips(ctx context.Context, arg ListPayslipsParams) ([]ListPayslipsRow, error)
 	ListPlacementHistory(ctx context.Context, placementID string) ([]PlacementHistory, error)
 	// E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
 	// master tables to fill the denormalized *_name fields the spec returns.
@@ -342,6 +394,8 @@ type Querier interface {
 	LockEmployeePlacements(ctx context.Context, employeeID string) ([]LockEmployeePlacementsRow, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
+	PayslipExists(ctx context.Context, id string) (bool, error)
 	// Reject an exception record (reason required). Same PENDING/ESCALATED guard.
 	RejectAttendance(ctx context.Context, arg RejectAttendanceParams) (RejectAttendanceRow, error)
 	// Reject a PENDING correction (reason required). Same PENDING guard.
@@ -407,6 +461,9 @@ type Querier interface {
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
+	// The worker's lifecycle writer. Sets status + result fields; stamps started_at
+	// on RUNNING (once) and completed_at on the terminal states (DONE/FAILED).
+	UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (ExportJob, error)
 	// Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
 	// the current value (applicable_service_lines is whole-array replace when supplied).
 	UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (UpdateHolidayRow, error)

@@ -219,6 +219,25 @@ type EmploymentAgreement struct {
 	DeletedAt         *time.Time
 }
 
+type ExportJob struct {
+	ID               string
+	Kind             string
+	Status           string
+	Format           string
+	Confidential     bool
+	RequestedByID    string
+	RequestedByName  *string
+	ScopePeriod      *string
+	ScopeYear        *int32
+	ScopeEmployeeIds []string
+	RowCount         *int32
+	ArtifactRef      *string
+	ErrorMessage     *string
+	RequestedAt      time.Time
+	StartedAt        *time.Time
+	CompletedAt      *time.Time
+}
+
 type Holiday struct {
 	ID                     string
 	Name                   string
@@ -387,6 +406,54 @@ type PasswordResetToken struct {
 	ExpiresAt time.Time
 	UsedAt    *time.Time
 	CreatedAt time.Time
+}
+
+type Payslip struct {
+	ID                 string
+	EmployeeID         string
+	EmployeeName       *string
+	PlacementID        *string
+	Year               int32
+	Month              int32
+	PaidOn             pgtype.Date
+	WorkingDays        *int32
+	GrossEarningsEnc   []byte
+	GrossDeductionsEnc []byte
+	TakeHomePayEnc     []byte
+	Status             string
+	SourceSystem       string
+	SourceID           string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
+type PayslipAuditNote struct {
+	ID         string
+	PayslipID  string
+	Seq        int32
+	Text       string
+	AuthorID   string
+	AuthorName *string
+	CreatedAt  time.Time
+}
+
+type PayslipBenefit struct {
+	ID        int64
+	PayslipID string
+	Name      string
+	ValueEnc  []byte
+	SortOrder int32
+}
+
+type PayslipComponent struct {
+	ID        int64
+	PayslipID string
+	Kind      string
+	Name      string
+	ValueEnc  []byte
+	ForBpjs   bool
+	SortOrder int32
 }
 
 type Placement struct {
