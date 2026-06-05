@@ -27,10 +27,10 @@
 SELECT
     a.employee_id                                                            AS group_key,
     COALESCE(e.full_name, a.employee_id)                                     AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -53,10 +53,10 @@ ORDER BY group_label;
 SELECT
     (a.check_in_at::date)::text                                              AS group_key,
     (a.check_in_at::date)::text                                              AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -79,10 +79,10 @@ ORDER BY group_key;
 SELECT
     COALESCE(se.shift_master_id, 'UNSCHEDULED')                              AS group_key,
     COALESCE(sm.name, 'Tanpa Jadwal')                                        AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count

@@ -15,10 +15,10 @@ const billableAggregateByDay = `-- name: BillableAggregateByDay :many
 SELECT
     (a.check_in_at::date)::text                                              AS group_key,
     (a.check_in_at::date)::text                                              AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -46,10 +46,10 @@ type BillableAggregateByDayParams struct {
 type BillableAggregateByDayRow struct {
 	GroupKey            string
 	GroupLabel          string
-	CompanyID           interface{}
-	CompanyName         interface{}
-	ServiceLineID       interface{}
-	ServiceLineName     interface{}
+	CompanyID           string
+	CompanyName         string
+	ServiceLineID       string
+	ServiceLineName     string
 	WorkedMinutes       int64
 	BillableMinutes     int64
 	VerifiedRecordCount int64
@@ -96,10 +96,10 @@ const billableAggregateByEmployee = `-- name: BillableAggregateByEmployee :many
 SELECT
     a.employee_id                                                            AS group_key,
     COALESCE(e.full_name, a.employee_id)                                     AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -128,10 +128,10 @@ type BillableAggregateByEmployeeParams struct {
 type BillableAggregateByEmployeeRow struct {
 	GroupKey            string
 	GroupLabel          string
-	CompanyID           interface{}
-	CompanyName         interface{}
-	ServiceLineID       interface{}
-	ServiceLineName     interface{}
+	CompanyID           string
+	CompanyName         string
+	ServiceLineID       string
+	ServiceLineName     string
 	WorkedMinutes       int64
 	BillableMinutes     int64
 	VerifiedRecordCount int64
@@ -200,10 +200,10 @@ const billableAggregateByShiftMaster = `-- name: BillableAggregateByShiftMaster 
 SELECT
     COALESCE(se.shift_master_id, 'UNSCHEDULED')                              AS group_key,
     COALESCE(sm.name, 'Tanpa Jadwal')                                        AS group_label,
-    min(p.client_company_id)                                                 AS company_id,
-    min(cc.name)                                                             AS company_name,
-    min(p.service_line_id)                                                   AS service_line_id,
-    min(sl.name)                                                             AS service_line_name,
+    min(p.client_company_id)::text                                                 AS company_id,
+    min(cc.name)::text                                                             AS company_name,
+    min(p.service_line_id)::text                                                   AS service_line_id,
+    min(sl.name)::text                                                             AS service_line_name,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -233,10 +233,10 @@ type BillableAggregateByShiftMasterParams struct {
 type BillableAggregateByShiftMasterRow struct {
 	GroupKey            string
 	GroupLabel          string
-	CompanyID           interface{}
-	CompanyName         interface{}
-	ServiceLineID       interface{}
-	ServiceLineName     interface{}
+	CompanyID           string
+	CompanyName         string
+	ServiceLineID       string
+	ServiceLineName     string
 	WorkedMinutes       int64
 	BillableMinutes     int64
 	VerifiedRecordCount int64
