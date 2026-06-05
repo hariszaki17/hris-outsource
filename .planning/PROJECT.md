@@ -15,15 +15,18 @@ by a Playwright test that exercises the real FE against the real Go API.
 
 ## Requirements
 
-### Active
+### Validated
 
-- [ ] Implement the backend endpoints **the FE web calls today** (see
-  `.planning/reference/fe-endpoint-inventory.md`), matching each `docs/api/*/openapi.yaml`
-  contract exactly, following `.planning/reference/backend-build-conventions.md`.
-- [ ] Wire FE auth to the real BE (login/refresh/logout/forgot/reset) — currently stubbed.
-- [ ] A full-stack Playwright E2E harness with headless / headful / UI modes, real BE +
-  ephemeral Postgres + seeded personas (see `.planning/reference/e2e-harness-spec.md`).
-- [ ] Exhaustive E2E: every Gherkin AC / case (C-#) per FE feature becomes its own test.
+- ✓ Backend endpoints the FE web calls today — implemented behind the locked `docs/api/*/openapi.yaml` contracts across all 11 epics — v1.0
+- ✓ FE auth wired to the real BE (login/refresh/logout/forgot/reset) — v1.0
+- ✓ Full-stack Playwright E2E harness (headless/headful/UI, real BE + ephemeral Postgres + seeded personas, hardened detached-worker boot) — v1.0
+- ✓ Exhaustive E2E per Gherkin AC + a Go contract-test drift gate per slice — v1.0 (final suite 239 passed / 6 skipped / 0 failed)
+
+### Active (next milestone — candidates)
+
+- [ ] Notification dispatch coverage beyond leave/OT/attendance (placement, payroll, change-requests, quotas — currently nil-safe no-op stubs).
+- [ ] PDF export (currently `EXPORT_FORMAT_UNSUPPORTED`; Excel only in v1.0).
+- [ ] One independent human `pnpm e2e` pass to close the 6 phases verified `human_needed`.
 
 ### Out of Scope
 
@@ -60,11 +63,28 @@ by a Playwright test that exercises the real FE against the real Go API.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Scope = FE-used endpoints only | Least effort to make the whole web app live; max value | — Pending |
-| No server-side OpenAPI codegen; hand-write handlers | oapi-codegen can't parse 3.1 specs (5/9 fail) | ✓ Good |
-| Full-stack Playwright E2E (real BE + ephemeral PG) | Only way to catch FE↔BE contract mismatches | — Pending |
-| Exhaustive E2E per Gherkin AC | Max coverage/traceability (user choice) | — Pending |
-| One phase per epic, dependency-ordered, auth first | Auth gates E2E; epics build on each other | — Pending |
+| Scope = FE-used endpoints only | Least effort to make the whole web app live; max value | ✓ Good — whole web console live end-to-end |
+| No server-side OpenAPI codegen; hand-write handlers | oapi-codegen can't parse 3.1 specs (5/9 fail) | ✓ Good — Go contract tests held the line, zero FE drift |
+| Full-stack Playwright E2E (real BE + ephemeral PG) | Only way to catch FE↔BE contract mismatches | ✓ Good — caught real bugs (INV-1 banner, `{data}` envelope, conflict_details) |
+| Exhaustive E2E per Gherkin AC | Max coverage/traceability (user choice) | ✓ Good — 239 passing E2E across 11 epics |
+| One phase per epic, dependency-ordered, auth first | Auth gates E2E; epics build on each other | ✓ Good — clean cross-epic seams (placement backbone, over-leave loop) |
+| Defense-in-depth invariants (DB partial-unique index + FOR UPDATE) | Race-proof INV enforcement under concurrency | ✓ Good — INV-1..5 honest, contract-tested |
+| Frontend code (not just `.pen`) as authoritative visual/interaction reference | Real components are what ships + what E2E drives | ✓ Good — surfaced contract mismatches `.pen` alone would miss |
+| Cross-epic loop-closers (over-leave, notification dispatch) wired to real producers/consumers | Avoid stub-only "appears to work" | ✓ Good — proven end-to-end in E2E |
+
+## Current State
+
+**Shipped v1.0 (2026-06-05).** The Go backend (`backend/`) implements every FE-used endpoint
+across all 11 epics (E1 foundations → E10 reporting) behind the locked OpenAPI contracts;
+migrations 00001–00036; River worker for async export + notification dispatch; AES-256-GCM
+encryption-at-rest for payroll. The web console (`frontend/apps/web`) runs against the real BE
+with MSW off. Quality spine: a Go contract-test drift gate per slice + exhaustive full-stack
+Playwright E2E (239 passed / 6 skipped / 0 failed).
+
+**Known tech debt (carried to v1.1):** notification dispatch limited to leave/OT/attendance
+(other stubs are nil-safe no-ops); PDF export deferred (Excel only); 6 phases' E2E is
+executor-run green pending one independent human `pnpm e2e` pass. Out of scope and untouched:
+E9 migration (MySQL→Postgres), mobile (React Native), production infra/CI/CD.
 
 ---
-*Last updated: 2026-06-03 after milestone planning (v1.0-be)*
+*Last updated: 2026-06-05 after v1.0 milestone (Backend + Full-Stack E2E)*
