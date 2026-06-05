@@ -236,6 +236,11 @@ type ExportJob struct {
 	RequestedAt      time.Time
 	StartedAt        *time.Time
 	CompletedAt      *time.Time
+	ReportType       string
+	Filters          []byte
+	AuditLogEntryID  *string
+	ProgressPercent  *int32
+	ExpiresAt        *time.Time
 }
 
 type Holiday struct {
@@ -339,6 +344,22 @@ type LeaveType struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
+}
+
+type Notification struct {
+	ID               string
+	RecipientID      string
+	Kind             string
+	Title            string
+	Body             string
+	DeepLinkEpic     *string
+	DeepLinkEntityID *string
+	DeepLinkPath     string
+	ActorID          *string
+	ActorLabel       string
+	IsCritical       bool
+	ReadAt           *time.Time
+	CreatedAt        time.Time
 }
 
 type Overtime struct {

@@ -14,6 +14,8 @@ type Querier interface {
 	// :adjust — signed delta on total + audited last_adjustment snapshot. Service
 	// guards delta cannot drop total below used (422 RULE_VIOLATION) before calling.
 	AdjustLeaveQuotaTotal(ctx context.Context, arg AdjustLeaveQuotaTotalParams) (LeaveQuota, error)
+	// AgentDashboard.recent_attendance: last-7-day present/late/absent for one agent.
+	AgentRecentAttendance(ctx context.Context, arg AgentRecentAttendanceParams) (AgentRecentAttendanceRow, error)
 	// Apply an approved correction's whitelisted proposed_* fields to the target row:
 	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
 	// (de-duped via array_remove first); sets last_correction_id.
@@ -22,6 +24,45 @@ type Querier interface {
 	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
 	// decidable; zero rows ⇒ terminal state (service emits 409).
 	ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error)
+	// group_by=day: group_key = ISO date, group_label = same ISO date.
+	BillableAggregateByDay(ctx context.Context, arg BillableAggregateByDayParams) ([]BillableAggregateByDayRow, error)
+	// E10 F10.3 billable-hours report (GET /reports/attendance-billable). Computed
+	// LIVE from VERIFIED attendance (INV-4 / BR-1) on billable attendance codes
+	// (E2 attendance_codes.is_billable). Hours only — no rates/amounts (EPICS §8).
+	//
+	// SCHEMA-ALIGNMENT NOTE [11-01 DECISION]:
+	//   * "verified" = attendance.verification_status = 'VERIFIED' (00026; the plan
+	//     prose mentioned is_verified — there is no such column, verification_status
+	//     is the source of truth).
+	//   * worked/billable/payable hours are DERIVED from attendance.worked_minutes
+	//     (a real STORED column set on clock-out/auto-close), /60.0 → hours. v1 has no
+	//     separate payable column, so payable_hours = worked_hours for billable codes
+	//     (faithful stand-in, derived from real rows — NOT a constant). When
+	//     worked_minutes is NULL (open shift) it contributes 0.
+	//   * billable_hours counts only billable-code minutes; worked_hours counts ALL
+	//     verified worked minutes in the group; the GROUP filter is applied per-variant.
+	//   * company/service-line names come from a JOIN to placements -> client_companies
+	//     / service_lines (attendance.company_id is the denormalized scope key;
+	//     placements.service_line_id is the line).
+	//   * shift date = check_in_at::date (no attendance_shift_date column exists).
+	//
+	// Three GROUP BY variants (employee / day / shift_master) are provided as distinct
+	// typed queries rather than a single @group_by CASE — keeps sqlc row types precise
+	// and the service maps each to BillableReportRow. The shared filter is identical.
+	// group_by=employee: group_key = SWP-EMP-*, group_label = employee full_name.
+	BillableAggregateByEmployee(ctx context.Context, arg BillableAggregateByEmployeeParams) ([]BillableAggregateByEmployeeRow, error)
+	// group_by=shift_master: group_key = SWP-SHF-*, group_label = shift master name.
+	// shift_master resolved via the schedule_entries row linked by attendance.schedule_id.
+	BillableAggregateByShiftMaster(ctx context.Context, arg BillableAggregateByShiftMasterParams) ([]BillableAggregateByShiftMasterRow, error)
+	// pending_summary: records in the period NOT yet billable (not VERIFIED). Hours
+	// estimate from worked_minutes (pre-verification, worked-hours stand-in).
+	BillablePendingSummary(ctx context.Context, arg BillablePendingSummaryParams) (BillablePendingSummaryRow, error)
+	// summary totals across the whole filtered set (verified-only). verification_rate
+	// numerator/denominator returned so the service computes the pct (null when 0).
+	BillableSummary(ctx context.Context, arg BillableSummaryParams) (BillableSummaryRow, error)
+	// Cancel a still-running job (QUEUED/RUNNING -> CANCELLED). No-op-safe: the
+	// service re-reads via GetExportJob when 0 rows return (already terminal).
+	CancelExportJob(ctx context.Context, id string) (CancelExportJobRow, error)
 	// INV-3 loop-closer (E6 / Phase 8): cancel overlapping live schedule entries for
 	// the leave dates on final/override approval. status='CANCELLED_BY_LEAVE' is the
 	// ONLY value the schedule_entries CHECK (migration 00024) permits for this
@@ -31,10 +72,18 @@ type Querier interface {
 	// the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
 	CancelScheduleEntriesForLeave(ctx context.Context, arg CancelScheduleEntriesForLeaveParams) ([]CancelScheduleEntriesForLeaveRow, error)
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
+	// HrDashboard.kpis.active_companies = companies with >=1 active placement.
+	CountActiveCompanies(ctx context.Context) (int64, error)
+	// HrDashboard.kpis.active_placements.
+	CountActivePlacements(ctx context.Context) (int64, error)
 	// Used to populate position_count in the ServiceLine DTO and to guard :discontinue.
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// Employment agreements ending within the next 30 days (HrDashboard).
+	CountExpiringAgreements30d(ctx context.Context, today pgtype.Date) (int64, error)
+	// Active/expiring placements ending within the next 30 days (inclusive of today).
+	CountExpiringPlacements30d(ctx context.Context, arg CountExpiringPlacements30dParams) (int64, error)
 	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
 	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)
@@ -43,9 +92,37 @@ type Querier interface {
 	// EXPORT_TOO_LARGE guard (10-02 compares to the threshold). Same period/year/
 	// employee_ids scope as the export request.
 	CountPayslipsInScope(ctx context.Context, arg CountPayslipsInScopeParams) (int64, error)
+	// E10 F10.2 dashboard aggregations (GET /dashboards/me). Read-only live counts
+	// over the existing E2..E8 tables — no rollup table (live for honesty, CONTEXT
+	// decision). All scope params are nullable: NULL = global (HR/super), a company id
+	// scopes to one company (shift_leader). The service passes role-derived scope.
+	//
+	// SCHEMA-ALIGNMENT NOTE [11-01 DECISION]: the plan prose used placeholder enum
+	// values that differ from the real Phase-7..9 schema. Aligned to reality:
+	//   * attendance.verification_status = 'PENDING' (NOT 'PENDING_VERIFY') —
+	//     00026_attendance.sql CHECK (AUTO_APPROVED/PENDING/VERIFIED/REJECTED/ESCALATED).
+	//     The leader queue counts PENDING + ESCALATED (both await action).
+	//   * leave_requests.status IN ('PENDING_L1','PENDING_HR') — 00028.
+	//   * overtime.status IN ('PENDING_L1','PENDING_HR') (NOT a bare 'PENDING') — 00031.
+	//   * placements use client_company_id + lifecycle_status + end_date — 00020.
+	//   * attendance carries company_id directly (denormalized); leave_requests +
+	//     overtime carry company_id (denormalized) too; schedule_entries does NOT, so
+	//     LeaderTodayStatus joins schedule_entries -> placements for company scope.
+	// Attendance awaiting leader verification (PENDING or ESCALATED).
+	CountPendingAttendanceVerify(ctx context.Context, companyID *string) (int64, error)
+	// Leave requests pending either approval level.
+	CountPendingLeaveApprove(ctx context.Context, companyID *string) (int64, error)
+	// HR-level-only pending leave (HrDashboard.kpis.leave_pending = PENDING_HR).
+	CountPendingLeaveApproveHR(ctx context.Context, companyID *string) (int64, error)
 	// Soft-reservation recompute: sum duration_days of this employee+leave_type's open
 	// PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
 	CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPendingLeaveDaysForQuotaParams) (int64, error)
+	// Overtime pending either approval level.
+	CountPendingOtApprove(ctx context.Context, companyID *string) (int64, error)
+	// AgentDashboard.pending_requests: this agent's own pending leave + OT.
+	CountPendingRequestsForEmployee(ctx context.Context, employeeID string) (CountPendingRequestsForEmployeeRow, error)
+	// Unread badge + AgentDashboard.recent_notifications_unread.
+	CountUnreadNotifications(ctx context.Context, recipientID string) (int64, error)
 	// Allocates the SWP-AG id inline from the per-prefix sequence.
 	CreateAgreement(ctx context.Context, arg CreateAgreementParams) (CreateAgreementRow, error)
 	// Allocates the SWP-FILE id inline from the per-prefix sequence.
@@ -139,7 +216,11 @@ type Querier interface {
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
-	GetExportJob(ctx context.Context, id string) (ExportJob, error)
+	GetExportJob(ctx context.Context, id string) (GetExportJobRow, error)
+	// Status poll / GET /exports/{id}. Requester scope enforced in the service.
+	// Named *Generic to avoid colliding with the Phase-10 payroll GetExportJob
+	// (sqlc shares one sqlcgen package — query names are globally unique).
+	GetExportJobGeneric(ctx context.Context, id string) (GetExportJobGenericRow, error)
 	// Single holiday (for GET after create/update).
 	GetHoliday(ctx context.Context, id string) (GetHolidayRow, error)
 	// HOLIDAY_DATE_CLASH pre-check: does a non-deleted holiday already exist on this
@@ -158,6 +239,8 @@ type Querier interface {
 	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
 	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
+	// Single notification scoped to its recipient (scope=self).
+	GetNotification(ctx context.Context, arg GetNotificationParams) (Notification, error)
 	// Single OT record with denormalized employee + company names (for GET /overtime/{id}).
 	GetOvertime(ctx context.Context, id string) (GetOvertimeRow, error)
 	// Row-lock for the state-machine transitions (confirm/approve-l1/approve-final/
@@ -200,7 +283,20 @@ type Querier interface {
 	// Queue a payslip export. status defaults QUEUED, confidential server-enforced
 	// true, kind PAYSLIP_EXPORT, format XLSX. id allocated by the column DEFAULT
 	// ('SWP-EXP-' || swp_next_id('EXP')) when omitted.
-	InsertExportJob(ctx context.Context, arg InsertExportJobParams) (ExportJob, error)
+	InsertExportJob(ctx context.Context, arg InsertExportJobParams) (InsertExportJobRow, error)
+	// E10 F10.4 generic export-framework queries over the GENERALIZED export_jobs
+	// table (00036). These are NEW, generic queries (report_type + filters jsonb);
+	// the Phase-10 payroll/export_jobs.sql queries (InsertExportJob / GetExportJob /
+	// UpdateExportJobStatus, PAYSLIP path) stay UNTOUCHED. The 11-02b export service
+	// uses these for ATTENDANCE_BILLABLE etc.
+	//
+	// DB status QUEUED/RUNNING/DONE/FAILED/CANCELLED; the service maps RUNNING<->
+	// PROCESSING and DONE<->COMPLETED to the wire ExportStatus at the DTO boundary.
+	// id allocated by the column DEFAULT 'SWP-EXP-' || swp_next_id('EXP') (omit id).
+	// Queue a generic report export. status defaults QUEUED. kind is set to the
+	// report_type for forward-compat with the Phase-10 'kind' column (the worker
+	// branches on report_type). format/confidential/filters per request.
+	InsertExportJobGeneric(ctx context.Context, arg InsertExportJobGenericParams) (InsertExportJobGenericRow, error)
 	// Create (POST /holidays). id allocated by the column DEFAULT
 	// ('SWP-HOL-' || swp_next_id('HOL')) when omitted, OR supplied explicitly
 	// (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
@@ -209,6 +305,8 @@ type Querier interface {
 	// LeaveRequest.timeline[] the FE renders (ordered by occurred_at).
 	// One immutable decision row per approval action (L1/HR approve, override, reject).
 	InsertLeaveApproval(ctx context.Context, arg InsertLeaveApprovalParams) (LeaveApproval, error)
+	// The worker / dispatch-helper write path. id via the column DEFAULT.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	// Seed / HR-on-behalf path (FE/web does not create OT — mobile/agent does). id
 	// allocated by the column DEFAULT ('SWP-OT-' || swp_next_id('OT')) when omitted,
 	// OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
@@ -232,6 +330,10 @@ type Querier interface {
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
 	// Stores a new (hashed) password reset token for the user (AU-4).
 	InsertResetToken(ctx context.Context, arg InsertResetTokenParams) (PasswordResetToken, error)
+	// LeaderDashboard.today: today's shift roll-up for one company. shifts_total from
+	// schedule_entries (joined to placements for company scope); the attendance-derived
+	// counts read today's attendance rows (check_in_at::date = today). COALESCE to 0.
+	LeaderTodayStatus(ctx context.Context, arg LeaderTodayStatusParams) (LeaderTodayStatusRow, error)
 	// bulk-grant employee_ids:["all"] sentinel + pro-rate join-date source: employees
 	// with an ACTIVE/EXPIRING placement covering any day of the [period_start,period_end].
 	ListActivePlacedEmployeesForGrant(ctx context.Context, arg ListActivePlacedEmployeesForGrantParams) ([]ListActivePlacedEmployeesForGrantRow, error)
@@ -308,6 +410,14 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_annual.
 	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
+	// E10 F10.1 notifications queries (SWP-NTF-*). The in-app notification surface:
+	// cursor list (read-state + kind filters), single + bulk mark-read, unread count,
+	// and the worker INSERT (called by the un-stubbed NotificationWorker / notify.Dispatch
+	// in 11-02). id is allocated by the column DEFAULT 'SWP-NTF-' || swp_next_id('NTF')
+	// (the INSERT omits id). Keyset cursor mirrors ListAuditLog: (created_at, id) DESC.
+	// Cursor page for one recipient, newest-first. read_state: 'ALL' (no-op),
+	// 'UNREAD' (read_at IS NULL), 'READ' (read_at IS NOT NULL). kind optional.
+	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// E7 overtime queries (F7.1/F7.4 / SWP-OT-*). Reads LEFT JOIN employees for
 	// employee_name, client_companies for company_name (the EmployeeRef/CompanyRef
 	// DTOs). work_date comes back as pgtype.Date (09-02 repo converts <-> time.Time
@@ -392,6 +502,12 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// INV-1 / period-overlap lock: all of the agent's placements, row-locked.
 	LockEmployeePlacements(ctx context.Context, employeeID string) ([]LockEmployeePlacementsRow, error)
+	// Bulk mark-read for a recipient. Optional @before cutoff (created_at < before).
+	// Returns the affected row count.
+	MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error)
+	// Mark one notification read (no-op if already read — COALESCE keeps the first
+	// read_at). Scoped to recipient.
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
 	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
@@ -463,7 +579,11 @@ type Querier interface {
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
 	// The worker's lifecycle writer. Sets status + result fields; stamps started_at
 	// on RUNNING (once) and completed_at on the terminal states (DONE/FAILED).
-	UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (ExportJob, error)
+	UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (UpdateExportJobStatusRow, error)
+	// The generic worker's lifecycle writer. Sets status + progress + result fields;
+	// stamps started_at on RUNNING (once) and completed_at on the terminal states
+	// (DONE/FAILED/CANCELLED). filename mirrors artifact_ref on the wire (11-02b DTO).
+	UpdateExportJobStatusGeneric(ctx context.Context, arg UpdateExportJobStatusGenericParams) (UpdateExportJobStatusGenericRow, error)
 	// Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
 	// the current value (applicable_service_lines is whole-array replace when supplied).
 	UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (UpdateHolidayRow, error)

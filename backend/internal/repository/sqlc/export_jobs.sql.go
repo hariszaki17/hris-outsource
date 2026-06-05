@@ -7,6 +7,7 @@ package sqlcgen
 
 import (
 	"context"
+	"time"
 )
 
 const countPayslipsInScope = `-- name: CountPayslipsInScope :one
@@ -45,9 +46,28 @@ FROM export_jobs
 WHERE id = $1
 `
 
-func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error) {
+type GetExportJobRow struct {
+	ID               string
+	Kind             string
+	Status           string
+	Format           string
+	Confidential     bool
+	RequestedByID    string
+	RequestedByName  *string
+	ScopePeriod      *string
+	ScopeYear        *int32
+	ScopeEmployeeIds []string
+	RowCount         *int32
+	ArtifactRef      *string
+	ErrorMessage     *string
+	RequestedAt      time.Time
+	StartedAt        *time.Time
+	CompletedAt      *time.Time
+}
+
+func (q *Queries) GetExportJob(ctx context.Context, id string) (GetExportJobRow, error) {
 	row := q.db.QueryRow(ctx, getExportJob, id)
-	var i ExportJob
+	var i GetExportJobRow
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,
@@ -102,6 +122,25 @@ type InsertExportJobParams struct {
 	ScopeEmployeeIds []string
 }
 
+type InsertExportJobRow struct {
+	ID               string
+	Kind             string
+	Status           string
+	Format           string
+	Confidential     bool
+	RequestedByID    string
+	RequestedByName  *string
+	ScopePeriod      *string
+	ScopeYear        *int32
+	ScopeEmployeeIds []string
+	RowCount         *int32
+	ArtifactRef      *string
+	ErrorMessage     *string
+	RequestedAt      time.Time
+	StartedAt        *time.Time
+	CompletedAt      *time.Time
+}
+
 // E8 payslip-export job queries (SWP-EXP-*). InsertExportJob writes a QUEUED row
 // inside the tx that EnqueueTx's the River job (transactional outbox, 10-02); the
 // PayslipExportWorker drives the lifecycle via UpdateExportJobStatus. status enum
@@ -110,7 +149,7 @@ type InsertExportJobParams struct {
 // Queue a payslip export. status defaults QUEUED, confidential server-enforced
 // true, kind PAYSLIP_EXPORT, format XLSX. id allocated by the column DEFAULT
 // ('SWP-EXP-' || swp_next_id('EXP')) when omitted.
-func (q *Queries) InsertExportJob(ctx context.Context, arg InsertExportJobParams) (ExportJob, error) {
+func (q *Queries) InsertExportJob(ctx context.Context, arg InsertExportJobParams) (InsertExportJobRow, error) {
 	row := q.db.QueryRow(ctx, insertExportJob,
 		arg.ID,
 		arg.Kind,
@@ -122,7 +161,7 @@ func (q *Queries) InsertExportJob(ctx context.Context, arg InsertExportJobParams
 		arg.ScopeYear,
 		arg.ScopeEmployeeIds,
 	)
-	var i ExportJob
+	var i InsertExportJobRow
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,
@@ -166,9 +205,28 @@ type UpdateExportJobStatusParams struct {
 	ID           string
 }
 
+type UpdateExportJobStatusRow struct {
+	ID               string
+	Kind             string
+	Status           string
+	Format           string
+	Confidential     bool
+	RequestedByID    string
+	RequestedByName  *string
+	ScopePeriod      *string
+	ScopeYear        *int32
+	ScopeEmployeeIds []string
+	RowCount         *int32
+	ArtifactRef      *string
+	ErrorMessage     *string
+	RequestedAt      time.Time
+	StartedAt        *time.Time
+	CompletedAt      *time.Time
+}
+
 // The worker's lifecycle writer. Sets status + result fields; stamps started_at
 // on RUNNING (once) and completed_at on the terminal states (DONE/FAILED).
-func (q *Queries) UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (ExportJob, error) {
+func (q *Queries) UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (UpdateExportJobStatusRow, error) {
 	row := q.db.QueryRow(ctx, updateExportJobStatus,
 		arg.Status,
 		arg.RowCount,
@@ -176,7 +234,7 @@ func (q *Queries) UpdateExportJobStatus(ctx context.Context, arg UpdateExportJob
 		arg.ErrorMessage,
 		arg.ID,
 	)
-	var i ExportJob
+	var i UpdateExportJobStatusRow
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,

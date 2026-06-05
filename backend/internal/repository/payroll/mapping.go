@@ -129,7 +129,48 @@ func mapAuditNote(r sqlcgen.PayslipAuditNote) dom.PayslipAuditNote {
 	}
 }
 
-func mapExportJob(r sqlcgen.ExportJob) dom.ExportJob {
+// exportJobRow is the common shape of the Phase-10 InsertExportJob /
+// GetExportJob RETURNING rows. Since Phase-11 (00036) ADDed columns to
+// export_jobs, sqlc no longer collapses these explicit-RETURNING queries onto the
+// shared ExportJob model type and instead emits distinct (but field-identical) Row
+// structs — so mapExportJob is generic over both. The Phase-10 payslip path reads
+// only these base columns; the new E10 generic columns are ignored here.
+type exportJobRow interface {
+	sqlcgen.InsertExportJobRow | sqlcgen.GetExportJobRow
+}
+
+func mapExportJob[R exportJobRow](row R) dom.ExportJob {
+	var r struct {
+		ID               string
+		Status           string
+		Format           string
+		Confidential     bool
+		RequestedByID    string
+		RequestedByName  *string
+		ScopePeriod      *string
+		ScopeYear        *int32
+		ScopeEmployeeIds []string
+		RowCount         *int32
+		ArtifactRef      *string
+		ErrorMessage     *string
+		RequestedAt      time.Time
+		StartedAt        *time.Time
+		CompletedAt      *time.Time
+	}
+	switch v := any(row).(type) {
+	case sqlcgen.InsertExportJobRow:
+		r.ID, r.Status, r.Format, r.Confidential = v.ID, v.Status, v.Format, v.Confidential
+		r.RequestedByID, r.RequestedByName = v.RequestedByID, v.RequestedByName
+		r.ScopePeriod, r.ScopeYear, r.ScopeEmployeeIds = v.ScopePeriod, v.ScopeYear, v.ScopeEmployeeIds
+		r.RowCount, r.ArtifactRef, r.ErrorMessage = v.RowCount, v.ArtifactRef, v.ErrorMessage
+		r.RequestedAt, r.StartedAt, r.CompletedAt = v.RequestedAt, v.StartedAt, v.CompletedAt
+	case sqlcgen.GetExportJobRow:
+		r.ID, r.Status, r.Format, r.Confidential = v.ID, v.Status, v.Format, v.Confidential
+		r.RequestedByID, r.RequestedByName = v.RequestedByID, v.RequestedByName
+		r.ScopePeriod, r.ScopeYear, r.ScopeEmployeeIds = v.ScopePeriod, v.ScopeYear, v.ScopeEmployeeIds
+		r.RowCount, r.ArtifactRef, r.ErrorMessage = v.RowCount, v.ArtifactRef, v.ErrorMessage
+		r.RequestedAt, r.StartedAt, r.CompletedAt = v.RequestedAt, v.StartedAt, v.CompletedAt
+	}
 	return dom.ExportJob{
 		ID:               r.ID,
 		Status:           dom.ExportJobStatus(r.Status),
