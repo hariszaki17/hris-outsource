@@ -16,13 +16,13 @@ Postgres). Scope is strictly the endpoints the FE calls today
 
 - [x] **Phase 1: Test Harness + Auth** - Playwright full-stack harness + real login/refresh/logout/forgot/reset, FE wired to BE (completed 2026-06-04)
 - [x] **Phase 2: E1 Foundations** - Users, roles, audit log, platform settings (completed 2026-06-04)
-- [x] **Phase 3: E2 Org & Master Data** - Client companies, sites, service lines, positions, leave/attendance/overtime master data (5/6 plans complete — awaiting E2E plan 03-06)
+- [x] **Phase 3: E2 Org & Master Data** - Client companies, sites, service lines, positions, leave/attendance/overtime master data (completed 2026-06-04)
 - [x] **Phase 4: E2 People** - Employees, employment agreements, change requests (completed 2026-06-04)
-- [ ] **Phase 5: E3 Placement** - Placements lifecycle + shift-leader assignments + roster
-- [ ] **Phase 6: E4 Schedule & Shifts** - Shift masters, schedule entries, conflict check, bulk apply
-- [x] **Phase 7: E5 Attendance** - Attendance verify/reject (incl. bulk) + corrections
-- [x] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
-- [ ] **Phase 9: E7 Overtime** - Overtime workflow + public holidays
+- [x] **Phase 5: E3 Placement** - Placements lifecycle + shift-leader assignments + roster (completed 2026-06-04)
+- [x] **Phase 6: E4 Schedule & Shifts** - Shift masters, schedule entries, conflict check, bulk apply (completed 2026-06-04)
+- [x] **Phase 7: E5 Attendance** - Attendance verify/reject (incl. bulk) + corrections (completed 2026-06-05)
+- [x] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar (completed 2026-06-05)
+- [x] **Phase 9: E7 Overtime** - Overtime workflow + public holidays (completed 2026-06-05)
 - [x] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export (completed 2026-06-05)
 - [x] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework (completed 2026-06-05)
 
@@ -234,8 +234,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. E2 People | 6/6 | Complete    | 2026-06-04 |
 | 5. E3 Placement | 4/4 | Complete    | 2026-06-04 |
 | 6. E4 Schedule & Shifts | 4/4 | Complete    | 2026-06-04 |
-| 7. E5 Attendance | 4/4 | Complete | - |
-| 8. E6 Leave | 4/4 | Complete | 2026-06-05 |
-| 9. E7 Overtime | 0/4 | Not started | - |
+| 7. E5 Attendance | 4/4 | Complete    | 2026-06-05 |
+| 8. E6 Leave | 4/4 | Complete    | 2026-06-05 |
+| 9. E7 Overtime | 4/4 | Complete    | 2026-06-05 |
 | 10. E8 Payroll | 4/4 | Complete    | 2026-06-05 |
 | 11. E10 Reporting & Notifications | 5/5 | Complete    | 2026-06-05 |
