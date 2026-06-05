@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 09-e7-overtime/09-04-PLAN.md
-last_updated: "2026-06-05T05:24:38.780Z"
+stopped_at: Completed 10-e8-payroll/10-01-PLAN.md
+last_updated: "2026-06-05T05:47:01.039Z"
 last_activity: "2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9."
 progress:
   total_phases: 11
   completed_phases: 9
-  total_plans: 41
-  completed_plans: 41
-  percent: 100
+  total_plans: 45
+  completed_plans: 42
+  percent: 93
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 9 — E7 Overtime COMPLETE (all 4 plans). 09-01 data layer + 09-02 services/handlers/routes/seed + 09-03 Go contract tests + 09-04 full-stack Playwright E2E. Next: Phase 10 (E8 Payroll, read-only archive).
+**Current focus:** Phase 10 — E8 Payroll (read-only archive). Plan 10-01 COMPLETE (data layer + crypto). Next: 10-02 services/handlers/routes/seed + River export worker.
 
 ## Current Position
 
-Phase: 9 of 11 (E7 Overtime) — COMPLETE
-Plan: 4 of 4 in current phase — Plan 09-04 COMPLETE (full-stack Playwright E2E)
-Status: Phase complete
-Last activity: 2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9.
+Phase: 10 of 11 (E8 Payroll) — IN PROGRESS
+Plan: 1 of 4 in current phase — Plan 10-01 COMPLETE (migrations + sqlc + domain + crypto helper)
+Status: Plan complete
+Last activity: 2026-06-05 — Plan 10-01 complete: E8 payroll data layer. 2 goose migrations (00033 payslips + payslip_components/benefits + append-only payslip_audit_notes, money stored AES-256-GCM ciphertext in *_enc bytea — INV-2, status FINAL/DECRYPT_FAIL; 00034 export_jobs QUEUED/RUNNING/DONE/FAILED lifecycle + scope + confidential). NEW internal/platform/crypto AES-256-GCM helper (New/NewFromBase64/Encrypt/Decrypt/DecryptPtr + typed ErrDecrypt = the DECRYPT_FAIL source; round-trip/garbage/wrong-key/three-case unit tests green). config.Crypto.PayrollKey from PAYROLL_ENCRYPTION_KEY. sqlc query set (payslips list/get/components/benefits/insert; audit_notes list/count/insert/exists; export_jobs insert/get/update-status/count-in-scope) + internal/domain/payroll types pinned byte-for-byte to the E8 openapi enums. make gen clean; go build + go vet exit 0. Handoff section in SUMMARY pins the generated Querier signatures + sqlc type quirks + crypto seam for 10-02.
 
-Progress: [██████████] 100%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Progress: [██████████] 100%
 | Phase 09-e7-overtime P02 | 11 | 3 tasks | 14 files |
 | Phase 09-e7-overtime P03 | 6 | 2 tasks | 3 files |
 | Phase 09 P04 | 51 | 3 tasks | 8 files |
+| Phase 10-e8-payroll P01 | 20 | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -208,6 +209,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 09-e7-overtime]: [09-02]: SELF_APPROVAL_FORBIDDEN via apperr.Error{HTTPStatus:403} struct literal; calculation tier_breakdown single-tier (supersedes null), multiplier = rule per-tier rate REFERENCE only (INV-2); bulk dispatches HR->ApproveFinal/leader->ApproveL1 each in own tx, SELF/OUT_OF_SCOPE/409 land in failed[]; :confirm guardConfirmActor enforces agent-self, staff pass for web seam
 - [Phase 09-e7-overtime]: [09-03]: E7 contract tests are the drift gate — fakeOvertimeRepo dual-port (OvertimeRepository+RuleRepository) + fakeHolidayRepo (configurable in-use) + fakeScheduleRepo over the REAL services+handler via newHarness on chi; OT_BELOW_MIN + ClassifyDayType asserted through the REAL exported seams (h.otSvc) because their only production trigger is the out-of-web-scope create/auto-detect path
 - [Phase 09]: [09-04] overtime-detail-screen unwraps the {data:<Overtime>} GET envelope with a bare fallback (was rendering blank); web confirm/withdraw driven via apiAs (agent-self UI is out of web scope); OT_BELOW_MIN asserted honestly via the seeded below-min calc (no web HTTP trigger); openRules retries the deep-route auth-restore redirect race. 25 e7 E2E green; full e1–e7 = 209 passed/6 skipped/0 failed.
+- [Phase 10-01]: monetary fields stored as *_enc bytea AES-256-GCM ciphertext (INV-2) — NO plaintext money column; decrypt at the 10-02 service boundary
+- [Phase 10-01]: export_jobs terminal-success status is DONE (openapi), not COMPLETED (CONTEXT prose); crypto.ErrDecrypt is the typed DECRYPT_FAIL source with DecryptPtr null/valid/garbage three-case seam
+- [Phase 10-01]: payslip_audit_notes.id is service-assigned composite '{payslip_id}-NOTE-{seq}' (not swp_next_id); seq via CountPayslipAuditNotes+1
 
 ### Pending Todos
 
@@ -219,6 +223,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T05:19:25.154Z
-Stopped at: Completed 09-e7-overtime/09-04-PLAN.md
+Last session: 2026-06-05T05:46:53.445Z
+Stopped at: Completed 10-e8-payroll/10-01-PLAN.md
 Resume file: None

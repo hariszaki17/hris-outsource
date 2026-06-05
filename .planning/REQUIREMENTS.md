@@ -58,8 +58,8 @@
 - [x] **OVT-02**: Public holidays — list/create/update/delete.
 
 ### E8 Payroll (Phase 10)
-- [ ] **PAY-01**: Payslips — list/detail (read-only history), audit notes list/create.
-- [ ] **PAY-02**: Payslip export (async job → 202 + job id).
+- [x] **PAY-01**: Payslips — list/detail (read-only history), audit notes list/create.
+- [x] **PAY-02**: Payslip export (async job → 202 + job id).
 
 ### E10 Reporting, Notifications & Exports (Phase 11)
 - [ ] **RPT-01**: My dashboard (role-aware).
