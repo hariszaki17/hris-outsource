@@ -161,7 +161,7 @@ Plans:
   2. Quotas list, adjust, and bulk-grant work; quota-exceeded returns 422 `QUOTA_EXCEEDED` with field errors.
   3. The leave calendar renders for the requested range.
   4. Exhaustive Playwright E2E for E6 features is green.
-**Plans:** 4 plans
+**Plans:** 2/4 plans executed
 
 Plans:
 - [x] 08-01-PLAN.md (wave 1) — Migrations 00028-00030 + sqlc queries + domain (leave_requests, leave_quotas, leave_approvals)
@@ -234,7 +234,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 5. E3 Placement | 4/4 | Complete    | 2026-06-04 |
 | 6. E4 Schedule & Shifts | 4/4 | Complete    | 2026-06-04 |
 | 7. E5 Attendance | 4/4 | Complete | - |
-| 8. E6 Leave | 1/4 | In Progress | - |
+| 8. E6 Leave | 2/4 | In Progress|  |
 | 9. E7 Overtime | 0/4 | Not started | - |
 | 10. E8 Payroll | 0/4 | Not started | - |
 | 11. E10 Reporting & Notifications | 0/4 | Not started | - |

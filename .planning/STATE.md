@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-e6-leave/08-01-PLAN.md
-last_updated: "2026-06-04T23:51:08.289Z"
+stopped_at: Completed 08-e6-leave/08-02-PLAN.md
+last_updated: "2026-06-05T00:11:30.789Z"
 last_activity: "2026-06-05 — Plan 08-01 complete: E6 leave DATA LAYER. Migrations 00028 leave_requests (SWP-LR id, openapi LeaveStatus CHECK enum, denorm company_id/service_line, routing.*/balance_check.* snapshot cols) + 00029 leave_quotas (total/used/pending soft-reservation, remaining derived, (emp,type,period) unique, last_adjustment/last_override jsonb) + 00030 leave_approvals (bigserial decision-trail, stage L1/HR, decision APPROVED/REJECTED/OVERRIDE_APPROVED). db/queries/leave/* sqlc set covers every 08-02 read/write. internal/domain/leave types + LeaveQuota.Remaining(). make gen + go build + go vet clean. INV-3 loop-closer queries (InsertApprovedLeaveDay + CancelScheduleEntriesForLeave on the E4 scheduling dir) deferred to 08-02 — exact signatures + sqlc type quirks handed off in 08-01-SUMMARY "Reference for 08-02"."
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 37
-  completed_plans: 34
+  completed_plans: 35
   percent: 92
 ---
 
@@ -75,6 +75,7 @@ Progress: [█████████░] 92%
 | Phase 07-e5-attendance P03 | 5 | 2 tasks | 3 files |
 | Phase 07-e5-attendance P04 | 75 | 3 tasks | 7 files |
 | Phase 08-e6-leave P01 | 4 | 2 tasks | 8 files |
+| Phase 08-e6-leave P02 | 38 | 3 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-04T23:51:08.286Z
-Stopped at: Completed 08-e6-leave/08-01-PLAN.md
+Last session: 2026-06-05T00:11:30.787Z
+Stopped at: Completed 08-e6-leave/08-02-PLAN.md
 Resume file: None
