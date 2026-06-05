@@ -20,13 +20,16 @@ import (
 	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	overtimehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
+	payrollhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/payroll"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/crypto"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
@@ -35,6 +38,7 @@ import (
 	leaverepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/leave"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
 	overtimerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/overtime"
+	payrollrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/payroll"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
 	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
@@ -45,6 +49,7 @@ import (
 	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
 	overtimesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/overtime"
+	payrollsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/payroll"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
@@ -85,6 +90,27 @@ func run() error {
 	}
 	defer pool.Close()
 	txm := db.NewTxManager(pool)
+
+	// Payroll encryption key (E8 / INV-2): the AES-256-GCM cipher that decrypts the
+	// *_enc money columns at the read boundary. Fail fast on a set-but-invalid key;
+	// warn (not fatal) when empty in dev — the E2E harness always sets it.
+	var payrollCipher *crypto.Cipher
+	if cfg.Crypto.PayrollKey != "" {
+		payrollCipher, err = crypto.NewFromBase64(cfg.Crypto.PayrollKey)
+		if err != nil {
+			return err
+		}
+	} else {
+		slog.Warn("PAYROLL_ENCRYPTION_KEY unset — payroll endpoints will fail to decrypt money")
+	}
+
+	// River insert-only client (the API process inserts jobs; cmd/worker runs them).
+	// This is the FIRST wiring of jobs.Client into the API process — the async
+	// payslip export EnqueueTx's its job through this client (transactional outbox).
+	jobsClient, err := jobs.NewInsertOnlyClient(pool)
+	if err != nil {
+		return err
+	}
 
 	// Auth primitives.
 	issuer, err := auth.NewIssuer(cfg.Auth.JWTPrivateKey, cfg.Auth.JWTPublicKey, cfg.Auth.AccessTTL)
@@ -188,6 +214,17 @@ func run() error {
 	holidaySvc := overtimesvc.NewHolidayService(holidayRepo, txm)
 	overtimeHandler := overtimehttp.NewHandler(overtimeSvc, holidaySvc)
 
+	// Payroll slice (10-02): E8 historical, read-only payslip archive + audit notes
+	// + async Excel export. The payslip service decrypts the *_enc money at the
+	// read boundary (payrollCipher); the export service enqueues a real River
+	// PayslipExportWorker in the same tx as the export_jobs QUEUED insert
+	// (jobsClient). Both reads and the audit-note notify stub share txm.
+	payrollRepo := payrollrepo.New(pool)
+	payrollExportRepo := payrollrepo.NewExportRepo(pool)
+	payslipSvc := payrollsvc.NewPayslipService(payrollRepo, txm, payrollCipher, jobsClient)
+	payrollExportSvc := payrollsvc.NewExportService(payrollExportRepo, txm, jobsClient)
+	payrollHandler := payrollhttp.NewHandler(payslipSvc, payrollExportSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -205,6 +242,7 @@ func run() error {
 		Attendance:           attendanceHandler,
 		Leave:                leaveHandler,
 		Overtime:             overtimeHandler,
+		Payroll:              payrollHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/crypto"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	sqlcgen "github.com/hariszaki17/hris-outsource/backend/internal/repository/sqlc"
 )
@@ -284,6 +286,20 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed overtime: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 10 (10-02): Seed E8 payroll fixtures — the web HR/Super-Admin
+	// payroll archive targets. Payslips are HISTORICAL/read-only (no payroll
+	// run in this milestone), so they are seeded directly with money encrypted
+	// AES-256-GCM (INV-2) under the SAME PAYROLL_ENCRYPTION_KEY the API decrypts
+	// with. Includes a DELIBERATELY-CORRUPT ciphertext row (SWP-PS-90119) so the
+	// API's Decrypt returns ErrDecrypt at read time and the row surfaces
+	// DECRYPT_FAIL honestly (not a hardcoded flag), plus two audit notes on it.
+	// FK: payslips → employees (SWP-EMP-1042/1108/2891/3001). Idempotent.
+	// -----------------------------------------------------------------------
+	if err := seedPayroll(ctx, pool); err != nil {
+		return fmt.Errorf("seed payroll: %w", err)
+	}
+
 	return nil
 }
 
@@ -429,6 +445,179 @@ func seedOvertime(ctx context.Context, pool *db.Pool) error {
 		}
 	}
 	slog.Info("seed: upserted overtime approvals", "count", len(trails))
+	return nil
+}
+
+// seedPayroll inserts E8 payslip fixtures (F8.1/F8.2) so the web HR/Super-Admin
+// payroll archive + detail + audit-note + export E2E have real targets. Money is
+// encrypted AES-256-GCM under PAYROLL_ENCRYPTION_KEY (the SAME key the API
+// decrypts with) so the FINAL rows decrypt cleanly and the DECRYPT_FAIL row
+// (garbage ciphertext) surfaces honestly. Periods 2025-11 / 2025-12 are clearly in
+// range. Idempotent (ON CONFLICT (id) DO NOTHING; child line-items dedupe via the
+// payslip ON CONFLICT — they are only inserted on a fresh payslip).
+//
+// Rows:
+//   - SWP-PS-90121 SWP-EMP-1042 (Budi) 2025-12 FINAL + full breakdown + benefits + 2 notes? (no)
+//   - SWP-PS-90122 SWP-EMP-1108 2025-12 FINAL (volume)
+//   - SWP-PS-90123 SWP-EMP-2891 2025-11 FINAL
+//   - SWP-PS-90124 SWP-EMP-3001 2025-11 FINAL (extra volume)
+//   - SWP-PS-90119 SWP-EMP-1108 (Rudi) 2025-12 DECRYPT_FAIL (garbage ciphertext) + 2 audit notes
+func seedPayroll(ctx context.Context, pool *db.Pool) error {
+	keyB64 := os.Getenv("PAYROLL_ENCRYPTION_KEY")
+	if keyB64 == "" {
+		slog.Warn("seed: PAYROLL_ENCRYPTION_KEY unset — skipping payroll seed (E8 archive will be empty)")
+		return nil
+	}
+	cipher, err := crypto.NewFromBase64(keyB64)
+	if err != nil {
+		return fmt.Errorf("seed payroll: build cipher: %w", err)
+	}
+	enc := func(money string) ([]byte, error) { return cipher.Encrypt(money) }
+
+	// --- payslip headers (encrypted summary money) ---
+	const psQ = `
+		INSERT INTO payslips (
+			id, employee_id, employee_name, placement_id, year, month, paid_on,
+			working_days, gross_earnings_enc, gross_deductions_enc, take_home_pay_enc,
+			status, source_system, source_id)
+		VALUES ($1, $2, $3, NULL, $4, $5, $6::date,
+			$7, $8, $9, $10,
+			$11, 'lumen_swp', $12)
+		ON CONFLICT (id) DO NOTHING
+		RETURNING id`
+
+	type money struct{ ge, gd, th string }
+	type payslip struct {
+		id, employeeID, name string
+		year, month          int
+		paidOn               string
+		workingDays          *int
+		m                    *money // nil → all *_enc NULL (not used here)
+		sourceID             string
+		decryptFail          bool
+	}
+	wd := func(n int) *int { return &n }
+	finals := []payslip{
+		{"SWP-PS-90121", "SWP-EMP-1042", "Budi Santoso", 2025, 12, "2025-12-28", wd(22), &money{"8500000.00", "1175000.00", "7325000.00"}, "44218", false},
+		{"SWP-PS-90122", "SWP-EMP-1108", "Rudi Hartono", 2025, 12, "2025-12-28", wd(21), &money{"7200000.00", "980000.00", "6220000.00"}, "44219", false},
+		{"SWP-PS-90123", "SWP-EMP-2891", "Andi Pratama", 2025, 11, "2025-11-28", wd(20), &money{"6800000.00", "910000.00", "5890000.00"}, "44201", false},
+		{"SWP-PS-90124", "SWP-EMP-3001", "Dewi Lestari", 2025, 11, "2025-11-28", wd(22), &money{"7000000.00", "950000.00", "6050000.00"}, "44202", false},
+	}
+
+	insertedFresh := map[string]bool{}
+	for _, p := range finals {
+		geEnc, e1 := enc(p.m.ge)
+		gdEnc, e2 := enc(p.m.gd)
+		thEnc, e3 := enc(p.m.th)
+		if e1 != nil || e2 != nil || e3 != nil {
+			return fmt.Errorf("seed payslip %q: encrypt money: %v/%v/%v", p.id, e1, e2, e3)
+		}
+		var wdArg any
+		if p.workingDays != nil {
+			wdArg = *p.workingDays
+		}
+		var returnedID string
+		err := pool.Pool.QueryRow(ctx, psQ,
+			p.id, p.employeeID, p.name, p.year, p.month, p.paidOn,
+			wdArg, geEnc, gdEnc, thEnc, "FINAL", p.sourceID,
+		).Scan(&returnedID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("seed: payslip already present (skip lines)", "id", p.id)
+				continue // ON CONFLICT DO NOTHING → no RETURNING row; lines already seeded
+			}
+			return fmt.Errorf("seed payslip %q: %w", p.id, err)
+		}
+		insertedFresh[p.id] = true
+		slog.Info("seed: upserted payslip", "id", p.id, "period", fmt.Sprintf("%d-%02d", p.year, p.month), "status", "FINAL")
+	}
+
+	// --- DECRYPT_FAIL row: deliberately-corrupt ciphertext (AES-GCM Open rejects).
+	// Raw garbage bytea (NOT produced by Encrypt) → the API's Decrypt returns
+	// ErrDecrypt at read time, so the row surfaces decrypt_fail honestly.
+	garbage := []byte{0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd}
+	var dfReturnedID string
+	dfErr := pool.Pool.QueryRow(ctx, psQ,
+		"SWP-PS-90119", "SWP-EMP-1108", "Rudi Hartono", 2025, 12, "2025-12-28",
+		nil, garbage, garbage, garbage, "DECRYPT_FAIL", "44216",
+	).Scan(&dfReturnedID)
+	if dfErr != nil && !errors.Is(dfErr, pgx.ErrNoRows) {
+		return fmt.Errorf("seed payslip SWP-PS-90119 (decrypt-fail): %w", dfErr)
+	}
+	slog.Info("seed: upserted DECRYPT_FAIL payslip", "id", "SWP-PS-90119")
+
+	// --- breakdown for SWP-PS-90121 (only when freshly inserted) ---
+	if insertedFresh["SWP-PS-90121"] {
+		if err := seedPayslipBreakdown(ctx, pool, enc, "SWP-PS-90121"); err != nil {
+			return err
+		}
+	}
+
+	// --- audit notes on the DECRYPT_FAIL row (migration-review channel) ---
+	const noteQ = `
+		INSERT INTO payslip_audit_notes (id, payslip_id, seq, text, author_id, author_name, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+		ON CONFLICT (id) DO NOTHING`
+	notes := []struct {
+		id, payslipID, text, authorID, authorName, createdAt string
+		seq                                                  int
+	}{
+		{"SWP-PS-90119-NOTE-1", "SWP-PS-90119", "Decrypt failed pada migrasi 2026-05-30; ditahan untuk review tim migrasi (lihat tiket MIG-318).", "SWP-EMP-9001", "Sari Hadi", "2026-05-30T08:14:22Z", 1},
+		{"SWP-PS-90119-NOTE-2", "SWP-PS-90119", "Konfirmasi key payroll lama dengan finance team — kunci tidak cocok untuk record ini.", "SWP-EMP-9001", "Sari Hadi", "2026-05-31T03:42:09Z", 2},
+	}
+	for _, n := range notes {
+		if _, err := pool.Pool.Exec(ctx, noteQ, n.id, n.payslipID, n.seq, n.text, n.authorID, n.authorName, n.createdAt); err != nil {
+			return fmt.Errorf("seed audit note %q: %w", n.id, err)
+		}
+	}
+	slog.Info("seed: upserted payslip audit notes", "count", len(notes))
+	return nil
+}
+
+// seedPayslipBreakdown inserts the encrypted earnings/deductions/benefits lines for
+// a freshly-seeded payslip (matches the openapi getPayslip example breakdown).
+func seedPayslipBreakdown(ctx context.Context, pool *db.Pool, enc func(string) ([]byte, error), payslipID string) error {
+	const compQ = `
+		INSERT INTO payslip_components (payslip_id, kind, name, value_enc, for_bpjs, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6)`
+	comps := []struct {
+		kind, name, value string
+		forBPJS           bool
+	}{
+		{"EARNING", "Gaji Pokok", "6500000.00", true},
+		{"EARNING", "Tunjangan Transport", "1200000.00", false},
+		{"EARNING", "Tunjangan Makan", "800000.00", false},
+		{"DEDUCTION", "BPJS Kesehatan (1%)", "65000.00", true},
+		{"DEDUCTION", "BPJS Ketenagakerjaan (JHT 2%)", "130000.00", true},
+		{"DEDUCTION", "PPh 21", "915000.00", false},
+	}
+	for i, c := range comps {
+		ve, eerr := enc(c.value)
+		if eerr != nil {
+			return fmt.Errorf("seed component %q: encrypt: %w", c.name, eerr)
+		}
+		if _, err := pool.Pool.Exec(ctx, compQ, payslipID, c.kind, c.name, ve, c.forBPJS, i); err != nil {
+			return fmt.Errorf("seed component %q: %w", c.name, err)
+		}
+	}
+
+	const benQ = `
+		INSERT INTO payslip_benefits (payslip_id, name, value_enc, sort_order)
+		VALUES ($1, $2, $3, $4)`
+	benefits := []struct{ name, value string }{
+		{"BPJS Kesehatan (employer 4%)", "260000.00"},
+		{"BPJS JKK", "16900.00"},
+	}
+	for i, b := range benefits {
+		ve, eerr := enc(b.value)
+		if eerr != nil {
+			return fmt.Errorf("seed benefit %q: encrypt: %w", b.name, eerr)
+		}
+		if _, err := pool.Pool.Exec(ctx, benQ, payslipID, b.name, ve, i); err != nil {
+			return fmt.Errorf("seed benefit %q: %w", b.name, err)
+		}
+	}
+	slog.Info("seed: upserted payslip breakdown", "id", payslipID, "components", len(comps), "benefits", len(benefits))
 	return nil
 }
 

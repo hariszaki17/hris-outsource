@@ -53,6 +53,12 @@ func (c *Client) Enqueue(ctx context.Context, args river.JobArgs) error {
 func NewWorkerClient(pool *db.Pool) (*river.Client[pgx.Tx], error) {
 	workers := river.NewWorkers()
 	registerWorkers(workers)
+	// The PayslipExportWorker is the FIRST worker whose Work() writes to the
+	// application DB (it drives export_jobs RUNNING→DONE via UpdateExportJobStatus),
+	// so it must be constructed WITH the pool. The pool is only in scope here in
+	// NewWorkerClient, so it is registered here rather than in the no-dependency
+	// registerWorkers below.
+	river.AddWorker(workers, NewPayslipExportWorker(pool))
 
 	return river.NewClient(riverpgxv5.New(pool.Pool), &river.Config{
 		Queues: map[string]river.QueueConfig{

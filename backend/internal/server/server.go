@@ -15,6 +15,7 @@ import (
 	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	overtimehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
+	payrollhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/payroll"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
@@ -56,7 +57,9 @@ type Deps struct {
 	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
 	Leave *leavehttp.Handler
 	// OVERTIME slice (09-02): OT two-level approval + holiday calendar (E7).
-	Overtime    *overtimehttp.Handler
+	Overtime *overtimehttp.Handler
+	// PAYROLL slice (10-02): historical payslip archive + audit notes + async export (E8).
+	Payroll     *payrollhttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -449,6 +452,26 @@ func New(d Deps) http.Handler {
 				r.Delete("/holidays/{id}", d.Overtime.DeleteHoliday)
 			})
 			// OVERTIME slice end (09-02). Phase 9+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// PAYROLL slice (10-02): E8 historical, read-only payslip archive
+			// (F8.1/F8.2 / PAY-01/PAY-02). The web surface is HR/Super-Admin
+			// ONLY (INV-3/4 — agent self-summary is mobile, shift_leader has no
+			// payroll access; both → 403). The 5 FE-used ops: list, detail,
+			// audit-notes list/create, async export. No 405-immutable / PDF /
+			// forward-export handlers (out of scope). chi matches the `:export`
+			// action suffix natively (decision [02-01]).
+			// COORDINATION POINT: future Phase-10 slices append AFTER this block.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Get("/payslips", d.Payroll.ListPayslips)
+				r.Get("/payslips/{id}", d.Payroll.GetPayslip)
+				r.Get("/payslips/{id}/audit-notes", d.Payroll.ListAuditNotes)
+				r.With(d.Idempotency.Handler).Post("/payslips/{id}/audit-notes", d.Payroll.CreateAuditNote)
+				r.With(d.Idempotency.Handler).Post("/payslips:export", d.Payroll.ExportPayslips)
+			})
+			// PAYROLL slice end (10-02). Phase 10+ appends after this line.
 		})
 	})
 
