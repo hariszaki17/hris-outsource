@@ -54,8 +54,8 @@
 - [x] **LVE-03**: Leave calendar.
 
 ### E7 Overtime (Phase 9)
-- [ ] **OVT-01**: Overtime — list/detail, confirm/approve(L1/final)/reject/withdraw, bulk approve/reject.
-- [ ] **OVT-02**: Public holidays — list/create/update/delete.
+- [x] **OVT-01**: Overtime — list/detail, confirm/approve(L1/final)/reject/withdraw, bulk approve/reject.
+- [x] **OVT-02**: Public holidays — list/create/update/delete.
 
 ### E8 Payroll (Phase 10)
 - [ ] **PAY-01**: Payslips — list/detail (read-only history), audit notes list/create.
