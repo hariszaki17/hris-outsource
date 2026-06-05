@@ -23,7 +23,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
 - [x] **Phase 7: E5 Attendance** - Attendance verify/reject (incl. bulk) + corrections
 - [x] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
 - [ ] **Phase 9: E7 Overtime** - Overtime workflow + public holidays
-- [ ] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export
+- [x] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export (completed 2026-06-05)
 - [ ] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework
 
 ## Phase Details
@@ -195,7 +195,7 @@ Plans:
   2. Payslip export returns 202 + a job id and the job completes via the worker.
   3. RBAC restricts payroll visibility appropriately.
   4. Exhaustive Playwright E2E for E8 features is green.
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 - [ ] 10-01-PLAN.md (wave 1) — Migrations 00033-00034 + sqlc queries (payslips + components/benefits/audit-notes, export_jobs) + domain + the AES-256-GCM crypto helper (encryption-at-rest)
@@ -236,5 +236,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. E5 Attendance | 4/4 | Complete | - |
 | 8. E6 Leave | 4/4 | Complete | 2026-06-05 |
 | 9. E7 Overtime | 0/4 | Not started | - |
-| 10. E8 Payroll | 3/4 | In Progress|  |
+| 10. E8 Payroll | 4/4 | Complete   | 2026-06-05 |
 | 11. E10 Reporting & Notifications | 0/4 | Not started | - |

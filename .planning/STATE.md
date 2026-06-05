@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 10-e8-payroll/10-03-PLAN.md
-last_updated: "2026-06-05T06:08:56.504Z"
-last_activity: "2026-06-05 — Plan 10-03 complete: E8 Go contract tests (the drift gate replacing server codegen). Three test files mount the REAL PayslipService + ExportService + handler on a chi httptest harness (copied from the Phase-9 overtime testkit: fakeTx + stubIdempotency + mutable-principal middleware + RequireRole(super_admin, hr_admin)) over in-memory fakes + a REAL crypto.Cipher. DECRYPT_FAIL is asserted HONESTLY: seedDecryptFail writes random garbage bytea so the real crypto.Decrypt returns ErrDecrypt → the service surfaces a 200 OK DECRYPT_FAIL row (money null, breakdown []) in BOTH list and detail — not a stub flag. Pinned: list {data,next_cursor,has_more} + meta.code MISSING_PAYROLL_HISTORY on empty + status/period filters + cursor; detail {data} FINAL full breakdown + DECRYPT_FAIL nulled/empty; audit-notes list (oldest-first) + create (composite {id}-NOTE-{seq}, 400 blank, 404 missing); export 202 + exact PayslipExportJob (confidential server-forced true) + exactly one PayslipExportArgs with matching JobID enqueued (transactional outbox via recording fakeJobs); EXPORT_TOO_LARGE 422 + no-enqueue; no-scope 422; RBAC 403 for agent/shift_leader on all 5 ops. go test ./... exits 0 (no regressions); go vet + gofmt clean. Next: 10-04 FE wiring + Playwright E2E."
+stopped_at: Completed 10-e8-payroll/10-04-PLAN.md
+last_updated: "2026-06-05T07:07:39.557Z"
+last_activity: "2026-06-05 — Plan 10-04 complete: e8-payroll screens wired off MSW to the real Go BE + 16 full-stack Playwright specs green headless (archive list+filters, detail decrypted breakdown, DECRYPT_FAIL@200, audit notes list/create, the async EXPORT headline — 202+SWP-EXP id THEN the REAL River worker flips export_jobs→DONE via a DB poll, RBAC 403 agent/shift_leader). The harness now boots cmd/worker (detached, PAYROLL_ENCRYPTION_KEY) and applies River queue migrations programmatically (new cmd/migrate river-up — no river CLI). FE fix: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it). reset-db TRUNCATEs payroll+export_jobs (River tables untouched) and re-seeds with the full .env.e2e so seedPayroll restores fixtures. Full e1-e8 suite: 225 passed / 6 skipped / 0 failed (no regressions). Phase 10 CLOSED."
 progress:
   total_phases: 11
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 45
-  completed_plans: 44
-  percent: 98
+  completed_plans: 45
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 10 — E8 Payroll (read-only archive). Plans 10-01/10-02/10-03 COMPLETE (data layer + crypto, services/handlers/async export, Go contract tests). Next: 10-04 FE wiring + Playwright E2E.
+**Current focus:** Phase 10 — E8 Payroll (read-only archive) COMPLETE. All 4 plans done: data layer + crypto, services/handlers/async export, Go contract tests, and FE wiring + full-stack Playwright E2E (16 e8 specs green). PAY-01/PAY-02 closed.
 
 ## Current Position
 
-Phase: 10 of 11 (E8 Payroll) — IN PROGRESS
-Plan: 3 of 4 in current phase — Plan 10-03 COMPLETE (Go contract tests = E8 drift gate)
-Status: Plan complete
-Last activity: 2026-06-05 — Plan 10-03 complete: E8 Go contract tests (the drift gate replacing server codegen). Three test files mount the REAL PayslipService + ExportService + handler on a chi httptest harness (copied from the Phase-9 overtime testkit: fakeTx + stubIdempotency + mutable-principal middleware + RequireRole(super_admin, hr_admin)) over in-memory fakes + a REAL crypto.Cipher. DECRYPT_FAIL is asserted HONESTLY: seedDecryptFail writes random garbage bytea so the real crypto.Decrypt returns ErrDecrypt → the service surfaces a 200 OK DECRYPT_FAIL row (money null, breakdown []) in BOTH list and detail — not a stub flag. Pinned: list {data,next_cursor,has_more} + meta.code MISSING_PAYROLL_HISTORY on empty + status/period filters + cursor; detail {data} FINAL full breakdown + DECRYPT_FAIL nulled/empty; audit-notes list (oldest-first) + create (composite {id}-NOTE-{seq}, 400 blank, 404 missing); export 202 + exact PayslipExportJob (confidential server-forced true) + exactly one PayslipExportArgs with matching JobID enqueued (transactional outbox via recording fakeJobs); EXPORT_TOO_LARGE 422 + no-enqueue; no-scope 422; RBAC 403 for agent/shift_leader on all 5 ops. go test ./... exits 0 (no regressions); go vet + gofmt clean. Next: 10-04 FE wiring + Playwright E2E.
+Phase: 10 of 11 (E8 Payroll) — COMPLETE
+Plan: 4 of 4 in current phase — Plan 10-04 COMPLETE (FE wiring off MSW + full-stack Playwright E2E)
+Status: Phase complete
+Last activity: 2026-06-05 — Plan 10-04 complete: e8-payroll screens wired off MSW to the real Go BE + 16 full-stack Playwright specs green headless (archive list+filters, detail decrypted breakdown, DECRYPT_FAIL@200, audit notes list/create, the async EXPORT headline — 202+SWP-EXP id THEN the REAL River worker flips export_jobs→DONE via a DB poll, RBAC 403 agent/shift_leader). The harness now boots cmd/worker (detached, PAYROLL_ENCRYPTION_KEY) and applies River queue migrations programmatically (new cmd/migrate river-up — no river CLI). FE fix: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it). reset-db TRUNCATEs payroll+export_jobs (River tables untouched) and re-seeds with the full .env.e2e so seedPayroll restores fixtures. Full e1-e8 suite: 225 passed / 6 skipped / 0 failed (no regressions). Phase 10 CLOSED.
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Progress: [██████████] 98%
 | Phase 10-e8-payroll P01 | 20 | 3 tasks | 10 files |
 | Phase 10-e8-payroll P02 | 30 | 3 tasks | 16 files |
 | Phase 10-e8-payroll P03 | 15 | 2 tasks | 3 files |
+| Phase 10-e8-payroll P04 | 75 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -217,6 +218,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 10-02]: Repo returns RAW *_enc ciphertext; service owns the single decryptMoney seam (DecryptPtr garbage→DECRYPT_FAIL). Whole-payslip DECRYPT_FAIL = 200 with money nulled + breakdown [].
 - [Phase 10-02]: Async export = transactional outbox: InsertExportJob(QUEUED) + jobs.EnqueueTx(PayslipExportArgs) in one tx; pool-backed PayslipExportWorker flips export_jobs RUNNING→DONE (CSV/row-count stand-in). svc.Jobs interface seam lets 10-03 fake River.
 - [Phase 10-e8-payroll]: [10-03]: E8 contract tests = drift gate; DECRYPT_FAIL asserted via seedDecryptFail random-garbage bytea through the REAL crypto.Decrypt (200 row status, not a stub flag) in BOTH list+detail; export 202 + transactional-outbox enqueue asserted via recording fakeJobs (one PayslipExportArgs, matching JobID); harness copies the Phase-9 overtime testkit under RequireRole(super_admin, hr_admin).
+- [Phase 10-e8-payroll]: [10-04]: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it; Phase-8 [08-04] precedent)
+- [Phase 10-e8-payroll]: [10-04]: harness boots the River worker (cmd/worker, detached, PAYROLL_ENCRYPTION_KEY) so the export job completes; River queue migrations applied programmatically via cmd/migrate river-up (no river CLI)
+- [Phase 10-e8-payroll]: [10-04]: export E2E proves worker completion via pollExportJob (export_jobs.status DONE, row_count>0) since E8 has no FE job-status hook; 16 e8 specs green, full e1-e8 225 passed/6 skipped/0 failed
 
 ### Pending Todos
 
@@ -228,6 +232,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T06:08:19.653Z
-Stopped at: Completed 10-e8-payroll/10-03-PLAN.md
+Last session: 2026-06-05T07:06:58.433Z
+Stopped at: Completed 10-e8-payroll/10-04-PLAN.md
 Resume file: None
