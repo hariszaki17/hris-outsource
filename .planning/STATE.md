@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 10-e8-payroll/10-01-PLAN.md
-last_updated: "2026-06-05T05:47:01.039Z"
-last_activity: "2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9."
+stopped_at: Completed 10-e8-payroll/10-02-PLAN.md
+last_updated: "2026-06-05T06:00:30.825Z"
+last_activity: "2026-06-05 — Plan 10-02 complete: E8 payroll API slice. Read payslips (list/detail) decrypt money AT THE BOUNDARY via a single decryptMoney seam (crypto.DecryptPtr); a row whose ciphertext fails to open surfaces as a 200 OK DECRYPT_FAIL (money + working_days nulled, earnings/deductions/benefits=[], locked_reason=decrypt_fail) — never a 4xx. Append-only audit notes (list + create, composite {id}-NOTE-{seq}, audited in-tx). POST /payslips:export inserts an export_jobs QUEUED row + EnqueueTx's a real River PayslipExportWorker in ONE tx (transactional outbox), returns 202 + the job stub; the worker flips export_jobs RUNNING→DONE (row_count + artifact_ref; CSV/row-count stand-in, no heavy xlsx dep). EXPORT_TOO_LARGE 422 guard (threshold 50k) + period-or-year RULE_VIOLATION. All 5 FE endpoints under RequireRole(super_admin, hr_admin) — agent/shift_leader → 403. First wiring of jobs.NewInsertOnlyClient into cmd/api + the crypto cipher; PayslipExportWorker registered in NewWorkerClient (pool-backed, first DB-writing worker). seedPayroll: FINAL payslips (2025-11/12) w/ encrypted money+breakdown+benefits + garbage-ciphertext SWP-PS-90119 DECRYPT_FAIL row + 2 audit notes. go build + go vet + gofmt + make gen all clean. Next: 10-03 Go contract tests."
 progress:
   total_phases: 11
   completed_phases: 9
   total_plans: 45
-  completed_plans: 42
-  percent: 93
+  completed_plans: 43
+  percent: 96
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 10 of 11 (E8 Payroll) — IN PROGRESS
-Plan: 1 of 4 in current phase — Plan 10-01 COMPLETE (migrations + sqlc + domain + crypto helper)
+Plan: 2 of 4 in current phase — Plan 10-02 COMPLETE (services + handlers + async export + routes + seed)
 Status: Plan complete
-Last activity: 2026-06-05 — Plan 10-01 complete: E8 payroll data layer. 2 goose migrations (00033 payslips + payslip_components/benefits + append-only payslip_audit_notes, money stored AES-256-GCM ciphertext in *_enc bytea — INV-2, status FINAL/DECRYPT_FAIL; 00034 export_jobs QUEUED/RUNNING/DONE/FAILED lifecycle + scope + confidential). NEW internal/platform/crypto AES-256-GCM helper (New/NewFromBase64/Encrypt/Decrypt/DecryptPtr + typed ErrDecrypt = the DECRYPT_FAIL source; round-trip/garbage/wrong-key/three-case unit tests green). config.Crypto.PayrollKey from PAYROLL_ENCRYPTION_KEY. sqlc query set (payslips list/get/components/benefits/insert; audit_notes list/count/insert/exists; export_jobs insert/get/update-status/count-in-scope) + internal/domain/payroll types pinned byte-for-byte to the E8 openapi enums. make gen clean; go build + go vet exit 0. Handoff section in SUMMARY pins the generated Querier signatures + sqlc type quirks + crypto seam for 10-02.
+Last activity: 2026-06-05 — Plan 10-02 complete: E8 payroll API slice. Read payslips (list/detail) decrypt money AT THE BOUNDARY via a single decryptMoney seam (crypto.DecryptPtr); a row whose ciphertext fails to open surfaces as a 200 OK DECRYPT_FAIL (money + working_days nulled, earnings/deductions/benefits=[], locked_reason=decrypt_fail) — never a 4xx. Append-only audit notes (list + create, composite {id}-NOTE-{seq}, audited in-tx). POST /payslips:export inserts an export_jobs QUEUED row + EnqueueTx's a real River PayslipExportWorker in ONE tx (transactional outbox), returns 202 + the job stub; the worker flips export_jobs RUNNING→DONE (row_count + artifact_ref; CSV/row-count stand-in, no heavy xlsx dep). EXPORT_TOO_LARGE 422 guard (threshold 50k) + period-or-year RULE_VIOLATION. All 5 FE endpoints under RequireRole(super_admin, hr_admin) — agent/shift_leader → 403. First wiring of jobs.NewInsertOnlyClient into cmd/api + the crypto cipher; PayslipExportWorker registered in NewWorkerClient (pool-backed, first DB-writing worker). seedPayroll: FINAL payslips (2025-11/12) w/ encrypted money+breakdown+benefits + garbage-ciphertext SWP-PS-90119 DECRYPT_FAIL row + 2 audit notes. go build + go vet + gofmt + make gen all clean. Next: 10-03 Go contract tests.
 
-Progress: [█████████░] 93%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [█████████░] 93%
 | Phase 09-e7-overtime P03 | 6 | 2 tasks | 3 files |
 | Phase 09 P04 | 51 | 3 tasks | 8 files |
 | Phase 10-e8-payroll P01 | 20 | 3 tasks | 10 files |
+| Phase 10-e8-payroll P02 | 30 | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -212,6 +213,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 10-01]: monetary fields stored as *_enc bytea AES-256-GCM ciphertext (INV-2) — NO plaintext money column; decrypt at the 10-02 service boundary
 - [Phase 10-01]: export_jobs terminal-success status is DONE (openapi), not COMPLETED (CONTEXT prose); crypto.ErrDecrypt is the typed DECRYPT_FAIL source with DecryptPtr null/valid/garbage three-case seam
 - [Phase 10-01]: payslip_audit_notes.id is service-assigned composite '{payslip_id}-NOTE-{seq}' (not swp_next_id); seq via CountPayslipAuditNotes+1
+- [Phase 10-02]: Repo returns RAW *_enc ciphertext; service owns the single decryptMoney seam (DecryptPtr garbage→DECRYPT_FAIL). Whole-payslip DECRYPT_FAIL = 200 with money nulled + breakdown [].
+- [Phase 10-02]: Async export = transactional outbox: InsertExportJob(QUEUED) + jobs.EnqueueTx(PayslipExportArgs) in one tx; pool-backed PayslipExportWorker flips export_jobs RUNNING→DONE (CSV/row-count stand-in). svc.Jobs interface seam lets 10-03 fake River.
 
 ### Pending Todos
 
@@ -223,6 +226,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T05:46:53.445Z
-Stopped at: Completed 10-e8-payroll/10-01-PLAN.md
+Last session: 2026-06-05T06:00:03.351Z
+Stopped at: Completed 10-e8-payroll/10-02-PLAN.md
 Resume file: None
