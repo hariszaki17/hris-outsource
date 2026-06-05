@@ -546,6 +546,7 @@ type harness struct {
 	holiday   *fakeHolidayRepo
 	schedule  *fakeScheduleRepo
 	idem      *stubIdempotency
+	otSvc     *svc.OvertimeService // the REAL service, exposed for the EnforceMinMinutes/ClassifyDayType seams
 	principal auth.Principal
 }
 
@@ -571,6 +572,7 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		holiday:  hrepo,
 		schedule: srepo,
 		idem:     idem,
+		otSvc:    osvc,
 		principal: auth.Principal{
 			UserID:     "SWP-USR-0001",
 			Role:       principalRole,

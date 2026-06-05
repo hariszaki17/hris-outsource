@@ -16,11 +16,15 @@
 package overtime_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
 // Persona / fixture constants mirror the 09-02 seed.
@@ -459,5 +463,196 @@ func TestWithdraw_FromApproved_409(t *testing.T) {
 	}
 	if got := errCode(t, rr); got != "CONFLICT" {
 		t.Errorf("code = %s, want CONFLICT", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OT_BELOW_MIN — counted_minutes < rule.min_minutes → 422 + field errors.
+//
+// The openapi returns OT_BELOW_MIN on the create path (mobile/system, OUT of web
+// scope); E7 exposes it as the exported EnforceMinMinutes seam. We drive the REAL
+// service method directly + assert the apperr wire shape (422, code, fields).
+// ---------------------------------------------------------------------------
+
+func TestEnforceMinMinutes_BelowMin422WithFields(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	h.seedRule("", 30) // global default min_minutes = 30
+	line := "SWP-SVC-001"
+
+	err := h.otSvc.EnforceMinMinutes(context.Background(), 20, &line)
+	if err == nil {
+		t.Fatalf("expected OT_BELOW_MIN error for counted 20 < min 30, got nil")
+	}
+	ae, ok := apperr.As(err)
+	if !ok {
+		t.Fatalf("expected *apperr.Error, got %T: %v", err, err)
+	}
+	if ae.Status() != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", ae.Status())
+	}
+	if ae.Code != "OT_BELOW_MIN" {
+		t.Errorf("code = %s, want OT_BELOW_MIN", ae.Code)
+	}
+	// error.fields carries counted_minutes + min_minutes (INV-5).
+	if ae.Fields["counted_minutes"] != "20" {
+		t.Errorf("fields.counted_minutes = %q, want \"20\"", ae.Fields["counted_minutes"])
+	}
+	if ae.Fields["min_minutes"] != "30" {
+		t.Errorf("fields.min_minutes = %q, want \"30\"", ae.Fields["min_minutes"])
+	}
+}
+
+func TestEnforceMinMinutes_AtOrAboveMin_OK(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	h.seedRule("", 30)
+	line := "SWP-SVC-001"
+	if err := h.otSvc.EnforceMinMinutes(context.Background(), 30, &line); err != nil {
+		t.Errorf("counted 30 >= min 30 should pass, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ClassifyDayType — schedule + holiday calendar with HOLIDAY>RESTDAY>WORKDAY.
+// ---------------------------------------------------------------------------
+
+func TestClassifyDayType_HolidayOverridesSchedule(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	workDate := ymd(2026, time.August, 17)
+	// even with a live shift (WORKDAY), a holiday on the date wins (precedence).
+	h.schedule.live[liveKey(empAgent, workDate)] = schedulingsvc.LiveEntry{ID: "SWP-SCH-6001", Status: "PUBLISHED", IsDayOff: false}
+	h.seedHoliday("SWP-HOL-9001", "Hari Kemerdekaan", workDate, dom.HolidayCategoryNational, 0)
+
+	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate, nil)
+	if tier != dom.OvertimeTierHoliday {
+		t.Errorf("tier = %s, want HOLIDAY (precedence over WORKDAY)", tier)
+	}
+	if holidayID == nil || *holidayID != "SWP-HOL-9001" {
+		t.Errorf("holidayID = %v, want SWP-HOL-9001", holidayID)
+	}
+}
+
+func TestClassifyDayType_NoScheduleNoHoliday_Restday(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	workDate := ymd(2026, time.August, 18)
+	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate, nil)
+	if tier != dom.OvertimeTierRestday {
+		t.Errorf("tier = %s, want RESTDAY (no live shift, no holiday)", tier)
+	}
+	if holidayID != nil {
+		t.Errorf("holidayID = %v, want nil on a non-holiday", holidayID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// :bulk-approve — leader → L1 dispatch; partial success {succeeded, failed}.
+//
+// ids = [in-scope PENDING_L1, the leader's OWN OT, a CMP-0022 OT, a terminal
+// APPROVED] → succeeded carries the in-scope id; failed[] carries the self
+// (SELF_APPROVAL_FORBIDDEN), cross-company (OUT_OF_SCOPE), terminal (CONFLICT).
+// ---------------------------------------------------------------------------
+
+func TestBulkApprove_LeaderPartialSuccess(t *testing.T) {
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	h.seedOvertime("SWP-OT-30002", cmpLed, empAgent, dom.OvertimeStatusPendingL1, dom.OvertimeTierWorkday)         // in-scope OK
+	h.seedOvertime("SWP-OT-30004", cmpLed, empLeader, dom.OvertimeStatusPendingL1, dom.OvertimeTierWorkday)        // leader's own → SELF
+	h.seedOvertime("SWP-OT-30005", cmpOther, "SWP-EMP-2891", dom.OvertimeStatusPendingL1, dom.OvertimeTierWorkday) // cross-company → OUT_OF_SCOPE
+	h.seedOvertime("SWP-OT-30007", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)          // terminal → CONFLICT
+
+	rr := h.do("POST", "/overtime:bulk-approve", map[string]any{
+		"ids": []string{"SWP-OT-30002", "SWP-OT-30004", "SWP-OT-30005", "SWP-OT-30007"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (>=1 succeeded), got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	succeeded, _ := body["succeeded"].([]any)
+	failed, _ := body["failed"].([]any)
+	if len(succeeded) != 1 || succeeded[0] != "SWP-OT-30002" {
+		t.Errorf("succeeded = %v, want [SWP-OT-30002]", succeeded)
+	}
+	if len(failed) != 3 {
+		t.Fatalf("failed = %d, want 3 (self + cross-company + terminal)", len(failed))
+	}
+	// each failed[] row carries {id, error.code}.
+	codeByID := map[string]string{}
+	for _, raw := range failed {
+		row := raw.(map[string]any)
+		errObj := row["error"].(map[string]any)
+		codeByID[row["id"].(string)] = errObj["code"].(string)
+	}
+	if codeByID["SWP-OT-30004"] != "SELF_APPROVAL_FORBIDDEN" {
+		t.Errorf("own OT code = %s, want SELF_APPROVAL_FORBIDDEN", codeByID["SWP-OT-30004"])
+	}
+	if codeByID["SWP-OT-30005"] != "OUT_OF_SCOPE" {
+		t.Errorf("cross-company code = %s, want OUT_OF_SCOPE", codeByID["SWP-OT-30005"])
+	}
+	if codeByID["SWP-OT-30007"] != "CONFLICT" {
+		t.Errorf("terminal code = %s, want CONFLICT", codeByID["SWP-OT-30007"])
+	}
+}
+
+func TestBulkApprove_AllFailed422(t *testing.T) {
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	h.seedOvertime("SWP-OT-30007", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday) // terminal
+	h.seedOvertime("SWP-OT-30008", cmpLed, empAgent, dom.OvertimeStatusRejected, dom.OvertimeTierWorkday) // terminal
+
+	rr := h.do("POST", "/overtime:bulk-approve", map[string]any{
+		"ids": []string{"SWP-OT-30007", "SWP-OT-30008"},
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 (all failed), got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if s, _ := body["succeeded"].([]any); len(s) != 0 {
+		t.Errorf("succeeded = %v, want empty", s)
+	}
+	if f, _ := body["failed"].([]any); len(f) != 2 {
+		t.Errorf("failed = %d, want 2", len(f))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// :bulk-reject — mix of succeeded + a terminal failure; envelope shape.
+// ---------------------------------------------------------------------------
+
+func TestBulkReject_LeaderPartialSuccess(t *testing.T) {
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	h.seedOvertime("SWP-OT-30002", cmpLed, empAgent, dom.OvertimeStatusPendingL1, dom.OvertimeTierWorkday) // OK to reject
+	h.seedOvertime("SWP-OT-30007", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)  // terminal → CONFLICT
+
+	rr := h.do("POST", "/overtime:bulk-reject", map[string]any{
+		"ids":    []string{"SWP-OT-30002", "SWP-OT-30007"},
+		"reason": "Tidak ada pre-approval untuk lembur ini.",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	succeeded, _ := body["succeeded"].([]any)
+	failed, _ := body["failed"].([]any)
+	if len(succeeded) != 1 || succeeded[0] != "SWP-OT-30002" {
+		t.Errorf("succeeded = %v, want [SWP-OT-30002]", succeeded)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed = %d, want 1 (terminal)", len(failed))
+	}
+	fr := failed[0].(map[string]any)
+	if fr["id"] != "SWP-OT-30007" {
+		t.Errorf("failed[0].id = %v, want SWP-OT-30007", fr["id"])
+	}
+	if fr["error"].(map[string]any)["code"] != "CONFLICT" {
+		t.Errorf("failed[0].error.code = %v, want CONFLICT", fr["error"].(map[string]any)["code"])
+	}
+}
+
+func TestBulkReject_AllFailed422(t *testing.T) {
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	h.seedOvertime("SWP-OT-30007", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)
+	rr := h.do("POST", "/overtime:bulk-reject", map[string]any{
+		"ids":    []string{"SWP-OT-30007"},
+		"reason": "Penolakan terlambat untuk lembur ini.",
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 (all failed), got %d: %s", rr.Code, rr.Body.String())
 	}
 }
