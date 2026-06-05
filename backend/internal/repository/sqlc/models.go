@@ -219,6 +219,18 @@ type EmploymentAgreement struct {
 	DeletedAt         *time.Time
 }
 
+type Holiday struct {
+	ID                     string
+	Name                   string
+	HolidayDate            pgtype.Date
+	Category               string
+	Recurring              bool
+	ApplicableServiceLines []string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              *time.Time
+}
+
 type IDCounter struct {
 	Prefix  string
 	NextVal int64
@@ -308,6 +320,48 @@ type LeaveType struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
+}
+
+type Overtime struct {
+	ID                   string
+	EmployeeID           string
+	CompanyID            *string
+	PlacementID          string
+	AttendanceID         *string
+	ServiceLineID        *string
+	WorkDate             pgtype.Date
+	PlannedStartTime     *string
+	PlannedEndTime       *string
+	ActualStartTime      *string
+	ActualEndTime        *string
+	CrossMidnight        bool
+	Source               string
+	Status               string
+	DayType              string
+	WorkedMinutes        int32
+	CountedMinutes       int32
+	MinMinutesThreshold  int32
+	SkippedTooShort      bool
+	ReferenceMultiplier  pgtype.Numeric
+	OvertimeRuleID       *string
+	HolidayID            *string
+	FlaggedNoPreapproval bool
+	Reason               *string
+	CreatedBy            *string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+}
+
+type OvertimeApproval struct {
+	ID           int64
+	OvertimeID   string
+	Level        int32
+	Decision     string
+	ApproverID   *string
+	ApproverName *string
+	Reason       *string
+	DecidedAt    time.Time
 }
 
 type OvertimeRule struct {

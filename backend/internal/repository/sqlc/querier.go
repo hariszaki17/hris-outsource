@@ -6,6 +6,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -33,6 +35,9 @@ type Querier interface {
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
+	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
+	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)
 	// Soft-reservation recompute: sum duration_days of this employee+leave_type's open
 	// PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
 	CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPendingLeaveDaysForQuotaParams) (int64, error)
@@ -129,6 +134,15 @@ type Querier interface {
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
+	// Single holiday (for GET after create/update).
+	GetHoliday(ctx context.Context, id string) (GetHolidayRow, error)
+	// HOLIDAY_DATE_CLASH pre-check: does a non-deleted holiday already exist on this
+	// (date, category)? The service pre-checks here, then backstops on the 23505 from
+	// holidays_date_category_uq.
+	GetHolidayByDateCategory(ctx context.Context, arg GetHolidayByDateCategoryParams) (GetHolidayByDateCategoryRow, error)
+	// day_type classification: is this work_date a holiday? Highest-priority category
+	// (NATIONAL) wins when several share a date.
+	GetHolidayForDate(ctx context.Context, holidayDate pgtype.Date) (GetHolidayForDateRow, error)
 	GetLeaveQuota(ctx context.Context, id string) (GetLeaveQuotaRow, error)
 	// Row-lock for :adjust and the final-approval deduct/restore.
 	GetLeaveQuotaForUpdate(ctx context.Context, id string) (LeaveQuota, error)
@@ -138,6 +152,11 @@ type Querier interface {
 	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
 	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
+	// Single OT record with denormalized employee + company names (for GET /overtime/{id}).
+	GetOvertime(ctx context.Context, id string) (GetOvertimeRow, error)
+	// Row-lock for the state-machine transitions (confirm/approve-l1/approve-final/
+	// reject/withdraw). Omits joins; the service re-reads via GetOvertime for the DTO.
+	GetOvertimeForUpdate(ctx context.Context, id string) (GetOvertimeForUpdateRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
 	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
 	// All placements sharing a predecessor/successor chain with the given placement
@@ -165,10 +184,21 @@ type Querier interface {
 	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
 	// not 23505).
 	InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error
+	// Create (POST /holidays). id allocated by the column DEFAULT
+	// ('SWP-HOL-' || swp_next_id('HOL')) when omitted, OR supplied explicitly
+	// (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
+	InsertHoliday(ctx context.Context, arg InsertHolidayParams) (InsertHolidayRow, error)
 	// E6 leave-approval decision-trail queries. Append-only; drives the
 	// LeaveRequest.timeline[] the FE renders (ordered by occurred_at).
 	// One immutable decision row per approval action (L1/HR approve, override, reject).
 	InsertLeaveApproval(ctx context.Context, arg InsertLeaveApprovalParams) (LeaveApproval, error)
+	// Seed / HR-on-behalf path (FE/web does not create OT — mobile/agent does). id
+	// allocated by the column DEFAULT ('SWP-OT-' || swp_next_id('OT')) when omitted,
+	// OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
+	InsertOvertime(ctx context.Context, arg InsertOvertimeParams) (InsertOvertimeRow, error)
+	// One immutable decision-trail row per approval action (L1/HR approve, override,
+	// reject) — written in-tx with each transition.
+	InsertOvertimeApproval(ctx context.Context, arg InsertOvertimeApprovalParams) (OvertimeApproval, error)
 	// E3 placement_history queries — one row per lifecycle transition.
 	InsertPlacementHistory(ctx context.Context, arg InsertPlacementHistoryParams) (PlacementHistory, error)
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (InsertRefreshTokenRow, error)
@@ -222,6 +252,14 @@ type Querier interface {
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
 	ListExpiringPlacements(ctx context.Context, arg ListExpiringPlacementsParams) ([]ListExpiringPlacementsRow, error)
+	// E7 public-holiday calendar queries (F7.1 / SWP-HOL-*). The HR-managed master
+	// that feeds OT day_type classification. holiday_date comes back as pgtype.Date
+	// (09-02 repo converts <-> time.Time). Keyset cursor on (holiday_date ASC, id) per
+	// CONVENTIONS §11 (calendar reads ascend by date).
+	// Calendar / list load. Keyset cursor (holiday_date,id) ASC. Filters (all optional
+	// via narg): category, service_line_id (matches when applicable_service_lines is
+	// empty=global OR contains the line), year (EXTRACT(year FROM holiday_date)).
+	ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]ListHolidaysRow, error)
 	// Timeline source: all decisions for a request, chronological.
 	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
 	// E6 leave-quota queries (F6.3 / SWP-LQ-*). remaining = total-used-pending is a
@@ -242,6 +280,17 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, is_annual.
 	ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) ([]ListLeaveTypesRow, error)
+	// E7 overtime queries (F7.1/F7.4 / SWP-OT-*). Reads LEFT JOIN employees for
+	// employee_name, client_companies for company_name (the EmployeeRef/CompanyRef
+	// DTOs). work_date comes back as pgtype.Date (09-02 repo converts <-> time.Time
+	// like Phase-5/6/8). Keyset cursor on (created_at DESC, id) per CONVENTIONS §11.
+	// overtime_rules CRUD is NOT here — reused from E2/Phase-3 (db/queries/org).
+	// Queue / list load. Keyset cursor (created_at,id) DESC. Filters (all optional via
+	// narg): employee_id, company_id, status (single), status__in (text[] → status =
+	// ANY), work_date >= / <=, day_type (tier), source, flagged_no_preapproval.
+	ListOvertime(ctx context.Context, arg ListOvertimeParams) ([]ListOvertimeRow, error)
+	// The approval timeline for GET /overtime/{id} (Overtime.approvals[]), chronological.
+	ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]OvertimeApproval, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, service_line (scopes to a specific line or global).
 	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
@@ -347,6 +396,9 @@ type Querier interface {
 	// Used by :deactivate (status='disabled') and :reactivate (status='active').
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (SetUserStatusRow, error)
 	SoftDeleteAttendanceCode(ctx context.Context, id string) error
+	// DELETE /holidays/{id} (soft). The service first runs CountOvertimeUsingHoliday to
+	// guard HOLIDAY_IN_USE.
+	SoftDeleteHoliday(ctx context.Context, id string) (string, error)
 	SoftDeleteLeaveType(ctx context.Context, id string) error
 	SoftDeleteOvertimeRule(ctx context.Context, id string) error
 	// Hard soft-delete: sets deleted_at so the position is invisible to all queries.
@@ -355,11 +407,17 @@ type Querier interface {
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
+	// Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
+	// the current value (applicable_service_lines is whole-array replace when supplied).
+	UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (UpdateHolidayRow, error)
 	// The approval state transitions (PENDING_L1→PENDING_HR→APPROVED, →REJECTED,
 	// →CANCELLED). Also refreshes the routing + balance_check snapshot columns.
 	UpdateLeaveRequestStatus(ctx context.Context, arg UpdateLeaveRequestStatusParams) (UpdateLeaveRequestStatusRow, error)
 	UpdateLeaveType(ctx context.Context, arg UpdateLeaveTypeParams) (UpdateLeaveTypeRow, error)
 	UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error)
+	// The transition writer (RETURNING-or-409 pattern). 09-02 guards the legal
+	// from→to transition before calling this.
+	UpdateOvertimeStatus(ctx context.Context, arg UpdateOvertimeStatusParams) (UpdateOvertimeStatusRow, error)
 	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
 	// Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
