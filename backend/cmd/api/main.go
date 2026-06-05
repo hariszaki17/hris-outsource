@@ -19,6 +19,7 @@ import (
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
+	overtimehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
@@ -33,6 +34,7 @@ import (
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
 	leaverepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/leave"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
+	overtimerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/overtime"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
 	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
@@ -42,6 +44,7 @@ import (
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
+	overtimesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/overtime"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
@@ -174,6 +177,17 @@ func run() error {
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
 	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc)
 
+	// Overtime slice (09-02): E7 two-level OT approval + holiday calendar
+	// (F7.1/F7.3/F7.4). The OT service reuses the EXISTING scheduling repo
+	// (scheduleRepo above) as its SchedulePort for WORKDAY/RESTDAY day_type
+	// classification, and the overtime repo's FindOvertimeRule reuses the E2
+	// overtime_rules master for OT_BELOW_MIN + the reference multiplier (INV-2).
+	overtimeRepo := overtimerepo.NewOvertimeRepo(pool)
+	holidayRepo := overtimerepo.NewHolidayRepo(pool)
+	overtimeSvc := overtimesvc.NewOvertimeService(overtimeRepo, overtimeRepo, holidayRepo, scheduleRepo, txm)
+	holidaySvc := overtimesvc.NewHolidayService(holidayRepo, txm)
+	overtimeHandler := overtimehttp.NewHandler(overtimeSvc, holidaySvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -190,6 +204,7 @@ func run() error {
 		Scheduling:           schedulingHandler,
 		Attendance:           attendanceHandler,
 		Leave:                leaveHandler,
+		Overtime:             overtimeHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,

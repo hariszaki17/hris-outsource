@@ -14,6 +14,7 @@ import (
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
 	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
+	overtimehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
@@ -53,7 +54,9 @@ type Deps struct {
 	// ATTENDANCE slice (07-02): verify/reject (+bulk) + corrections (E5).
 	Attendance *attendancehttp.Handler
 	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
-	Leave       *leavehttp.Handler
+	Leave *leavehttp.Handler
+	// OVERTIME slice (09-02): OT two-level approval + holiday calendar (E7).
+	Overtime    *overtimehttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -410,6 +413,42 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/leave-quotas:bulk-grant", d.Leave.BulkGrantLeaveQuotas)
 			})
 			// LEAVE slice end (08-02). Phase 8+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// OVERTIME slice (09-02): E7 two-level OT approval + holiday
+			// calendar (F7.1/F7.3/F7.4 / OVT-01/OVT-02). Leader scope
+			// (own-company) + SELF_APPROVAL_FORBIDDEN are enforced in the
+			// service via rbac.GuardCompany / guardSelf. Action endpoints are
+			// idempotent (Idempotency-Key required) per openapi.
+			// COORDINATION POINT: future Phase-9 slices append AFTER this block.
+			// ---------------------------------------------------------------
+
+			// Reads + L1 approve + reject + confirm + withdraw + bulk + holiday
+			// reads: super_admin, hr_admin, shift_leader (company_or_global).
+			// (agent reads/confirm are mobile — web scope is these three; the
+			// confirm agent-only check is enforced in-service.)
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/overtime", d.Overtime.ListOvertime)
+				r.Get("/overtime/{id}", d.Overtime.GetOvertime)
+				r.Get("/holidays", d.Overtime.ListHolidays)
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:confirm", d.Overtime.Confirm)
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-l1", d.Overtime.ApproveL1)
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:reject", d.Overtime.Reject)
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:withdraw", d.Overtime.Withdraw)
+				r.With(d.Idempotency.Handler).Post("/overtime:bulk-approve", d.Overtime.BulkApprove)
+				r.With(d.Idempotency.Handler).Post("/overtime:bulk-reject", d.Overtime.BulkReject)
+			})
+
+			// Final approval + holiday writes: super_admin, hr_admin (global).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-final", d.Overtime.ApproveFinal)
+				r.With(d.Idempotency.Handler).Post("/holidays", d.Overtime.CreateHoliday)
+				r.With(d.Idempotency.Handler).Patch("/holidays/{id}", d.Overtime.UpdateHoliday)
+				r.Delete("/holidays/{id}", d.Overtime.DeleteHoliday)
+			})
+			// OVERTIME slice end (09-02). Phase 9+ appends after this line.
 		})
 	})
 

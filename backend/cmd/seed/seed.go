@@ -268,6 +268,167 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed leave: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 9 (09-02): Seed E7 overtime + holiday fixtures — the web HR/leader
+	// OT APPROVAL targets (agent capture/auto-detect is mobile/system / out of
+	// web scope; OT records incl. PENDING_AGENT_CONFIRM candidates are seeded
+	// directly). FK: overtime → employees/placements/companies/overtime_rules/
+	// holidays; holidays is the master that feeds day_type. Holidays MUST seed
+	// before overtime (SWP-OT-30009 references SWP-HOL-9001 for HOLIDAY_IN_USE).
+	// Idempotent (ON CONFLICT (id) DO NOTHING).
+	// -----------------------------------------------------------------------
+	if err := seedHolidays(ctx, pool); err != nil {
+		return fmt.Errorf("seed holidays: %w", err)
+	}
+	if err := seedOvertime(ctx, pool); err != nil {
+		return fmt.Errorf("seed overtime: %w", err)
+	}
+
+	return nil
+}
+
+// seedHolidays inserts the E7 public-holiday calendar fixtures:
+//   - SWP-HOL-9001  referenced by SWP-OT-30009 (APPROVED) → in_use, delete blocked
+//   - SWP-HOL-9002  free, deletable
+//
+// Both NATIONAL, clearly-in-range Asia/Jakarta dates (current-year, distinct days).
+func seedHolidays(ctx context.Context, pool *db.Pool) error {
+	monday := mondayOfCurrentWeek(time.Now())
+	// Two distinct in-range dates that do NOT collide with the OT work_dates.
+	hol1 := monday.AddDate(0, 0, -14).Format("2006-01-02") // referenced by SWP-OT-30009
+	hol2 := monday.AddDate(0, 0, 21).Format("2006-01-02")  // free to delete
+
+	const hQ = `
+		INSERT INTO holidays (id, name, holiday_date, category, recurring, applicable_service_lines)
+		VALUES ($1, $2, $3::date, 'NATIONAL', false, '{}')
+		ON CONFLICT (id) DO NOTHING`
+	holidays := []struct {
+		id, name, date string
+	}{
+		{"SWP-HOL-9001", "Hari Libur Nasional (terpakai)", hol1},
+		{"SWP-HOL-9002", "Hari Libur Nasional (bebas hapus)", hol2},
+	}
+	for _, h := range holidays {
+		if _, err := pool.Pool.Exec(ctx, hQ, h.id, h.name, h.date); err != nil {
+			return fmt.Errorf("seed holiday %q: %w", h.id, err)
+		}
+		slog.Info("seed: upserted holiday", "id", h.id, "date", h.date)
+	}
+	return nil
+}
+
+// seedOvertime inserts E7 overtime fixtures so the web confirm/approval flows + the
+// every-scenario E2E have real targets. All anchor on the current week (Asia/Jakarta-
+// safe). Placements: Dewi=SWP-PL-5004 @ CMP-0021, Rudi=SWP-PL-5001 @ CMP-0021 (his
+// OWN → SELF_APPROVAL_FORBIDDEN), Budi=SWP-PL-5002 @ CMP-0022 (OUT_OF_SCOPE for Rudi).
+//
+// Rows:
+//   - SWP-OT-30001 PENDING_AGENT_CONFIRM AUTO_DETECTED @ CMP-0021 (confirm target)
+//   - SWP-OT-30002 PENDING_L1 WORKDAY @ CMP-0021 (Rudi L1 target)
+//   - SWP-OT-30003 PENDING_HR @ CMP-0021 (HR final target)
+//   - SWP-OT-30004 PENDING_L1 Rudi's OWN record (SELF_APPROVAL_FORBIDDEN)
+//   - SWP-OT-30005 PENDING_L1 @ CMP-0022 (OUT_OF_SCOPE for Rudi)
+//   - SWP-OT-30006 PENDING_L1 counted<30 skipped_too_short (OT_BELOW_MIN target)
+//   - SWP-OT-30007 APPROVED + SWP-OT-30008 REJECTED (terminal list-filter rows)
+//   - SWP-OT-30009 HOLIDAY APPROVED referencing SWP-HOL-9001 (HOLIDAY_IN_USE source)
+//   - SWP-OT-30010 RESTDAY PENDING_L1 @ CMP-0021
+func seedOvertime(ctx context.Context, pool *db.Pool) error {
+	monday := mondayOfCurrentWeek(time.Now())
+	d := func(off int) string { return monday.AddDate(0, 0, off).Format("2006-01-02") }
+	parking := "SWP-SVC-003"
+	rule := "SWP-OTR-001"
+	hol1 := "SWP-HOL-9001"
+
+	const otQ = `
+		INSERT INTO overtime (
+			id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+			work_date, planned_start_time, planned_end_time, actual_start_time, actual_end_time,
+			cross_midnight, source, status, day_type, worked_minutes, counted_minutes,
+			min_minutes_threshold, skipped_too_short, reference_multiplier, overtime_rule_id,
+			holiday_id, flagged_no_preapproval, reason, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6,
+			$7::date, $8, $9, $10, $11,
+			$12, $13, $14, $15, $16, $17,
+			30, $18, $19, $20,
+			$21, $22, $23, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	type ot struct {
+		id, employeeID, companyID, placementID string
+		attendanceID                           *string
+		workDate                               string
+		actualStart, actualEnd                 *string
+		source, status, dayType                string
+		worked, counted                        int
+		skipped                                bool
+		multiplier                             float64
+		holidayID                              *string
+		flagged                                bool
+		reason                                 *string
+	}
+	s := func(v string) *string { return &v }
+	rows := []ot{
+		// Confirm target: auto-detected, awaiting agent confirm. attendance_id left
+		// NULL (no seeded SWP-ATT row to satisfy the FK; the web confirm flow does
+		// not depend on the linked attendance record).
+		{"SWP-OT-30001", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-1), s("17:00"), s("19:30"), "AUTO_DETECTED", "PENDING_AGENT_CONFIRM", "WORKDAY", 150, 150, false, 1.5, nil, false, nil},
+		// L1 target (Rudi approves Dewi).
+		{"SWP-OT-30002", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-1), s("17:00"), s("20:32"), "REQUESTED", "PENDING_L1", "WORKDAY", 212, 210, false, 1.5, nil, false, s("Cover rekan absen.")},
+		// HR final target.
+		{"SWP-OT-30003", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-2), s("17:00"), s("19:00"), "REQUESTED", "PENDING_HR", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur rutin.")},
+		// SELF_APPROVAL_FORBIDDEN target: Rudi's OWN OT.
+		{"SWP-OT-30004", "SWP-EMP-1108", "SWP-CMP-0021", "SWP-PL-5001", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING_L1", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur leader sendiri.")},
+		// OUT_OF_SCOPE target for Rudi: CMP-0022.
+		{"SWP-OT-30005", "SWP-EMP-2891", "SWP-CMP-0022", "SWP-PL-5002", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING_L1", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur di perusahaan lain.")},
+		// OT_BELOW_MIN target: counted < 30, skipped_too_short.
+		{"SWP-OT-30006", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-3), s("17:00"), s("17:20"), "REQUESTED", "PENDING_L1", "WORKDAY", 20, 0, true, 1.5, nil, false, s("Lembur singkat.")},
+		// Terminal rows for list filters.
+		{"SWP-OT-30007", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-5), s("17:00"), s("19:30"), "REQUESTED", "APPROVED", "WORKDAY", 150, 150, false, 1.5, nil, false, s("Lembur disetujui.")},
+		{"SWP-OT-30008", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-6), s("17:00"), s("18:00"), "REQUESTED", "REJECTED", "WORKDAY", 60, 60, false, 1.5, nil, false, s("Lembur ditolak.")},
+		// HOLIDAY APPROVED referencing SWP-HOL-9001 (HOLIDAY_IN_USE source).
+		{"SWP-OT-30009", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-14), s("09:00"), s("12:00"), "WORKED_WITHOUT_REQUEST", "APPROVED", "HOLIDAY", 180, 180, false, 3.0, &hol1, true, s("Kerja saat hari libur.")},
+		// RESTDAY pending row.
+		{"SWP-OT-30010", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-7), s("09:00"), s("11:00"), "REQUESTED", "PENDING_L1", "RESTDAY", 120, 120, false, 2.0, nil, false, s("Lembur hari istirahat.")},
+	}
+	for _, r := range rows {
+		if _, err := pool.Pool.Exec(ctx, otQ,
+			r.id, r.employeeID, r.companyID, r.placementID, r.attendanceID, parking,
+			r.workDate, nil, nil, r.actualStart, r.actualEnd,
+			false, r.source, r.status, r.dayType, r.worked, r.counted,
+			r.skipped, r.multiplier, rule,
+			r.holidayID, r.flagged, r.reason,
+		); err != nil {
+			return fmt.Errorf("seed overtime %q: %w", r.id, err)
+		}
+		slog.Info("seed: upserted overtime", "id", r.id, "status", r.status, "day_type", r.dayType)
+	}
+
+	// SWP-OT-30009 carries an L1+HR approval trail so the FE detail timeline renders
+	// (it is APPROVED). Idempotent via NOT EXISTS (bigserial has no id to ON CONFLICT).
+	const oaQ = `
+		INSERT INTO overtime_approvals (overtime_id, level, decision, approver_id, approver_name, reason)
+		SELECT $1, $2, $3, $4, $5, $6
+		WHERE NOT EXISTS (
+			SELECT 1 FROM overtime_approvals WHERE overtime_id = $1 AND level = $2)`
+	trails := []struct {
+		otID         string
+		level        int
+		decision     string
+		approverID   string
+		approverName string
+	}{
+		{"SWP-OT-30009", 1, "APPROVED", "SWP-EMP-1108", "Rudi Wijaya"},
+		{"SWP-OT-30009", 2, "APPROVED", "SWP-USR-00002", "HR Admin"},
+		{"SWP-OT-30007", 1, "APPROVED", "SWP-EMP-1108", "Rudi Wijaya"},
+		{"SWP-OT-30007", 2, "APPROVED", "SWP-USR-00002", "HR Admin"},
+		{"SWP-OT-30008", 1, "REJECTED", "SWP-EMP-1108", "Rudi Wijaya"},
+	}
+	for _, t := range trails {
+		if _, err := pool.Pool.Exec(ctx, oaQ, t.otID, t.level, t.decision, t.approverID, t.approverName, nil); err != nil {
+			return fmt.Errorf("seed overtime_approval for %q L%d: %w", t.otID, t.level, err)
+		}
+	}
+	slog.Info("seed: upserted overtime approvals", "count", len(trails))
 	return nil
 }
 
