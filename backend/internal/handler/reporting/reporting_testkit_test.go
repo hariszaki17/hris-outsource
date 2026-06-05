@@ -64,9 +64,27 @@ func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag,
 func (f *fakeTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 	panic("fakeTx: Query not implemented")
 }
+// QueryRow serves audit.RecordReturningID (the export tx INSERT ... RETURNING id):
+// it returns a fake row that scans a deterministic SWP-AL id into the single
+// *string destination, so the export-job audit_log_entry_id is captured honestly
+// through the real service path.
 func (f *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
-	panic("fakeTx: QueryRow not implemented")
+	return &fakeRow{id: "SWP-AL-1204520"}
 }
+
+// fakeRow scans the RETURNING id (audit.RecordReturningID) into a *string dest.
+type fakeRow struct{ id string }
+
+func (r *fakeRow) Scan(dest ...any) error {
+	if len(dest) == 1 {
+		if p, ok := dest[0].(*string); ok {
+			*p = r.id
+		}
+	}
+	return nil
+}
+
+var _ pgx.Row = (*fakeRow)(nil)
 func (f *fakeTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
 	panic("fakeTx: CopyFrom not implemented")
 }
