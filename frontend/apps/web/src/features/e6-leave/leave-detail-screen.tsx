@@ -56,10 +56,22 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   // ---------------------------------------------------------------------------
 
   const query = useGetLeaveRequest(leaveRequestId);
-  const raw = query.data?.data;
+  // The real Go BE wraps the detail (and the approve/reject action results) in the
+  // standard `{ data: <LeaveRequest> }` envelope — the same envelope every other
+  // epic's detail screen unwraps (e.g. attendance-detail reads query.data.data.data).
+  // The E6 openapi declares the bare LeaveRequest (no envelope), so the generated
+  // type narrows `query.data.data` to LeaveRequest; we unwrap the BE's extra `data`
+  // layer when present and fall back to the bare shape so both contracts work.
+  const outer = query.data?.data as
+    | (LeaveRequest & { data?: LeaveRequest })
+    | undefined;
+  const raw: unknown =
+    outer && typeof outer === 'object' && 'data' in outer && outer.data ? outer.data : outer;
   // The Orval response union includes error types; narrow to LeaveRequest.
   const lr: LeaveRequest | undefined =
-    raw && 'id' in raw && 'status' in raw ? (raw as LeaveRequest) : undefined;
+    raw && typeof raw === 'object' && 'id' in raw && 'status' in raw
+      ? (raw as LeaveRequest)
+      : undefined;
 
   // ---------------------------------------------------------------------------
   // Overlay state

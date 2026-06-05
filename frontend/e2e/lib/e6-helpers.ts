@@ -172,11 +172,15 @@ export async function expectLeaveStatus(
   await expect.poll(() => leaveStatus(page, id), { timeout: 20_000 }).toBe(expected);
 }
 
-/** GET a leave quota's persisted `remaining` (via the in-memory token). */
+/**
+ * quotaRemaining — GET /leave-quotas and return the persisted `remaining` for `id`.
+ * apiAs() returns the RAW BE body (not the Orval `{data}` wrap), so the page envelope
+ * is the top-level `{ data: [quotas], next_cursor, has_more }` (httpx.PageResponse).
+ */
 export async function quotaRemaining(page: Page, id: string): Promise<number | undefined> {
   const res = await apiAs(page, 'GET', '/leave-quotas?limit=50');
-  const body = res.body as { data?: { data?: Array<{ id: string; remaining: number }> } } | null;
-  const rows = body?.data?.data ?? [];
+  const body = res.body as { data?: Array<{ id: string; remaining: number }> } | null;
+  const rows = body?.data ?? [];
   return rows.find((q) => q.id === id)?.remaining;
 }
 
