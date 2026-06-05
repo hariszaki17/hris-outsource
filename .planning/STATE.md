@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-e6-leave/08-02-PLAN.md
-last_updated: "2026-06-05T00:11:30.789Z"
-last_activity: "2026-06-05 — Plan 08-01 complete: E6 leave DATA LAYER. Migrations 00028 leave_requests (SWP-LR id, openapi LeaveStatus CHECK enum, denorm company_id/service_line, routing.*/balance_check.* snapshot cols) + 00029 leave_quotas (total/used/pending soft-reservation, remaining derived, (emp,type,period) unique, last_adjustment/last_override jsonb) + 00030 leave_approvals (bigserial decision-trail, stage L1/HR, decision APPROVED/REJECTED/OVERRIDE_APPROVED). db/queries/leave/* sqlc set covers every 08-02 read/write. internal/domain/leave types + LeaveQuota.Remaining(). make gen + go build + go vet clean. INV-3 loop-closer queries (InsertApprovedLeaveDay + CancelScheduleEntriesForLeave on the E4 scheduling dir) deferred to 08-02 — exact signatures + sqlc type quirks handed off in 08-01-SUMMARY "Reference for 08-02"."
+stopped_at: Completed 08-e6-leave/08-03-PLAN.md
+last_updated: "2026-06-05T02:42:33.204Z"
+last_activity: "2026-06-05 — Plan 08-03 complete: E6 leave Go CONTRACT TESTS (the drift gate replacing server codegen). 30 contract tests: leave_testkit_test.go (fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo over the REAL Leave/Quota/Calendar services + handler via newHarness(role,company,employee) on chi mirroring server.go RequireRole+Idempotency positions) + leave/quota/calendar handler tests. Pins: two-level approval state machine (l1→PENDING_HR→APPROVED, reject, override), wrong-state/terminal 409, OUT_OF_SCOPE/self-approve 403, BALANCE_RECHECK_FAILED 422 (requires_override; no deduct/INV-3 on block), override deduct+last_override+INV-3, quota remaining math + recompute-on-read + adjust refuse-total<used 422 RULE_VIOLATION + bulk-grant partial-success/preview-no-write, calendar shape + show_pending + leader 403 + clash detection, no-leader routing. INV-3 cancel + approved_leave_days insert + CANCELLED_BY_LEAVE-to-LEAVE DTO mapping asserted at the service-contract level. go test ./... -count=1 exits 0, no e1..e5 regressions. Next: 08-04 (Playwright E2E)."
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 37
-  completed_plans: 35
-  percent: 92
+  completed_plans: 36
+  percent: 97
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 8 — E6 Leave; Plan 08-01 (data layer) COMPLETE; next: 08-02 (services + handlers + INV-3 loop-closer + seed)
+**Current focus:** Phase 8 — E6 Leave; Plans 08-01 (data), 08-02 (services+handlers+INV-3+seed), 08-03 (Go contract tests) COMPLETE; next: 08-04 (full-stack Playwright E2E)
 
 ## Current Position
 
 Phase: 8 of 11 (E6 Leave) — IN PROGRESS
-Plan: 1 of 4 in current phase — Plan 08-01 COMPLETE (data layer: migrations + sqlc + domain)
+Plan: 3 of 4 in current phase — Plan 08-03 COMPLETE (Go contract tests — the E6 drift gate)
 Status: In progress
-Last activity: 2026-06-05 — Plan 08-01 complete: E6 leave DATA LAYER. Migrations 00028 leave_requests (SWP-LR id, openapi LeaveStatus CHECK enum, denorm company_id/service_line, routing.*/balance_check.* snapshot cols) + 00029 leave_quotas (total/used/pending soft-reservation, remaining derived, (emp,type,period) unique, last_adjustment/last_override jsonb) + 00030 leave_approvals (bigserial decision-trail, stage L1/HR, decision APPROVED/REJECTED/OVERRIDE_APPROVED). db/queries/leave/* sqlc set covers every 08-02 read/write. internal/domain/leave types + LeaveQuota.Remaining(). make gen + go build + go vet clean. INV-3 loop-closer queries (InsertApprovedLeaveDay + CancelScheduleEntriesForLeave on the E4 scheduling dir) deferred to 08-02 — exact signatures + sqlc type quirks handed off in 08-01-SUMMARY "Reference for 08-02".
+Last activity: 2026-06-05 — Plan 08-03 complete: E6 leave Go CONTRACT TESTS (the drift gate replacing server codegen). 30 contract tests across leave_testkit_test.go (fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo over the REAL Leave/Quota/Calendar services + handler via newHarness(role,company,employee) on chi mirroring server.go RequireRole+Idempotency positions) + leave/quota/calendar handler tests. Pins the two-level approval state machine (l1→PENDING_HR→APPROVED, reject, override), wrong-state/terminal 409, OUT_OF_SCOPE/self-approve 403, BALANCE_RECHECK_FAILED 422 (requires_override; no deduct/INV-3 on block), override deduct+last_override+INV-3, quota remaining math + recompute-on-read + adjust refuse-total<used 422 RULE_VIOLATION + bulk-grant partial-success/preview-no-write, calendar shape + show_pending toggle + leader 403 + clash detection, no-leader routing. INV-3 cancel + approved_leave_days insert + CANCELLED_BY_LEAVE→LEAVE DTO mapping asserted at the service-contract level. go test ./... -count=1 exits 0, no e1..e5 regressions.
 
-Progress: [█████████░] 92%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -76,6 +76,7 @@ Progress: [█████████░] 92%
 | Phase 07-e5-attendance P04 | 75 | 3 tasks | 7 files |
 | Phase 08-e6-leave P01 | 4 | 2 tasks | 8 files |
 | Phase 08-e6-leave P02 | 38 | 3 tasks | 22 files |
+| Phase 08-e6-leave P03 | 6 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,9 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 08-e6-leave]: [08-01]: leave_quotas remaining = total-used-pending is a DERIVED domain method (LeaveQuota.Remaining()), never stored; pending recompute is computed-on-read via CountPendingLeaveDaysForQuota (no trigger)
 - [Phase 08-e6-leave]: [08-01]: SWP-LR display id reconciled — new leave_requests.id shares swp_next_id('LR') with Phase-6's literal SWP-LR-44210 fixture (no collision); 08-02 INV-3 write-through inserts the REAL id into approved_leave_days, replacing the fixture mechanism
 - [Phase 08-e6-leave]: [08-01]: sqlc quirks for 08-02 repo — dates→pgtype.Date, jsonb(last_adjustment/last_override)→[]byte, ints→int32, CountPendingLeaveDaysForQuota→int64, leave_approvals.ID→int64; INV-3 loop-closer queries (InsertApprovedLeaveDay ON CONFLICT + CancelScheduleEntriesForLeave→CANCELLED_BY_LEAVE) live in scheduling/ dir, added by 08-02
+- [Phase 08-e6-leave]: [08-03]: E6 drift gate mirrors the Phase-7 attendance harness EXACTLY — fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo (svc.SchedulePort) over the REAL services+handler via newHarness(role,company,employee) on chi with a mutable-principal closure middleware + stubIdempotency at the server.go router position
+- [Phase 08-e6-leave]: [08-03]: INV-3 loop-closer asserted at the service-contract level — fakeScheduleRepo records cancelCalls + insertedDays and returns a configurable schedule_impact[] so the over-balance approve-final blocks BEFORE the tx (no deduct/cancel) while override deducts into negative remaining + sets last_override + fires INV-3; the CANCELLED_BY_LEAVE → LEAVE DTO mapping is pinned on the wire
+- [Phase 08-e6-leave]: [08-03]: decodeBody snapshots rr.Body.Bytes() so one response is re-decodable (errCode + errFields) — the one deliberate divergence from the 07-03 attendance harness which only decoded once
 
 ### Pending Todos
 
@@ -198,6 +202,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T00:11:30.787Z
-Stopped at: Completed 08-e6-leave/08-02-PLAN.md
+Last session: 2026-06-05T02:42:21.307Z
+Stopped at: Completed 08-e6-leave/08-03-PLAN.md
 Resume file: None

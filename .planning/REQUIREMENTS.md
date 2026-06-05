@@ -87,7 +87,7 @@
 | PLC-01..04 | Phase 5 | Complete (05-01..04) |
 | SCH-01..03 | Phase 6 | Complete (06-01..04) |
 | ATT-01..02 | Phase 7 | Complete |
-| LVE-01..03 | Phase 8 | Pending |
+| LVE-01..03 | Phase 8 | In Progress (08-01..03 done; 08-04 E2E pending) |
 | OVT-01..02 | Phase 9 | Pending |
 | PAY-01..02 | Phase 10 | Pending |
 | RPT-01..04 | Phase 11 | Pending |
