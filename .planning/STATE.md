@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-e6-leave/08-03-PLAN.md
-last_updated: "2026-06-05T02:42:33.204Z"
-last_activity: "2026-06-05 — Plan 08-03 complete: E6 leave Go CONTRACT TESTS (the drift gate replacing server codegen). 30 contract tests: leave_testkit_test.go (fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo over the REAL Leave/Quota/Calendar services + handler via newHarness(role,company,employee) on chi mirroring server.go RequireRole+Idempotency positions) + leave/quota/calendar handler tests. Pins: two-level approval state machine (l1→PENDING_HR→APPROVED, reject, override), wrong-state/terminal 409, OUT_OF_SCOPE/self-approve 403, BALANCE_RECHECK_FAILED 422 (requires_override; no deduct/INV-3 on block), override deduct+last_override+INV-3, quota remaining math + recompute-on-read + adjust refuse-total<used 422 RULE_VIOLATION + bulk-grant partial-success/preview-no-write, calendar shape + show_pending + leader 403 + clash detection, no-leader routing. INV-3 cancel + approved_leave_days insert + CANCELLED_BY_LEAVE-to-LEAVE DTO mapping asserted at the service-contract level. go test ./... -count=1 exits 0, no e1..e5 regressions. Next: 08-04 (Playwright E2E)."
+stopped_at: Completed 08-e6-leave/08-04-PLAN.md
+last_updated: "2026-06-05T03:27:37.666Z"
+last_activity: "2026-06-05 — Plan 08-04 complete: E6 leave full-stack Playwright E2E. Wired the four e6-leave screens off MSW to the real Go BE; 21 tests / 5 specs green headless vs real FE↔Go↔ephemeral Postgres (approvals/quotas/calendar/scope + the INV-3 loop-closer). INV-3 PROVEN: approving SWP-LR-8007 cancels SWP-SCH-6002 (approve-final response new_status='LEAVE'; GET /schedule status='CANCELLED_BY_LEAVE') AND a fresh schedule create hits 409 SHIFT_OVER_LEAVE with details.leave_request_id='SWP-LR-8007' from the REAL approved_leave_days row. FE fixes: leave-detail unwraps the BE {data} envelope + opens the override modal off ApiError.code BALANCE_RECHECK_FAILED. Full e1-e6: 184 passed / 6 skipped / 0 failed — no regressions. Closes LVE-01/02/03; Phase 8 COMPLETE."
 progress:
   total_phases: 11
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 37
-  completed_plans: 36
-  percent: 97
+  completed_plans: 37
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 8 — E6 Leave; Plans 08-01 (data), 08-02 (services+handlers+INV-3+seed), 08-03 (Go contract tests) COMPLETE; next: 08-04 (full-stack Playwright E2E)
+**Current focus:** Phase 8 — E6 Leave COMPLETE (08-01 data, 08-02 services+handlers+INV-3+seed, 08-03 Go contract tests, 08-04 full-stack Playwright E2E). Next: Phase 9 (E7 Overtime).
 
 ## Current Position
 
-Phase: 8 of 11 (E6 Leave) — IN PROGRESS
-Plan: 3 of 4 in current phase — Plan 08-03 COMPLETE (Go contract tests — the E6 drift gate)
-Status: In progress
-Last activity: 2026-06-05 — Plan 08-03 complete: E6 leave Go CONTRACT TESTS (the drift gate replacing server codegen). 30 contract tests across leave_testkit_test.go (fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo over the REAL Leave/Quota/Calendar services + handler via newHarness(role,company,employee) on chi mirroring server.go RequireRole+Idempotency positions) + leave/quota/calendar handler tests. Pins the two-level approval state machine (l1→PENDING_HR→APPROVED, reject, override), wrong-state/terminal 409, OUT_OF_SCOPE/self-approve 403, BALANCE_RECHECK_FAILED 422 (requires_override; no deduct/INV-3 on block), override deduct+last_override+INV-3, quota remaining math + recompute-on-read + adjust refuse-total<used 422 RULE_VIOLATION + bulk-grant partial-success/preview-no-write, calendar shape + show_pending toggle + leader 403 + clash detection, no-leader routing. INV-3 cancel + approved_leave_days insert + CANCELLED_BY_LEAVE→LEAVE DTO mapping asserted at the service-contract level. go test ./... -count=1 exits 0, no e1..e5 regressions.
+Phase: 8 of 11 (E6 Leave) — COMPLETE
+Plan: 4 of 4 in current phase — Plan 08-04 COMPLETE (full-stack Playwright E2E + INV-3 loop-closer)
+Status: Phase complete
+Last activity: 2026-06-05 — Plan 08-04 complete: E6 leave full-stack Playwright E2E. Wired the four e6-leave screens off MSW to the real Go BE; 21 tests / 5 specs green headless vs real FE↔Go↔ephemeral Postgres. approvals (L1-forward/HR-final/L1→final/reject±min/override±min via the 422 error path/PENDING_HR-list+APPROVED-filter/no-leader badge), quotas (remaining math/adjust happy+refuse 422 field error/bulk-grant preview→apply/balance-recheck→override), calendar (empty-default + show_pending toggle), scope (leader cross-company :approve-l1 403 OUT_OF_SCOPE + list 403 + queue-hidden + HR global 200). INV-3 loop-closer PROVEN: approving SWP-LR-8007 cancels SWP-SCH-6002 (approve-final response new_status='LEAVE'; GET /schedule status='CANCELLED_BY_LEAVE') AND a fresh schedule create then hits 409 SHIFT_OVER_LEAVE with details.leave_request_id='SWP-LR-8007' from the REAL approved_leave_days row (Phase-6 fixture replaced). FE fixes: leave-detail unwraps the BE {data} envelope + opens the override modal off ApiError.code BALANCE_RECHECK_FAILED. Full e1-e6 suite: 184 passed / 6 skipped / 0 failed — no regressions. Closes LVE-01/02/03.
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [██████████] 97%
 | Phase 08-e6-leave P01 | 4 | 2 tasks | 8 files |
 | Phase 08-e6-leave P02 | 38 | 3 tasks | 22 files |
 | Phase 08-e6-leave P03 | 6 | 2 tasks | 4 files |
+| Phase 08-e6-leave P04 | 64 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,10 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 08-e6-leave]: [08-03]: E6 drift gate mirrors the Phase-7 attendance harness EXACTLY — fakeTx + in-memory fake leave/quota repos + a recording fakeScheduleRepo (svc.SchedulePort) over the REAL services+handler via newHarness(role,company,employee) on chi with a mutable-principal closure middleware + stubIdempotency at the server.go router position
 - [Phase 08-e6-leave]: [08-03]: INV-3 loop-closer asserted at the service-contract level — fakeScheduleRepo records cancelCalls + insertedDays and returns a configurable schedule_impact[] so the over-balance approve-final blocks BEFORE the tx (no deduct/cancel) while override deducts into negative remaining + sets last_override + fires INV-3; the CANCELLED_BY_LEAVE → LEAVE DTO mapping is pinned on the wire
 - [Phase 08-e6-leave]: [08-03]: decodeBody snapshots rr.Body.Bytes() so one response is re-decodable (errCode + errFields) — the one deliberate divergence from the 07-03 attendance harness which only decoded once
+- [Phase 08-e6-leave]: [08-04]: E6 FE detail unwraps the BE {data:<LeaveRequest>} envelope (E6 openapi declares bare LeaveRequest so Orval narrows query.data.data to it; handler wraps in dataResponse like every epic) — fixed toward what the BE returns
+- [Phase 08-e6-leave]: [08-04]: override modal opens off ApiError.code BALANCE_RECHECK_FAILED (the 422's error.fields make classifyError 'validation' not 'rule'; Bahasa msg lacks 'BALANCE'); detail GET never pre-flags requires_override (BE re-checks only at approve-final) so the 422 error path is the real override trigger
+- [Phase 08-e6-leave]: [08-04]: schedule_impact[].new_status='LEAVE' asserted on the approve-final ACTION RESPONSE (LeaveService.Get re-derives only the timeline, not schedule_impact); INV-3 pre-condition probes monday+2 → DOUBLE_SHIFT (engine: SHIFT_OVER_LEAVE precedes DOUBLE_SHIFT); post-approval → SHIFT_OVER_LEAVE from the real approved_leave_days row + GET /schedule status=CANCELLED_BY_LEAVE
+- [Phase 08-e6-leave]: [08-04]: E6 full-stack Playwright suite (21 tests/5 specs) green headless vs real FE+Go+ephemeral PG; full e1-e6 run 184 passed/6 skipped/0 failed — no regressions; seeded remaining is total-used-PENDING (Dewi 5, Budi -3)
 
 ### Pending Todos
 
@@ -202,6 +207,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T02:42:21.307Z
-Stopped at: Completed 08-e6-leave/08-03-PLAN.md
+Last session: 2026-06-05T03:27:24.276Z
+Stopped at: Completed 08-e6-leave/08-04-PLAN.md
 Resume file: None

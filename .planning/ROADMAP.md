@@ -21,7 +21,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
 - [ ] **Phase 5: E3 Placement** - Placements lifecycle + shift-leader assignments + roster
 - [ ] **Phase 6: E4 Schedule & Shifts** - Shift masters, schedule entries, conflict check, bulk apply
 - [x] **Phase 7: E5 Attendance** - Attendance verify/reject (incl. bulk) + corrections
-- [ ] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
+- [x] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
 - [ ] **Phase 9: E7 Overtime** - Overtime workflow + public holidays
 - [ ] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export
 - [ ] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework
@@ -234,7 +234,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 5. E3 Placement | 4/4 | Complete    | 2026-06-04 |
 | 6. E4 Schedule & Shifts | 4/4 | Complete    | 2026-06-04 |
 | 7. E5 Attendance | 4/4 | Complete | - |
-| 8. E6 Leave | 3/4 | In Progress|  |
+| 8. E6 Leave | 4/4 | Complete | 2026-06-05 |
 | 9. E7 Overtime | 0/4 | Not started | - |
 | 10. E8 Payroll | 0/4 | Not started | - |
 | 11. E10 Reporting & Notifications | 0/4 | Not started | - |
