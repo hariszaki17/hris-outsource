@@ -192,6 +192,7 @@ func run() error {
 	attendanceRepo := attendancerepo.NewAttendanceRepo(pool)
 	correctionRepo := attendancerepo.NewCorrectionRepo(pool)
 	attendanceSvc := attendancesvc.NewAttendanceService(attendanceRepo, txm)
+	attendanceSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on verify/reject
 	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
 	attendanceHandler := attendancehttp.NewHandler(attendanceSvc, correctionSvc)
 
@@ -202,6 +203,7 @@ func run() error {
 	leaveRepo := leaverepo.NewLeaveRepo(pool)
 	quotaRepo := leaverepo.NewQuotaRepo(pool)
 	leaveSvc := leavesvc.NewLeaveService(leaveRepo, quotaRepo, scheduleRepo, txm)
+	leaveSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on approve-final/reject
 	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm)
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
 	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc)
@@ -214,6 +216,7 @@ func run() error {
 	overtimeRepo := overtimerepo.NewOvertimeRepo(pool)
 	holidayRepo := overtimerepo.NewHolidayRepo(pool)
 	overtimeSvc := overtimesvc.NewOvertimeService(overtimeRepo, overtimeRepo, holidayRepo, scheduleRepo, txm)
+	overtimeSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on approve-final/reject
 	holidaySvc := overtimesvc.NewHolidayService(holidayRepo, txm)
 	overtimeHandler := overtimehttp.NewHandler(overtimeSvc, holidaySvc)
 

@@ -34,6 +34,15 @@ func actorEmployeeID(ctx context.Context) *string {
 	return nil
 }
 
+// actorUserID resolves the acting user id (empty if absent) — the notification
+// actor (who approved/rejected). Returns the SWP-USR-* of the principal.
+func actorUserID(ctx context.Context) string {
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		return p.UserID
+	}
+	return ""
+}
+
 func ptrStr(p *string) any {
 	if p == nil {
 		return nil
@@ -42,6 +51,17 @@ func ptrStr(p *string) any {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// leaveDateBody builds a single-line notification body summarizing the leave
+// date range (Asia/Jakarta-neutral YYYY-MM-DD; the FE renders TZ-aware copy).
+func leaveDateBody(prefix string, start, end time.Time) string {
+	s := start.Format("2006-01-02")
+	e := end.Format("2006-01-02")
+	if s == e {
+		return prefix + " (" + s + ")."
+	}
+	return prefix + " (" + s + " s/d " + e + ")."
+}
 
 // asAppErr passes *apperr.Error through, wrapping anything else as 500.
 func asAppErr(err error) error {

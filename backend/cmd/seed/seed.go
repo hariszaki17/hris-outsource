@@ -300,6 +300,94 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed payroll: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 11 (11-02): Seed E10 notifications so the in-app inbox list +
+	// mark-read flows render for the personas. These are SEED-ONLY (the
+	// auto-dispatch loop-closer is proven by a REAL action in 11-04). Recipients
+	// are the persona EMPLOYEE ids (SWP-EMP-1042 HR Sari, SWP-EMP-2891 agent Budi)
+	// — deterministic, and the notification service scopes List on the principal's
+	// (user id, employee id) pair so both render. Mixed read/unread across kinds.
+	// Explicit SWP-NTF-9000x ids + ON CONFLICT (id) DO NOTHING for idempotent E2E.
+	// -----------------------------------------------------------------------
+	if err := seedNotifications(ctx, pool); err != nil {
+		return fmt.Errorf("seed notifications: %w", err)
+	}
+
+	return nil
+}
+
+// seedNotifications inserts ~6 in-app notification fixtures (mixed read/unread,
+// across kinds) for the seeded personas so the notifications list + mark-read +
+// mark-all-read flows render. Idempotent (ON CONFLICT (id) DO NOTHING).
+func seedNotifications(ctx context.Context, pool *db.Pool) error {
+	now := time.Now()
+	ts := func(d time.Duration) time.Time { return now.Add(-d) }
+
+	type notif struct {
+		id          string
+		recipientID string
+		kind        string
+		title       string
+		body        string
+		dlEpic      string
+		dlEntityID  *string
+		dlPath      string
+		actorID     *string
+		actorLabel  string
+		isCritical  bool
+		readAt      *time.Time // nil = unread
+		createdAt   time.Time
+	}
+
+	hr := "SWP-EMP-1042"    // Sari Hadi (hr_admin persona's employee id)
+	agent := "SWP-EMP-2891" // Budi Santoso (agent persona's employee id)
+	read := ts(30 * time.Minute)
+	sysActor := "SWP-USR-00002"
+
+	rows := []notif{
+		// HR Sari — a fresh leave-request-submitted (unread, critical).
+		{"SWP-NTF-90001", hr, "LEAVE_REQUEST_SUBMITTED", "Pengajuan cuti baru",
+			"Dewi Lestari mengajukan cuti 1 hari.", "E6", strPtr("SWP-LR-8002"), "/leave-requests/SWP-LR-8002",
+			strPtr("SWP-EMP-3001"), "Dewi Lestari", true, nil, ts(2 * time.Hour)},
+		// HR Sari — attendance verify needed (read).
+		{"SWP-NTF-90002", hr, "ATTENDANCE_VERIFY_NEEDED", "Verifikasi kehadiran",
+			"Beberapa catatan kehadiran menunggu verifikasi.", "E5", nil, "/attendance?status=PENDING",
+			nil, "system", false, &read, ts(1 * 24 * time.Hour)},
+		// HR Sari — a placement expiring (unread, system actor).
+		{"SWP-NTF-90003", hr, "PLACEMENT_EXPIRING", "Penempatan akan berakhir",
+			"1 penempatan berakhir dalam 30 hari.", "E3", strPtr("SWP-PL-5002"), "/placements/SWP-PL-5002",
+			nil, "system", false, nil, ts(3 * time.Hour)},
+		// Agent Budi — leave approved (unread, critical).
+		{"SWP-NTF-90004", agent, "LEAVE_APPROVED", "Cuti disetujui",
+			"Pengajuan cuti Anda disetujui.", "E6", strPtr("SWP-LR-8005"), "/leave-requests/SWP-LR-8005",
+			&sysActor, "HR Admin", true, nil, ts(90 * time.Minute)},
+		// Agent Budi — OT approved (read).
+		{"SWP-NTF-90005", agent, "OT_APPROVED", "Lembur disetujui",
+			"Pengajuan lembur Anda disetujui.", "E7", strPtr("SWP-OT-30005"), "/overtime/SWP-OT-30005",
+			&sysActor, "HR Admin", true, &read, ts(2 * 24 * time.Hour)},
+		// Agent Budi — attendance verify needed (unread).
+		{"SWP-NTF-90006", agent, "ATTENDANCE_VERIFY_NEEDED", "Kehadiran diverifikasi",
+			"Catatan kehadiran Anda telah diverifikasi.", "E5", nil, "/attendance",
+			&sysActor, "HR Admin", false, nil, ts(45 * time.Minute)},
+	}
+
+	for _, n := range rows {
+		_, err := pool.Pool.Exec(ctx, `
+			INSERT INTO notifications (
+				id, recipient_id, kind, title, body,
+				deep_link_epic, deep_link_entity_id, deep_link_path,
+				actor_id, actor_label, is_critical, read_at, created_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			ON CONFLICT (id) DO NOTHING`,
+			n.id, n.recipientID, n.kind, n.title, n.body,
+			n.dlEpic, n.dlEntityID, n.dlPath,
+			n.actorID, n.actorLabel, n.isCritical, n.readAt, n.createdAt,
+		)
+		if err != nil {
+			return fmt.Errorf("insert notification %s: %w", n.id, err)
+		}
+	}
+	slog.Info("seed: notifications", "count", len(rows))
 	return nil
 }
 

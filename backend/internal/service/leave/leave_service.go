@@ -16,9 +16,11 @@ import (
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
+	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
 
@@ -29,6 +31,7 @@ type LeaveService struct {
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
+	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
 // NewLeaveService wires the leave service. The schedule port is the INV-3
@@ -39,6 +42,11 @@ func NewLeaveService(repo LeaveRepository, quota QuotaRepository, schedule Sched
 
 // SetClock overrides the time source (tests only).
 func (s *LeaveService) SetClock(c Clock) { s.now = c }
+
+// SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe:
+// notify.Dispatch no-ops when the notifier is nil, so existing unit tests that
+// construct the service without it keep passing. main.go injects the River client.
+func (s *LeaveService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
 
 // --- list / get ---
 
@@ -138,7 +146,11 @@ func (s *LeaveService) ApproveL1(ctx context.Context, id, note string) (dom.Leav
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("leave L1-approved → HR queue").
+		// Phase-11 stub (documented): the L1→HR next-stage event targets the HR
+		// approver QUEUE, not a single recipient — there is no clean per-user
+		// recipient at this point (the HR pool is not enumerated here). Left as a
+		// stub per the plan's OPTIONAL coverage; the submitter-facing
+		// approve-final/reject points ARE wired below. See 11-02-SUMMARY.
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "PENDING_HR", actor, "APPROVE_L1"))
 	})
 	if err != nil {
@@ -286,7 +298,21 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 		if override {
 			action = "APPROVE_OVERRIDE"
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("leave approved" + submitter notify).
+		// E10 (11-02): notify the submitter their leave is approved (transactional
+		// outbox — enqueued in THIS tx, so a rolled-back approval never notifies).
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifLeaveApproved),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Cuti disetujui",
+			Body:             leaveDateBody("Pengajuan cuti Anda disetujui", rec.StartDate, rec.EndDate),
+			DeepLinkEpic:     "E6",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/leave-requests/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       true,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "APPROVED", actor, action))
 	})
 	if err != nil {
@@ -347,7 +373,20 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("leave rejected").
+		// E10 (11-02): notify the submitter their leave is rejected.
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifLeaveRejected),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Cuti ditolak",
+			Body:             "Pengajuan cuti Anda ditolak: " + reason,
+			DeepLinkEpic:     "E6",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/leave-requests/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       true,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "REJECTED", actor, "REJECT"))
 	})
 	if err != nil {

@@ -18,9 +18,11 @@ import (
 
 	domain "github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
+	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
 
@@ -85,15 +87,19 @@ type ApplyCorrectionParams struct {
 
 // AttendanceService implements the verification business logic.
 type AttendanceService struct {
-	repo AttendanceRepository
-	txm  TxRunner
-	now  Clock
+	repo     AttendanceRepository
+	txm      TxRunner
+	now      Clock
+	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
 // NewAttendanceService wires the attendance service.
 func NewAttendanceService(repo AttendanceRepository, txm TxRunner) *AttendanceService {
 	return &AttendanceService{repo: repo, txm: txm, now: time.Now}
 }
+
+// SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe.
+func (s *AttendanceService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
 
 // SetClock overrides the time source (tests only).
 func (s *AttendanceService) SetClock(c Clock) { s.now = c }
@@ -183,7 +189,25 @@ func (s *AttendanceService) Verify(ctx context.Context, id string, note string) 
 			return terminalConflict(rec.VerificationStatus)
 		}
 		out = updated
-		// TODO(Phase-11): enqueue NotificationArgs ("attendance verified") in this tx.
+		// E10 (11-02): notify the record owner their attendance is verified
+		// (transactional outbox). The catalog's attendance kind is
+		// ATTENDANCE_VERIFY_NEEDED — there is no dedicated VERIFIED/REJECTED kind in
+		// the v1 NotificationKind enum, so we reuse it as the nearest honest
+		// attendance kind for the owner-facing verify/reject result (documented
+		// choice; see 11-02-SUMMARY).
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifAttendanceVerifyNeeded),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Kehadiran diverifikasi",
+			Body:             "Catatan kehadiran Anda telah diverifikasi.",
+			DeepLinkEpic:     "E5",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/attendance/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       false,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionUpdate,
 			EntityType: "attendance",
@@ -224,7 +248,21 @@ func (s *AttendanceService) Reject(ctx context.Context, id string, reason string
 			return terminalConflict(rec.VerificationStatus)
 		}
 		out = updated
-		// TODO(Phase-11): enqueue NotificationArgs ("attendance rejected") in this tx.
+		// E10 (11-02): notify the record owner their attendance was rejected. Same
+		// kind reuse as verify (no dedicated reject kind in v1; documented).
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifAttendanceVerifyNeeded),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Kehadiran ditolak",
+			Body:             "Catatan kehadiran Anda ditolak: " + reason,
+			DeepLinkEpic:     "E5",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/attendance/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       false,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionUpdate,
 			EntityType: "attendance",
@@ -360,6 +398,15 @@ func actorEmployeeID(ctx context.Context) *string {
 		return &id
 	}
 	return nil
+}
+
+// actorUserID resolves the acting user id (empty if absent) — the notification
+// actor (who verified/rejected).
+func actorUserID(ctx context.Context) string {
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		return p.UserID
+	}
+	return ""
 }
 
 func ptrStr(p *string) any {

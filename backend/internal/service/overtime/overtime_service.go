@@ -25,7 +25,10 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
+
+	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 )
 
 // OvertimeService implements the OT approval business logic.
@@ -36,6 +39,7 @@ type OvertimeService struct {
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
+	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
 // NewOvertimeService wires the overtime service. holidays + schedule feed the
@@ -46,6 +50,9 @@ func NewOvertimeService(repo OvertimeRepository, rules RuleRepository, holidays 
 
 // SetClock overrides the time source (tests only).
 func (s *OvertimeService) SetClock(c Clock) { s.now = c }
+
+// SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe.
+func (s *OvertimeService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
 
 // --- calculation block (computed at read time; INV-2 reference-only multiplier) ---
 
@@ -221,7 +228,10 @@ func (s *OvertimeService) Confirm(ctx context.Context, id, note string) (dom.Ove
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("OT confirmed → leader queue").
+		// Phase-11 stub (documented): "OT confirmed → leader queue" targets the
+		// leader APPROVAL queue, not a single recipient — left as a stub per the
+		// plan's OPTIONAL coverage. The submitter-facing approve-final/reject points
+		// ARE wired. See 11-02-SUMMARY.
 		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING_L1", actor, "CONFIRM"))
 	})
 	if err != nil {
@@ -261,7 +271,9 @@ func (s *OvertimeService) ApproveL1(ctx context.Context, id, note string) (dom.O
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("OT L1-approved → HR queue").
+		// Phase-11 stub (documented): "OT L1-approved → HR queue" targets the HR
+		// queue, not a single recipient — left as a stub per the plan's OPTIONAL
+		// coverage. See 11-02-SUMMARY.
 		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING_HR", actor, "APPROVE_L1"))
 	})
 	if err != nil {
@@ -309,7 +321,20 @@ func (s *OvertimeService) ApproveFinal(ctx context.Context, id, note string, isO
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("OT approved" + submitter notify).
+		// E10 (11-02): notify the submitter their OT is approved (transactional outbox).
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifOTApproved),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Lembur disetujui",
+			Body:             "Pengajuan lembur Anda (" + rec.WorkDate.Format("2006-01-02") + ") disetujui.",
+			DeepLinkEpic:     "E7",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/overtime/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       true,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "APPROVED", actor, action))
 	})
 	if err != nil {
@@ -353,7 +378,20 @@ func (s *OvertimeService) Reject(ctx context.Context, id, reason string) (dom.Ov
 		}); aerr != nil {
 			return aerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("OT rejected").
+		// E10 (11-02): notify the submitter their OT is rejected.
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifOTRejected),
+			RecipientID:      rec.EmployeeID,
+			Title:            "Lembur ditolak",
+			Body:             "Pengajuan lembur Anda ditolak: " + reason,
+			DeepLinkEpic:     "E7",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/overtime/" + id,
+			ActorID:          actorUserID(ctx),
+			IsCritical:       true,
+		}); derr != nil {
+			return derr
+		}
 		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "REJECTED", actor, "REJECT"))
 	})
 	if err != nil {
@@ -377,7 +415,9 @@ func (s *OvertimeService) Withdraw(ctx context.Context, id string) error {
 		if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusWithdrawn); uerr != nil {
 			return uerr
 		}
-		// TODO(Phase-11): enqueue NotificationArgs ("OT withdrawn").
+		// Phase-11 stub (documented): "OT withdrawn" is an agent self-action — the
+		// actor IS the recipient, so a self-notification adds no value. Left as a
+		// stub. See 11-02-SUMMARY.
 		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "WITHDRAWN", actor, "WITHDRAW"))
 	})
 	if err != nil {

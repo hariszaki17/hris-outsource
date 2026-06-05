@@ -46,6 +46,15 @@ func actorName(ctx context.Context) *string {
 	return nil
 }
 
+// actorUserID resolves the acting user id (empty if absent) — the notification
+// actor (who approved/rejected).
+func actorUserID(ctx context.Context) string {
+	if p, ok := auth.PrincipalFrom(ctx); ok {
+		return p.UserID
+	}
+	return ""
+}
+
 func ptrStr(p *string) any {
 	if p == nil {
 		return nil
