@@ -94,9 +94,17 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
   // ---------------------------------------------------------------------------
 
   const query = useGetOvertime(overtimeId);
-  const raw = query.data?.data;
+  // The handler wraps the detail in a {data:<Overtime>} envelope even though the E7
+  // openapi declares the bare object (so Orval narrows query.data.data to Overtime).
+  // Unwrap with a bare fallback (the recurring Phase-8 detail-GET fix): prefer the
+  // nested .data when present, else treat the response body as the bare Overtime.
+  const raw = query.data?.data as { data?: Overtime } | Overtime | undefined;
+  const unwrapped =
+    raw && typeof raw === 'object' && 'data' in raw && raw.data
+      ? (raw as { data?: Overtime }).data
+      : (raw as Overtime | undefined);
   const ot: Overtime | undefined =
-    raw && 'id' in raw && 'status' in raw ? (raw as Overtime) : undefined;
+    unwrapped && 'id' in unwrapped && 'status' in unwrapped ? (unwrapped as Overtime) : undefined;
 
   // ---------------------------------------------------------------------------
   // Overlay state
