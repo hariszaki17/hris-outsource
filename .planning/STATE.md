@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: completed
 stopped_at: Completed 08-e6-leave/08-04-PLAN.md
-last_updated: "2026-06-05T03:27:37.666Z"
-last_activity: "2026-06-05 — Plan 08-04 complete: E6 leave full-stack Playwright E2E. Wired the four e6-leave screens off MSW to the real Go BE; 21 tests / 5 specs green headless vs real FE↔Go↔ephemeral Postgres (approvals/quotas/calendar/scope + the INV-3 loop-closer). INV-3 PROVEN: approving SWP-LR-8007 cancels SWP-SCH-6002 (approve-final response new_status='LEAVE'; GET /schedule status='CANCELLED_BY_LEAVE') AND a fresh schedule create hits 409 SHIFT_OVER_LEAVE with details.leave_request_id='SWP-LR-8007' from the REAL approved_leave_days row. FE fixes: leave-detail unwraps the BE {data} envelope + opens the override modal off ApiError.code BALANCE_RECHECK_FAILED. Full e1-e6: 184 passed / 6 skipped / 0 failed — no regressions. Closes LVE-01/02/03; Phase 8 COMPLETE."
+last_updated: "2026-06-05T03:33:50.160Z"
+last_activity: "2026-06-05 — Plan 08-04 complete: E6 leave full-stack Playwright E2E. Wired the four e6-leave screens off MSW to the real Go BE; 21 tests / 5 specs green headless vs real FE↔Go↔ephemeral Postgres. approvals (L1-forward/HR-final/L1→final/reject±min/override±min via the 422 error path/PENDING_HR-list+APPROVED-filter/no-leader badge), quotas (remaining math/adjust happy+refuse 422 field error/bulk-grant preview→apply/balance-recheck→override), calendar (empty-default + show_pending toggle), scope (leader cross-company :approve-l1 403 OUT_OF_SCOPE + list 403 + queue-hidden + HR global 200). INV-3 loop-closer PROVEN: approving SWP-LR-8007 cancels SWP-SCH-6002 (approve-final response new_status='LEAVE'; GET /schedule status='CANCELLED_BY_LEAVE') AND a fresh schedule create then hits 409 SHIFT_OVER_LEAVE with details.leave_request_id='SWP-LR-8007' from the REAL approved_leave_days row (Phase-6 fixture replaced). FE fixes: leave-detail unwraps the BE {data} envelope + opens the override modal off ApiError.code BALANCE_RECHECK_FAILED. Full e1-e6 suite: 184 passed / 6 skipped / 0 failed — no regressions. Closes LVE-01/02/03."
 progress:
   total_phases: 11
   completed_phases: 8
