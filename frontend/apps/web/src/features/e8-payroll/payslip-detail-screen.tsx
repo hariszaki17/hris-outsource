@@ -171,8 +171,17 @@ function PayslipDetailInner({
   // Data
   // -------------------------------------------------------------------------
 
-  // Unwrap: getPayslipResponse.data is Payslip | error unions at 200
-  const payslip = query.data?.data as Payslip | undefined;
+  // Unwrap: the BE wraps the detail in a `{data: Payslip}` envelope (like every epic),
+  // but the E8 openapi declares getPayslip 200 as a BARE `Payslip`, so Orval narrows
+  // `query.data.data` to `Payslip`. The actual body is therefore one level deeper. Unwrap
+  // the inner `{data}` when present, else fall back to the bare object — matches the
+  // Phase-8 leave-detail / Phase-9 overtime-detail {data}-envelope precedent ([08-04]).
+  const rawPayslip = query.data?.data as Payslip | { data?: Payslip } | undefined;
+  const payslip = (
+    rawPayslip && typeof rawPayslip === 'object' && 'data' in rawPayslip && rawPayslip.data
+      ? rawPayslip.data
+      : rawPayslip
+  ) as Payslip | undefined;
 
   if (!payslip) {
     return (

@@ -150,19 +150,30 @@ function runMigrations(testEnv: NodeJS.ProcessEnv): void {
 // Step 4: River queue migrations (best-effort, falls back gracefully)
 // ---------------------------------------------------------------------------
 function runRiverMigrations(testEnv: NodeJS.ProcessEnv): void {
+  // Apply River's queue migrations PROGRAMMATICALLY via `go run ./cmd/migrate river-up`
+  // (rivermigrate over a pgx pool) — no external `river` CLI install required. Without
+  // these tables the worker crashes on boot ("relation river_queue does not exist") and
+  // the async E8 export job never completes (the export E2E poll would time out). This is
+  // the robust path; the legacy `river` CLI is no longer required.
+  try {
+    runSync('go', ['run', './cmd/migrate', 'river-up'], { cwd: BACKEND_DIR, env: testEnv });
+    console.log('[e2e] River migrations applied (programmatic rivermigrate).');
+    return;
+  } catch (err) {
+    console.warn('[e2e] programmatic river-up failed, falling back to `river` CLI:', err);
+  }
   const dbUrl = testEnv.DATABASE_URL as string;
   try {
-    // Prefer the `river` CLI installed by `make tools`.
     execSync(`river migrate-up --database-url "${dbUrl}"`, {
       cwd: BACKEND_DIR,
       env: { ...process.env, ...testEnv },
       stdio: 'inherit',
     });
-    console.log('[e2e] River migrations applied.');
+    console.log('[e2e] River migrations applied (river CLI).');
   } catch {
     console.warn(
-      '[e2e] WARNING: `river` CLI not found — River queue tables not created. ' +
-      'Async worker features (notifications, exports) will not be exercised in Phase 1.',
+      '[e2e] WARNING: River queue tables not created — async worker features ' +
+        '(notifications, exports) will NOT be exercised.',
     );
   }
 }

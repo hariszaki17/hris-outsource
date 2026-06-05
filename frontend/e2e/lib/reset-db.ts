@@ -40,18 +40,26 @@ const ENV_FILE = path.join(E2E_DIR, '.env.e2e');
 // ---------------------------------------------------------------------------
 // Parse .env.e2e (minimal — only need DATABASE_URL)
 // ---------------------------------------------------------------------------
-function getDbUrl(): string {
+/** Parse .env.e2e into a flat map (comments + blank lines skipped). */
+function loadEnv(): Record<string, string> {
   if (!fs.existsSync(ENV_FILE)) {
     throw new Error(`[reset-db] .env.e2e not found at ${ENV_FILE}`);
   }
-  const lines = fs.readFileSync(ENV_FILE, 'utf8').split('\n');
-  for (const line of lines) {
+  const out: Record<string, string> = {};
+  for (const line of fs.readFileSync(ENV_FILE, 'utf8').split('\n')) {
     const trimmed = line.trim();
-    if (trimmed.startsWith('DATABASE_URL=')) {
-      return trimmed.slice('DATABASE_URL='.length).trim();
-    }
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
   }
-  throw new Error('[reset-db] DATABASE_URL not found in .env.e2e');
+  return out;
+}
+
+function getDbUrl(): string {
+  const url = loadEnv().DATABASE_URL;
+  if (!url) throw new Error('[reset-db] DATABASE_URL not found in .env.e2e');
+  return url;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +149,9 @@ const TRUNCATE_TABLES = [
  * beforeAll in specs that need a clean slate.
  */
 export async function resetDb(): Promise<void> {
-  const dbUrl = getDbUrl();
+  const env = loadEnv();
+  const dbUrl = env.DATABASE_URL;
+  if (!dbUrl) throw new Error('[reset-db] DATABASE_URL not found in .env.e2e');
   const client = new Client({ connectionString: dbUrl });
   await client.connect();
 
@@ -161,9 +171,12 @@ export async function resetDb(): Promise<void> {
     await client.end();
   }
 
-  // Re-apply the seed so personas are available again.
+  // Re-apply the seed so personas are available again. Pass the FULL .env.e2e so the
+  // seed sees PAYROLL_ENCRYPTION_KEY (E8) — without it seedPayroll skips entirely and the
+  // payslip fixtures never come back after the TRUNCATE above, breaking the e8 specs.
   const envForSeed: NodeJS.ProcessEnv = {
     ...process.env,
+    ...env,
     DATABASE_URL: dbUrl,
     ENV: 'test',
   };
