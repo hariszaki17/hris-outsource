@@ -181,10 +181,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 09-01: Migrations + sqlc queries (overtime, holidays)
-- [ ] 09-02: Services + handlers (OT workflow, rules, holidays) + audit/notify
-- [ ] 09-03: Go contract tests vs E7 openapi examples
-- [ ] 09-04: Playwright E2E for E7 (per Gherkin AC)
+- [ ] 09-01-PLAN.md (wave 1) — Migrations 00031-00032 + sqlc queries + domain (overtime, overtime_approvals, holidays)
+- [ ] 09-02-PLAN.md (wave 2, deps 09-01) — Services + handlers: OT two-level workflow (confirm/L1/final/reject/withdraw), bulk partial-success, OT_BELOW_MIN, day_type classification, holiday CRUD (clash/in-use), scope + SELF_APPROVAL_FORBIDDEN, audit/notify, routes/main.go, seed
+- [ ] 09-03-PLAN.md (wave 3, deps 09-02) — Go contract tests vs E7 openapi (transitions + 409s, OT_BELOW_MIN 422, HOLIDAY_DATE_CLASH/IN_USE, OUT_OF_SCOPE/SELF_APPROVAL_FORBIDDEN 403, bulk partial-success, cursor shapes)
+- [ ] 09-04-PLAN.md (wave 4, deps 09-02,09-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e7/ (confirm→L1→final, reject, withdraw, bulk partial, OT_BELOW_MIN, holiday CRUD + clash/in-use, scope 403 + SELF_APPROVAL_FORBIDDEN)
 
 ### Phase 10: E8 Payroll
 **Goal:** Read-only payslips, audit notes, and async export work against the real BE.
