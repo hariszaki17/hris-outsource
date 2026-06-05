@@ -212,13 +212,14 @@ Plans:
   2. Notifications list and mark-read / mark-all-read work; auto-dispatched notifications from earlier phases appear.
   3. The export framework (create/get/cancel, async) works end-to-end via the worker.
   4. Exhaustive Playwright E2E for E10 features is green.
-**Plans:** 4 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] 11-01: Migrations + sqlc queries (notifications, export_jobs shared, report queries)
-- [ ] 11-02: Services + handlers (dashboard aggregation, billable report, notifications, exports)
-- [ ] 11-03: Go contract tests vs E10 openapi examples
-- [ ] 11-04: Playwright E2E for E10 (per Gherkin AC)
+- [ ] 11-01-PLAN.md (wave 1) — Migrations 00035 (notifications) + 00036 (generalize export_jobs) + sqlc reporting queries (notifications/exports/dashboard/billable) + reporting domain; make gen
+- [ ] 11-02-PLAN.md (wave 2, deps 11-01) — Notifications service/handler/routes + UN-STUB NotificationWorker + notify.Dispatch helper + retro-wire prior-phase dispatch points (leave/OT/attendance) + seed notifications [owns server.go/main.go/jobs.go/notify.go/seed.go + prior-service edits]
+- [ ] 11-02b-PLAN.md (wave 3, deps 11-01,11-02) — Dashboard aggregation (/dashboards/me role-aware) + billable report (/reports/attendance-billable) + generalized export framework (POST/GET/:cancel async, ReportExportWorker, DB↔wire status mapping) [appends after the 11-02 routes]
+- [ ] 11-03-PLAN.md (wave 4, deps 11-02,11-02b) — Go contract tests vs E10 openapi (notifications list/mark-read/mark-all-read, dashboard shapes, billable, export 202+outbox + EXPORT_FORMAT_UNSUPPORTED/TOO_LARGE/RATE_LIMITED, RBAC, cursor)
+- [ ] 11-04-PLAN.md (wave 5, deps 11-02,11-02b,11-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e10/ (dashboard role-aware, billable, notifications + mark-read + REAL auto-dispatch capstone, export create→worker DONE + cancel + PDF-unsupported), green headless
 
 ## Progress
 
