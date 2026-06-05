@@ -189,7 +189,8 @@ function NotificationsScreenInner({
   const markAllRead = useMarkAllNotificationsRead({
     mutation: {
       onSuccess: (res) => {
-        const affected = (res.data as { marked?: number } | undefined)?.marked ?? 0;
+        // BE returns { marked_count } per E10 openapi (MarkAllNotificationsRead200).
+        const affected = (res.data as { marked_count?: number } | undefined)?.marked_count ?? 0;
         toast({
           tone: 'success',
           title: t('markAllSuccess', { count: affected }),

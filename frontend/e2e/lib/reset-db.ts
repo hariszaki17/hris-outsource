@@ -95,6 +95,14 @@ const TRUNCATE_TABLES = [
   'payslip_components',
   'payslips',
   'export_jobs',
+  // Phase 11: E10 reporting. `notifications` has NO FK to kept tables (recipient_id
+  // is a plain text SWP-EMP-*/SWP-USR-* id), so its position is flexible — kept here
+  // with the E10/export group. TRUNCATE clears any test-dispatched rows (from the
+  // capstone leave/OT approval auto-dispatch) so they never leak into the next spec;
+  // the Go seed re-applies the SWP-NTF-9000x fixtures (ON CONFLICT DO NOTHING). The
+  // export_jobs row above is also re-cleared so report-export E2E never sees a stale
+  // DONE/CANCELLED row. River internal tables (river_*) are left intact (see note above).
+  'notifications',
   // Phase 7: E5 attendance tables (FK order: most-dependent first).
   // attendance_corrections FK to attendance; attendance FK to schedule_entries /
   // placements / employees / client_companies. Both MUST be truncated before
