@@ -63,7 +63,7 @@
 
 ### E10 Reporting, Notifications & Exports (Phase 11)
 - [ ] **RPT-01**: My dashboard (role-aware).
-- [ ] **RPT-02**: Billable attendance report.
+- [x] **RPT-02**: Billable attendance report.
 - [ ] **RPT-03**: Notifications — list/mark-read/mark-all-read.
 - [ ] **RPT-04**: Export framework — create/get/cancel (async).
 
