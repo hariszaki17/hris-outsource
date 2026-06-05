@@ -53,6 +53,14 @@ function loadEnvFile(filePath: string): Record<string, string> {
 // Module-level state (kept alive across the Playwright worker lifecycle)
 // ---------------------------------------------------------------------------
 let apiProcess: ChildProcess | null = null;
+// The River worker (go run ./cmd/worker). Spawned alongside the API (10-04) so async
+// jobs — notifications AND the E8 payslip-export job (PayslipExportArgs) — are actually
+// processed: POST /payslips:export inserts a QUEUED export_jobs row + EnqueueTx's the job
+// in one tx (transactional outbox), and ONLY a running worker flips it RUNNING → DONE.
+// Without this process the export_jobs row would stay QUEUED forever (the export E2E poll
+// would time out). Detached into its own process group + reaped on teardown, mirroring the
+// API spawn (go run does not forward SIGTERM to its exe child — decision [07-04]).
+let workerProcess: ChildProcess | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -243,6 +251,38 @@ function startApiProcess(testEnv: NodeJS.ProcessEnv): void {
 }
 
 // ---------------------------------------------------------------------------
+// Step 7b: Start the River worker (go run ./cmd/worker)
+// ---------------------------------------------------------------------------
+/**
+ * startWorkerProcess — boot the River job processor so async jobs complete. The
+ * E8 export E2E asserts the PayslipExportWorker flips export_jobs → DONE; that ONLY
+ * happens if a worker is running (the API merely enqueues the job inside the export
+ * tx). The worker reads DATABASE_URL + PAYROLL_ENCRYPTION_KEY from the SAME testEnv as
+ * the API/seed (so its export job uses the same AEAD key as the seed's ciphertext).
+ * Spawned detached (own process group) so stopBackend can SIGTERM the whole tree
+ * (go run + exe/worker) — go run does not forward SIGTERM to its child binary.
+ */
+function startWorkerProcess(testEnv: NodeJS.ProcessEnv): void {
+  console.log('[e2e] Starting River worker (go run ./cmd/worker) …');
+  workerProcess = spawn('go', ['run', './cmd/worker'], {
+    cwd: BACKEND_DIR,
+    env: { ...process.env, ...testEnv },
+    stdio: ['ignore', 'inherit', 'inherit'],
+    detached: true,
+  });
+
+  workerProcess.on('error', (err) => {
+    console.error('[e2e] worker process error:', err);
+  });
+
+  workerProcess.on('exit', (code, signal) => {
+    if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+      console.error(`[e2e] worker process exited unexpectedly (code=${code}, signal=${signal})`);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -282,6 +322,11 @@ export async function startBackend(): Promise<void> {
   // 7. Start Go API
   startApiProcess(apiEnv);
 
+  // 7b. Start the River worker so async jobs (notifications + the E8 payslip export)
+  //     actually complete. Uses apiEnv so it shares DATABASE_URL + PAYROLL_ENCRYPTION_KEY
+  //     (the export job's AEAD key MUST match the seed's ciphertext).
+  startWorkerProcess(apiEnv);
+
   // 8. Wait for /healthz
   console.log('[e2e] Waiting for Go API /healthz on :8081 …');
   await waitForHttp('http://localhost:8081/healthz', 60_000);
@@ -305,6 +350,18 @@ export function stopBackend(): void {
     apiProcess = null;
   }
   freePort(8081);
+
+  // Terminate the River worker. Spawned detached (own process group), so signal the
+  // WHOLE group (negative pid) to reap the `exe/worker` child that `go run` execs —
+  // a plain workerProcess.kill() would only hit the `go run` parent and orphan the child.
+  if (workerProcess && workerProcess.pid && !workerProcess.killed) {
+    try {
+      process.kill(-workerProcess.pid, 'SIGTERM');
+    } catch {
+      workerProcess.kill('SIGTERM');
+    }
+    workerProcess = null;
+  }
 
   // Tear down the Postgres container (including volumes)
   try {

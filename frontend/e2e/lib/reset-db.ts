@@ -72,6 +72,21 @@ const TRUNCATE_TABLES = [
   'leave_types',
   'attendance_codes',
   'overtime_rules',
+  // Phase 10: E8 payroll tables (FK order: most-dependent first).
+  // payslip_audit_notes / payslip_components / payslip_benefits FK to payslips;
+  // payslips FK to employees / placements / attendance. All MUST be truncated before
+  // placements + employees below. export_jobs has NO FK to kept tables (requested_by_id
+  // is a plain text id) — clearing it resets any test-created export job rows so the
+  // export E2E never sees a stale DONE row leak into the next spec.
+  // IMPORTANT: do NOT truncate River's own tables (river_job / river_*); leaving them
+  // intact lets the running worker keep its queue. The Go seed re-applies the
+  // SWP-PS-90121..90124 FINAL fixtures + the SWP-PS-90119 DECRYPT_FAIL row + its two
+  // audit notes (ON CONFLICT DO NOTHING; breakdown lines only on fresh insert).
+  'payslip_audit_notes',
+  'payslip_benefits',
+  'payslip_components',
+  'payslips',
+  'export_jobs',
   // Phase 7: E5 attendance tables (FK order: most-dependent first).
   // attendance_corrections FK to attendance; attendance FK to schedule_entries /
   // placements / employees / client_companies. Both MUST be truncated before
