@@ -89,7 +89,7 @@
 | ATT-01..02 | Phase 7 | Complete |
 | LVE-01..03 | Phase 8 | Complete (08-01..04) |
 | OVT-01..02 | Phase 9 | Pending |
-| PAY-01..02 | Phase 10 | Pending |
+| PAY-01..02 | Phase 10 | In Progress (10-01..03; 10-04 E2E pending) |
 | RPT-01..04 | Phase 11 | Pending |
 
 **Coverage:** all v1 requirements mapped to phases ✓

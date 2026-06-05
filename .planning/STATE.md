@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 10-e8-payroll/10-02-PLAN.md
-last_updated: "2026-06-05T06:00:30.825Z"
-last_activity: "2026-06-05 — Plan 10-02 complete: E8 payroll API slice. Read payslips (list/detail) decrypt money AT THE BOUNDARY via a single decryptMoney seam (crypto.DecryptPtr); a row whose ciphertext fails to open surfaces as a 200 OK DECRYPT_FAIL (money + working_days nulled, earnings/deductions/benefits=[], locked_reason=decrypt_fail) — never a 4xx. Append-only audit notes (list + create, composite {id}-NOTE-{seq}, audited in-tx). POST /payslips:export inserts an export_jobs QUEUED row + EnqueueTx's a real River PayslipExportWorker in ONE tx (transactional outbox), returns 202 + the job stub; the worker flips export_jobs RUNNING→DONE (row_count + artifact_ref; CSV/row-count stand-in, no heavy xlsx dep). EXPORT_TOO_LARGE 422 guard (threshold 50k) + period-or-year RULE_VIOLATION. All 5 FE endpoints under RequireRole(super_admin, hr_admin) — agent/shift_leader → 403. First wiring of jobs.NewInsertOnlyClient into cmd/api + the crypto cipher; PayslipExportWorker registered in NewWorkerClient (pool-backed, first DB-writing worker). seedPayroll: FINAL payslips (2025-11/12) w/ encrypted money+breakdown+benefits + garbage-ciphertext SWP-PS-90119 DECRYPT_FAIL row + 2 audit notes. go build + go vet + gofmt + make gen all clean. Next: 10-03 Go contract tests."
+stopped_at: Completed 10-e8-payroll/10-03-PLAN.md
+last_updated: "2026-06-05T06:08:56.504Z"
+last_activity: "2026-06-05 — Plan 10-03 complete: E8 Go contract tests (the drift gate replacing server codegen). Three test files mount the REAL PayslipService + ExportService + handler on a chi httptest harness (copied from the Phase-9 overtime testkit: fakeTx + stubIdempotency + mutable-principal middleware + RequireRole(super_admin, hr_admin)) over in-memory fakes + a REAL crypto.Cipher. DECRYPT_FAIL is asserted HONESTLY: seedDecryptFail writes random garbage bytea so the real crypto.Decrypt returns ErrDecrypt → the service surfaces a 200 OK DECRYPT_FAIL row (money null, breakdown []) in BOTH list and detail — not a stub flag. Pinned: list {data,next_cursor,has_more} + meta.code MISSING_PAYROLL_HISTORY on empty + status/period filters + cursor; detail {data} FINAL full breakdown + DECRYPT_FAIL nulled/empty; audit-notes list (oldest-first) + create (composite {id}-NOTE-{seq}, 400 blank, 404 missing); export 202 + exact PayslipExportJob (confidential server-forced true) + exactly one PayslipExportArgs with matching JobID enqueued (transactional outbox via recording fakeJobs); EXPORT_TOO_LARGE 422 + no-enqueue; no-scope 422; RBAC 403 for agent/shift_leader on all 5 ops. go test ./... exits 0 (no regressions); go vet + gofmt clean. Next: 10-04 FE wiring + Playwright E2E."
 progress:
   total_phases: 11
   completed_phases: 9
   total_plans: 45
-  completed_plans: 43
-  percent: 96
+  completed_plans: 44
+  percent: 98
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 10 — E8 Payroll (read-only archive). Plan 10-01 COMPLETE (data layer + crypto). Next: 10-02 services/handlers/routes/seed + River export worker.
+**Current focus:** Phase 10 — E8 Payroll (read-only archive). Plans 10-01/10-02/10-03 COMPLETE (data layer + crypto, services/handlers/async export, Go contract tests). Next: 10-04 FE wiring + Playwright E2E.
 
 ## Current Position
 
 Phase: 10 of 11 (E8 Payroll) — IN PROGRESS
-Plan: 2 of 4 in current phase — Plan 10-02 COMPLETE (services + handlers + async export + routes + seed)
+Plan: 3 of 4 in current phase — Plan 10-03 COMPLETE (Go contract tests = E8 drift gate)
 Status: Plan complete
-Last activity: 2026-06-05 — Plan 10-02 complete: E8 payroll API slice. Read payslips (list/detail) decrypt money AT THE BOUNDARY via a single decryptMoney seam (crypto.DecryptPtr); a row whose ciphertext fails to open surfaces as a 200 OK DECRYPT_FAIL (money + working_days nulled, earnings/deductions/benefits=[], locked_reason=decrypt_fail) — never a 4xx. Append-only audit notes (list + create, composite {id}-NOTE-{seq}, audited in-tx). POST /payslips:export inserts an export_jobs QUEUED row + EnqueueTx's a real River PayslipExportWorker in ONE tx (transactional outbox), returns 202 + the job stub; the worker flips export_jobs RUNNING→DONE (row_count + artifact_ref; CSV/row-count stand-in, no heavy xlsx dep). EXPORT_TOO_LARGE 422 guard (threshold 50k) + period-or-year RULE_VIOLATION. All 5 FE endpoints under RequireRole(super_admin, hr_admin) — agent/shift_leader → 403. First wiring of jobs.NewInsertOnlyClient into cmd/api + the crypto cipher; PayslipExportWorker registered in NewWorkerClient (pool-backed, first DB-writing worker). seedPayroll: FINAL payslips (2025-11/12) w/ encrypted money+breakdown+benefits + garbage-ciphertext SWP-PS-90119 DECRYPT_FAIL row + 2 audit notes. go build + go vet + gofmt + make gen all clean. Next: 10-03 Go contract tests.
+Last activity: 2026-06-05 — Plan 10-03 complete: E8 Go contract tests (the drift gate replacing server codegen). Three test files mount the REAL PayslipService + ExportService + handler on a chi httptest harness (copied from the Phase-9 overtime testkit: fakeTx + stubIdempotency + mutable-principal middleware + RequireRole(super_admin, hr_admin)) over in-memory fakes + a REAL crypto.Cipher. DECRYPT_FAIL is asserted HONESTLY: seedDecryptFail writes random garbage bytea so the real crypto.Decrypt returns ErrDecrypt → the service surfaces a 200 OK DECRYPT_FAIL row (money null, breakdown []) in BOTH list and detail — not a stub flag. Pinned: list {data,next_cursor,has_more} + meta.code MISSING_PAYROLL_HISTORY on empty + status/period filters + cursor; detail {data} FINAL full breakdown + DECRYPT_FAIL nulled/empty; audit-notes list (oldest-first) + create (composite {id}-NOTE-{seq}, 400 blank, 404 missing); export 202 + exact PayslipExportJob (confidential server-forced true) + exactly one PayslipExportArgs with matching JobID enqueued (transactional outbox via recording fakeJobs); EXPORT_TOO_LARGE 422 + no-enqueue; no-scope 422; RBAC 403 for agent/shift_leader on all 5 ops. go test ./... exits 0 (no regressions); go vet + gofmt clean. Next: 10-04 FE wiring + Playwright E2E.
 
-Progress: [██████████] 96%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [██████████] 96%
 | Phase 09 P04 | 51 | 3 tasks | 8 files |
 | Phase 10-e8-payroll P01 | 20 | 3 tasks | 10 files |
 | Phase 10-e8-payroll P02 | 30 | 3 tasks | 16 files |
+| Phase 10-e8-payroll P03 | 15 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -215,6 +216,7 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 10-01]: payslip_audit_notes.id is service-assigned composite '{payslip_id}-NOTE-{seq}' (not swp_next_id); seq via CountPayslipAuditNotes+1
 - [Phase 10-02]: Repo returns RAW *_enc ciphertext; service owns the single decryptMoney seam (DecryptPtr garbage→DECRYPT_FAIL). Whole-payslip DECRYPT_FAIL = 200 with money nulled + breakdown [].
 - [Phase 10-02]: Async export = transactional outbox: InsertExportJob(QUEUED) + jobs.EnqueueTx(PayslipExportArgs) in one tx; pool-backed PayslipExportWorker flips export_jobs RUNNING→DONE (CSV/row-count stand-in). svc.Jobs interface seam lets 10-03 fake River.
+- [Phase 10-e8-payroll]: [10-03]: E8 contract tests = drift gate; DECRYPT_FAIL asserted via seedDecryptFail random-garbage bytea through the REAL crypto.Decrypt (200 row status, not a stub flag) in BOTH list+detail; export 202 + transactional-outbox enqueue asserted via recording fakeJobs (one PayslipExportArgs, matching JobID); harness copies the Phase-9 overtime testkit under RequireRole(super_admin, hr_admin).
 
 ### Pending Todos
 
@@ -226,6 +228,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T06:00:03.351Z
-Stopped at: Completed 10-e8-payroll/10-02-PLAN.md
+Last session: 2026-06-05T06:08:19.653Z
+Stopped at: Completed 10-e8-payroll/10-03-PLAN.md
 Resume file: None
