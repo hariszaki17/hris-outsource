@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 10-e8-payroll/10-04-PLAN.md
-last_updated: "2026-06-05T07:13:47.563Z"
-last_activity: "2026-06-05 — Plan 10-04 complete: e8-payroll screens wired off MSW to the real Go BE + 16 full-stack Playwright specs green headless (archive list+filters, detail decrypted breakdown, DECRYPT_FAIL@200, audit notes list/create, the async EXPORT headline — 202+SWP-EXP id THEN the REAL River worker flips export_jobs→DONE via a DB poll, RBAC 403 agent/shift_leader). The harness now boots cmd/worker (detached, PAYROLL_ENCRYPTION_KEY) and applies River queue migrations programmatically (new cmd/migrate river-up — no river CLI). FE fix: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it). reset-db TRUNCATEs payroll+export_jobs (River tables untouched) and re-seeds with the full .env.e2e so seedPayroll restores fixtures. Full e1-e8 suite: 225 passed / 6 skipped / 0 failed (no regressions). Phase 10 CLOSED."
+status: executing
+stopped_at: Completed 11-e10-reporting/11-01-PLAN.md
+last_updated: "2026-06-05T07:42:07.715Z"
+last_activity: "2026-06-05 — Plan 11-01 complete: E10 data foundation. New notifications table (00035, SWP-NTF-* via swp_next_id, flattened deep_link.*/actor.* + read_at + (recipient_id, created_at DESC, id DESC) cursor index + partial unread index). export_jobs GENERALIZED via ALTER (00036 — NOT recreate; Phase-10 PAYSLIP path untouched): status +CANCELLED, format +EXCEL, +report_type/filters(jsonb)/audit_log_entry_id/progress_percent/expires_at. New backend/db/queries/reporting/ (notifications cursor list/mark-read/mark-all/count/insert; generic exports insert/get/update/cancel; dashboard pending-count aggregations; billable aggregation 3 group_by variants + summary + pending over VERIFIED attendance on is_billable codes). New internal/domain/reporting/ (openapi-shaped Notification/DeepLink/Actor + ExportJob/ReportType/ExportStatus + HR/Leader/Agent dashboard + BillableReport). Aligned all aggregation SQL to the REAL E5..E9 schema (verification_status PENDING/VERIFIED, PENDING_L1/HR, client_company_id, check_in_at::date). Fixes: GetExportJob name collision → GetExportJobGeneric; mapExportJob made generic (00036 ALTER split the sqlc Row types). make gen + go build + go vet clean; full backend suite 13 pkg pass / 0 fail (no Phase-10 regression). Handoff section in SUMMARY for 11-02/11-02b (Querier signatures + sqlc quirks)."
 progress:
   total_phases: 11
   completed_phases: 10
-  total_plans: 45
-  completed_plans: 45
-  percent: 100
+  total_plans: 50
+  completed_plans: 46
+  percent: 92
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 
 ## Current Position
 
-Phase: 10 of 11 (E8 Payroll) — COMPLETE
-Plan: 4 of 4 in current phase — Plan 10-04 COMPLETE (FE wiring off MSW + full-stack Playwright E2E)
-Status: Phase complete
-Last activity: 2026-06-05 — Plan 10-04 complete: e8-payroll screens wired off MSW to the real Go BE + 16 full-stack Playwright specs green headless (archive list+filters, detail decrypted breakdown, DECRYPT_FAIL@200, audit notes list/create, the async EXPORT headline — 202+SWP-EXP id THEN the REAL River worker flips export_jobs→DONE via a DB poll, RBAC 403 agent/shift_leader). The harness now boots cmd/worker (detached, PAYROLL_ENCRYPTION_KEY) and applies River queue migrations programmatically (new cmd/migrate river-up — no river CLI). FE fix: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it). reset-db TRUNCATEs payroll+export_jobs (River tables untouched) and re-seeds with the full .env.e2e so seedPayroll restores fixtures. Full e1-e8 suite: 225 passed / 6 skipped / 0 failed (no regressions). Phase 10 CLOSED.
+Phase: 11 of 11 (E10 Reporting & Notifications) — IN PROGRESS
+Plan: 1 of 5 in current phase — Plan 11-01 COMPLETE (data layer)
+Status: In progress
+Last activity: 2026-06-05 — Plan 11-01 complete: E10 data foundation. New notifications table (00035, SWP-NTF-* via swp_next_id, flattened deep_link.*/actor.* + read_at + (recipient_id, created_at DESC, id DESC) cursor index + partial unread index). export_jobs GENERALIZED via ALTER (00036 — NOT recreate; Phase-10 PAYSLIP path untouched): status +CANCELLED, format +EXCEL, +report_type/filters(jsonb)/audit_log_entry_id/progress_percent/expires_at. New backend/db/queries/reporting/ (notifications cursor list/mark-read/mark-all/count/insert; generic exports insert/get/update/cancel; dashboard pending-count aggregations; billable aggregation 3 group_by variants + summary + pending over VERIFIED attendance on is_billable codes). New internal/domain/reporting/ (openapi-shaped Notification/DeepLink/Actor + ExportJob/ReportType/ExportStatus + HR/Leader/Agent dashboard + BillableReport). Aligned all aggregation SQL to the REAL E5..E9 schema (verification_status PENDING/VERIFIED, PENDING_L1/HR, client_company_id, check_in_at::date). Fixes: GetExportJob name collision → GetExportJobGeneric; mapExportJob made generic (00036 ALTER split the sqlc Row types). make gen + go build + go vet clean; full backend suite 13 pkg pass / 0 fail (no Phase-10 regression). Handoff section in SUMMARY for 11-02/11-02b (Querier signatures + sqlc quirks).
 
-Progress: [██████████] 100%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -86,6 +86,7 @@ Progress: [██████████] 100%
 | Phase 10-e8-payroll P02 | 30 | 3 tasks | 16 files |
 | Phase 10-e8-payroll P03 | 15 | 2 tasks | 3 files |
 | Phase 10-e8-payroll P04 | 75 | 3 tasks | 11 files |
+| Phase 11-e10-reporting P01 | 7 | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,8 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 10-e8-payroll]: [10-04]: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it; Phase-8 [08-04] precedent)
 - [Phase 10-e8-payroll]: [10-04]: harness boots the River worker (cmd/worker, detached, PAYROLL_ENCRYPTION_KEY) so the export job completes; River queue migrations applied programmatically via cmd/migrate river-up (no river CLI)
 - [Phase 10-e8-payroll]: [10-04]: export E2E proves worker completion via pollExportJob (export_jobs.status DONE, row_count>0) since E8 has no FE job-status hook; 16 e8 specs green, full e1-e8 225 passed/6 skipped/0 failed
+- [Phase 11-e10-reporting]: [11-01]: export_jobs GENERALIZED via ALTER 00036 (not recreate) — +CANCELLED status/+EXCEL format/+report_type/filters(jsonb)/audit_log_entry_id/progress_percent/expires_at, all nullable/defaulted; Phase-10 PAYSLIP path unchanged. DB status RUNNING/DONE maps to wire PROCESSING/COMPLETED at the 11-02b DTO boundary
+- [Phase 11-e10-reporting]: [11-01]: reporting aggregation SQL aligned to REAL E5..E9 schema (verification_status PENDING/VERIFIED not PENDING_VERIFY; PENDING_L1/HR not bare PENDING; placements client_company_id; check_in_at::date as shift date; is_billable codes) — plan prose used placeholder names. GetExportJob renamed GetExportJobGeneric (shared sqlcgen pkg); mapExportJob made generic (00036 ALTER split Insert/Get Row types); min(text)::text → string not interface{}
 
 ### Pending Todos
 
@@ -232,6 +235,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T07:06:58.433Z
-Stopped at: Completed 10-e8-payroll/10-04-PLAN.md
+Last session: 2026-06-05T07:42:07.712Z
+Stopped at: Completed 11-e10-reporting/11-01-PLAN.md
 Resume file: None
