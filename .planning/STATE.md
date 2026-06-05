@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Completed 11-e10-reporting/11-04-PLAN.md
-last_updated: "2026-06-05T09:24:16.973Z"
+last_updated: "2026-06-05T09:30:03.505Z"
 last_activity: "2026-06-05 — Plan 11-04 complete: E10 screens wired off MSW to the real Go BE (the {data}-envelope double-unwrap in dashboard/report/export-flow + the notifications marked_count fix; reset-db TRUNCATEs notifications), proven by 14 Playwright specs under frontend/e2e/tests/e10/ — dashboard role-aware, billable report, notifications list/mark-read/mark-all, the auto-dispatch CAPSTONE (HR approve-final → un-stubbed worker → recipient sees a real LEAVE_APPROVED, not seeded), and exports (worker-DONE / cancel→CANCELLED / PDF→EXPORT_FORMAT_UNSUPPORTED). FULL e1..e10 suite: 239 passed / 6 skipped / 0 failed (10.3m), no regressions. The v1.0 milestone is CLOSED — the whole web console works end-to-end against the real backend."
 progress:
   total_phases: 11
