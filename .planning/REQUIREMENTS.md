@@ -65,7 +65,7 @@
 - [x] **RPT-01**: My dashboard (role-aware).
 - [x] **RPT-02**: Billable attendance report.
 - [x] **RPT-03**: Notifications — list/mark-read/mark-all-read.
-- [ ] **RPT-04**: Export framework — create/get/cancel (async).
+- [x] **RPT-04**: Export framework — create/get/cancel (async).
 
 ## Out of Scope
 
@@ -90,7 +90,7 @@
 | LVE-01..03 | Phase 8 | Complete (08-01..04) |
 | OVT-01..02 | Phase 9 | Pending |
 | PAY-01..02 | Phase 10 | In Progress (10-01..03; 10-04 E2E pending) |
-| RPT-01..04 | Phase 11 | Pending |
+| RPT-01..04 | Phase 11 | In Progress (11-01..03; 11-04 E2E pending) |
 
 **Coverage:** all v1 requirements mapped to phases ✓
 

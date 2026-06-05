@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 11-e10-reporting/11-02b-PLAN.md
-last_updated: "2026-06-05T08:13:36.263Z"
-last_activity: "2026-06-05 — Plan 11-02 complete: E10 notifications surface + the REAL notification loop-closer. UN-STUBBED NotificationWorker.Work to INSERT a notifications row via sqlcgen (registered WITH the pool in NewWorkerClient like PayslipExportWorker). Added notify.Dispatch transactional-outbox helper + Dispatcher seam (*Client.Dispatch == EnqueueTx; nil-safe). Notifications slice: repo (List fans out the single-recipient sqlc query over the principal's (user id, employee id) pair + merge-sorts the keyset; MarkRead scoped→404; MarkAllRead summed) → service (scope=self, cursor (created_at,id)) → handler (GET /notifications cursor envelope + read_state/kind/kind__in; :mark-read {data}; :mark-all-read {marked_count}) → routes (all 4 roles, action endpoints Idempotency-wrapped) → main.go. RETRO-WIRED the prior-phase dispatch points to enqueue REAL notifications inside their existing tx: leave approve-final/reject, OT approve-final/reject, attendance verify/reject (via an additive SetNotifier seam — constructors + drift-gate tests unchanged). Left as documented stubs: leave approve-l1, OT confirm/approve-l1/withdraw (queue-targeted or self-action). Seed: 6 notifications (mixed read/unread across kinds) for HR + agent personas (recipient = persona employee ids, deterministic). NotificationArgs.Kind field renamed NotifKind (Kind() is River's reserved method). make gen + go build + go vet clean; full backend suite green (no regression). 11-04 must TRUNCATE notifications in reset-db."
+stopped_at: Completed 11-e10-reporting/11-03-PLAN.md
+last_updated: "2026-06-05T08:24:35.832Z"
+last_activity: "2026-06-05 — Plan 11-02b complete: E10 read-aggregation + export half. GET /dashboards/me role-aware (HrDashboard / LeaderDashboard scoped to own company / AgentDashboard; openapi deep-link paths; Cache-Control private max-age=30; fields without an 11-01 rollup query emitted present-but-0/empty/null per the REQUIRED contract, live counts that have queries are real). GET /reports/attendance-billable verified-only aggregation (employee/day/shift_master) with summary + pending_summary callout + verification_rate_pct(null-when-0); leader forced to own company else 403 OUT_OF_SCOPE; >1yr → 422 REPORT_PERIOD_TOO_WIDE. GENERIC export framework: POST /exports (format guard EXPORT_FORMAT_UNSUPPORTED, size guard EXPORT_TOO_LARGE, throttle RATE_LIMITED_EXPORTS 429; insert export_jobs QUEUED + audit.RecordReturningID + EnqueueTx ReportExportArgs in ONE tx → 202 + bare ExportJob under {data}); GET /exports/{id} + :cancel scope=self; DB RUNNING/DONE mapped to wire PROCESSING/COMPLETED at the DTO. ReportExportWorker (report.export) registered ALONGSIDE PayslipExportWorker — both coexist; payslip path untouched (payroll tests green). Seed: SWP-ATT-9007/9008 VERIFIED rows on AC-001 so the report + dashboard render non-empty. make gen + go build + go vet clean; full backend suite green. 11-04 must TRUNCATE export_jobs (+ notifications) in reset-db."
 progress:
   total_phases: 11
   completed_phases: 10
   total_plans: 50
-  completed_plans: 48
-  percent: 94
+  completed_plans: 49
+  percent: 98
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-03)
 ## Current Position
 
 Phase: 11 of 11 (E10 Reporting & Notifications) — IN PROGRESS
-Plan: 11-02b COMPLETE (3 of 5 plans done in current phase — dashboard + billable report + export framework)
+Plan: 11-03 COMPLETE (4 of 5 plans done in current phase — E10 contract tests / drift gate)
 Status: In progress
-Last activity: 2026-06-05 — Plan 11-02b complete: E10 read-aggregation + export half. GET /dashboards/me role-aware (HrDashboard / LeaderDashboard scoped to own company / AgentDashboard; openapi deep-link paths; Cache-Control private max-age=30; fields without an 11-01 rollup query emitted present-but-0/empty/null per the REQUIRED contract, live counts that have queries are real). GET /reports/attendance-billable verified-only aggregation (employee/day/shift_master) with summary + pending_summary callout + verification_rate_pct(null-when-0); leader forced to own company else 403 OUT_OF_SCOPE; >1yr → 422 REPORT_PERIOD_TOO_WIDE. GENERIC export framework: POST /exports (format guard EXPORT_FORMAT_UNSUPPORTED, size guard EXPORT_TOO_LARGE, throttle RATE_LIMITED_EXPORTS 429; insert export_jobs QUEUED + audit.RecordReturningID + EnqueueTx ReportExportArgs in ONE tx → 202 + bare ExportJob under {data}); GET /exports/{id} + :cancel scope=self; DB RUNNING/DONE mapped to wire PROCESSING/COMPLETED at the DTO. ReportExportWorker (report.export) registered ALONGSIDE PayslipExportWorker — both coexist; payslip path untouched (payroll tests green). Seed: SWP-ATT-9007/9008 VERIFIED rows on AC-001 so the report + dashboard render non-empty. make gen + go build + go vet clean; full backend suite green. 11-04 must TRUNCATE export_jobs (+ notifications) in reset-db.
+Last activity: 2026-06-05 — Plan 11-03 complete: the E10 drift gate (Go contract tests, replacing server codegen). reporting_testkit_test.go = newHarness(role,company,employee) on chi with a mutable-principal closure middleware + stubIdempotency at the server.go router positions, over fake repos (fakeNotificationRepo seeded-by-recipient with keyset cursor; fakeDashboardRepo configurable counts; fakeBillableRepo aggregate/summary/pending + countInScope; fakeExportRepo insert/get/cancel + countRecent) + the REAL NotificationService/DashboardService/BillableService/ExportService + handler + a recording fakeJobs — copies the Phase-10 payroll testkit, with fakeTx.QueryRow → fakeRow added so audit.RecordReturningID (INSERT…RETURNING id) runs honestly in the export tx. 4 handler test files assert the wire shapes byte-for-shape vs docs/api/E10-reporting/openapi.yaml: notifications (cursor envelope + read_state/kind filters + scope=self, mark-read flip+no-op, mark-all-read marked_count, non-owned 404); dashboard (hr/super/leader/agent role shapes + role_label + EXACT deep-link paths); billable (summary+pending_summary+rows, verification_rate_pct null-when-empty, leader OUT_OF_SCOPE 403, REPORT_PERIOD_TOO_WIDE 422); exports (202 + transactional-outbox enqueue of exactly one ReportExportArgs whose JobID==the 202 id, EXPORT_FORMAT_UNSUPPORTED/EXPORT_TOO_LARGE 422, RATE_LIMITED_EXPORTS 429, GET DB RUNNING→PROCESSING/DONE→COMPLETED + non-owner 404, :cancel QUEUED→CANCELLED + terminal no-op, agent POST /exports 403). go build ./... + go test ./... -count=1 exit 0 — no regressions in any earlier package. 11-04 (Playwright E2E milestone capstone) is the only remaining plan.
 
-Progress: [█████████░] 94%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [█████████░] 94%
 | Phase 11-e10-reporting P01 | 7 | 3 tasks | 12 files |
 | Phase 11-e10-reporting P02 | 11 | 3 tasks | 15 files |
 | Phase 11-e10-reporting P02b | 9 | 2 tasks | 18 files |
+| Phase 11-e10-reporting P03 | 6 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -231,6 +232,7 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 11-e10-reporting]: [11-02]: documented dispatch stubs left unwired (no clean single recipient): leave approve-l1, OT confirm/approve-l1/withdraw; mandatory leave/OT/attendance approve-final+reject+verify ARE wired. 11-04 must TRUNCATE notifications in reset-db
 - [Phase 11-e10-reporting]: [11-02b]: generic export framework adds a SECOND River worker (report.export) over the ALTER-generalized export_jobs — coexists with PayslipExportWorker; DB RUNNING/DONE mapped to wire PROCESSING/COMPLETED at the DTO so the built FE drives it unchanged
 - [Phase 11-e10-reporting]: [11-02b]: dashboard fields without an 11-01 rollup query (attendance_rate_pct/billable_mtd/ot_mtd/trend/leave_balance/today_shift/schedule_alerts) emitted present-but-0/empty/null per openapi REQUIRED (never a fake constant); live counts that DO have queries are real. audit.RecordReturningID added to capture export_jobs.audit_log_entry_id
+- [Phase 11-e10-reporting]: [11-03]: E10 drift gate — Go contract tests over the REAL reporting services+handlers via newHarness(role,company,employee) + fake repos + recording fakeJobs + stubIdempotency (copied from the Phase-10 payroll testkit). fakeTx.QueryRow returns a fakeRow scanning a SWP-AL id so audit.RecordReturningID runs honestly in the export tx. Asserts all 8 FE ops + export codes (FORMAT_UNSUPPORTED/TOO_LARGE/RATE_LIMITED) + DB→wire PROCESSING/COMPLETED + outbox (one ReportExportArgs, matching JobID) + RBAC (agent POST /exports 403) + cursor envelopes. go test ./... exits 0, no regressions.
 
 ### Pending Todos
 
@@ -242,6 +244,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T08:13:25.433Z
-Stopped at: Completed 11-e10-reporting/11-02b-PLAN.md
+Last session: 2026-06-05T08:24:35.830Z
+Stopped at: Completed 11-e10-reporting/11-03-PLAN.md
 Resume file: None
