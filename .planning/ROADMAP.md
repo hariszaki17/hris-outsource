@@ -198,10 +198,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 10-01: Migrations + sqlc queries (payslips, payslip_audit_notes, export_jobs)
-- [ ] 10-02: Services + handlers (read payslips, audit notes, async export via River) 
-- [ ] 10-03: Go contract tests vs E8 openapi examples
-- [ ] 10-04: Playwright E2E for E8 (per Gherkin AC, incl. async export)
+- [ ] 10-01-PLAN.md (wave 1) — Migrations 00033-00034 + sqlc queries (payslips + components/benefits/audit-notes, export_jobs) + domain + the AES-256-GCM crypto helper (encryption-at-rest)
+- [ ] 10-02-PLAN.md (wave 2, deps 10-01) — Services + handlers: read payslips (decrypt-at-boundary + DECRYPT_FAIL as a 200 row status), audit notes list/create, async export (River EnqueueTx + PayslipExportWorker → export_jobs DONE; EXPORT_TOO_LARGE), RBAC hr/super, routes/main.go/jobs.go/seed
+- [ ] 10-03-PLAN.md (wave 3, deps 10-02) — Go contract tests vs E8 openapi (list/detail incl. DECRYPT_FAIL 200 row, audit notes, export 202 + job enqueue, EXPORT_TOO_LARGE 422, RBAC 403, cursor shapes)
+- [ ] 10-04-PLAN.md (wave 4, deps 10-02,10-03) — FE wiring (MSW off) + exhaustive Playwright E2E under frontend/e2e/tests/e8/ (archive+filters, detail breakdown, DECRYPT_FAIL render, audit notes, export 202 + worker-completes-job via export_jobs DB poll, RBAC 403)
 
 ### Phase 11: E10 Reporting & Notifications
 **Goal:** Dashboard, billable report, notifications, and the export framework work against the real BE.
