@@ -12,6 +12,7 @@ import (
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
+	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
@@ -50,7 +51,9 @@ type Deps struct {
 	// SCHEDULING slice (06-02): shift masters + schedule grid + conflict engine (E4).
 	Scheduling *schedulinghttp.Handler
 	// ATTENDANCE slice (07-02): verify/reject (+bulk) + corrections (E5).
-	Attendance  *attendancehttp.Handler
+	Attendance *attendancehttp.Handler
+	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
+	Leave       *leavehttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -377,6 +380,36 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/corrections/{id}:reject", d.Attendance.RejectCorrection)
 			})
 			// ATTENDANCE slice end (07-02). Phase 7+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// LEAVE slice (08-02): E6 two-level approval + quotas + calendar
+			// (F6.1/F6.2/F6.3 / LVE-01..03). Leader scope (own-company) is
+			// enforced in the service via rbac.GuardCompany. Action endpoints
+			// are idempotent (Idempotency-Key required) per openapi.
+			// COORDINATION POINT: future Phase-8 slices append AFTER this block.
+			// ---------------------------------------------------------------
+
+			// Reads + L1 approve + reject + calendar + quota list:
+			// super_admin, hr_admin, shift_leader (company_or_global).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/leave-requests", d.Leave.ListLeaveRequests)
+				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-l1", d.Leave.ApproveLeaveRequestL1)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:reject", d.Leave.RejectLeaveRequest)
+				r.Get("/leave-quotas", d.Leave.ListLeaveQuotas)
+				r.Get("/leave-calendar", d.Leave.GetLeaveCalendar)
+			})
+
+			// Final/override approval + quota writes: super_admin, hr_admin (global).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-final", d.Leave.ApproveLeaveRequestFinal)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-override", d.Leave.ApproveLeaveRequestOverride)
+				r.With(d.Idempotency.Handler).Post("/leave-quotas/{id}:adjust", d.Leave.AdjustLeaveQuota)
+				r.With(d.Idempotency.Handler).Post("/leave-quotas:bulk-grant", d.Leave.BulkGrantLeaveQuotas)
+			})
+			// LEAVE slice end (08-02). Phase 8+ appends after this line.
 		})
 	})
 

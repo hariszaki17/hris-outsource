@@ -256,6 +256,128 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed corrections: %w", err)
 	}
 
+	// -----------------------------------------------------------------------
+	// Phase 8 (08-02): Seed E6 leave fixtures — quotas + Pending leave_requests
+	// (web/HR/leader APPROVAL targets; agent CREATE is mobile-only / out of web
+	// scope). Runs AFTER seedScheduling so SWP-SCH-6002 exists to overlap for the
+	// INV-3 loop-closer E2E. FK: leave_requests → employees/placements/companies/
+	// leave_types; leave_quotas → employees/leave_types; leave_approvals →
+	// leave_requests. Idempotent (ON CONFLICT (id) DO NOTHING / NOT EXISTS guard).
+	// -----------------------------------------------------------------------
+	if err := seedLeave(ctx, pool); err != nil {
+		return fmt.Errorf("seed leave: %w", err)
+	}
+
+	return nil
+}
+
+// seedLeave inserts E6 leave fixtures so the web approval flows + quota mgmt +
+// calendar + the INV-3 loop-closer E2E have real targets. All dates anchor on the
+// CURRENT week's Monday (Asia/Jakarta-safe, clearly in range), period = current year.
+//
+// leave_quotas (annual SWP-LT-001, calendar year):
+//   - Dewi (SWP-EMP-3001): total 12, used 4 → remaining 8 (clean final-approve target)
+//   - Budi (SWP-EMP-2891): total 12, used 11 → remaining 1 (near-exhausted →
+//     BALANCE_RECHECK_FAILED / override target)
+//
+// leave_requests (all seeded Pending/terminal — web/mobile CREATE out of scope):
+//   - SWP-LR-8001  Dewi @ CMP-0021, PENDING_L1, monday+4 (Fri) → Rudi L1 target
+//   - SWP-LR-8002  Dewi @ CMP-0021, PENDING_HR (leader-approved; +leave_approvals
+//     {L1,APPROVED}) → HR final target
+//   - SWP-LR-8003  Budi @ CMP-0022, PENDING_HR, 3 days vs remaining 1 →
+//     BALANCE_RECHECK/override target (no leader at CMP-0022 → no_leader=true)
+//   - SWP-LR-8004  Budi @ CMP-0022, PENDING_L1 → leader OUT_OF_SCOPE target (Rudi
+//     leads CMP-0021, gets 403 on :approve-l1)
+//   - SWP-LR-8005  Dewi @ CMP-0021, APPROVED terminal (list filter + calendar)
+//   - SWP-LR-8006  Dewi @ CMP-0021, REJECTED terminal (list filter)
+//   - SWP-LR-8007  Dewi @ CMP-0021, PENDING_HR, start=end=monday+2 (Wed) OVERLAPPING
+//     SWP-SCH-6002 → HR :approve-final fires INV-3 (schedule → CANCELLED_BY_LEAVE /
+//     DTO LEAVE + approved_leave_days insert), the production over-leave source.
+func seedLeave(ctx context.Context, pool *db.Pool) error {
+	monday := mondayOfCurrentWeek(time.Now())
+	wed := monday.AddDate(0, 0, 2).Format("2006-01-02") // SWP-SCH-6002 overlap (INV-3)
+	thu := monday.AddDate(0, 0, 3).Format("2006-01-02")
+	fri := monday.AddDate(0, 0, 4).Format("2006-01-02")
+	year := monday.Year()
+	periodStart := fmt.Sprintf("%d-01-01", year)
+	periodEnd := fmt.Sprintf("%d-12-31", year)
+
+	// --- leave_quotas (explicit ids for deterministic E2E) ---
+	const lqQ = `
+		INSERT INTO leave_quotas
+			(id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending)
+		VALUES ($1, $2, 'SWP-LT-001', $3, $4::date, $5::date, $6, $7, 0)
+		ON CONFLICT (id) DO NOTHING`
+	quotas := []struct {
+		id, employeeID string
+		total, used    int
+	}{
+		{"SWP-LQ-8001", "SWP-EMP-3001", 12, 4},  // Dewi: remaining 8
+		{"SWP-LQ-8002", "SWP-EMP-2891", 12, 11}, // Budi: remaining 1
+	}
+	for _, q := range quotas {
+		if _, err := pool.Pool.Exec(ctx, lqQ, q.id, q.employeeID, year, periodStart, periodEnd, q.total, q.used); err != nil {
+			return fmt.Errorf("seed leave_quota %q: %w", q.id, err)
+		}
+		slog.Info("seed: upserted leave quota", "id", q.id, "employee_id", q.employeeID, "remaining", q.total-q.used)
+	}
+
+	// --- leave_requests (explicit ids; all Pending/terminal targets) ---
+	const lrQ = `
+		INSERT INTO leave_requests
+			(id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+			 start_date, end_date, duration_days, reason, status, no_leader, assigned_leader_id, created_by)
+		VALUES ($1, $2, $3, $4, $5, 'SWP-LT-001',
+			 $6::date, $7::date, $8, $9, $10, $11, $12, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+
+	parking := "SWP-SVC-003"
+	rudi := "SWP-EMP-1108" // shift leader of CMP-0021
+	priorApproved := monday.AddDate(0, 0, -7).Format("2006-01-02")
+	priorRejected := monday.AddDate(0, 0, -5).Format("2006-01-02")
+	budiEnd := monday.AddDate(0, 0, 6).Format("2006-01-02")
+	type lr struct {
+		id, employeeID, placementID, companyID string
+		serviceLine                            *string
+		start, end                             string
+		days                                   int
+		reason, status                         string
+		noLeader                               bool
+		assignedLeader                         *string
+	}
+	requests := []lr{
+		{"SWP-LR-8001", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, fri, fri, 1, "Keperluan keluarga.", "PENDING_L1", false, &rudi},
+		{"SWP-LR-8002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, thu, thu, 1, "Kontrol rumah sakit.", "PENDING_HR", false, &rudi},
+		{"SWP-LR-8003", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", &parking, fri, budiEnd, 3, "Acara keluarga 3 hari.", "PENDING_HR", true, nil},
+		{"SWP-LR-8004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", &parking, thu, thu, 1, "Izin pribadi.", "PENDING_L1", false, nil},
+		{"SWP-LR-8005", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, priorApproved, priorApproved, 1, "Cuti yang sudah disetujui.", "APPROVED", false, &rudi},
+		{"SWP-LR-8006", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, priorRejected, priorRejected, 1, "Pengajuan yang ditolak.", "REJECTED", false, &rudi},
+		{"SWP-LR-8007", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, wed, wed, 1, "Cuti yang menimpa jadwal (INV-3).", "PENDING_HR", false, &rudi},
+	}
+	for _, r := range requests {
+		if _, err := pool.Pool.Exec(ctx, lrQ,
+			r.id, r.employeeID, r.placementID, r.companyID, r.serviceLine,
+			r.start, r.end, r.days, r.reason, r.status, r.noLeader, r.assignedLeader,
+		); err != nil {
+			return fmt.Errorf("seed leave_request %q: %w", r.id, err)
+		}
+		slog.Info("seed: upserted leave request", "id", r.id, "employee_id", r.employeeID, "status", r.status)
+	}
+
+	// --- leave_approvals: SWP-LR-8002 carries an L1-APPROVED decision row so the
+	// FE timeline renders the two-stage path + the PENDING_HR marker. Idempotent
+	// via NOT EXISTS (bigserial has no deterministic id to ON CONFLICT on).
+	const laQ = `
+		INSERT INTO leave_approvals
+			(leave_request_id, stage, decision, actor_id, actor_role, decision_note, is_override)
+		SELECT 'SWP-LR-8002', 'L1', 'APPROVED', 'SWP-EMP-1108', 'shift_leader', 'Coverage aman.', false
+		WHERE NOT EXISTS (
+			SELECT 1 FROM leave_approvals WHERE leave_request_id = 'SWP-LR-8002' AND stage = 'L1')`
+	if _, err := pool.Pool.Exec(ctx, laQ); err != nil {
+		return fmt.Errorf("seed leave_approval for SWP-LR-8002: %w", err)
+	}
+	slog.Info("seed: upserted leave approval", "leave_request_id", "SWP-LR-8002", "stage", "L1")
+
 	return nil
 }
 

@@ -17,6 +17,7 @@ import (
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
+	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
@@ -30,6 +31,7 @@ import (
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
+	leaverepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/leave"
 	orgrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/org"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
@@ -38,6 +40,7 @@ import (
 	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
+	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 	orgsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/org"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
@@ -160,6 +163,17 @@ func run() error {
 	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
 	attendanceHandler := attendancehttp.NewHandler(attendanceSvc, correctionSvc)
 
+	// Leave slice (08-02): E6 two-level approval + quotas + calendar (F6.1/F6.2/F6.3).
+	// The leave service's INV-3 loop-closer reuses the EXISTING scheduling repo
+	// (scheduleRepo above) as its SchedulePort — cancelling overlapping schedule
+	// entries + populating approved_leave_days in the approval tx.
+	leaveRepo := leaverepo.NewLeaveRepo(pool)
+	quotaRepo := leaverepo.NewQuotaRepo(pool)
+	leaveSvc := leavesvc.NewLeaveService(leaveRepo, quotaRepo, scheduleRepo, txm)
+	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm)
+	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
+	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -175,6 +189,7 @@ func run() error {
 		Placement:            placementHandler,
 		Scheduling:           schedulingHandler,
 		Attendance:           attendanceHandler,
+		Leave:                leaveHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,
