@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 11-e10-reporting/11-03-PLAN.md
-last_updated: "2026-06-05T08:24:35.832Z"
-last_activity: "2026-06-05 — Plan 11-02b complete: E10 read-aggregation + export half. GET /dashboards/me role-aware (HrDashboard / LeaderDashboard scoped to own company / AgentDashboard; openapi deep-link paths; Cache-Control private max-age=30; fields without an 11-01 rollup query emitted present-but-0/empty/null per the REQUIRED contract, live counts that have queries are real). GET /reports/attendance-billable verified-only aggregation (employee/day/shift_master) with summary + pending_summary callout + verification_rate_pct(null-when-0); leader forced to own company else 403 OUT_OF_SCOPE; >1yr → 422 REPORT_PERIOD_TOO_WIDE. GENERIC export framework: POST /exports (format guard EXPORT_FORMAT_UNSUPPORTED, size guard EXPORT_TOO_LARGE, throttle RATE_LIMITED_EXPORTS 429; insert export_jobs QUEUED + audit.RecordReturningID + EnqueueTx ReportExportArgs in ONE tx → 202 + bare ExportJob under {data}); GET /exports/{id} + :cancel scope=self; DB RUNNING/DONE mapped to wire PROCESSING/COMPLETED at the DTO. ReportExportWorker (report.export) registered ALONGSIDE PayslipExportWorker — both coexist; payslip path untouched (payroll tests green). Seed: SWP-ATT-9007/9008 VERIFIED rows on AC-001 so the report + dashboard render non-empty. make gen + go build + go vet clean; full backend suite green. 11-04 must TRUNCATE export_jobs (+ notifications) in reset-db."
+status: completed
+stopped_at: Completed 11-e10-reporting/11-04-PLAN.md
+last_updated: "2026-06-05T09:24:16.973Z"
+last_activity: "2026-06-05 — Plan 11-04 complete: E10 screens wired off MSW to the real Go BE (the {data}-envelope double-unwrap in dashboard/report/export-flow + the notifications marked_count fix; reset-db TRUNCATEs notifications), proven by 14 Playwright specs under frontend/e2e/tests/e10/ — dashboard role-aware, billable report, notifications list/mark-read/mark-all, the auto-dispatch CAPSTONE (HR approve-final → un-stubbed worker → recipient sees a real LEAVE_APPROVED, not seeded), and exports (worker-DONE / cancel→CANCELLED / PDF→EXPORT_FORMAT_UNSUPPORTED). FULL e1..e10 suite: 239 passed / 6 skipped / 0 failed (10.3m), no regressions. The v1.0 milestone is CLOSED — the whole web console works end-to-end against the real backend."
 progress:
   total_phases: 11
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 50
-  completed_plans: 49
-  percent: 98
+  completed_plans: 50
+  percent: 100
 ---
 
 # Project State
@@ -20,17 +20,17 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-06-03)
 
-**Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 10 — E8 Payroll (read-only archive) COMPLETE. All 4 plans done: data layer + crypto, services/handlers/async export, Go contract tests, and FE wiring + full-stack Playwright E2E (16 e8 specs green). PAY-01/PAY-02 closed.
+**Core value:** Every screen the web app shows works end-to-end against the real backend.
+**Current focus:** MILESTONE COMPLETE — Phase 11 (E10 Reporting & Notifications) done. All 11 phases / 50 plans complete. The whole web console (e1..e10) works end-to-end against the real Go backend; the full Playwright suite is green (239 passed / 6 skipped / 0 failed).
 
 ## Current Position
 
-Phase: 11 of 11 (E10 Reporting & Notifications) — IN PROGRESS
-Plan: 11-03 COMPLETE (4 of 5 plans done in current phase — E10 contract tests / drift gate)
-Status: In progress
-Last activity: 2026-06-05 — Plan 11-03 complete: the E10 drift gate (Go contract tests, replacing server codegen). reporting_testkit_test.go = newHarness(role,company,employee) on chi with a mutable-principal closure middleware + stubIdempotency at the server.go router positions, over fake repos (fakeNotificationRepo seeded-by-recipient with keyset cursor; fakeDashboardRepo configurable counts; fakeBillableRepo aggregate/summary/pending + countInScope; fakeExportRepo insert/get/cancel + countRecent) + the REAL NotificationService/DashboardService/BillableService/ExportService + handler + a recording fakeJobs — copies the Phase-10 payroll testkit, with fakeTx.QueryRow → fakeRow added so audit.RecordReturningID (INSERT…RETURNING id) runs honestly in the export tx. 4 handler test files assert the wire shapes byte-for-shape vs docs/api/E10-reporting/openapi.yaml: notifications (cursor envelope + read_state/kind filters + scope=self, mark-read flip+no-op, mark-all-read marked_count, non-owned 404); dashboard (hr/super/leader/agent role shapes + role_label + EXACT deep-link paths); billable (summary+pending_summary+rows, verification_rate_pct null-when-empty, leader OUT_OF_SCOPE 403, REPORT_PERIOD_TOO_WIDE 422); exports (202 + transactional-outbox enqueue of exactly one ReportExportArgs whose JobID==the 202 id, EXPORT_FORMAT_UNSUPPORTED/EXPORT_TOO_LARGE 422, RATE_LIMITED_EXPORTS 429, GET DB RUNNING→PROCESSING/DONE→COMPLETED + non-owner 404, :cancel QUEUED→CANCELLED + terminal no-op, agent POST /exports 403). go build ./... + go test ./... -count=1 exit 0 — no regressions in any earlier package. 11-04 (Playwright E2E milestone capstone) is the only remaining plan.
+Phase: 11 of 11 (E10 Reporting & Notifications) — COMPLETE
+Plan: 11-04 COMPLETE (5 of 5 plans done — the FINAL milestone plan: E10 FE-wiring off MSW + full-stack Playwright capstone)
+Status: Milestone complete
+Last activity: 2026-06-05 — Plan 11-04 complete: E10 screens wired off MSW to the real Go BE (the {data}-envelope double-unwrap in dashboard/report/export-flow + the notifications marked_count fix; reset-db TRUNCATEs notifications), proven by 14 Playwright specs under frontend/e2e/tests/e10/ — dashboard role-aware, billable report, notifications list/mark-read/mark-all, the auto-dispatch CAPSTONE (HR approve-final → un-stubbed worker → recipient sees a real LEAVE_APPROVED, not seeded), and exports (worker-DONE / cancel→CANCELLED / PDF→EXPORT_FORMAT_UNSUPPORTED). FULL e1..e10 suite: 239 passed / 6 skipped / 0 failed (10.3m), no regressions. The v1.0 milestone is CLOSED — the whole web console works end-to-end against the real backend.
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Progress: [██████████] 98%
 | Phase 11-e10-reporting P02 | 11 | 3 tasks | 15 files |
 | Phase 11-e10-reporting P02b | 9 | 2 tasks | 18 files |
 | Phase 11-e10-reporting P03 | 6 | 2 tasks | 5 files |
+| Phase 11 P04 | 53 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -233,6 +234,7 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 11-e10-reporting]: [11-02b]: generic export framework adds a SECOND River worker (report.export) over the ALTER-generalized export_jobs — coexists with PayslipExportWorker; DB RUNNING/DONE mapped to wire PROCESSING/COMPLETED at the DTO so the built FE drives it unchanged
 - [Phase 11-e10-reporting]: [11-02b]: dashboard fields without an 11-01 rollup query (attendance_rate_pct/billable_mtd/ot_mtd/trend/leave_balance/today_shift/schedule_alerts) emitted present-but-0/empty/null per openapi REQUIRED (never a fake constant); live counts that DO have queries are real. audit.RecordReturningID added to capture export_jobs.audit_log_entry_id
 - [Phase 11-e10-reporting]: [11-03]: E10 drift gate — Go contract tests over the REAL reporting services+handlers via newHarness(role,company,employee) + fake repos + recording fakeJobs + stubIdempotency (copied from the Phase-10 payroll testkit). fakeTx.QueryRow returns a fakeRow scanning a SWP-AL id so audit.RecordReturningID runs honestly in the export tx. Asserts all 8 FE ops + export codes (FORMAT_UNSUPPORTED/TOO_LARGE/RATE_LIMITED) + DB→wire PROCESSING/COMPLETED + outbox (one ReportExportArgs, matching JobID) + RBAC (agent POST /exports 403) + cursor envelopes. go test ./... exits 0, no regressions.
+- [Phase 11]: [11-04]: E10 FE needed a DOUBLE {data}-unwrap (query.data.data.data) in dashboard/report/export-flow — Orval wraps the body in {data} AND the BE handler wraps the payload in {data:<T>} though the openapi declares bare; with one unwrap the dashboard showed the agent fallback + report/export rendered empty against the real BE. notifications LIST is single-wrapped (cursor envelope IS the body) so its screen only needed the marked_count fix. 14 e10 Playwright specs green; full e1..e10 = 239 passed / 6 skipped / 0 failed — the v1.0 milestone is closed.
 
 ### Pending Todos
 
@@ -244,6 +246,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T08:24:35.830Z
-Stopped at: Completed 11-e10-reporting/11-03-PLAN.md
+Last session: 2026-06-05T09:23:15.352Z
+Stopped at: Completed 11-e10-reporting/11-04-PLAN.md
 Resume file: None

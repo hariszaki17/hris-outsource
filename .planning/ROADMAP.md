@@ -24,7 +24,7 @@ Postgres). Scope is strictly the endpoints the FE calls today
 - [x] **Phase 8: E6 Leave** - Leave requests multi-step approval, quotas, calendar
 - [ ] **Phase 9: E7 Overtime** - Overtime workflow + public holidays
 - [x] **Phase 10: E8 Payroll** - Payslips (read-only) + audit notes + export (completed 2026-06-05)
-- [ ] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework
+- [x] **Phase 11: E10 Reporting & Notifications** - Dashboard, billable report, notifications, export framework (completed 2026-06-05)
 
 ## Phase Details
 
@@ -212,7 +212,7 @@ Plans:
   2. Notifications list and mark-read / mark-all-read work; auto-dispatched notifications from earlier phases appear.
   3. The export framework (create/get/cancel, async) works end-to-end via the worker.
   4. Exhaustive Playwright E2E for E10 features is green.
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [ ] 11-01-PLAN.md (wave 1) — Migrations 00035 (notifications) + 00036 (generalize export_jobs) + sqlc reporting queries (notifications/exports/dashboard/billable) + reporting domain; make gen
@@ -238,4 +238,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. E6 Leave | 4/4 | Complete | 2026-06-05 |
 | 9. E7 Overtime | 0/4 | Not started | - |
 | 10. E8 Payroll | 4/4 | Complete    | 2026-06-05 |
-| 11. E10 Reporting & Notifications | 4/5 | In Progress|  |
+| 11. E10 Reporting & Notifications | 5/5 | Complete   | 2026-06-05 |
