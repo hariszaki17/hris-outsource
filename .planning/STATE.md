@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 09-e7-overtime/09-03-PLAN.md
-last_updated: "2026-06-05T04:21:41.333Z"
-last_activity: "2026-06-05 — Plan 09-02 complete: E7 overtime services + handlers. The two-level OT approval state machine (confirm→L1→final, reject, withdraw) with *ForUpdate guards + 409 stateConflict, GuardCompany OUT_OF_SCOPE + SELF_APPROVAL_FORBIDDEN (struct literal), bulk approve/reject partial-success ({succeeded,failed} per-id own-tx), OT_BELOW_MIN 422 from the reused E2 overtime_rules (OvertimeRepo dual-port FindOvertimeRule, line-scoped wins over global default), ClassifyDayType (GetHolidayForDate→HOLIDAY else live-schedule→WORKDAY else RESTDAY, TierPrecedence HOLIDAY>RESTDAY>WORKDAY; SchedulePort typed on schedulingsvc.LiveEntry so the existing scheduleRepo satisfies it verbatim), holiday CRUD (HOLIDAY_DATE_CLASH pre-check+23505 backstop, HOLIDAY_IN_USE via CountOvertimeUsingHoliday + in_use_by_overtime flag), calculation block (reference multiplier stored not applied INV-2), audit-in-tx + notify stub. 9 overtime + 4 holiday chi handlers matching the E7 openapi byte-for-shape ({data} envelope on GET, PageResponse on list). Routed under RequireRole (idempotency-wrapped actions) + wired in main.go + seeded (10 OT rows + 2 holidays covering every E2E scenario). make gen clean; go build ./... + go vet ./... + gofmt clean; no test regressions. Next: 09-03 contract tests."
+status: completed
+stopped_at: Completed 09-e7-overtime/09-04-PLAN.md
+last_updated: "2026-06-05T05:20:01.795Z"
+last_activity: "2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9."
 progress:
   total_phases: 11
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 41
-  completed_plans: 40
-  percent: 95
+  completed_plans: 41
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 9 — E7 Overtime. Plans 09-01 (data layer) + 09-02 (services + handlers + routes + wiring + seed) + 09-03 (Go contract tests vs E7 openapi) COMPLETE. Next: 09-04 (full-stack Playwright E2E).
+**Current focus:** Phase 9 — E7 Overtime COMPLETE (all 4 plans). 09-01 data layer + 09-02 services/handlers/routes/seed + 09-03 Go contract tests + 09-04 full-stack Playwright E2E. Next: Phase 10 (E8 Payroll, read-only archive).
 
 ## Current Position
 
-Phase: 9 of 11 (E7 Overtime) — IN PROGRESS
-Plan: 3 of 4 in current phase — Plan 09-03 COMPLETE (Go contract tests = the drift gate)
-Status: In progress
-Last activity: 2026-06-05 — Plan 09-03 complete: E7 contract tests (the drift gate replacing server codegen). 35 table-driven Go tests over the REAL OvertimeService + HolidayService + handler through a chi httptest harness — overtime_testkit_test.go (fakeTx + fakeTxRunner + fakeOvertimeRepo dual-port OvertimeRepository+RuleRepository + fakeHolidayRepo with configurable in-use + fakeScheduleRepo SchedulePort + newHarness(role,company,employee) on chi with mutable-principal middleware + stubIdempotency + decodeBody snapshot, mirroring the Phase-8 leave harness EXACTLY). Asserts the confirm→L1→final chain + level-1/level-2 approval rows, wrong/terminal-state 409s (fields.status), OUT_OF_SCOPE 403, SELF_APPROVAL_FORBIDDEN 403, OVERRIDE_REASON_REQUIRED 422, withdraw 204/409, the {data} envelope (attendance_id JSON null, calculation tier_breakdown + supersedes-null + WORKDAY reference multiplier 1.5), cursor list shape + leader-scope filter. OT_BELOW_MIN 422 + fields.{counted_minutes,min_minutes} + ClassifyDayType HOLIDAY-precedence driven through the REAL exported seams (h.otSvc) because the create/auto-detect trigger is out of web scope. Bulk approve (leader→L1) partial-success: in-scope succeeded; self SELF_APPROVAL_FORBIDDEN + cross-company OUT_OF_SCOPE + terminal CONFLICT in failed[]; all-failed→422; bulk-reject mirror. Holiday CRUD: 201 create / DATE_CLASH 409 / 200 update / 204 delete / HOLIDAY_IN_USE 409 + cursor envelope + in_use_by_overtime. go test ./... exits 0 (11 packages, no regressions); gofmt + go vet clean. Next: 09-04 full-stack Playwright E2E.
+Phase: 9 of 11 (E7 Overtime) — COMPLETE
+Plan: 4 of 4 in current phase — Plan 09-04 COMPLETE (full-stack Playwright E2E)
+Status: Phase complete
+Last activity: 2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9.
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Progress: [██████████] 98%
 | Phase 09-e7-overtime P01 | 5 | 3 tasks | 5 files |
 | Phase 09-e7-overtime P02 | 11 | 3 tasks | 14 files |
 | Phase 09-e7-overtime P03 | 6 | 2 tasks | 3 files |
+| Phase 09 P04 | 51 | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -206,6 +207,7 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 09-e7-overtime]: [09-02]: OvertimeRepo is dual-port (OvertimeRepository+RuleRepository); FindOvertimeRule reuses E2 overtime_rules (line-scoped wins over NULL-line global default) — no rule CRUD; SchedulePort typed on schedulingsvc.LiveEntry so the existing scheduleRepo satisfies it verbatim for WORKDAY/RESTDAY classification
 - [Phase 09-e7-overtime]: [09-02]: SELF_APPROVAL_FORBIDDEN via apperr.Error{HTTPStatus:403} struct literal; calculation tier_breakdown single-tier (supersedes null), multiplier = rule per-tier rate REFERENCE only (INV-2); bulk dispatches HR->ApproveFinal/leader->ApproveL1 each in own tx, SELF/OUT_OF_SCOPE/409 land in failed[]; :confirm guardConfirmActor enforces agent-self, staff pass for web seam
 - [Phase 09-e7-overtime]: [09-03]: E7 contract tests are the drift gate — fakeOvertimeRepo dual-port (OvertimeRepository+RuleRepository) + fakeHolidayRepo (configurable in-use) + fakeScheduleRepo over the REAL services+handler via newHarness on chi; OT_BELOW_MIN + ClassifyDayType asserted through the REAL exported seams (h.otSvc) because their only production trigger is the out-of-web-scope create/auto-detect path
+- [Phase 09]: [09-04] overtime-detail-screen unwraps the {data:<Overtime>} GET envelope with a bare fallback (was rendering blank); web confirm/withdraw driven via apiAs (agent-self UI is out of web scope); OT_BELOW_MIN asserted honestly via the seeded below-min calc (no web HTTP trigger); openRules retries the deep-route auth-restore redirect race. 25 e7 E2E green; full e1–e7 = 209 passed/6 skipped/0 failed.
 
 ### Pending Todos
 
@@ -217,6 +219,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T04:21:41.331Z
-Stopped at: Completed 09-e7-overtime/09-03-PLAN.md
+Last session: 2026-06-05T05:19:25.154Z
+Stopped at: Completed 09-e7-overtime/09-04-PLAN.md
 Resume file: None
