@@ -27,12 +27,20 @@ import (
 // 11-02b adds dashboard/billable/export services to the same struct.
 type Handler struct {
 	notifications *svc.NotificationService
+	dashboard     *svc.DashboardService
+	billable      *svc.BillableService
+	exports       *svc.ExportService
 }
 
-// NewHandler wires the handler to the notification service. (11-02b will extend
-// the constructor signature with its services.)
-func NewHandler(n *svc.NotificationService) *Handler {
-	return &Handler{notifications: n}
+// NewHandler wires the handler to all E10 reporting services. dashboard/billable/
+// exports are added by 11-02b (dashboard/report/export framework).
+func NewHandler(
+	n *svc.NotificationService,
+	d *svc.DashboardService,
+	b *svc.BillableService,
+	e *svc.ExportService,
+) *Handler {
+	return &Handler{notifications: n, dashboard: d, billable: b, exports: e}
 }
 
 // ListNotifications handles GET /notifications — cursor-paged, newest-first,

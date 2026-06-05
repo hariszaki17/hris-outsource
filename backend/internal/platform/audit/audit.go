@@ -66,6 +66,41 @@ func Record(ctx context.Context, tx pgx.Tx, e Entry) error {
 	return nil
 }
 
+// RecordReturningID inserts an audit row exactly like Record but RETURNs the
+// allocated SWP-AL id. E10 exports (EX-4 / INV-5) need the id to stamp
+// export_jobs.audit_log_entry_id for traceability (the openapi requires it on
+// ExportJob). Same tx, same atomicity guarantee as Record.
+func RecordReturningID(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
+	p, _ := auth.PrincipalFrom(ctx)
+	reqID := httpx.RequestID(ctx)
+
+	before, err := marshalNullable(e.Before)
+	if err != nil {
+		return "", fmt.Errorf("audit before: %w", err)
+	}
+	after, err := marshalNullable(e.After)
+	if err != nil {
+		return "", fmt.Errorf("audit after: %w", err)
+	}
+
+	const q = `
+		INSERT INTO audit_log
+			(id, actor_user_id, actor_role, action, entity_type, entity_id,
+			 before_state, after_state, request_id, created_at)
+		VALUES
+			('SWP-AL-' || swp_next_id('AL'), $1, $2, $3, $4, $5, $6, $7, $8, now())
+		RETURNING id`
+	var id string
+	if err := tx.QueryRow(ctx, q,
+		nullStr(p.UserID), nullStr(string(p.Role)),
+		string(e.Action), e.EntityType, e.EntityID,
+		before, after, nullStr(reqID),
+	).Scan(&id); err != nil {
+		return "", fmt.Errorf("insert audit_log: %w", err)
+	}
+	return id, nil
+}
+
 func marshalNullable(v any) ([]byte, error) {
 	if v == nil {
 		return nil, nil

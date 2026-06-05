@@ -56,10 +56,13 @@ func NewWorkerClient(pool *db.Pool) (*river.Client[pgx.Tx], error) {
 	// Workers whose Work() writes to the application DB are constructed WITH the
 	// pool (only in scope here in NewWorkerClient, not in the no-dependency
 	// registerWorkers below):
-	//   - PayslipExportWorker drives export_jobs RUNNING→DONE.
+	//   - PayslipExportWorker drives export_jobs RUNNING→DONE (PAYSLIPS path).
+	//   - ReportExportWorker (E10, 11-02b) drives the GENERIC export_jobs lifecycle
+	//     (ATTENDANCE_BILLABLE etc.) — coexists with PayslipExportWorker.
 	//   - NotificationWorker (E10, 11-02) INSERTs a notifications row — un-stubbed
 	//     from its former no-op, so it now needs the pool too.
 	river.AddWorker(workers, NewPayslipExportWorker(pool))
+	river.AddWorker(workers, NewReportExportWorker(pool))
 	river.AddWorker(workers, NewNotificationWorker(pool))
 
 	return river.NewClient(riverpgxv5.New(pool.Pool), &river.Config{

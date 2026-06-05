@@ -494,6 +494,38 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/notifications:mark-all-read", d.Reporting.MarkAllNotificationsRead)
 			})
 			// E10 REPORTING notifications slice end (11-02). 11-02b appends after this line.
+
+				// ---------------------------------------------------------------
+				// E10 REPORTING slice — DASHBOARD + REPORT (11-02b). The role-aware
+				// landing dashboard (all 4 roles, scope=self) + the billable
+				// attendance report (HR/super/leader; leader is server-scoped to
+				// their own company, else 403 OUT_OF_SCOPE). Both return the
+				// {data:<body>} envelope the FE unwraps (query.data.data).
+				// ---------------------------------------------------------------
+				r.Group(func(r chi.Router) {
+					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+					r.Get("/dashboards/me", d.Reporting.GetMyDashboard)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+					r.Get("/reports/attendance-billable", d.Reporting.GetBillableReport)
+				})
+
+				// ---------------------------------------------------------------
+				// E10 REPORTING slice — EXPORTS (11-02b). The generic export
+				// framework: POST /exports (202 + ExportJob, QUEUED + EnqueueTx the
+				// ReportExportWorker in one tx), GET /exports/{id} (status poll,
+				// scope=self, DB→wire status mapping), POST /exports/{id}:cancel.
+				// Create + cancel are Idempotency-wrapped per openapi. chi matches
+				// the `:cancel` action suffix natively.
+				// ---------------------------------------------------------------
+				r.Group(func(r chi.Router) {
+					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+					r.With(d.Idempotency.Handler).Post("/exports", d.Reporting.CreateExport)
+					r.Get("/exports/{export_id}", d.Reporting.GetExport)
+					r.With(d.Idempotency.Handler).Post("/exports/{export_id}:cancel", d.Reporting.CancelExport)
+				})
+				// E10 REPORTING exports slice end (11-02b).
 		})
 	})
 

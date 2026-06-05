@@ -238,7 +238,17 @@ func run() error {
 	// with dashboard/billable-report/export methods.
 	reportingNotifRepo := reportingrepo.New(pool)
 	reportingNotifSvc := reportingsvc.NewNotificationService(reportingNotifRepo)
-	reportingHandler := reportinghttp.NewHandler(reportingNotifSvc)
+	// 11-02b: dashboard (role-aware aggregation), billable report (verified-only),
+	// and the GENERIC export framework (insert QUEUED + EnqueueTx the
+	// ReportExportWorker in one tx; the worker — registered in NewWorkerClient
+	// alongside the Phase-10 PayslipExportWorker — flips the job DONE).
+	reportingDashboardRepo := reportingrepo.NewDashboardRepo(pool)
+	reportingBillableRepo := reportingrepo.NewBillableRepo(pool)
+	reportingExportRepo := reportingrepo.NewExportRepo(pool)
+	reportingDashboardSvc := reportingsvc.NewDashboardService(reportingDashboardRepo)
+	reportingBillableSvc := reportingsvc.NewBillableService(reportingBillableRepo)
+	reportingExportSvc := reportingsvc.NewExportService(reportingExportRepo, reportingBillableRepo, txm, jobsClient)
+	reportingHandler := reportinghttp.NewHandler(reportingNotifSvc, reportingDashboardSvc, reportingBillableSvc, reportingExportSvc)
 
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
