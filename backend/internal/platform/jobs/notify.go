@@ -27,13 +27,13 @@ import (
 // GET /notifications scope filters on BOTH so either resolves to the logged-in
 // principal.
 type NotificationArgs struct {
-	Event       string            `json:"event,omitempty"`       // legacy back-compat (mirrors NotifKind)
-	NotifKind   string            `json:"kind"`                  // openapi NotificationKind
-	RecipientID string            `json:"recipient_id"`          // SWP-EMP-… / SWP-USR-…
-	Title       string            `json:"title"`                 // Bahasa headline
-	Body        string            `json:"body"`                  // single-line body
-	EntityType  string            `json:"entity_type,omitempty"` // legacy back-compat
-	EntityID    string            `json:"entity_id,omitempty"`   // legacy back-compat
+	Event       string `json:"event,omitempty"`       // legacy back-compat (mirrors NotifKind)
+	NotifKind   string `json:"kind"`                  // openapi NotificationKind
+	RecipientID string `json:"recipient_id"`          // SWP-EMP-… / SWP-USR-…
+	Title       string `json:"title"`                 // Bahasa headline
+	Body        string `json:"body"`                  // single-line body
+	EntityType  string `json:"entity_type,omitempty"` // legacy back-compat
+	EntityID    string `json:"entity_id,omitempty"`   // legacy back-compat
 
 	// Deep link (flattened onto the row; the repo re-nests into DeepLink).
 	DeepLinkEpic     string `json:"deep_link_epic,omitempty"`
