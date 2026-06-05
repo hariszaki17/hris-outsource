@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-e7-overtime/09-02-PLAN.md
-last_updated: "2026-06-05T04:10:44.504Z"
-last_activity: "2026-06-05 — Plan 09-01 complete: E7 overtime data layer. Two goose migrations (00031 overtime + overtime_approvals bigserial decision-trail; 00032 holidays with HOLIDAY_DATE_CLASH unique index + deferred overtime_holiday_id_fkey ALTER for goose numeric-order), the sqlc query set (overtime list/get/ForUpdate/transition/insert + approvals; holidays list/get/byDateCategory/forDate/insert/update/softDelete/CountOvertimeUsingHoliday), and the domain/overtime sub-package (OvertimeStatus/Source/Tier/HolidayCategory enums pinned byte-for-byte to E7 openapi, TierPrecedence HOLIDAY>RESTDAY>WORKDAY, CountedFromWorked floor-to-30, reference_multiplier STORED-not-applied INV-2). make gen clean; go build ./... + go vet ./... exit 0. ids.go untouched (OT+HOL pre-existing). Foundation for the 09-02 service/handler slice."
+stopped_at: Completed 09-e7-overtime/09-03-PLAN.md
+last_updated: "2026-06-05T04:21:41.333Z"
+last_activity: "2026-06-05 — Plan 09-02 complete: E7 overtime services + handlers. The two-level OT approval state machine (confirm→L1→final, reject, withdraw) with *ForUpdate guards + 409 stateConflict, GuardCompany OUT_OF_SCOPE + SELF_APPROVAL_FORBIDDEN (struct literal), bulk approve/reject partial-success ({succeeded,failed} per-id own-tx), OT_BELOW_MIN 422 from the reused E2 overtime_rules (OvertimeRepo dual-port FindOvertimeRule, line-scoped wins over global default), ClassifyDayType (GetHolidayForDate→HOLIDAY else live-schedule→WORKDAY else RESTDAY, TierPrecedence HOLIDAY>RESTDAY>WORKDAY; SchedulePort typed on schedulingsvc.LiveEntry so the existing scheduleRepo satisfies it verbatim), holiday CRUD (HOLIDAY_DATE_CLASH pre-check+23505 backstop, HOLIDAY_IN_USE via CountOvertimeUsingHoliday + in_use_by_overtime flag), calculation block (reference multiplier stored not applied INV-2), audit-in-tx + notify stub. 9 overtime + 4 holiday chi handlers matching the E7 openapi byte-for-shape ({data} envelope on GET, PageResponse on list). Routed under RequireRole (idempotency-wrapped actions) + wired in main.go + seeded (10 OT rows + 2 holidays covering every E2E scenario). make gen clean; go build ./... + go vet ./... + gofmt clean; no test regressions. Next: 09-03 contract tests."
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 41
-  completed_plans: 39
+  completed_plans: 40
   percent: 95
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-03)
 
 **Core value:** Every screen the web app shows today works end-to-end against the real backend.
-**Current focus:** Phase 9 — E7 Overtime. Plans 09-01 (data layer) + 09-02 (services + handlers + routes + wiring + seed) COMPLETE. Next: 09-03 (Go contract tests vs E7 openapi) then 09-04 (full-stack Playwright E2E).
+**Current focus:** Phase 9 — E7 Overtime. Plans 09-01 (data layer) + 09-02 (services + handlers + routes + wiring + seed) + 09-03 (Go contract tests vs E7 openapi) COMPLETE. Next: 09-04 (full-stack Playwright E2E).
 
 ## Current Position
 
 Phase: 9 of 11 (E7 Overtime) — IN PROGRESS
-Plan: 2 of 4 in current phase — Plan 09-02 COMPLETE (OT services + handlers + routes + wiring + seed)
+Plan: 3 of 4 in current phase — Plan 09-03 COMPLETE (Go contract tests = the drift gate)
 Status: In progress
-Last activity: 2026-06-05 — Plan 09-02 complete: E7 overtime services + handlers. The two-level OT approval state machine (confirm→L1→final, reject, withdraw) with *ForUpdate guards + 409 stateConflict, GuardCompany OUT_OF_SCOPE + SELF_APPROVAL_FORBIDDEN (struct literal), bulk approve/reject partial-success ({succeeded,failed} per-id own-tx), OT_BELOW_MIN 422 from the reused E2 overtime_rules (OvertimeRepo dual-port FindOvertimeRule, line-scoped wins over global default), ClassifyDayType (GetHolidayForDate→HOLIDAY else live-schedule→WORKDAY else RESTDAY, TierPrecedence HOLIDAY>RESTDAY>WORKDAY; SchedulePort typed on schedulingsvc.LiveEntry so the existing scheduleRepo satisfies it verbatim), holiday CRUD (HOLIDAY_DATE_CLASH pre-check+23505 backstop, HOLIDAY_IN_USE via CountOvertimeUsingHoliday + in_use_by_overtime flag), calculation block (reference multiplier stored not applied INV-2), audit-in-tx + notify stub. 9 overtime + 4 holiday chi handlers matching the E7 openapi byte-for-shape ({data} envelope on GET, PageResponse on list). Routed under RequireRole (idempotency-wrapped actions) + wired in main.go + seeded (10 OT rows + 2 holidays covering every E2E scenario). make gen clean; go build ./... + go vet ./... + gofmt clean; no test regressions. Next: 09-03 contract tests.
+Last activity: 2026-06-05 — Plan 09-03 complete: E7 contract tests (the drift gate replacing server codegen). 35 table-driven Go tests over the REAL OvertimeService + HolidayService + handler through a chi httptest harness — overtime_testkit_test.go (fakeTx + fakeTxRunner + fakeOvertimeRepo dual-port OvertimeRepository+RuleRepository + fakeHolidayRepo with configurable in-use + fakeScheduleRepo SchedulePort + newHarness(role,company,employee) on chi with mutable-principal middleware + stubIdempotency + decodeBody snapshot, mirroring the Phase-8 leave harness EXACTLY). Asserts the confirm→L1→final chain + level-1/level-2 approval rows, wrong/terminal-state 409s (fields.status), OUT_OF_SCOPE 403, SELF_APPROVAL_FORBIDDEN 403, OVERRIDE_REASON_REQUIRED 422, withdraw 204/409, the {data} envelope (attendance_id JSON null, calculation tier_breakdown + supersedes-null + WORKDAY reference multiplier 1.5), cursor list shape + leader-scope filter. OT_BELOW_MIN 422 + fields.{counted_minutes,min_minutes} + ClassifyDayType HOLIDAY-precedence driven through the REAL exported seams (h.otSvc) because the create/auto-detect trigger is out of web scope. Bulk approve (leader→L1) partial-success: in-scope succeeded; self SELF_APPROVAL_FORBIDDEN + cross-company OUT_OF_SCOPE + terminal CONFLICT in failed[]; all-failed→422; bulk-reject mirror. Holiday CRUD: 201 create / DATE_CLASH 409 / 200 update / 204 delete / HOLIDAY_IN_USE 409 + cursor envelope + in_use_by_overtime. go test ./... exits 0 (11 packages, no regressions); gofmt + go vet clean. Next: 09-04 full-stack Playwright E2E.
 
-Progress: [██████████] 95%
+Progress: [██████████] 98%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [██████████] 95%
 | Phase 08-e6-leave P04 | 64 | 3 tasks | 8 files |
 | Phase 09-e7-overtime P01 | 5 | 3 tasks | 5 files |
 | Phase 09-e7-overtime P02 | 11 | 3 tasks | 14 files |
+| Phase 09-e7-overtime P03 | 6 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,7 @@ Full log in PROJECT.md Key Decisions. Recent:
 - [Phase 09-e7-overtime]: [09-01]: sqlc quirks for 09-02 repo — work_date/holiday_date->pgtype.Date, minutes/level->int32, reference_multiplier->pgtype.Numeric(nullable)<->*float64, applicable_service_lines->[]string, employee_name/company_name->*string(LEFT JOIN), CountOvertimeUsingHoliday->int64; GetOvertimeForUpdate FOR-UPDATE lock + UpdateOvertimeStatus RETURNING-or-409
 - [Phase 09-e7-overtime]: [09-02]: OvertimeRepo is dual-port (OvertimeRepository+RuleRepository); FindOvertimeRule reuses E2 overtime_rules (line-scoped wins over NULL-line global default) — no rule CRUD; SchedulePort typed on schedulingsvc.LiveEntry so the existing scheduleRepo satisfies it verbatim for WORKDAY/RESTDAY classification
 - [Phase 09-e7-overtime]: [09-02]: SELF_APPROVAL_FORBIDDEN via apperr.Error{HTTPStatus:403} struct literal; calculation tier_breakdown single-tier (supersedes null), multiplier = rule per-tier rate REFERENCE only (INV-2); bulk dispatches HR->ApproveFinal/leader->ApproveL1 each in own tx, SELF/OUT_OF_SCOPE/409 land in failed[]; :confirm guardConfirmActor enforces agent-self, staff pass for web seam
+- [Phase 09-e7-overtime]: [09-03]: E7 contract tests are the drift gate — fakeOvertimeRepo dual-port (OvertimeRepository+RuleRepository) + fakeHolidayRepo (configurable in-use) + fakeScheduleRepo over the REAL services+handler via newHarness on chi; OT_BELOW_MIN + ClassifyDayType asserted through the REAL exported seams (h.otSvc) because their only production trigger is the out-of-web-scope create/auto-detect path
 
 ### Pending Todos
 
@@ -215,6 +217,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T04:10:35.418Z
-Stopped at: Completed 09-e7-overtime/09-02-PLAN.md
+Last session: 2026-06-05T04:21:41.331Z
+Stopped at: Completed 09-e7-overtime/09-03-PLAN.md
 Resume file: None
