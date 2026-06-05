@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Completed 10-e8-payroll/10-04-PLAN.md
-last_updated: "2026-06-05T07:07:39.557Z"
+last_updated: "2026-06-05T07:13:47.563Z"
 last_activity: "2026-06-05 — Plan 10-04 complete: e8-payroll screens wired off MSW to the real Go BE + 16 full-stack Playwright specs green headless (archive list+filters, detail decrypted breakdown, DECRYPT_FAIL@200, audit notes list/create, the async EXPORT headline — 202+SWP-EXP id THEN the REAL River worker flips export_jobs→DONE via a DB poll, RBAC 403 agent/shift_leader). The harness now boots cmd/worker (detached, PAYROLL_ENCRYPTION_KEY) and applies River queue migrations programmatically (new cmd/migrate river-up — no river CLI). FE fix: payslip-detail unwraps the BE {data:Payslip} envelope with a bare fallback (openapi declares bare Payslip, handler wraps it). reset-db TRUNCATEs payroll+export_jobs (River tables untouched) and re-seeds with the full .env.e2e so seedPayroll restores fixtures. Full e1-e8 suite: 225 passed / 6 skipped / 0 failed (no regressions). Phase 10 CLOSED."
 progress:
   total_phases: 11
