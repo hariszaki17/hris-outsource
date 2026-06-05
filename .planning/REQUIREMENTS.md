@@ -80,17 +80,17 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HARN-01, HARN-02, AUTH-01..04 | Phase 1 | Pending |
-| FND-01..03 | Phase 2 | Pending |
-| ORG-01..04 | Phase 3 | Complete (03-02..05) |
-| PPL-01..03 | Phase 4 | Pending |
+| HARN-01, HARN-02, AUTH-01..04 | Phase 1 | Complete (01-01..05) |
+| FND-01..03 | Phase 2 | Complete (02-01..04) |
+| ORG-01..04 | Phase 3 | Complete (03-01..06) |
+| PPL-01..03 | Phase 4 | Complete (04-01..06) |
 | PLC-01..04 | Phase 5 | Complete (05-01..04) |
 | SCH-01..03 | Phase 6 | Complete (06-01..04) |
-| ATT-01..02 | Phase 7 | Complete |
+| ATT-01..02 | Phase 7 | Complete (07-01..04) |
 | LVE-01..03 | Phase 8 | Complete (08-01..04) |
-| OVT-01..02 | Phase 9 | Pending |
-| PAY-01..02 | Phase 10 | In Progress (10-01..03; 10-04 E2E pending) |
-| RPT-01..04 | Phase 11 | In Progress (11-01..03; 11-04 E2E pending) |
+| OVT-01..02 | Phase 9 | Complete (09-01..04) |
+| PAY-01..02 | Phase 10 | Complete (10-01..04) |
+| RPT-01..04 | Phase 11 | Complete (11-01..04) |
 
 **Coverage:** all v1 requirements mapped to phases ✓
 
