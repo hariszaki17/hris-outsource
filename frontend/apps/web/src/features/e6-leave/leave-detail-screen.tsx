@@ -12,6 +12,7 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { ApiError } from '@swp/api-client';
 import {
   LeaveDecision,
   type LeaveRequest,
@@ -104,7 +105,17 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
       },
       onError: (err) => {
         const { kind, message } = classifyError(err);
-        if (kind === 'rule' && message.toUpperCase().includes('BALANCE')) {
+        // Balance re-check failed at final approval: BE returns 422
+        // BALANCE_RECHECK_FAILED (code) — its Bahasa message does NOT contain
+        // "BALANCE" and the presence of error.fields classifies it as 'validation'
+        // (not 'rule'). Test the actual error CODE (mirrors the Phase-6 error.details
+        // precedent) so the override modal opens against the real BE.
+        const code = err instanceof ApiError ? err.code : '';
+        const isBalanceRecheck =
+          code === 'BALANCE_RECHECK_FAILED' ||
+          code.toUpperCase().includes('BALANCE') ||
+          (kind === 'rule' && message.toUpperCase().includes('BALANCE'));
+        if (isBalanceRecheck) {
           setOverrideOpen(true);
           return;
         }

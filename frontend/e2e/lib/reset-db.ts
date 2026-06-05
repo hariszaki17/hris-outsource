@@ -78,6 +78,17 @@ const TRUNCATE_TABLES = [
   // schedule_entries + placements + employees below. Reseeded by the Go seed.
   'attendance_corrections',
   'attendance',
+  // Phase 8: E6 leave tables (FK order: most-dependent first).
+  // leave_approvals FK to leave_requests; leave_requests FK to employees /
+  // leave_types / placements / client_companies; leave_quotas FK to employees /
+  // leave_types. All MUST be truncated before schedule_entries + placements +
+  // employees below. The INV-3 approval write-through inserts approved_leave_days
+  // rows + flips schedule_entries.status — both are in this list already, so a
+  // reset clears any test-approved leave so it never leaks into the next spec;
+  // the Go seed re-applies the SWP-LR-8001..8007 / SWP-LQ-8001/8002 fixtures.
+  'leave_approvals',
+  'leave_requests',
+  'leave_quotas',
   // Phase 6: E4 scheduling tables (FK order: most-dependent first).
   // schedule_entries / approved_leave_days FK to placements/employees/shift_masters,
   // so they MUST be truncated before placements + employees below. shift_masters has
