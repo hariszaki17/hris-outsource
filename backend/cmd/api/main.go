@@ -23,6 +23,7 @@ import (
 	payrollhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/payroll"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
+	reportinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/reporting"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
@@ -41,6 +42,7 @@ import (
 	payrollrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/payroll"
 	peoplerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/people"
 	placementrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/placement"
+	reportingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/reporting"
 	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
 	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
@@ -52,6 +54,7 @@ import (
 	payrollsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/payroll"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
+	reportingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/reporting"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
@@ -225,6 +228,15 @@ func run() error {
 	payrollExportSvc := payrollsvc.NewExportService(payrollExportRepo, txm, jobsClient)
 	payrollHandler := payrollhttp.NewHandler(payslipSvc, payrollExportSvc)
 
+	// Reporting slice (11-02): E10 notifications (list/mark-read/mark-all-read).
+	// scope=self — the service derives the recipient set from the principal. The
+	// auto-dispatched notifications (leave/OT/attendance retro-wire) land here via
+	// the un-stubbed NotificationWorker (cmd/worker). 11-02b extends this handler
+	// with dashboard/billable-report/export methods.
+	reportingNotifRepo := reportingrepo.New(pool)
+	reportingNotifSvc := reportingsvc.NewNotificationService(reportingNotifRepo)
+	reportingHandler := reportinghttp.NewHandler(reportingNotifSvc)
+
 	handler := server.New(server.Deps{
 		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
 		RatePerMinute:        cfg.Rate.PerMinute,
@@ -243,6 +255,7 @@ func run() error {
 		Leave:                leaveHandler,
 		Overtime:             overtimeHandler,
 		Payroll:              payrollHandler,
+		Reporting:            reportingHandler,
 		Authn:                authn,
 		Idempotency:          idempotency.New(pool),
 		Obs:                  observ,

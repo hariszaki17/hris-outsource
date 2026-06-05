@@ -18,6 +18,7 @@ import (
 	payrollhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/payroll"
 	peoplehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/people"
 	placementhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/placement"
+	reportinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/reporting"
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
@@ -59,7 +60,10 @@ type Deps struct {
 	// OVERTIME slice (09-02): OT two-level approval + holiday calendar (E7).
 	Overtime *overtimehttp.Handler
 	// PAYROLL slice (10-02): historical payslip archive + audit notes + async export (E8).
-	Payroll     *payrollhttp.Handler
+	Payroll *payrollhttp.Handler
+	// REPORTING slice (11-02): E10 notifications (list/mark-read/mark-all-read).
+	// 11-02b extends the SAME handler with dashboard/billable-report/export methods.
+	Reporting   *reportinghttp.Handler
 	Authn       *auth.Authenticator
 	Idempotency *idempotency.Middleware
 	Obs         *obs.Providers
@@ -472,6 +476,24 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/payslips:export", d.Payroll.ExportPayslips)
 			})
 			// PAYROLL slice end (10-02). Phase 10+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// E10 REPORTING slice — NOTIFICATIONS (11-02). The caller's in-app
+			// inbox: list (cursor + read_state/kind), single mark-read, bulk
+			// mark-all-read. scope=self is enforced in the service (recipient
+			// set = the principal's user id + employee id); all four roles may
+			// read their OWN notifications. Action endpoints are idempotent
+			// (Idempotency-Key required) per openapi.
+			// COORDINATION POINT: 11-02b appends dashboard/report/exports AFTER
+			// this block (extending d.Reporting with new methods).
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Get("/notifications", d.Reporting.ListNotifications)
+				r.With(d.Idempotency.Handler).Post("/notifications/{notification_id}:mark-read", d.Reporting.MarkNotificationRead)
+				r.With(d.Idempotency.Handler).Post("/notifications:mark-all-read", d.Reporting.MarkAllNotificationsRead)
+			})
+			// E10 REPORTING notifications slice end (11-02). 11-02b appends after this line.
 		})
 	})
 
