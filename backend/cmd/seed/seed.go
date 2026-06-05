@@ -1781,6 +1781,25 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "ESCALATED", flags: "{LATE,ESCALATED}",
 		},
+		// 9007 / 9008 — VERIFIED billable rows (E10 11-02b): so /reports/
+		// attendance-billable + the dashboard return non-empty for CMP-0021
+		// (HR global + Rudi's leader scope). attendance_code PRESENT is is_billable.
+		{
+			id: "SWP-ATT-9007", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
+			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",
+		},
+		{
+			id: "SWP-ATT-9008", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
+			companyID: "SWP-CMP-0021", serviceLine: "building_management",
+			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
+			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
+			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",
+		},
 	}
 
 	for _, a := range rows {
@@ -1795,6 +1814,17 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 			return fmt.Errorf("seed attendance %q: %w", a.id, err)
 		}
 		slog.Info("seed: upserted attendance", "id", a.id, "employee_id", a.employeeID, "verification_status", a.verification)
+	}
+
+	// E10 (11-02b): bind the VERIFIED rows to the billable PRESENT code (SWP-AC-001,
+	// is_billable=true) so /reports/attendance-billable reports non-zero billable
+	// hours. The shared attendance insert leaves attendance_code_id NULL, so we set
+	// it here only for the billable fixtures.
+	if _, err := pool.Pool.Exec(ctx,
+		`UPDATE attendance SET attendance_code_id = 'SWP-AC-001'
+		 WHERE id IN ('SWP-ATT-9007','SWP-ATT-9008') AND attendance_code_id IS NULL`,
+	); err != nil {
+		return fmt.Errorf("seed attendance billable code: %w", err)
 	}
 
 	return nil

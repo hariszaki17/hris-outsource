@@ -13,8 +13,24 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
+
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 )
+
+// TxRunner runs a closure inside a DB transaction (db.TxManager satisfies it).
+// Used by the export service for the transactional-outbox insert+enqueue.
+type TxRunner interface {
+	InTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+}
+
+// Jobs is the River enqueue seam (the real *jobs.Client satisfies it). EnqueueTx
+// inserts the ReportExportArgs in the SAME tx as the export_jobs QUEUED insert
+// (transactional outbox). An interface so 11-03 can fake it.
+type Jobs interface {
+	EnqueueTx(ctx context.Context, tx pgx.Tx, args river.JobArgs) error
+}
 
 // --- filters ---
 
@@ -47,4 +63,101 @@ type NotificationRepository interface {
 	// MarkAllRead marks every unread row for recipientIDs (optional before cutoff)
 	// and returns the affected count.
 	MarkAllRead(ctx context.Context, recipientIDs []string, before *time.Time) (int, error)
+}
+
+// --- dashboard port ---
+
+// DashboardCounts is the bundle of live dashboard aggregations the service needs
+// to assemble any role's payload. companyID nil = global (HR/super); set = the
+// leader's own company. Only the fields a given role needs are read.
+type DashboardCounts struct {
+	PendingAttendanceVerify int
+	PendingLeaveApprove     int
+	PendingLeaveApproveHR   int
+	PendingOTApprove        int
+	ExpiringPlacements30d   int
+	ExpiringAgreements30d   int
+	ActivePlacements        int
+	ActiveCompanies         int
+}
+
+// LeaderToday mirrors the sqlc LeaderTodayStatus row (today's team roll-up).
+type LeaderTodayRow struct {
+	ShiftsTotal          int
+	ClockedIn            int
+	LateCount            int
+	AbsentCount          int
+	PendingVerifications int
+}
+
+// AgentRecentRow mirrors the sqlc AgentRecentAttendance row.
+type AgentRecentRow struct {
+	Present int
+	Late    int
+	Absent  int
+}
+
+// AgentPendingRow mirrors the sqlc CountPendingRequestsForEmployee row.
+type AgentPendingRow struct {
+	Leave int
+	OT    int
+}
+
+// DashboardRepository wraps the 11-01 dashboard aggregation queries. today is the
+// Asia/Jakarta calendar date the service resolves once. companyID nil = global.
+type DashboardRepository interface {
+	HrCounts(ctx context.Context, today time.Time, companyID *string) (DashboardCounts, error)
+	LeaderToday(ctx context.Context, today time.Time, companyID string) (LeaderTodayRow, error)
+	LeaderPending(ctx context.Context, companyID string) (attendanceVerify, leaveApprove, otApprove int, err error)
+	CompanyName(ctx context.Context, companyID string) (string, error)
+	AgentRecent(ctx context.Context, employeeID string, today time.Time) (AgentRecentRow, error)
+	AgentPending(ctx context.Context, employeeID string) (AgentPendingRow, error)
+	CountUnread(ctx context.Context, recipientIDs []string) (int, error)
+}
+
+// --- billable port ---
+
+// BillableQuery is the decoded /reports/attendance-billable filter set (after
+// scope coercion). CompanyID/ServiceLineID nil = unfiltered.
+type BillableQuery struct {
+	CompanyID     *string
+	ServiceLineID *string
+	PeriodStart   string // ISO date
+	PeriodEnd     string // ISO date
+	GroupBy       dom.BillableGroupBy
+}
+
+// BillableRepository wraps the 11-01 billable aggregation queries. The aggregate
+// rows + the two summary rows feed BillableReport; CountInScope backs the export
+// size guard.
+type BillableRepository interface {
+	Aggregate(ctx context.Context, q BillableQuery) ([]dom.BillableReportRow, error)
+	Summary(ctx context.Context, q BillableQuery) (dom.BillableSummary, error)
+	PendingSummary(ctx context.Context, q BillableQuery) (dom.BillablePendingSummary, error)
+	// CountInScope returns verified+pending record count for the export size guard.
+	CountInScope(ctx context.Context, q BillableQuery) (int, error)
+}
+
+// --- export port ---
+
+// ExportInsert carries one generic export_jobs QUEUED insert (transactional outbox).
+type ExportInsert struct {
+	ReportType      string
+	Format          string
+	Confidential    bool
+	Filters         []byte // json.Marshal(map[string]any)
+	RequestedByID   string
+	RequestedByName *string
+	AuditLogEntryID *string
+	ExpiresAt       *time.Time
+}
+
+// ExportRepository wraps the 11-01 generic export queries. Insert runs in-tx
+// (WithTx); Get/Cancel run on the pool. CountRecent backs the per-user throttle.
+type ExportRepository interface {
+	InsertExportJob(ctx context.Context, tx pgx.Tx, p ExportInsert) (dom.ExportJob, error)
+	GetExportJob(ctx context.Context, id string) (dom.ExportJob, error)
+	CancelExportJob(ctx context.Context, id string) (dom.ExportJob, error)
+	// CountRecentExports counts this requester's export_jobs created within window.
+	CountRecentExports(ctx context.Context, requesterID string, since time.Time) (int, error)
 }

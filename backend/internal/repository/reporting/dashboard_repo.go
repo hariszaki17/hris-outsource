@@ -1,0 +1,167 @@
+// Package reporting (repository) — DashboardRepo implements svc.DashboardRepository
+// over the 11-01 dashboard aggregation queries (live counts, no rollup). Scope is a
+// nullable companyID (nil = global HR/super, set = the leader's company). Dates are
+// converted time.Time → pgtype.Date at the boundary (mirrors Phase-5/9).
+package reporting
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
+	sqlcgen "github.com/hariszaki17/hris-outsource/backend/internal/repository/sqlc"
+	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/reporting"
+)
+
+// DashboardRepo is the sqlc-backed implementation of svc.DashboardRepository.
+type DashboardRepo struct {
+	pool *db.Pool
+	q    *sqlcgen.Queries
+}
+
+var _ svc.DashboardRepository = (*DashboardRepo)(nil)
+
+// NewDashboardRepo returns a DashboardRepo backed by pool.
+func NewDashboardRepo(pool *db.Pool) *DashboardRepo {
+	return &DashboardRepo{pool: pool, q: sqlcgen.New(pool.Pool)}
+}
+
+func pgDate(t time.Time) pgtype.Date {
+	return pgtype.Date{Time: t, Valid: true}
+}
+
+// HrCounts runs the HR/leader KPI counts. companyID nil = global.
+func (r *DashboardRepo) HrCounts(ctx context.Context, today time.Time, companyID *string) (svc.DashboardCounts, error) {
+	var c svc.DashboardCounts
+	d := pgDate(today)
+
+	v, err := r.q.CountPendingAttendanceVerify(ctx, companyID)
+	if err != nil {
+		return c, err
+	}
+	c.PendingAttendanceVerify = int(v)
+
+	la, err := r.q.CountPendingLeaveApprove(ctx, companyID)
+	if err != nil {
+		return c, err
+	}
+	c.PendingLeaveApprove = int(la)
+
+	lhr, err := r.q.CountPendingLeaveApproveHR(ctx, companyID)
+	if err != nil {
+		return c, err
+	}
+	c.PendingLeaveApproveHR = int(lhr)
+
+	ot, err := r.q.CountPendingOtApprove(ctx, companyID)
+	if err != nil {
+		return c, err
+	}
+	c.PendingOTApprove = int(ot)
+
+	ep, err := r.q.CountExpiringPlacements30d(ctx, sqlcgen.CountExpiringPlacements30dParams{Today: d, CompanyID: companyID})
+	if err != nil {
+		return c, err
+	}
+	c.ExpiringPlacements30d = int(ep)
+
+	ea, err := r.q.CountExpiringAgreements30d(ctx, d)
+	if err != nil {
+		return c, err
+	}
+	c.ExpiringAgreements30d = int(ea)
+
+	ap, err := r.q.CountActivePlacements(ctx)
+	if err != nil {
+		return c, err
+	}
+	c.ActivePlacements = int(ap)
+
+	ac, err := r.q.CountActiveCompanies(ctx)
+	if err != nil {
+		return c, err
+	}
+	c.ActiveCompanies = int(ac)
+
+	return c, nil
+}
+
+// LeaderToday runs the today team-status roll-up scoped to one company.
+func (r *DashboardRepo) LeaderToday(ctx context.Context, today time.Time, companyID string) (svc.LeaderTodayRow, error) {
+	cid := &companyID
+	row, err := r.q.LeaderTodayStatus(ctx, sqlcgen.LeaderTodayStatusParams{Today: pgDate(today), CompanyID: cid})
+	if err != nil {
+		return svc.LeaderTodayRow{}, err
+	}
+	return svc.LeaderTodayRow{
+		ShiftsTotal:          int(row.ShiftsTotal),
+		ClockedIn:            int(row.ClockedIn),
+		LateCount:            int(row.LateCount),
+		AbsentCount:          int(row.AbsentCount),
+		PendingVerifications: int(row.PendingVerifications),
+	}, nil
+}
+
+// LeaderPending runs the three leader pending counts scoped to one company.
+func (r *DashboardRepo) LeaderPending(ctx context.Context, companyID string) (int, int, int, error) {
+	cid := &companyID
+	av, err := r.q.CountPendingAttendanceVerify(ctx, cid)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	la, err := r.q.CountPendingLeaveApprove(ctx, cid)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	ot, err := r.q.CountPendingOtApprove(ctx, cid)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return int(av), int(la), int(ot), nil
+}
+
+// CompanyName resolves the display name for the leader's company (best-effort).
+func (r *DashboardRepo) CompanyName(ctx context.Context, companyID string) (string, error) {
+	var name string
+	err := r.pool.Pool.QueryRow(ctx,
+		`SELECT name FROM client_companies WHERE id = $1`, companyID).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return name, err
+}
+
+// AgentRecent runs the agent's last-7-day attendance roll-up.
+func (r *DashboardRepo) AgentRecent(ctx context.Context, employeeID string, today time.Time) (svc.AgentRecentRow, error) {
+	row, err := r.q.AgentRecentAttendance(ctx, sqlcgen.AgentRecentAttendanceParams{EmployeeID: employeeID, Today: pgDate(today)})
+	if err != nil {
+		return svc.AgentRecentRow{}, err
+	}
+	return svc.AgentRecentRow{Present: int(row.Last7dPresent), Late: int(row.Last7dLate), Absent: int(row.Last7dAbsent)}, nil
+}
+
+// AgentPending runs the agent's own pending leave + OT counts.
+func (r *DashboardRepo) AgentPending(ctx context.Context, employeeID string) (svc.AgentPendingRow, error) {
+	row, err := r.q.CountPendingRequestsForEmployee(ctx, employeeID)
+	if err != nil {
+		return svc.AgentPendingRow{}, err
+	}
+	return svc.AgentPendingRow{Leave: int(row.LeavePending), OT: int(row.OtPending)}, nil
+}
+
+// CountUnread sums unread notifications across the principal's recipient ids.
+func (r *DashboardRepo) CountUnread(ctx context.Context, recipientIDs []string) (int, error) {
+	total := 0
+	for _, rid := range recipientIDs {
+		n, err := r.q.CountUnreadNotifications(ctx, rid)
+		if err != nil {
+			return 0, err
+		}
+		total += int(n)
+	}
+	return total, nil
+}
