@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Completed 09-e7-overtime/09-04-PLAN.md
-last_updated: "2026-06-05T05:20:01.795Z"
+last_updated: "2026-06-05T05:24:38.780Z"
 last_activity: "2026-06-05 — Plan 09-04 complete: E7 full-stack Playwright E2E. 5 specs / 25 tests green headless vs real FE↔Go↔ephemeral Postgres under frontend/e2e/tests/e7/ — workflow (confirm→L1→final, reject, withdraw 204+terminal-409, terminal-409 approve), approvals (HR/SL queue scope + detail tier-breakdown/timeline render + source filter), bulk (partial-success terminal CONFLICT + cross-company OUT_OF_SCOPE, all-fail 422, UI "Setujui Massal"), holidays (create+toast, clash 409 HOLIDAY_DATE_CLASH, update 200, delete-free 204, delete-in-use disabled-confirm+Banner+409 HOLIDAY_IN_USE), scope-negatives (OUT_OF_SCOPE 403 approve+list, SELF_APPROVAL_FORBIDDEN 403, queue-hidden, OT_BELOW_MIN via seeded below-min calc). e7-helpers (OT/HOL fixture maps + real-DOM locators + bulk/status probes) + reset-db TRUNCATE overtime_approvals/overtime/holidays. FE fix: overtime-detail-screen.tsx unwraps the {data:<Overtime>} GET envelope (was rendering blank). Full e1–e7 suite: 209 passed / 6 skipped / 0 failed (zero regressions). Closes OVT-01/OVT-02 and Phase 9."
 progress:
   total_phases: 11
