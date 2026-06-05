@@ -89,6 +89,15 @@ const TRUNCATE_TABLES = [
   'leave_approvals',
   'leave_requests',
   'leave_quotas',
+  // Phase 9: E7 overtime tables (FK order: most-dependent first).
+  // overtime_approvals FK to overtime; overtime FK to attendance / schedule_entries /
+  // placements / employees / client_companies / holidays. Both MUST be truncated before
+  // schedule_entries + placements + employees + holidays below. holidays FK is inbound
+  // from overtime.holiday_id (SWP-OT-30009 → SWP-HOL-9001), so overtime is listed BEFORE
+  // holidays. The Go seed re-applies the SWP-OT-3000x + SWP-HOL-900x fixtures (09-02).
+  'overtime_approvals',
+  'overtime',
+  'holidays',
   // Phase 6: E4 scheduling tables (FK order: most-dependent first).
   // schedule_entries / approved_leave_days FK to placements/employees/shift_masters,
   // so they MUST be truncated before placements + employees below. shift_masters has
