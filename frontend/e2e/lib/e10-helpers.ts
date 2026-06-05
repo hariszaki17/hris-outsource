@@ -149,7 +149,11 @@ export interface NotificationDto {
   created_at: string;
 }
 
-/** The cursor-envelope page shape returned by GET /notifications under {data}. */
+/**
+ * The cursor envelope returned by GET /notifications: the rows live in `data` at the TOP
+ * level alongside `next_cursor` / `has_more` (CONVENTIONS §11 cursor-list shape), NOT nested
+ * under a wrapper. Verified against the real BE: `{ data: Notification[], next_cursor, has_more }`.
+ */
 interface NotifPage {
   data?: NotificationDto[];
   has_more?: boolean;
@@ -163,8 +167,8 @@ export async function listNotificationsVia(
 ): Promise<NotificationDto[]> {
   const res = await apiAs(page, 'GET', `/notifications${query}`);
   expect(res.status, `GET /notifications → ${res.status}: ${JSON.stringify(res.body)}`).toBe(200);
-  const page0 = (res.body as { data?: NotifPage })?.data;
-  return page0?.data ?? [];
+  const body = res.body as NotifPage;
+  return body?.data ?? [];
 }
 
 /**
@@ -191,6 +195,22 @@ export async function pollNotification(
     `[e10-helpers] pollNotification timed out after ${timeoutMs}ms ` +
       `(no matching notification; last list size: ${lastCount})`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// gotoReady — navigate to a route and let the screen's data query settle. main.tsx
+// awaits tryRestoreSession() (refresh cookie → /auth/refresh → in-memory token) BEFORE
+// createRoot().render(), so on a fresh goto the token is present when the screen mounts
+// and fires its query. We still waitForToken (so a subsequent apiAs has the Bearer) and
+// then wait for the network to go idle so the (occasionally StrictMode-double-mounted /
+// briefly-canceled) initial query has resolved its retry before we assert the rendered
+// data. This is the E10 analogue of the Phase-6/7/9 "waitForToken dodges the post-goto race".
+// ---------------------------------------------------------------------------
+
+export async function gotoReady(page: Page, route: string): Promise<void> {
+  await page.goto(route);
+  await waitForToken(page);
+  await page.waitForLoadState('networkidle');
 }
 
 // ---------------------------------------------------------------------------

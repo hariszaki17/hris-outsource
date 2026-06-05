@@ -54,6 +54,21 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Unwrap an ExportJob from a query/mutation result. Orval's customFetch wraps the HTTP
+ * body in { data, status, headers } and the BE handler wraps the ExportJob in
+ * { data: <ExportJob> } (dataResponse) even though the E10 openapi declares the bare
+ * ExportJob. So the real job lives at result.data.data — peel both, with a bare fallback
+ * (recurring {data}-unwrap finding; cf. [08-04]/[10-04]). `result` here is already the
+ * customFetch envelope, so we read result.data (HTTP body) then its inner .data.
+ */
+function unwrapExportJob(result: unknown): ExportJob | undefined {
+  const body = (result as { data?: { data?: ExportJob } | ExportJob } | undefined)?.data;
+  return ((body as { data?: ExportJob } | undefined)?.data ?? (body as ExportJob | undefined)) as
+    | ExportJob
+    | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Public API types
 // ---------------------------------------------------------------------------
@@ -113,7 +128,7 @@ export function useExportFlow(): ExportFlowResult {
   const createExport = useCreateExport({
     mutation: {
       onSuccess(res) {
-        const job = (res as { data?: ExportJob }).data;
+        const job = unwrapExportJob(res);
         if (!job?.id) return;
         setJobId(job.id);
         setStep('progress');
@@ -131,14 +146,14 @@ export function useExportFlow(): ExportFlowResult {
     query: {
       enabled: Boolean(jobId),
       refetchInterval(query) {
-        const job = (query.state.data as { data?: ExportJob } | undefined)?.data;
+        const job = unwrapExportJob(query.state.data);
         if (!job) return POLL_INTERVAL_MS;
         return isTerminal(job.status) ? false : POLL_INTERVAL_MS;
       },
     },
   });
 
-  const job = (pollQuery.data as { data?: ExportJob } | undefined)?.data;
+  const job = unwrapExportJob(pollQuery.data);
 
   // Sync step from job status whenever polling resolves
   if (job && step !== 'format') {

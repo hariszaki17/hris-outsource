@@ -501,8 +501,14 @@ export function DashboardScreen() {
     return <StateView kind="empty" title={t('errors.noData')} />;
   }
 
-  // Cast the wrapped response body (Orval wraps in { data, status, headers })
-  const body = (query.data as { data: Dashboard }).data as Dashboard;
+  // Unwrap BOTH envelopes: Orval's customFetch wraps the HTTP body in { data, status,
+  // headers }, and the BE handler wraps the Dashboard in { data: <Dashboard> } (dataResponse,
+  // like every epic) even though the E10 openapi declares the bare Dashboard. So the real
+  // payload lives at query.data.data.data — fixed toward what the BE returns (the recurring
+  // {data}-unwrap finding; cf. [08-04]/[10-04] precedents). A bare fallback keeps it robust
+  // if the envelope ever flattens.
+  const outer = (query.data as { data?: { data?: Dashboard } | Dashboard }).data;
+  const body = ((outer as { data?: Dashboard })?.data ?? outer) as Dashboard;
 
   // ----- Role branching -----
   if (isHrDashboard(body)) {

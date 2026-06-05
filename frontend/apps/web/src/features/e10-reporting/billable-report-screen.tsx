@@ -218,7 +218,15 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   // Data
   // ---------------------------------------------------------------------------
 
-  const report = (query.data as { data?: BillableReport } | undefined)?.data;
+  // Unwrap BOTH envelopes: Orval's customFetch wraps the HTTP body in { data, status,
+  // headers }, and the BE handler wraps the BillableReport in { data: <BillableReport> }
+  // (dataResponse) even though the E10 openapi declares the bare BillableReport. The real
+  // report lives at query.data.data.data — fixed toward what the BE returns (recurring
+  // {data}-unwrap; cf. [08-04]/[10-04]). Bare fallback keeps it robust if it ever flattens.
+  const outer = (query.data as { data?: { data?: BillableReport } | BillableReport } | undefined)
+    ?.data;
+  const report = ((outer as { data?: BillableReport } | undefined)?.data ??
+    (outer as BillableReport | undefined)) as BillableReport | undefined;
   const rows: BillableReportRow[] = report?.rows ?? [];
   const summary = report?.summary;
   const pending = report?.pending_summary;
