@@ -120,6 +120,30 @@ func (h *Handler) ListExpiringPlacements(w http.ResponseWriter, r *http.Request)
 	httpx.WriteJSON(w, http.StatusOK, toPlacementListResponse(rows, next))
 }
 
+// GetPlacementStats handles GET /placements/stats — the global placement
+// aggregates backing the /placements dashboard stat cards (F3.1 / C2SSLA).
+// Scope: a shift_leader is server-scoped to their own company; super_admin /
+// hr_admin get global counts (nil). Mirrors how ListPlacements reads optional
+// company scope, but here the shift-leader scope is derived from the principal.
+func (h *Handler) GetPlacementStats(w http.ResponseWriter, r *http.Request) {
+	var companyID *string
+	if p, ok := auth.PrincipalFrom(r.Context()); ok && p.Role == auth.RoleShiftLeader && p.CompanyID != "" {
+		c := p.CompanyID
+		companyID = &c
+	}
+	stats, err := h.placements.PlacementStats(r.Context(), companyID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, placementStatsResponse{
+		ClientCompanyCount: stats.ClientCompanyCount,
+		ActiveCount:        stats.ActiveCount,
+		ExpiringCount:      stats.ExpiringCount,
+		PendingCount:       stats.PendingCount,
+	})
+}
+
 // GetPlacement handles GET /placements/{id}.
 func (h *Handler) GetPlacement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

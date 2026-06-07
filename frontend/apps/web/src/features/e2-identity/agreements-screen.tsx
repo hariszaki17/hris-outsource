@@ -4,9 +4,9 @@
  * .pen frame: mS8rP  "E2 · Perjanjian Kerja — Daftar"
  *
  * Design: TitleBand → 4× StatCards → TableCard (Tabs, FilterRow, DataTable, Pagination).
- * Columns: NOMOR | KARYAWAN | TIPE | PERIODE | DURASI | STATUS | PENGGANTI | kebab.
+ * Columns: NOMOR | KARYAWAN (name + id) | TIPE | PERIODE | DURASI | STATUS.
  * Tabs: Semua | Aktif | Berakhir <90 hari | Superseded | Closed.
- * Filters: search (nomor/nama agen), Tipe, Status, Lini Layanan.
+ * Filters: search (nama / ID karyawan / no. perjanjian), Tipe, Status.
  *
  * F2.2 EA-1/EA-2/EA-3/EA-5 · ENGINEERING.md D1 cursor pagination.
  */
@@ -27,13 +27,14 @@ import {
   DataTable,
   EmptyState,
   FilterSelect,
+  SearchField,
   StatCard,
   StateView,
   StatusBadge,
 } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { AlarmClock, Archive, FileSignature, MoreVertical, Plus } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { AlarmClock, Archive, FileSignature, Plus } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ import { useTranslation } from 'react-i18next';
 const PAGE_SIZE = 50;
 
 export type AgreementsSearch = {
+  q?: string;
   type?: AgreementType;
   status?: AgreementStatus;
   /** Tab shortcut: 'all' | 'active' | 'expiring' | 'superseded' | 'closed' */
@@ -53,15 +55,6 @@ export type AgreementsSearch = {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0] ?? '')
-    .join('')
-    .toUpperCase();
-}
 
 function durationLabel(startDate: string, endDate?: string | null): string {
   if (!endDate) return '∞';
@@ -131,8 +124,6 @@ export function AgreementsScreen() {
   const search = useSearch({ from: '/authed/agreements' as const });
 
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const kebabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // ---------------------------------------------------------------------------
   // Search params → API params
@@ -153,6 +144,7 @@ export function AgreementsScreen() {
 
   const params: ListAgreementsParams = {
     limit: PAGE_SIZE,
+    q: search.q || undefined,
     status: tabStatus ?? search.status,
     type: search.type,
     cursor: search.cursor,
@@ -160,7 +152,7 @@ export function AgreementsScreen() {
 
   const query = useListAgreements(params);
 
-  const hasFilters = Boolean(search.status || search.type);
+  const hasFilters = Boolean(search.q || search.status || search.type);
 
   const page = query.data?.data as ListAgreements200 | undefined;
   const rows = (page?.data ?? []) as Agreement[];
@@ -218,13 +210,11 @@ export function AgreementsScreen() {
     {
       id: 'karyawan',
       header: t('colKaryawan'),
-      width: 250,
+      width: 280,
       cell: (a) => (
-        <div className="flex items-center gap-[10px]">
-          <div className="size-[30px] rounded-full bg-surface-2 flex items-center justify-center text-[11px] font-semibold text-text-3 shrink-0">
-            {initials(a.employee_id ?? '?')}
-          </div>
-          <span className="font-mono text-[11px] text-text-2">{a.employee_id}</span>
+        <div className="flex flex-col gap-[2px]">
+          <span className="text-[13px] font-medium text-text">{a.employee_name ?? '—'}</span>
+          <span className="font-mono text-[11px] text-text-3">{a.employee_id}</span>
         </div>
       ),
     },
@@ -273,71 +263,6 @@ export function AgreementsScreen() {
           {t(`status.${a.status}`)}
         </StatusBadge>
       ),
-    },
-    {
-      id: 'pengganti',
-      header: t('colPengganti'),
-      width: 100,
-      cell: (a) =>
-        a.successor_id ? (
-          <Link
-            to="/agreements/$agreementId"
-            params={{ agreementId: String(a.successor_id) }}
-            className="font-mono text-[11px] text-primary hover:underline"
-          >
-            {t('viewSuccessor')}
-          </Link>
-        ) : (
-          <span className="font-mono text-[11px] text-text-3">—</span>
-        ),
-    },
-    {
-      id: 'actions',
-      header: '',
-      width: 52,
-      cell: (a) => {
-        const isOpen = openMenuId === a.id;
-        const setRef = (el: HTMLButtonElement | null) => {
-          if (el) kebabRefs.current.set(a.id, el);
-          else kebabRefs.current.delete(a.id);
-        };
-        return (
-          <div className="relative flex justify-center">
-            <button
-              ref={setRef}
-              type="button"
-              aria-label={t('rowActions')}
-              aria-expanded={isOpen}
-              aria-haspopup="menu"
-              className="flex size-[30px] items-center justify-center rounded-[7px] text-text-3 hover:bg-surface-2"
-              onClick={() => setOpenMenuId(isOpen ? null : a.id)}
-            >
-              <MoreVertical className="size-4" aria-hidden />
-            </button>
-            {isOpen && (
-              <div
-                className="absolute right-0 top-full z-10 mt-1 w-[160px] rounded-lg border border-border bg-surface py-1 shadow-md"
-                role="menu"
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-[8px] text-[13px] text-text hover:bg-surface-2"
-                  onClick={() => {
-                    setOpenMenuId(null);
-                    void navigate({
-                      to: '/agreements/$agreementId' as const,
-                      params: { agreementId: a.id },
-                    });
-                  }}
-                >
-                  {t('menuView')}
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      },
     },
   ];
 
@@ -481,6 +406,12 @@ export function AgreementsScreen() {
 
         {/* Filter row — mS8rP EEKyM */}
         <div className="flex items-center gap-[10px] border-b border-border-soft px-[18px] py-[14px]">
+          <SearchField
+            placeholder={t('searchPlaceholder')}
+            defaultValue={search.q ?? ''}
+            containerClassName="w-[280px]"
+            onChange={(e) => setSearch({ q: e.target.value || undefined })}
+          />
           <FilterSelect
             aria-label={t('filterType')}
             value={search.type ?? ''}
@@ -504,13 +435,6 @@ export function AgreementsScreen() {
             <option value={AgreementStatus.CLOSED}>{t('status.CLOSED')}</option>
           </FilterSelect>
           <div className="flex-1" />
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-[14px] py-[9px] text-[13px] font-medium text-text-2 hover:bg-surface-2"
-            onClick={() => setSearch({ type: undefined, status: undefined })}
-          >
-            {t('resetFilters')}
-          </button>
         </div>
 
         {/* Data table */}

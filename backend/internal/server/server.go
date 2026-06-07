@@ -322,6 +322,9 @@ func New(d Deps) http.Handler {
 				// {param} at the same position regardless of order; register it BEFORE
 				// "/placements/{id}" for clarity so it is never shadowed.
 				r.Get("/placements/expiring", d.Placement.ListExpiringPlacements)
+				// Dashboard stat cards (F3.1 / C2SSLA). Static segment — register
+				// BEFORE "/placements/{id}" so it is never shadowed by the param route.
+				r.Get("/placements/stats", d.Placement.GetPlacementStats)
 				r.Get("/placements/{id}", d.Placement.GetPlacement)
 				r.Get("/client-companies/{company_id}/roster", d.Placement.GetCompanyRoster)
 			})

@@ -345,7 +345,9 @@ type Querier interface {
 	// with an ACTIVE/EXPIRING placement covering any day of the [period_start,period_end].
 	ListActivePlacedEmployeesForGrant(ctx context.Context, arg ListActivePlacedEmployeesForGrantParams) ([]ListActivePlacedEmployeesForGrantRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
+	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before),
+	// q (free-text ILIKE over employee full_name / employee_id / agreement_no).
+	// LEFT JOIN employees to surface the employee full name on each row.
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
 	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
 	// employee_name and client_companies for company_name. Cursor lists keyset on
@@ -521,6 +523,9 @@ type Querier interface {
 	MarkResetTokenUsed(ctx context.Context, id int64) error
 	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
 	PayslipExists(ctx context.Context, id string) (bool, error)
+	// Dashboard stat cards (C2SSLA): global placement aggregates over non-deleted
+	// placements. Optional company_id scopes the counts (shift-leader RBAC).
+	PlacementGlobalStats(ctx context.Context, companyID *string) (PlacementGlobalStatsRow, error)
 	// EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
 	// forces a rotation on next login. Used by :regenerate-password.
 	RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error

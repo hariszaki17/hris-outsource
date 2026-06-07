@@ -776,6 +776,35 @@ paths:
       x-design-screens:
         - C2SSLA  # Companies list stat tile
 
+  /placements/stats:
+    get:
+      operationId: getPlacementStats
+      tags: [placements]
+      summary: Global placement aggregates for the dashboard stat cards
+      description: |
+        Aggregate counts backing the `/placements` dashboard stat cards
+        (F3.1 / C2SSLA): distinct active client companies, active placements
+        (`ACTIVE`+`EXTENDED`), expiring placements, and pending/scheduled
+        placements (`PENDING_START`). Computed over all non-deleted placements
+        so the cards do not undercount past the first page.
+
+        Scope: a `shift_leader` is server-scoped to their own company; an
+        `hr_admin`/`super_admin` sees global counts.
+      responses:
+        '200':
+          description: Placement aggregate counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementStats'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - C2SSLA  # Companies list stat cards
+
   # ─────────────────────────────────────────────────────────────────────────
   # Shift Leader Assignments
   # ─────────────────────────────────────────────────────────────────────────
@@ -1796,6 +1825,35 @@ components:
           nullable: true
         has_more:
           type: boolean
+
+    PlacementStats:
+      type: object
+      description: |
+        Aggregate placement counts for the `/placements` dashboard stat cards
+        (F3.1 / C2SSLA). Counts are over non-deleted placements, optionally
+        scoped to the caller's company (shift-leader RBAC).
+      required:
+        - client_company_count
+        - active_count
+        - expiring_count
+        - pending_count
+      properties:
+        client_company_count:
+          type: integer
+          description: Distinct client companies with at least one non-terminal placement.
+          example: 42
+        active_count:
+          type: integer
+          description: Placements with lifecycle_status ACTIVE or EXTENDED.
+          example: 318
+        expiring_count:
+          type: integer
+          description: Placements with lifecycle_status EXPIRING.
+          example: 12
+        pending_count:
+          type: integer
+          description: Placements with lifecycle_status PENDING_START (scheduled, not started).
+          example: 7
 
     # ─────── Action requests ────────────────────────────────────────────
     TransferRequest:

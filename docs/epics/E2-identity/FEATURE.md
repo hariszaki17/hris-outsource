@@ -203,6 +203,8 @@ flowchart TD
 
 **Entities:** `EmploymentAgreement`. **Depends on:** F2.1. **Consumed by:** E3 (placement window/auto-cap), E7 (OT calc base), E8 (payroll history).
 
+> **MVP scope note (2026-06-07, EPICS §8):** agreements are **created `active`** in one step — there is **no DRAFT** state (DB `status` CHECK = `active | superseded | closed`) and **no agreement document/attachment upload** (object/bucket storage isn't provisioned for MVP; the attachments capability is **deferred post-MVP**). The flow above reflects this. `expiring` (EA-8/EA-9) is a derived flag over an `active` PKWT, not a stored status. See [employment-agreement PRD](prds/employment-agreement.md) EA-11/EA-12.
+
 ---
 
 ### F2.3 — Client Company Directory

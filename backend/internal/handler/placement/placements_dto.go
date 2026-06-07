@@ -149,6 +149,15 @@ type placementListResponse struct {
 	HasMore    bool                `json:"has_more"`
 }
 
+// placementStatsResponse is the openapi PlacementStats object backing the
+// /placements dashboard stat cards (F3.1 / C2SSLA).
+type placementStatsResponse struct {
+	ClientCompanyCount int64 `json:"client_company_count"`
+	ActiveCount        int64 `json:"active_count"`
+	ExpiringCount      int64 `json:"expiring_count"`
+	PendingCount       int64 `json:"pending_count"`
+}
+
 type transferResponse struct {
 	Predecessor       placementResponse          `json:"predecessor"`
 	Successor         placementResponse          `json:"successor"`

@@ -118,7 +118,7 @@ export const en: Messages = {
     inbox: 'Inbox',
     employees: 'Employees',
     offboarding: 'Offboarding',
-    clientsAgreements: 'Clients & Agreements',
+    clients: 'Clients',
     clientCompanies: 'Client Companies',
     agreements: 'Agreements',
     changeRequests: 'Approvals',
@@ -392,6 +392,10 @@ export const en: Messages = {
       placeholder: 'Select employment agreement',
       disabledPlaceholder: 'Select an agent first',
       empty: 'No active agreements found',
+      loading: 'Loading…',
+      openEnded: 'Open-ended',
+      validUntil: 'until {{date}}',
+      none: 'This agent has no active employment agreement.',
     },
   },
   serviceLines: {
@@ -899,9 +903,6 @@ export const en: Messages = {
     add: 'New Agreement',
     export: 'Export',
     backToList: 'Back to Agreements',
-    rowActions: 'Row actions',
-    menuView: 'View detail',
-    viewSuccessor: 'View →',
     employeeId: 'Employee ID',
 
     tabAll: 'All',
@@ -916,14 +917,12 @@ export const en: Messages = {
     colPeriode: 'PERIOD',
     colDurasi: 'DURATION',
     colStatus: 'STATUS',
-    colPengganti: 'SUCCESSOR',
 
     filterType: 'Filter type',
     filterTypeAll: 'All types',
     filterStatus: 'Filter status',
     filterStatusAll: 'All statuses',
-    resetFilters: 'Reset',
-    searchPlaceholder: 'Search number / agent name…',
+    searchPlaceholder: 'Search name, employee ID, or agreement no.',
     resultRange: 'Showing {{count}} agreements',
 
     statTotal: 'Total Agreements',
@@ -1030,7 +1029,6 @@ export const en: Messages = {
     createSubtitle:
       'PKWT or PKWTT contract between SWP and an agent. Fields marked * are required.',
     createActiveSuccess: 'Agreement activated successfully.',
-    createDraftSuccess: 'Agreement saved as draft.',
     createError: 'Failed to create agreement.',
 
     secType: 'Agreement Type',
@@ -1041,8 +1039,6 @@ export const en: Messages = {
     secDetailPKWTTHint: 'PKWTT has no end date (indefinite contract).',
     secCompensation: 'Compensation & Tax',
     secCompensationHint: 'Fields encrypted at rest (DBEncryption · EA-4). Role-gated access.',
-    secFile: 'Agreement File',
-    secFileHint: 'Upload PDF (optional at draft, required at activation).',
 
     summaryTitle: 'Summary Preview',
 
@@ -1055,11 +1051,7 @@ export const en: Messages = {
     lawHintPKWTT: 'PKWTT is an indefinite contract. No end date is required.',
 
     footerHint: 'required · Compensation encrypted · Actions recorded in audit log',
-    saveDraft: 'Save as Draft',
     activateSubmit: 'Activate Agreement',
-
-    uploadDrop: 'Click or drag a file here',
-    uploadHint: 'PDF, JPG, PNG · Max 10 MB',
   },
   sites: {
     panel: {
@@ -1344,8 +1336,8 @@ export const en: Messages = {
     statPenempatanAktifSub: 'all companies',
     statAkanBerakhir: 'Expiring',
     statAkanBerakhirSub: '≤ 30 days',
-    statTanpaShiftLeader: 'Scheduled',
-    statTanpaShiftLeaderSub: 'not started yet',
+    statTerjadwal: 'Scheduled',
+    statTerjadwalSub: 'not started',
     colAgen: 'Agent',
     colPerusahaan: 'Client Company',
     colLiniLayanan: 'Service Line',

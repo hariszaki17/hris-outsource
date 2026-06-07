@@ -829,6 +829,10 @@ paths:
         - { $ref: '#/components/parameters/Cursor' }
         - { $ref: '#/components/parameters/Sort' }
         - in: query
+          name: q
+          description: Free-text search across employee name, employee id, or agreement number.
+          schema: { type: string }
+        - in: query
           name: employee_id
           schema: { $ref: '#/components/schemas/EmployeeId' }
         - in: query
@@ -3057,6 +3061,14 @@ components:
       properties:
         id: { $ref: '#/components/schemas/AgreementId' }
         employee_id: { $ref: '#/components/schemas/EmployeeId' }
+        employee_name:
+          type: string
+          nullable: true
+          description: >-
+            Full name of the agreement's employee (joined from the employee
+            record). Populated on the list projection for display; may be
+            absent if the employee record is unavailable.
+          example: "Budi Santoso"
         type: { $ref: '#/components/schemas/AgreementType' }
         agreement_no:
           type: string

@@ -6,9 +6,13 @@
  * Design: BackRow → HeaderCard (title + subtitle) →
  * Two-column layout:
  *   L: S Tipe Perjanjian | S Detail PKWT (conditional on type=PKWT) |
- *      S Kompensasi & Pajak | S Berkas Perjanjian (upload stub)
+ *      S Kompensasi & Pajak
  *   R: Summary card | Warn card (existing active agreement)
- * Footer: hint | Draft btn | Batal btn | Aktifkan Perjanjian btn
+ * Footer: hint | Batal btn | Aktifkan Perjanjian btn
+ *
+ * MVP: agreement is always created ACTIVE (backend default). No draft
+ * lifecycle and no attachment storage, so the upload section and the
+ * "save as draft" path are omitted.
  *
  * RHF + hand-written Zod schema (E2 Zod codegen deferred).
  * Conditional: end_date required when type=PKWT (EA-1).
@@ -20,8 +24,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { AgreementType, type AgreementWriteRequest, useCreateAgreement } from '@swp/api-client/e2';
 import { Button, FilterSelect, FormField, FormSection, Input, useToast } from '@swp/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Check, File, Info, Lock, TriangleAlert, Upload } from 'lucide-react';
-import { useRef } from 'react';
+import { ArrowLeft, Check, Info, Lock, TriangleAlert } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -98,7 +101,6 @@ export function CreateAgreementScreen() {
   const { t } = useTranslation('agreements');
   const navigate = useNavigate();
   const { toast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const createMutation = useCreateAgreement();
 
@@ -125,10 +127,10 @@ export function CreateAgreementScreen() {
   const isPKWT = watchedType === AgreementType.PKWT;
 
   // ---------------------------------------------------------------------------
-  // Submit handlers
+  // Submit handler — always creates the agreement ACTIVE (backend default)
   // ---------------------------------------------------------------------------
 
-  async function submitWithStatus(activate: boolean) {
+  async function submitCreate() {
     await handleSubmit(async (values) => {
       const body: AgreementWriteRequest = {
         employee_id: values.employee_id,
@@ -149,7 +151,7 @@ export function CreateAgreementScreen() {
         const created = res.data as import('@swp/api-client/e2').Agreement | undefined;
         toast({
           tone: 'success',
-          title: activate ? t('createActiveSuccess') : t('createDraftSuccess'),
+          title: t('createActiveSuccess'),
         });
         if (created?.id) {
           void navigate({
@@ -326,27 +328,6 @@ export function CreateAgreementScreen() {
               </div>
             </FormSection>
           </SectionCard>
-
-          {/* S Berkas Perjanjian — RlSgA */}
-          <SectionCard title={t('secFile')} subtitle={t('secFileHint')}>
-            <button
-              type="button"
-              className="flex w-full cursor-pointer flex-col items-center justify-center gap-[8px] rounded-[10px] border border-border bg-surface-2 px-6 py-[24px] min-h-[140px] hover:bg-surface"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label={t('actionUpload')}
-            >
-              <Upload className="size-6 text-text-3" aria-hidden />
-              <p className="text-[13px] font-medium text-text-2">{t('uploadDrop')}</p>
-              <p className="text-[11px] text-text-3">{t('uploadHint')}</p>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf,image/jpeg,image/png"
-              className="sr-only"
-              aria-label={t('actionUpload')}
-            />
-          </SectionCard>
         </div>
 
         {/* Right column — dIfiM */}
@@ -386,22 +367,13 @@ export function CreateAgreementScreen() {
         <div className="flex items-center gap-[10px]">
           <Button
             type="button"
-            variant="ghost"
-            onClick={() => void submitWithStatus(false)}
-            disabled={isSubmitting}
-          >
-            <File className="size-4 mr-[6px]" aria-hidden />
-            {t('saveDraft')}
-          </Button>
-          <Button
-            type="button"
             variant="secondary"
             onClick={() => void navigate({ to: '/agreements' as const })}
             disabled={isSubmitting}
           >
             {t('common.cancel', { ns: 'translation' })}
           </Button>
-          <Button type="button" onClick={() => void submitWithStatus(true)} disabled={isSubmitting}>
+          <Button type="button" onClick={() => void submitCreate()} disabled={isSubmitting}>
             <Check className="size-4 mr-[6px]" aria-hidden />
             {isSubmitting ? t('common.loading', { ns: 'translation' }) : t('activateSubmit')}
           </Button>

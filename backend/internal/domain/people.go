@@ -113,6 +113,7 @@ type Agreement struct {
 	ClosedReason  *string
 	ClosedAt      *time.Time
 	Compensation  CompensationTerms
+	EmployeeName  string // joined from employees.full_name (list view); empty if employee row missing
 	CreatedBy     *string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -123,6 +124,7 @@ type AgreementFilter struct {
 	EmployeeID      *string
 	Status          *string
 	Type            *string
+	Q               *string    // free-text ILIKE over employee name / employee id / agreement no
 	EndDateLTE      *time.Time // for EXPIRING virtual status pre-filter
 	Limit           int
 	CursorCreatedAt *time.Time

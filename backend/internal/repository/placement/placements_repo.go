@@ -79,6 +79,21 @@ func (r *PlacementRepo) ListExpiringPlacements(ctx context.Context, f domain.Exp
 	return out, nil
 }
 
+// PlacementStats returns the global placement aggregates for the dashboard stat
+// cards (F3.1 / C2SSLA). companyID scopes the counts (nil = global).
+func (r *PlacementRepo) PlacementStats(ctx context.Context, companyID *string) (domain.PlacementStats, error) {
+	row, err := r.q.PlacementGlobalStats(ctx, companyID)
+	if err != nil {
+		return domain.PlacementStats{}, err
+	}
+	return domain.PlacementStats{
+		ClientCompanyCount: row.ClientCompanyCount,
+		ActiveCount:        row.ActiveCount,
+		ExpiringCount:      row.ExpiringCount,
+		PendingCount:       row.PendingCount,
+	}, nil
+}
+
 // GetPlacementByID fetches a single placement by SWP-PL id.
 func (r *PlacementRepo) GetPlacementByID(ctx context.Context, id string) (domain.Placement, error) {
 	row, err := r.q.GetPlacementByID(ctx, id)

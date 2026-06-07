@@ -45,6 +45,7 @@ func (r *AgreementRepo) ListAgreements(ctx context.Context, f domain.AgreementFi
 		EmployeeID:      f.EmployeeID,
 		Status:          f.Status,
 		Type:            f.Type,
+		Q:               f.Q,
 		EndDateLte:      endDateLte,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,
@@ -184,6 +185,10 @@ func (r *AgreementRepo) GetAttachmentByID(ctx context.Context, id string) (domai
 // --- mapping helpers ---
 
 func mapAgreementFromList(row sqlcgen.ListAgreementsRow) domain.Agreement {
+	var employeeName string
+	if row.EmployeeName != nil {
+		employeeName = *row.EmployeeName
+	}
 	return domain.Agreement{
 		ID:            row.ID,
 		EmployeeID:    row.EmployeeID,
@@ -197,6 +202,7 @@ func mapAgreementFromList(row sqlcgen.ListAgreementsRow) domain.Agreement {
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
 		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		EmployeeName:  employeeName,
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,

@@ -35,6 +35,7 @@ func (h *AgreementHandler) ListAgreements(w http.ResponseWriter, r *http.Request
 		EmployeeID: queryStringPtr(q.Get("employee_id")),
 		Status:     queryStringPtr(q.Get("status")),
 		Type:       queryStringPtr(q.Get("type")),
+		Q:          queryStringPtr(q.Get("q")),
 		Limit:      parseLimit(q.Get("limit")),
 	}
 

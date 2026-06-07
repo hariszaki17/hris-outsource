@@ -83,6 +83,7 @@ type compensationTermsResp struct {
 type agreementResponse struct {
 	ID            string                 `json:"id"`
 	EmployeeID    string                 `json:"employee_id"`
+	EmployeeName  string                 `json:"employee_name,omitempty"`
 	Type          string                 `json:"type"`
 	AgreementNo   string                 `json:"agreement_no"`
 	StartDate     string                 `json:"start_date"` // YYYY-MM-DD
@@ -124,6 +125,7 @@ func toAgreementResponse(ag domain.Agreement, now time.Time) agreementResponse {
 	resp := agreementResponse{
 		ID:            ag.ID,
 		EmployeeID:    ag.EmployeeID,
+		EmployeeName:  ag.EmployeeName,
 		Type:          strings.ToUpper(ag.Type),
 		AgreementNo:   ag.AgreementNo,
 		StartDate:     ag.StartDate.Format("2006-01-02"),

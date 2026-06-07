@@ -20,11 +20,12 @@ import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type ListExpiringPlacementsParams,
   type ListPlacementsParams,
-  PlacementLifecycleStatus,
+  type PlacementLifecycleStatus,
+  useGetPlacementStats,
   useListExpiringPlacements,
   useListPlacements,
 } from '@swp/api-client/e3';
-import type { Placement } from '@swp/api-client/e3';
+import type { Placement, PlacementStats } from '@swp/api-client/e3';
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
@@ -41,7 +42,7 @@ import {
   Toggle,
 } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Building2, CheckCircle2, Clock, MoreVertical, Plus, UserX } from 'lucide-react';
+import { Building2, CalendarClock, CheckCircle2, Clock, MoreVertical, Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -131,6 +132,12 @@ export function PlacementsScreen() {
   });
 
   const query = expiringOn ? expiringQuery : regularQuery;
+
+  // Global placement aggregates for the stat cards (F3.1 / C2SSLA). Computed
+  // server-side over ALL non-deleted placements (not the loaded page), so the
+  // cards do not undercount past page 1. Independent of the expiring toggle.
+  const statsQuery = useGetPlacementStats();
+  const stats = statsQuery.data?.data as PlacementStats | undefined;
 
   const page = query.data?.data as
     | { data?: Placement[]; next_cursor?: string | null; has_more?: boolean }
@@ -258,24 +265,6 @@ export function PlacementsScreen() {
   }
 
   // ---------------------------------------------------------------------------
-  // Stat counts (derived from loaded page)
-  // ---------------------------------------------------------------------------
-
-  const activeCount = rows.filter(
-    (p) =>
-      p.lifecycle_status === PlacementLifecycleStatus.ACTIVE ||
-      p.lifecycle_status === PlacementLifecycleStatus.EXTENDED,
-  ).length;
-
-  const expiringCount = rows.filter(
-    (p) => p.lifecycle_status === PlacementLifecycleStatus.EXPIRING,
-  ).length;
-
-  const pendingCount = rows.filter(
-    (p) => p.lifecycle_status === PlacementLifecycleStatus.PENDING_START,
-  ).length;
-
-  // ---------------------------------------------------------------------------
   // Error state
   // ---------------------------------------------------------------------------
 
@@ -335,31 +324,31 @@ export function PlacementsScreen() {
       <div className="grid grid-cols-4 gap-4">
         <StatCard
           label={t('statPerusahaanKlien')}
-          value={query.isLoading ? '—' : '—'}
+          value={statsQuery.isLoading || !stats ? '—' : String(stats.client_company_count)}
           sub={t('statPerusahaanKlienSub')}
           icon={Building2}
           tone="brand"
         />
         <StatCard
           label={t('statPenempatanAktif')}
-          value={query.isLoading ? '—' : String(activeCount)}
+          value={statsQuery.isLoading || !stats ? '—' : String(stats.active_count)}
           sub={t('statPenempatanAktifSub')}
           icon={CheckCircle2}
           tone="ok"
         />
         <StatCard
           label={t('statAkanBerakhir')}
-          value={query.isLoading ? '—' : String(expiringCount)}
+          value={statsQuery.isLoading || !stats ? '—' : String(stats.expiring_count)}
           sub={t('statAkanBerakhirSub')}
           icon={Clock}
           tone="warn"
         />
         <StatCard
-          label={t('statTanpaShiftLeader')}
-          value={query.isLoading ? '—' : String(pendingCount)}
-          sub={t('statTanpaShiftLeaderSub')}
-          icon={UserX}
-          tone="bad"
+          label={t('statTerjadwal')}
+          value={statsQuery.isLoading || !stats ? '—' : String(stats.pending_count)}
+          sub={t('statTerjadwalSub')}
+          icon={CalendarClock}
+          tone="info"
         />
       </div>
 
@@ -383,7 +372,7 @@ export function PlacementsScreen() {
               />
             </div>
             {/* ServiceLinePicker as filter */}
-            <div className="w-[180px]">
+            <div className="w-[240px]">
               <ServiceLinePicker
                 value={search.service_line_id ?? null}
                 onChange={(v) => setSearch({ service_line_id: v ?? undefined })}

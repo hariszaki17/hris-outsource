@@ -272,6 +272,7 @@ const agreementsRoute = createRoute({
   component: AgreementsScreen,
   validateSearch: (search: Record<string, unknown>): AgreementsSearch => {
     const out: AgreementsSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
     if (search.type === AgreementType.PKWT || search.type === AgreementType.PKWTT) {
       out.type = search.type;
     }

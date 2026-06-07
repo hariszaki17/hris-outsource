@@ -53,7 +53,7 @@ import { EmployeePicker } from '../e2-identity/pickers/employee-picker.tsx';
 import { PositionPicker } from '../e2-identity/pickers/position-picker.tsx';
 import { ServiceLinePicker } from '../e2-identity/pickers/service-line-picker.tsx';
 import { SitePicker } from '../e2-identity/pickers/site-picker.tsx';
-import { AgreementPicker } from './agreement-picker.tsx';
+import { AgreementField } from './agreement-field.tsx';
 
 // ---------------------------------------------------------------------------
 // Zod schema (hand-written — F3.1 BR-1b, BR-4, BR-5, BR-6)
@@ -383,13 +383,12 @@ export function CreatePlacementScreen() {
                     required
                     error={errors.agreement_id?.message}
                   >
-                    <AgreementPicker
+                    <AgreementField
+                      employeeId={watchedEmployeeId || null}
                       value={watchedAgreementId || null}
                       onChange={(val) =>
                         setValue('agreement_id', val ?? '', { shouldValidate: true })
                       }
-                      employeeId={watchedEmployeeId || null}
-                      disabled={!watchedEmployeeId}
                       error={!!errors.agreement_id}
                     />
                   </FormField>

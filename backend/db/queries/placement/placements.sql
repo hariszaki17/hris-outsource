@@ -87,6 +87,20 @@ WHERE p.deleted_at IS NULL
 ORDER BY p.end_date ASC, p.id ASC
 LIMIT sqlc.arg(row_limit);
 
+-- name: PlacementGlobalStats :one
+-- Dashboard stat cards (C2SSLA): global placement aggregates over non-deleted
+-- placements. Optional company_id scopes the counts (shift-leader RBAC).
+SELECT
+  COUNT(DISTINCT p.client_company_id) FILTER (
+    WHERE p.lifecycle_status NOT IN ('ENDED','TRANSFERRED','SUPERSEDED','TERMINATED','RESIGNED')
+  )::bigint AS client_company_count,
+  COUNT(*) FILTER (WHERE p.lifecycle_status IN ('ACTIVE','EXTENDED'))::bigint AS active_count,
+  COUNT(*) FILTER (WHERE p.lifecycle_status = 'EXPIRING')::bigint AS expiring_count,
+  COUNT(*) FILTER (WHERE p.lifecycle_status = 'PENDING_START')::bigint AS pending_count
+FROM placements p
+WHERE p.deleted_at IS NULL
+  AND (sqlc.narg(company_id)::text IS NULL OR p.client_company_id = sqlc.narg(company_id)::text);
+
 -- name: GetPlacementByID :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,

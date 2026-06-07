@@ -236,22 +236,30 @@ func (q *Queries) GetAgreementByID(ctx context.Context, id string) (GetAgreement
 }
 
 const listAgreements = `-- name: ListAgreements :many
-SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
-       predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
-       created_by, created_at, updated_at
-FROM employment_agreements
-WHERE deleted_at IS NULL
-  AND ($1::text IS NULL OR employee_id = $1::text)
-  AND ($2::text IS NULL OR status = $2::text)
-  AND ($3::text IS NULL OR type = $3::text)
-  AND ($4::date IS NULL OR end_date <= $4::date)
+SELECT a.id, a.employee_id, a.type, a.agreement_no, a.start_date, a.end_date, a.status,
+       a.predecessor_id, a.successor_id, a.closed_reason, a.closed_at,
+       a.base_salary_idr, a.annual_leave_entitlement_days, a.bpjs_terms, a.tax_profile, a.comp_effective_date,
+       a.created_by, a.created_at, a.updated_at,
+       e.full_name AS employee_name
+FROM employment_agreements a
+LEFT JOIN employees e ON e.id = a.employee_id
+WHERE a.deleted_at IS NULL
+  AND ($1::text IS NULL OR a.employee_id = $1::text)
+  AND ($2::text IS NULL OR a.status = $2::text)
+  AND ($3::text IS NULL OR a.type = $3::text)
+  AND ($4::date IS NULL OR a.end_date <= $4::date)
   AND (
-        $5::timestamptz IS NULL
-        OR (created_at, id) < ($5::timestamptz, $6::text)
+        $5::text IS NULL
+        OR e.full_name    ILIKE '%' || $5::text || '%'
+        OR a.employee_id  ILIKE '%' || $5::text || '%'
+        OR a.agreement_no ILIKE '%' || $5::text || '%'
       )
-ORDER BY created_at DESC, id DESC
-LIMIT $7
+  AND (
+        $6::timestamptz IS NULL
+        OR (a.created_at, a.id) < ($6::timestamptz, $7::text)
+      )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $8
 `
 
 type ListAgreementsParams struct {
@@ -259,6 +267,7 @@ type ListAgreementsParams struct {
 	Status          *string
 	Type            *string
 	EndDateLte      pgtype.Date
+	Q               *string
 	CursorCreatedAt *time.Time
 	CursorID        *string
 	RowLimit        int32
@@ -284,16 +293,20 @@ type ListAgreementsRow struct {
 	CreatedBy                  *string
 	CreatedAt                  time.Time
 	UpdatedAt                  time.Time
+	EmployeeName               *string
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
+// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before),
+// q (free-text ILIKE over employee full_name / employee_id / agreement_no).
+// LEFT JOIN employees to surface the employee full name on each row.
 func (q *Queries) ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error) {
 	rows, err := q.db.Query(ctx, listAgreements,
 		arg.EmployeeID,
 		arg.Status,
 		arg.Type,
 		arg.EndDateLte,
+		arg.Q,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,
@@ -325,6 +338,7 @@ func (q *Queries) ListAgreements(ctx context.Context, arg ListAgreementsParams) 
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EmployeeName,
 		); err != nil {
 			return nil, err
 		}

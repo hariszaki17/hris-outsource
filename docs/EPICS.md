@@ -184,6 +184,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **D3 — temporary credential (unchanged).** Initial credential is a **system-generated temporary password**, shown once to the creating admin, **force-rotated on first login** (already implemented; kept — no HR-typed passwords).
   - **D4 — migration backfill.** E9 (DATA-MAPPING G-5): every legacy employee without a user is **backfilled a User keyed on phone** (email if present). **No null `user_id` post-migration.**
   - See [E1 FEATURE], [E2 employees PRD], [E9 DATA-MAPPING G-5].
+- ✅ **Employment-agreement MVP simplifications** *(resolved 2026-06-07)* — **no attachment upload** at create (object/bucket storage isn't provisioned for MVP; the agreement-attachments capability — migration 00018 / attachment endpoints — is **deferred post-MVP**; agreements are created without an attached PDF); **no "Save as Draft"** (agreements are created **directly active** — the status set is `active | superseded | closed`, DRAFT was never a real status); the **agreements list shows the joined employee name** alongside the employee id and is **searchable by employee name, employee id, or agreement number** (`q` free-text filter), dropping the successor/"Pengganti" column, the per-row kebab menu, and the filter "Reset" button. See [E2 employment-agreement PRD].
 
 **E4 — Shift & Scheduling**
 - ✅ Agent shift-swap / day-off requests: **deferred to post-v1** (v1 = leader-driven schedule edits only; F4.4 swaps drop from v1 scope)

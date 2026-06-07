@@ -106,6 +106,7 @@ type PlacementRepository interface {
 	// Reads (pool).
 	ListPlacements(ctx context.Context, f domain.PlacementFilter) ([]domain.Placement, error)
 	ListExpiringPlacements(ctx context.Context, f domain.ExpiringFilter) ([]domain.Placement, error)
+	PlacementStats(ctx context.Context, companyID *string) (domain.PlacementStats, error)
 	GetPlacementByID(ctx context.Context, id string) (domain.Placement, error)
 	GetPlacementChain(ctx context.Context, id string) ([]domain.Placement, error)
 	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (domain.Placement, error)
@@ -296,6 +297,17 @@ func (s *PlacementService) ListExpiringPlacements(ctx context.Context, withinDay
 		next = &cur
 	}
 	return rows, next, nil
+}
+
+// PlacementStats returns the global placement aggregates backing the /placements
+// dashboard stat cards (F3.1 / C2SSLA). companyID scopes the counts (nil =
+// global; set to a shift-leader's company for company-scoped totals).
+func (s *PlacementService) PlacementStats(ctx context.Context, companyID *string) (domain.PlacementStats, error) {
+	stats, err := s.repo.PlacementStats(ctx, companyID)
+	if err != nil {
+		return domain.PlacementStats{}, apperr.Internal(err)
+	}
+	return stats, nil
 }
 
 // PlacementDetail bundles a placement with its chain + current leader.

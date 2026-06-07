@@ -73,9 +73,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/placements', labelKey: 'nav.placements', icon: MapPin, requires: 'placements.read' },
   {
     to: '/client-companies',
-    labelKey: 'nav.clientsAgreements',
+    labelKey: 'nav.clients',
     icon: Building2,
-    requires: { anyOf: ['clients.read', 'agreements.read'] },
+    requires: 'clients.read',
   },
   {
     to: '/schedule',
@@ -116,11 +116,13 @@ export const SETTINGS_ITEM: NavItem = {
 export const SECTION_SUBNAV: Record<string, readonly SubnavItem[]> = {
   '/employees': [
     { to: '/employees', labelKey: 'nav.employees', requires: 'employees.read' },
+    // Perjanjian kerja (employment agreement) is a SWP↔employee contract — it lives
+    // under Karyawan, not under Klien (the agreement is not client-scoped).
+    { to: '/agreements', labelKey: 'nav.agreements', requires: 'agreements.read' },
     { to: '/change-requests', labelKey: 'nav.changeRequests', requires: 'change_requests.read' },
   ],
   '/client-companies': [
     { to: '/client-companies', labelKey: 'nav.clientCompanies', requires: 'clients.read' },
-    { to: '/agreements', labelKey: 'nav.agreements', requires: 'agreements.read' },
     { to: '/service-lines', labelKey: 'nav.serviceLines', requires: 'service_lines.read' },
   ],
   '/schedule': [

@@ -26,7 +26,7 @@ describe('visibleNav (permission-keyed)', () => {
       'nav.inbox',
       'nav.employees',
       'nav.placements',
-      'nav.clientsAgreements',
+      'nav.clients',
       'nav.scheduleShift',
       'nav.attendance',
       'nav.leave',
@@ -55,7 +55,7 @@ describe('visibleNav (permission-keyed)', () => {
       'nav.leave',
       'nav.overtime',
     ]);
-    expect(sl).not.toContain('nav.clientsAgreements');
+    expect(sl).not.toContain('nav.clients');
     expect(sl).not.toContain('nav.payroll');
     expect(sl).not.toContain('nav.reports');
     expect(hasPermission(permissionsForRole('shift_leader'), SETTINGS_ITEM.requires)).toBe(false);
@@ -70,10 +70,10 @@ describe('visibleNav (permission-keyed)', () => {
 });
 
 describe('section sub-nav (sub-features live under their parent module)', () => {
-  it('clients & agreements is now its own primary module, not under Karyawan', () => {
+  it('agreements live under Karyawan; clients is its own module (no agreements)', () => {
     expect(NAV_ITEMS.map((i) => i.to)).toContain('/client-companies');
     expect(activeSection('/client-companies')).toBe('/client-companies');
-    expect(activeSection('/agreements')).toBe('/client-companies');
+    expect(activeSection('/agreements')).toBe('/employees');
     expect(activeSection('/service-lines')).toBe('/client-companies');
   });
 
@@ -103,9 +103,9 @@ describe('section sub-nav (sub-features live under their parent module)', () => 
   });
 
   it('a section with <2 visible tabs for a role renders no sub-nav', () => {
-    // Karyawan: shift_leader only sees /employees (not change-requests) → no sub-nav strip.
+    // Karyawan: shift_leader only sees /employees (not agreements/change-requests) → no sub-nav strip.
     expect(subnavForSection('/employees', permissionsForRole('shift_leader'))).toEqual([]);
-    // Clients & Agreements is admin-only entirely → empty for shift_leader.
+    // Klien is admin-only entirely → empty for shift_leader.
     expect(subnavForSection('/client-companies', permissionsForRole('shift_leader'))).toEqual([]);
   });
 

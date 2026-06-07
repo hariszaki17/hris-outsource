@@ -12,7 +12,7 @@
  * No raw hex. No new npm deps. Outside-click: document mousedown (ENGINEERING.md pattern).
  */
 
-import { ChevronDown, Loader2, Search } from 'lucide-react';
+import { ChevronDown, Loader2, Search, X } from 'lucide-react';
 import * as React from 'react';
 import { cn } from '../lib/cn.ts';
 
@@ -37,6 +37,8 @@ export interface ComboboxProps {
   disabled?: boolean;
   emptyText?: string;
   error?: boolean;
+  /** aria-label for the clear (×) button shown when a value is selected. */
+  clearLabel?: string;
   renderOption?: (option: ComboboxOption, selected: boolean) => React.ReactNode;
 }
 
@@ -56,6 +58,7 @@ export const Combobox = React.forwardRef<HTMLDivElement, ComboboxProps>(
       disabled = false,
       emptyText = 'Tidak ada pilihan',
       error = false,
+      clearLabel = 'Hapus pilihan',
       renderOption,
     },
     ref,
@@ -146,7 +149,9 @@ export const Combobox = React.forwardRef<HTMLDivElement, ComboboxProps>(
 
     return (
       <div ref={containerRef} className="relative w-full" onKeyDown={handleKeyDown}>
-        {/* Trigger */}
+        {/* Trigger. The clear (×) and chevron are absolutely-positioned siblings
+            (not nested in the button) — the chevron is pointer-events-none so
+            clicks fall through to the trigger; the clear button captures its own. */}
         <button
           type="button"
           aria-haspopup="listbox"
@@ -155,31 +160,46 @@ export const Combobox = React.forwardRef<HTMLDivElement, ComboboxProps>(
           disabled={disabled}
           onClick={handleTriggerClick}
           className={cn(
-            'flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-sm',
+            'flex w-full items-center rounded-lg border py-2.5 pl-3 text-sm',
             'bg-surface transition-colors',
+            selectedOption && !disabled ? 'pr-14' : 'pr-9',
             error
               ? 'border-bad-tx focus-within:ring-bad-tx/30'
               : 'border-border focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20',
             disabled && 'cursor-not-allowed opacity-50',
           )}
         >
-          <Search aria-hidden className="h-4 w-4 shrink-0 text-text-3" />
           <span
             className={cn(
-              'flex-1 truncate text-left',
+              'min-w-0 flex-1 truncate text-left',
               selectedOption ? 'text-text' : 'text-text-3',
             )}
           >
             {selectedOption ? selectedOption.label : placeholder}
           </span>
-          <ChevronDown
-            aria-hidden
-            className={cn(
-              'h-4 w-4 shrink-0 text-text-3 transition-transform',
-              open && 'rotate-180',
-            )}
-          />
         </button>
+        {selectedOption && !disabled && (
+          <button
+            type="button"
+            aria-label={clearLabel}
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange(null);
+              onSearch('');
+              setOpen(false);
+            }}
+            className="absolute right-8 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-text-3 hover:bg-surface-2 hover:text-text"
+          >
+            <X aria-hidden className="h-4 w-4" />
+          </button>
+        )}
+        <ChevronDown
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-3 transition-transform',
+            open && 'rotate-180',
+          )}
+        />
 
         {/* Popover */}
         {open && (

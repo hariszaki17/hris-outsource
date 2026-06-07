@@ -106,6 +106,16 @@ type RosterStatusCount struct {
 	Count  int
 }
 
+// PlacementStats holds the global placement aggregates backing the /placements
+// dashboard stat cards (F3.1 / C2SSLA). Counts are over non-deleted placements,
+// optionally scoped to a single company (shift-leader RBAC).
+type PlacementStats struct {
+	ClientCompanyCount int64
+	ActiveCount        int64
+	ExpiringCount      int64
+	PendingCount       int64
+}
+
 // PlacementFilter holds the decoded query parameters for GET /placements and the
 // company roster. All fields optional; cursor fields are set when paginating.
 //

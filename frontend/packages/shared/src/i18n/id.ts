@@ -121,7 +121,7 @@ export const id = {
     inbox: 'Kotak Masuk',
     employees: 'Karyawan',
     offboarding: 'Offboarding',
-    clientsAgreements: 'Klien & Perjanjian',
+    clients: 'Klien',
     clientCompanies: 'Perusahaan Klien',
     agreements: 'Perjanjian Kerja',
     changeRequests: 'Persetujuan',
@@ -391,8 +391,12 @@ export const id = {
     },
     agreement: {
       placeholder: 'Pilih perjanjian kerja',
-      disabledPlaceholder: 'Pilih agen dahulu',
+      disabledPlaceholder: 'Pilih agen terlebih dahulu',
       empty: 'Tidak ada perjanjian aktif ditemukan',
+      loading: 'Memuat…',
+      openEnded: 'Terbuka',
+      validUntil: 's/d {{date}}',
+      none: 'Agen belum punya perjanjian kerja aktif.',
     },
   },
   placementForm: {
@@ -968,9 +972,6 @@ export const id = {
     add: 'Buat Perjanjian',
     export: 'Ekspor',
     backToList: 'Kembali ke Perjanjian Kerja',
-    rowActions: 'Aksi baris',
-    menuView: 'Lihat detail',
-    viewSuccessor: 'Lihat →',
     employeeId: 'Karyawan ID',
 
     tabAll: 'Semua',
@@ -985,14 +986,12 @@ export const id = {
     colPeriode: 'PERIODE',
     colDurasi: 'DURASI',
     colStatus: 'STATUS',
-    colPengganti: 'PENGGANTI',
 
     filterType: 'Filter tipe',
     filterTypeAll: 'Semua tipe',
     filterStatus: 'Filter status',
     filterStatusAll: 'Semua status',
-    resetFilters: 'Reset',
-    searchPlaceholder: 'Cari nomor / nama agen…',
+    searchPlaceholder: 'Cari nama, ID karyawan, atau no. perjanjian',
     resultRange: 'Menampilkan {{count}} perjanjian',
 
     statTotal: 'Total Perjanjian',
@@ -1098,7 +1097,6 @@ export const id = {
     createTitle: 'Buat Perjanjian Kerja',
     createSubtitle: 'Kontrak PKWT atau PKWTT antara SWP dan agen. Field * wajib diisi.',
     createActiveSuccess: 'Perjanjian berhasil diaktifkan.',
-    createDraftSuccess: 'Perjanjian disimpan sebagai draft.',
     createError: 'Gagal membuat perjanjian.',
 
     secType: 'Tipe Perjanjian',
@@ -1109,8 +1107,6 @@ export const id = {
     secDetailPKWTTHint: 'PKWTT tidak memiliki tanggal akhir (kontrak tidak terbatas).',
     secCompensation: 'Kompensasi & Pajak',
     secCompensationHint: 'Field dienkripsi (DBEncryption · EA-4). Akses dibatasi role.',
-    secFile: 'Berkas Perjanjian',
-    secFileHint: 'Unggah PDF (opsional saat draft, wajib saat aktivasi).',
 
     summaryTitle: 'Pratinjau Ringkasan',
 
@@ -1124,11 +1120,7 @@ export const id = {
       'PKWTT adalah kontrak tidak terbatas. Tidak ada tanggal akhir yang dipersyaratkan.',
 
     footerHint: 'wajib · Kompensasi dienkripsi · Aksi dicatat di audit log',
-    saveDraft: 'Simpan sebagai Draft',
     activateSubmit: 'Aktifkan Perjanjian',
-
-    uploadDrop: 'Klik atau seret berkas ke sini',
-    uploadHint: 'PDF, JPG, PNG · Maks. 10 MB',
   },
   sites: {
     panel: {
@@ -1355,8 +1347,8 @@ export const id = {
     statPenempatanAktifSub: 'seluruh klien',
     statAkanBerakhir: 'Akan berakhir',
     statAkanBerakhirSub: '≤ 30 hari',
-    statTanpaShiftLeader: 'Terjadwal',
-    statTanpaShiftLeaderSub: 'belum mulai',
+    statTerjadwal: 'Terjadwal',
+    statTerjadwalSub: 'belum mulai',
     colAgen: 'Agen',
     colPerusahaan: 'Perusahaan Klien',
     colLiniLayanan: 'Lini Layanan',

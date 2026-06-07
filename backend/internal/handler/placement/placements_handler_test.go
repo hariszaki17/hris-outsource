@@ -189,6 +189,31 @@ func (r *fakePlacementRepo) ListExpiringPlacements(_ context.Context, f domain.E
 	return out, nil
 }
 
+func (r *fakePlacementRepo) PlacementStats(_ context.Context, companyID *string) (domain.PlacementStats, error) {
+	var stats domain.PlacementStats
+	companies := map[string]bool{}
+	for _, p := range r.placements {
+		if companyID != nil && p.ClientCompanyID != *companyID {
+			continue
+		}
+		switch p.LifecycleStatus {
+		case "ACTIVE", "EXTENDED":
+			stats.ActiveCount++
+		case "EXPIRING":
+			stats.ExpiringCount++
+		case "PENDING_START":
+			stats.PendingCount++
+		}
+		switch p.LifecycleStatus {
+		case "ENDED", "TRANSFERRED", "SUPERSEDED", "TERMINATED", "RESIGNED":
+		default:
+			companies[p.ClientCompanyID] = true
+		}
+	}
+	stats.ClientCompanyCount = int64(len(companies))
+	return stats, nil
+}
+
 func (r *fakePlacementRepo) GetPlacementByID(_ context.Context, id string) (domain.Placement, error) {
 	p, ok := r.placements[id]
 	if !ok {
