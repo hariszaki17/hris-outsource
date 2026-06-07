@@ -14,7 +14,6 @@
  *   Card: Periode & Ketentuan
  *     Row: start_date | end_date
  *     CapNote (info-bg)
- *     Row: annual_leave_entitlement_days | base_salary_ref_idr
  *     Row: notes (full-width)
  *     Row: backdate_reason (conditional — start_date < today)
  *   Footer: hint | Batal | Simpan Penempatan
@@ -62,22 +61,14 @@ import { AgreementPicker } from './agreement-picker.tsx';
 
 const placementSchema = z
   .object({
-    employee_id: z.string().min(1),
-    agreement_id: z.string().min(1),
-    client_company_id: z.string().min(1),
-    site_id: z.string().min(1),
-    service_line_id: z.string().min(1),
-    position_id: z.string().min(1),
-    start_date: z.string().min(1),
+    employee_id: z.string().min(1, 'Agen wajib dipilih'),
+    agreement_id: z.string().min(1, 'Perjanjian kerja wajib dipilih'),
+    client_company_id: z.string().min(1, 'Perusahaan klien wajib dipilih'),
+    site_id: z.string().min(1, 'Site wajib dipilih'),
+    service_line_id: z.string().min(1, 'Lini layanan wajib dipilih'),
+    position_id: z.string().min(1, 'Posisi wajib dipilih'),
+    start_date: z.string().min(1, 'Tanggal mulai wajib diisi'),
     end_date: z.string().nullable().optional(),
-    annual_leave_entitlement_days: z
-      .union([z.number().int().min(0), z.nan(), z.literal(0)])
-      .nullable()
-      .optional(),
-    base_salary_ref_idr: z
-      .union([z.number().min(0), z.nan(), z.literal(0)])
-      .nullable()
-      .optional(),
     backdate_reason: z.string().max(1000).nullable().optional(),
     notes: z.string().max(2000).nullable().optional(),
   })
@@ -158,8 +149,8 @@ function SectionCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="border-b border-border-soft px-5 py-[14px]">
+    <div className="rounded-xl border border-border bg-surface">
+      <div className="rounded-t-xl border-b border-border-soft px-5 py-[14px]">
         <p className="text-[14px] font-bold text-text">{title}</p>
       </div>
       <div className="flex flex-col gap-4 p-5">{children}</div>
@@ -199,8 +190,6 @@ export function CreatePlacementScreen() {
       position_id: '',
       start_date: '',
       end_date: null,
-      annual_leave_entitlement_days: null,
-      base_salary_ref_idr: null,
       backdate_reason: null,
       notes: null,
     },
@@ -244,8 +233,6 @@ export function CreatePlacementScreen() {
           position_id: values.position_id,
           start_date: values.start_date,
           end_date: values.end_date ?? null,
-          annual_leave_entitlement_days: values.annual_leave_entitlement_days ?? null,
-          base_salary_ref_idr: values.base_salary_ref_idr ?? null,
           backdate_reason: values.backdate_reason ?? null,
           notes: values.notes ?? null,
         },
@@ -555,43 +542,20 @@ export function CreatePlacementScreen() {
                 <p className="text-[12px] leading-[1.4] text-info-tx">{t('capNote')}</p>
               </div>
 
-              {/* Row: annual leave + base salary — g3OzZz D2zhfK */}
-              <FieldRow>
-                <div className="flex-1 min-w-0">
-                  <FormField
-                    label={t('fieldAnnualLeave')}
-                    htmlFor="annual_leave_entitlement_days"
-                    hint={t('fieldAnnualLeaveHint')}
-                    error={errors.annual_leave_entitlement_days?.message}
+              {/* Leave-quota info — annual leave is an employment-agreement term; the quota
+                  is auto-prorated from the agent's onboarding date and adjustable later in Cuti. */}
+              <div className="flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-[14px] py-[9px]">
+                <Info className="mt-[1px] size-[15px] shrink-0 text-info-tx" aria-hidden />
+                <p className="text-[12px] leading-[1.4] text-info-tx">
+                  {t('leaveQuotaNote')}{' '}
+                  <Link
+                    to="/leave/quotas"
+                    className="font-semibold underline underline-offset-2 hover:no-underline"
                   >
-                    <Input
-                      id="annual_leave_entitlement_days"
-                      type="number"
-                      min={0}
-                      placeholder="12"
-                      {...register('annual_leave_entitlement_days', { valueAsNumber: true })}
-                      aria-invalid={!!errors.annual_leave_entitlement_days}
-                    />
-                  </FormField>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <FormField
-                    label={t('fieldBaseSalary')}
-                    htmlFor="base_salary_ref_idr"
-                    hint={t('fieldBaseSalaryHint')}
-                    error={errors.base_salary_ref_idr?.message}
-                  >
-                    <Input
-                      id="base_salary_ref_idr"
-                      type="number"
-                      min={0}
-                      placeholder="4900000"
-                      {...register('base_salary_ref_idr', { valueAsNumber: true })}
-                      aria-invalid={!!errors.base_salary_ref_idr}
-                    />
-                  </FormField>
-                </div>
-              </FieldRow>
+                    {t('leaveQuotaNoteLink')}
+                  </Link>
+                </p>
+              </div>
 
               {/* Notes — g3OzZz XFXPx H8XsW */}
               <FormField label={t('fieldNotes')} htmlFor="notes" error={errors.notes?.message}>

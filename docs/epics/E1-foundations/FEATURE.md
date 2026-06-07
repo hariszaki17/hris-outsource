@@ -7,7 +7,7 @@
 
 ## 1. Goal & outcome
 
-Stand up the platform foundations: a runnable **Go API + React web + React Native/mobile + Postgres** with **email/password auth**, a **fixed-role RBAC** model with shift-leader **company scoping**, a **comprehensive audit log** (every mutation), and shared conventions (**Bahasa Indonesia** UI, **Asia/Jakarta** timezone, consistent API errors/pagination/validation). Everything in E2–E10 builds on this.
+Stand up the platform foundations: a runnable **Go API + React web + React Native/mobile + Postgres** with **phone-or-email + password auth**, a **fixed-role RBAC** model with shift-leader **company scoping**, a **comprehensive audit log** (every mutation), and shared conventions (**Bahasa Indonesia** UI, **Asia/Jakarta** timezone, consistent API errors/pagination/validation). Everything in E2–E10 builds on this.
 
 ## 2. Actors & roles
 
@@ -34,8 +34,9 @@ erDiagram
 
     USER {
         bigint id PK
-        bigint employee_id FK "1:1 with Employee (E2)"
-        string email "unique"
+        bigint employee_id FK "1:1 non-null with Employee (E2)"
+        string phone "unique, required"
+        string email "unique, nullable"
         string password_hash
         string role "super_admin|hr_admin|shift_leader|agent"
         string status "active|disabled"
@@ -63,7 +64,7 @@ erDiagram
 - **INV-2:** **four fixed roles**; permissions are seeded per role (not user-editable in v1).
 - **INV-3:** a **shift leader's company scope is derived** from their active E3 `ShiftLeaderAssignment` — not a static field.
 - **INV-4:** **every mutating action** writes an `AuditLog` entry (comprehensive).
-- **INV-5:** **email + password** auth for all users; passwords hashed (bcrypt/argon2).
+- **INV-5:** **phone-or-email + password** auth for all users; **phone required+unique**, **email optional+unique**; passwords hashed (argon2id/bcrypt).
 - **INV-6:** UI is **Bahasa Indonesia**; **Asia/Jakarta** is the canonical timezone for all date/time logic.
 
 ## 5. Features
@@ -87,12 +88,12 @@ erDiagram
 
 ### F1.1 — Authentication & Sessions
 
-Email/password login for all users across web + mobile, with secure password storage, password reset, and session/token management. Login provisioning is driven from E2 (employee → user, opt-in).
+Phone-or-email + password login for all users across web + mobile, with secure password storage, password reset, and session/token management. Login provisioning is driven from E2 but **automatic at employee create** (employee → user, 1:1 non-null) — not opt-in.
 
 ```mermaid
 flowchart TD
     subgraph U[User - web/mobile]
-        A1([Login: email + password]) --> A2[Submit]
+        A1([Login: phone or email + password]) --> A2[Submit]
         A5([Forgot password]) --> A6[Request reset link]
     end
     subgraph SYS[System]
@@ -103,6 +104,8 @@ flowchart TD
         A6 --> S5[Email reset token if account exists]
     end
 ```
+
+> **Note:** the `Valid + active?` gate and every subsequent request consult **`users.status`** and the session-epoch **`users.tokens_valid_after`** — token issuance stamps the current epoch, and a per-request middleware check rejects tokens issued before it. This is how disable/offboard ([F2.7](../E2-identity/prds/offboarding.md)) revoke instantly; placement-end never does.
 
 **Entities:** `User`, sessions/tokens. **Depends on:** E2 (provisioning).
 
@@ -168,17 +171,19 @@ flowchart LR
 ## 7. Decisions & open questions
 
 **Resolved (2026-05-29):**
-- ✅ **Email + password** auth for all users (web + mobile).
+- ✅ **Phone-or-email + password** auth for all users (web + mobile); phone required+unique, email optional+unique. *(Updated 2026-06-07 — was email-only.)*
 - ✅ **Fixed four roles** + shift-leader **company scoping** (scope from E3).
 - ✅ **Comprehensive audit** (every mutation).
 - ✅ **Bahasa Indonesia** UI; **Asia/Jakarta** canonical timezone.
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **MFA** → post-v1 (admin/HR hardening later).
-- ✅ **Email-less agents** → assign an email at provisioning; login stays email + password.
+- ✅ **Email-less agents** → solved by **phone** as the universal required identifier (no email needed to log in). *(Superseded 2026-06-07: every employee auto-provisions a login at create — Employee↔User 1:1 non-null, no opt-in step — with a system-generated temp password shown once and force-rotated on first login.)*
 - ✅ **Role assignment** → super_admin **and** hr_admin may assign roles.
 
+**Resolved (2026-06-06):**
+- ✅ **Session model** → **JWT access token + opaque (rotating) refresh token**, plus a **per-request user `status` + session-epoch (`users.tokens_valid_after`) check** in the auth middleware for **instant revocation** (no longer purely stateless JWT). Disable/offboard bump the epoch and call `RevokeAllRefreshForUser`; outstanding access tokens fail at the next request. Revocation is tied to **employment-end** ([F2.7](../E2-identity/prds/offboarding.md), OB-#) — placement transfer/renewal/supersede/auto-end never revoke. *Resolves the prior "session model deferred / revocation out of scope" note.*
+
 **Deferred to build/tech phase:**
-1. Session model (JWT access+refresh vs server sessions) + token lifetimes / mobile "stay logged in".
-2. Password policy (complexity, rotation, lockout/rate-limit thresholds).
-3. Audit retention + storage strategy (high volume).
+1. Password policy (complexity, rotation, lockout/rate-limit thresholds).
+2. Audit retention + storage strategy (high volume).

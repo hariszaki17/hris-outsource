@@ -34,6 +34,20 @@ var defaultParams = argon2Params{
 
 var ErrPasswordMismatch = errors.New("password mismatch")
 
+// GenerateTempPassword returns a random temporary password that satisfies the
+// platform policy (>=10 chars; upper, lower, digit, symbol). EP-3 show-once: the
+// caller returns this plaintext to the admin ONCE and persists only its argon2id
+// hash — the temp password itself is never stored.
+func GenerateTempPassword() (string, error) {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	// "Swp-" guarantees upper+lower+symbol; the trailing "9" guarantees a digit;
+	// the base64url body (A-Za-z0-9-_) keeps it unguessable. ~21 chars.
+	return "Swp-" + base64.RawURLEncoding.EncodeToString(b) + "9", nil
+}
+
 // HashPassword returns a PHC-encoded argon2id hash.
 func HashPassword(plain string) (string, error) {
 	p := defaultParams

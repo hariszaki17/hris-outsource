@@ -216,8 +216,6 @@ paths:
                   position_id: SWP-POS-021
                   start_date: '2026-06-03'
                   end_date: '2026-12-31'
-                  annual_leave_entitlement_days: 12
-                  base_salary_ref_idr: 4800000
                   notes: 'Replacement for Andi (resigned).'
               future:
                 summary: Future-dated (PENDING_START) placement
@@ -230,7 +228,6 @@ paths:
                   position_id: SWP-POS-021
                   start_date: '2026-07-01'
                   end_date: '2027-06-30'
-                  annual_leave_entitlement_days: 12
               backdated:
                 summary: Backdated by HR Admin (requires reason)
                 value:
@@ -374,7 +371,7 @@ paths:
         anything that changes the chain or lifecycle.
 
         Editable: `position_id`, `end_date` (within agreement / BR-1b),
-        `annual_leave_entitlement_days`, `base_salary_ref_idr`, `notes`.
+        `notes`.
 
         Terminal-state placements (LC-1) reject all edits with
         `409 TERMINAL_STATE_IMMUTABLE` except via Super Admin override
@@ -389,7 +386,6 @@ paths:
               fixNotes:
                 value:
                   notes: 'Pindah pos parkir Lantai B2 — disesuaikan dengan supervisor site.'
-                  base_salary_ref_idr: 5000000
       responses:
         '200':
           description: Updated placement.
@@ -523,9 +519,6 @@ paths:
                   new_start_date: '2027-01-01'
                   new_end_date: '2027-12-31'
                   new_agreement_id: SWP-AG-991
-                  terms_changes:
-                    annual_leave_entitlement_days: 14
-                    base_salary_ref_idr: 5200000
                   notes: 'Renewal under new PKWT 2027.'
       responses:
         '201':
@@ -573,6 +566,15 @@ paths:
         reason capture, Wave-1). Closes the placement with
         `ended_reason = ENDED` (default) or one of the explicit reasons
         listed below. The placement transitions to `ENDED`.
+
+        This is an **explicit HR-decision action** (taken at or after the
+        `EXPIRING` flag via the Inbox decision task), **not** a system
+        auto-end at `end_date`. Per F2.7, a PKWT placement reaching its
+        `end_date` with no HR decision stays `EXPIRING` (grace) — the
+        login also stays valid — until HR explicitly ends it here; there
+        is no auto-end of the placement (the former LC-4 auto-end is
+        removed). Ending a placement never revokes the agent's login;
+        only employment-end / offboarding (E2 F2.7) does that.
 
         If the agent was the company's shift leader, the assignment
         auto-vacates with `vacated_reason = PLACEMENT_ENDED` (SL-6) and a
@@ -1444,7 +1446,10 @@ components:
           straight to `SUPERSEDED`). Reserved for E9 migrated records
           that don't fit the cleaner state machine.
         - `EXPIRING` — system-flagged 30 days before `end_date` (LC-3).
-        - `ENDED` — end-of-term reached (LC-4) **or** soft-ended via `:end`.
+        - `ENDED` — HR ended the placement via `:end` (end-of-term or soft
+          end). Per F2.7 there is no auto-end at `end_date` (former LC-4
+          auto-end removed); an expired placement stays `EXPIRING` until HR
+          acts on the Inbox decision.
         - `TRANSFERRED` — closed because the agent was transferred (RT-2).
         - `TERMINATED` — closed early by HR (`:terminate`, LC-5).
         - `RESIGNED` — closed because the agent resigned (LC-6).
@@ -1465,7 +1470,12 @@ components:
 
     EndedReason:
       type: string
-      description: Reason associated with a terminal lifecycle state.
+      description: |
+        Reason associated with a terminal lifecycle state. The
+        `DECEASED` / `RETIRED` / `ABSCONDED` values are shared with the
+        E2 employment-end reason enum (F2.7) — when a placement is ended
+        because the agent's employment ended for one of these reasons,
+        the same reason is recorded here.
       enum:
         - END_OF_TERM    # natural expiry
         - ENDED          # soft-end (manual, non-destructive)
@@ -1473,6 +1483,9 @@ components:
         - RESIGNED       # agent-initiated
         - TRANSFERRED    # closed because of a transfer
         - SUPERSEDED     # closed because of a renewal
+        - DECEASED       # agent deceased (F2.7, employment-end)
+        - RETIRED        # agent retired (F2.7, employment-end)
+        - ABSCONDED      # agent mangkir / absconded (F2.7, employment-end)
 
     Placement:
       type: object
@@ -1561,18 +1574,6 @@ components:
             Null = open-ended (typical for PKWTT). For PKWT, must sit
             within the agreement period or be auto-capped (BR-1b).
           example: '2026-12-31'
-        annual_leave_entitlement_days:
-          type: integer
-          minimum: 0
-          nullable: true
-          description: Cuti tahunan entitlement at this placement.
-          example: 12
-        base_salary_ref_idr:
-          type: integer
-          minimum: 0
-          nullable: true
-          description: Reference only — payroll is read-only (E8).
-          example: 4800000
         notes:
           type: string
           nullable: true
@@ -1646,8 +1647,6 @@ components:
         position_name: 'Parking Attendant'
         start_date: '2026-06-03'
         end_date: '2026-12-31'
-        annual_leave_entitlement_days: 12
-        base_salary_ref_idr: 4800000
         notes: 'Replacement for Andi (resigned).'
         lifecycle_status: ACTIVE
         status_changed_at: '2026-06-03T01:00:00Z'
@@ -1731,14 +1730,6 @@ components:
           format: date
           nullable: true
           description: Optional — null = open-ended (PKWTT). If set, must be `> start_date` (BR-4).
-        annual_leave_entitlement_days:
-          type: integer
-          minimum: 0
-          nullable: true
-        base_salary_ref_idr:
-          type: integer
-          minimum: 0
-          nullable: true
         backdate_reason:
           type: string
           nullable: true
@@ -1761,14 +1752,6 @@ components:
         end_date:
           type: string
           format: date
-          nullable: true
-        annual_leave_entitlement_days:
-          type: integer
-          minimum: 0
-          nullable: true
-        base_salary_ref_idr:
-          type: integer
-          minimum: 0
           nullable: true
         notes:
           type: string
@@ -1855,14 +1838,6 @@ components:
             Required if the agent has moved to a new agreement (e.g.
             PKWT renewed).
           nullable: true
-        new_annual_leave_entitlement_days:
-          type: integer
-          minimum: 0
-          nullable: true
-        new_base_salary_ref_idr:
-          type: integer
-          minimum: 0
-          nullable: true
         transfer_reason:
           type: string
           maxLength: 1000
@@ -1933,18 +1908,6 @@ components:
           pattern: '^SWP-POS-\d+$'
           nullable: true
           description: Defaults to the predecessor's position.
-        terms_changes:
-          type: object
-          description: Optional overrides for the successor's terms.
-          properties:
-            annual_leave_entitlement_days:
-              type: integer
-              minimum: 0
-              nullable: true
-            base_salary_ref_idr:
-              type: integer
-              minimum: 0
-              nullable: true
         notes:
           type: string
           nullable: true

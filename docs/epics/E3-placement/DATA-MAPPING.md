@@ -56,8 +56,8 @@ flowchart LR
 | `contract_end_at` | date | `end_date` (null ⇒ PKWTT) | **EmploymentAgreement** | null/empty → treat as PKWTT (verify) |
 | `contract_status_id` | string→`RecruitmentRoleType` | `status` / `type` | EmploymentAgreement | derive PKWT vs PKWTT + status (needs lookup values) |
 | `resign_at` | date | `ended_reason=Resigned` + close | Placement + EmploymentAgreement | if set → status Resigned, ended_at=resign_at |
-| `annual_leave` | int | `annual_leave_entitlement` | Placement | — |
-| `gaji_pokok` | **enc** string | `base_salary_ref` | EmploymentAgreement (terms) | **decrypt** (DBEncryption) → store; payroll read-only (E8) |
+| `annual_leave` | int | `annual_leave_entitlement_days` | **EmploymentAgreement** | comp/leave are agreement terms, not placement (2026-06-07, EPICS §8) |
+| `gaji_pokok` | **enc** string | `base_salary` | **EmploymentAgreement** (`CompensationRecord`) | **decrypt** (DBEncryption) → store; single source for comp; payroll read-only (E8) |
 | `bpjs_ks, bpjs_tk_jht/jkk/jkm/jp` | **enc** string | BPJS terms | EmploymentAgreement / Payroll (E8) | decrypt; carry for E8 |
 | `pph21` | **enc** string | tax term | Payroll (E8) | decrypt; carry for E8 |
 | `show_all_benefit` | bool | benefit display flag | E8 (or drop) | low value — confirm |

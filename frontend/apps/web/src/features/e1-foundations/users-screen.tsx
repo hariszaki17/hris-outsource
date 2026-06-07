@@ -10,7 +10,6 @@ import {
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
-  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -22,13 +21,12 @@ import {
   StatusBadge,
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { MoreVertical, UserPlus } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import type * as React from 'react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChangeRoleModal,
-  CreateUserModal,
   DeactivateUserConfirm,
   EditUserDrawer,
   ReactivateUserConfirm,
@@ -67,14 +65,7 @@ function initials(name: string): string {
 // Overlay state types
 // ---------------------------------------------------------------------------
 
-type OverlayKind =
-  | 'create'
-  | 'edit'
-  | 'change-role'
-  | 'send-reset'
-  | 'deactivate'
-  | 'reactivate'
-  | null;
+type OverlayKind = 'edit' | 'change-role' | 'send-reset' | 'deactivate' | 'reactivate' | null;
 
 export function UsersScreen() {
   const { t } = useTranslation();
@@ -150,7 +141,7 @@ export function UsersScreen() {
           <Avatar initials={initials(u.full_name)} size={34} />
           <div className="flex flex-col">
             <span className="font-medium text-text">{u.full_name}</span>
-            <span className="text-text-3 text-xs">{u.email}</span>
+            <span className="text-text-3 text-xs">{u.email ?? u.phone}</span>
           </div>
         </div>
       ),
@@ -204,10 +195,7 @@ export function UsersScreen() {
         <h1 className="font-bold text-3xl text-text">{t('users.title')}</h1>
         <p className="max-w-[640px] text-sm text-text-3">{t('users.subtitle')}</p>
       </div>
-      <Button type="button" onClick={() => openOverlay('create')}>
-        <UserPlus aria-hidden />
-        {t('users.add')}
-      </Button>
+      {/* Admins are now created via employee-create + change-role (D1); no standalone create-user. */}
     </div>
   );
 
@@ -386,14 +374,6 @@ export function UsersScreen() {
       {/* ---------------------------------------------------------------------------
           Overlays — rendered once, driven by overlayKind + activeUser state
           --------------------------------------------------------------------------- */}
-
-      <CreateUserModal
-        open={overlayKind === 'create'}
-        onOpenChange={(open) => {
-          if (!open) closeOverlay();
-        }}
-        onDone={handleDone}
-      />
 
       <EditUserDrawer
         open={overlayKind === 'edit'}

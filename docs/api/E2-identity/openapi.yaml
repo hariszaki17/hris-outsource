@@ -129,10 +129,6 @@ paths:
             Only meaningful with `role=shift_leader`. `false` = leader not yet
             assigned to any client company (drives the leader-picker for E3).
           schema: { type: boolean }
-        - in: query
-          name: has_login
-          description: Filter by whether a `User` is linked (EP-3 provisioning).
-          schema: { type: boolean }
       responses:
         '200':
           description: Paginated employee page.
@@ -156,6 +152,7 @@ paths:
                         nip: "1042"
                         nik: "3175011505900012"
                         join_at: "2024-03-15"
+                        phone: "+62-812-3344-5566"
                         status: ACTIVE
                         current_position:
                           id: SWP-POS-014
@@ -166,13 +163,13 @@ paths:
                         current_client_company:
                           id: SWP-CMP-101
                           name: Plaza Senayan
-                        has_login: true
                         user_id: SWP-USR-1042
                       - id: SWP-EMP-1043
                         full_name: Rudi Wijaya
                         nip: "1043"
                         nik: "3175011505900019"
                         join_at: "2023-11-01"
+                        phone: "+62-812-5566-7788"
                         status: ACTIVE
                         current_position:
                           id: SWP-POS-015
@@ -183,7 +180,6 @@ paths:
                         current_client_company:
                           id: SWP-CMP-101
                           name: Plaza Senayan
-                        has_login: true
                         user_id: SWP-USR-1043
                     next_cursor: "eyJpZCI6IlNXUC1FTVAtMTA0MyJ9"
                     has_more: true
@@ -195,12 +191,16 @@ paths:
       tags: [employees]
       summary: Create an employee (EP-1)
       description: |
-        Creates an Employee. If `provision_login` is true, a linked User (E1)
-        is created with role `agent` and an invite is sent (EP-3). Otherwise
-        the employee is saved data-only and a login can be provisioned later.
+        Creates an Employee. Creation **always** auto-provisions a linked E1
+        User (1:1, non-null) with default role `agent` (D1, EP-3). The login
+        identifier is the employee's `phone` (required); `login_email` is an
+        optional secondary identifier. The response returns a one-time
+        `temp_password` (show-once) for the new account; the agent rotates it
+        on first login (D3).
 
-        Required fields per EP-1: `full_name`, `nik`, `join_at`. Duplicate NIK
-        returns `DUPLICATE_NIK` (409).
+        Required fields per EP-1: `full_name`, `nik`, `join_at`, `phone`.
+        Duplicate NIK returns `DUPLICATE_NIK` (409); a duplicate phone or
+        login email returns a 409 conflict.
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -214,8 +214,8 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/EmployeeWriteRequest' }
             examples:
-              hr_creating_agent_with_login:
-                summary: HR creates an agent and provisions login
+              hr_creating_agent:
+                summary: HR creates an agent (login auto-provisioned)
                 value:
                   full_name: Budi Santoso
                   nik: "3175011505900012"
@@ -232,7 +232,6 @@ paths:
                     account_number: "1234567890"
                     account_holder_name: Budi Santoso
                   address: "Jl. Mawar 23, Jakarta Selatan"
-                  provision_login: true
                   login_email: budi.santoso@swp.co.id
       responses:
         '201':
@@ -248,7 +247,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Conflict — NIK or login email already in use.
+          description: Conflict — NIK, phone, or login email already in use.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -334,7 +333,6 @@ paths:
                       account_holder_name: Budi Santoso
                     address: "Jl. Mawar 23, Jakarta Selatan"
                     status: ACTIVE
-                    has_login: true
                     user_id: SWP-USR-1042
                     current_position:
                       id: SWP-POS-014
@@ -400,6 +398,14 @@ paths:
         preserved. Terminal state per Wave 3.4 — reactivation possible via
         `:reactivate` (C-3).
 
+        Disabling the login bumps the user's session epoch
+        (`users.tokens_valid_after`) and calls `RevokeAllRefreshForUser`
+        (E1). The auth middleware now performs a per-request user
+        status + epoch check, so revocation is instant — prior access tokens
+        fail on their next validation rather than living out their TTL (F2.7,
+        OB-#). This is the ONLY path that revokes login: placement-end
+        (transfer/renewal/supersede/auto-end) NEVER revokes.
+
         Auto-cascades: active placements (E3) are flagged for review.
       x-rbac:
         roles: [hr_admin, super_admin]
@@ -442,8 +448,8 @@ paths:
       tags: [employees]
       summary: Reactivate a deactivated employee (C-3)
       description: |
-        Restores status to `ACTIVE`. If the linked User existed, login is
-        re-enabled; otherwise HR may invoke the provision flow separately.
+        Restores status to `ACTIVE`. The employee's linked User login is
+        re-enabled (every employee has a 1:1 login, D1).
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -1096,7 +1102,8 @@ paths:
       summary: Close an agreement early (EA-5)
       description: |
         Terminates an agreement with a reason and effective date (EA-5).
-        Reason ∈ {RESIGNED, TERMINATED, END_OF_TERM, OTHER}. Active
+        Reason ∈ {RESIGNED, TERMINATED, END_OF_TERM, DECEASED, RETIRED,
+        ABSCONDED, OTHER}. Active
         placements (E3) referencing this agreement are flagged for review
         (cascade — implicit side effect; not a separate API call).
       x-rbac:
@@ -1114,7 +1121,7 @@ paths:
               properties:
                 reason:
                   type: string
-                  enum: [RESIGNED, TERMINATED, END_OF_TERM, OTHER]
+                  enum: [RESIGNED, TERMINATED, END_OF_TERM, DECEASED, RETIRED, ABSCONDED, OTHER]
                 effective_date:
                   type: string
                   format: date
@@ -2785,13 +2792,14 @@ components:
         Full employee record. The list response uses the same shape — the
         picker projection is just `id`, `full_name`, `nip`,
         `current_position`, `current_client_company`.
-      required: [id, full_name, nik, join_at, status, has_login]
+      required: [id, user_id, full_name, nik, join_at, status, phone]
       properties:
         id: { $ref: '#/components/schemas/EmployeeId' }
         user_id:
           allOf: [{ $ref: '#/components/schemas/UserId' }]
-          nullable: true
-          description: Linked E1 User account (null until provisioned).
+          description: |
+            Linked E1 User account. Always present (1:1, non-null) — every
+            employee auto-provisions a login at create (D1).
         full_name: { type: string, maxLength: 200 }
         nik:
           type: string
@@ -2807,7 +2815,10 @@ components:
         birth_place: { type: string }
         phone:
           type: string
-          description: Agent-editable via change-request (E2 §8 lock).
+          description: |
+            Primary login identifier (E.164, `+62...`), required and unique
+            (D2). Also the contact number; agent-editable via change-request
+            (E2 §8 lock).
           example: "+62-812-3344-5566"
         email_personal: { type: string, format: email }
         address:
@@ -2822,9 +2833,15 @@ components:
           allOf: [{ $ref: '#/components/schemas/BankAccount' }]
           description: Agent-editable via change-request.
         status: { $ref: '#/components/schemas/EmployeeStatus' }
-        has_login:
-          type: boolean
-          description: True if a User record is linked (EP-3 provisioning state).
+        temp_password:
+          type: string
+          nullable: true
+          readOnly: true
+          description: |
+            One-time temporary password (EP-3 / D3 show-once). Present ONLY in
+            the create and `:regenerate-password` responses; never returned by
+            reads. The agent must rotate it on first login (see
+            `must_change_password` on the login response).
         current_position:
           type: object
           nullable: true
@@ -2854,8 +2871,11 @@ components:
       type: object
       description: |
         Used for both create (`POST /employees`) and patch
-        (`PATCH /employees/{id}`). On patch, all fields are optional and
-        only present fields are updated.
+        (`PATCH /employees/{id}`). On create, `full_name`, `nik`, `join_at`,
+        and `phone` are required (phone is the login identifier — see below).
+        On patch, all fields are optional and only present fields are updated.
+        Creating an employee always auto-provisions a 1:1 login (D1); there is
+        no opt-out flag.
       properties:
         full_name: { type: string, maxLength: 200 }
         nik: { type: string }
@@ -2864,25 +2884,24 @@ components:
         gender: { $ref: '#/components/schemas/Gender' }
         birth_date: { type: string, format: date }
         birth_place: { type: string }
-        phone: { type: string }
+        phone:
+          type: string
+          description: |
+            Primary login identifier (E.164, `+62...`). Required on create,
+            unique system-wide (D2). Also serves as the contact number.
+          example: "+6281233445566"
         email_personal: { type: string, format: email }
         address: { type: string }
         npwp: { type: string }
         bpjs_kesehatan: { type: string }
         bpjs_ketenagakerjaan: { type: string }
         bank_account: { $ref: '#/components/schemas/BankAccount' }
-        provision_login:
-          type: boolean
-          description: |
-            On create only. If true, also create a linked E1 User with role
-            `agent` and send an invite (EP-3). Optional at create — login can
-            be provisioned later via a separate call (C-1).
         login_email:
           type: string
           format: email
           description: |
-            Required if `provision_login=true`. Used as the User's login
-            email; unique system-wide (EP-2).
+            Optional secondary login email for the auto-provisioned User;
+            unique system-wide when present (D2, EP-2).
 
     # ---- ChangeRequest --------------------------------------------------
 
@@ -2992,7 +3011,7 @@ components:
 
     AgreementCloseReason:
       type: string
-      enum: [RESIGNED, TERMINATED, END_OF_TERM, OTHER]
+      enum: [RESIGNED, TERMINATED, END_OF_TERM, DECEASED, RETIRED, ABSCONDED, OTHER]
 
     TaxProfile:
       type: string
@@ -3064,6 +3083,14 @@ components:
           description: |
             Current comp. Hidden / masked for unauthorized roles (EA-4). On
             mobile (agent role) this field is omitted entirely.
+        annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: >-
+            Annual leave entitlement in days (hak cuti tahunan) — term of the
+            employment agreement; source for E6 leave quota.
+          example: 12
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 
@@ -3080,6 +3107,13 @@ components:
           format: date
           description: Required for PKWT; must be omitted for PKWTT.
         compensation: { $ref: '#/components/schemas/CompensationTerms' }
+        annual_leave_entitlement_days:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: >-
+            Annual leave entitlement in days (hak cuti tahunan) — term of the
+            employment agreement; source for E6 leave quota.
 
     # ---- ClientCompany --------------------------------------------------
 

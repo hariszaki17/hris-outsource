@@ -666,7 +666,10 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
                       className="flex items-center gap-[8px] rounded-lg border border-border-soft bg-surface-2 px-[12px] py-[10px]"
                     >
                       <Paperclip className="size-[14px] shrink-0 text-text-2" aria-hidden />
-                      <span className="text-[13px] font-medium text-text" data-testid="attachment-name">
+                      <span
+                        className="text-[13px] font-medium text-text"
+                        data-testid="attachment-name"
+                      >
                         {f.name}
                       </span>
                     </div>

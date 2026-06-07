@@ -15,9 +15,21 @@ import {
   useDeactivateEmployee,
   useReactivateEmployee,
 } from '@swp/api-client/e2';
-import { ConfirmDialog, useToast } from '@swp/ui';
-import { Briefcase, Eye, KeyRound, Pencil, UserCheck, UserX } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { ConfirmDialog, FilterSelect, FormField, Input, StatusBadge, useToast } from '@swp/ui';
+import {
+  Briefcase,
+  CalendarClock,
+  Check,
+  Copy,
+  Eye,
+  KeyRound,
+  Pencil,
+  TriangleAlert,
+  UserCheck,
+  UserMinus,
+  UserX,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -154,12 +166,12 @@ export function EmployeeRowActionsMenu({
         onClick={() => action(onToggleStatus)}
       >
         {isActive ? (
-          <UserX className="size-4 shrink-0 text-bad-tx" aria-hidden />
+          <UserMinus className="size-4 shrink-0 text-bad-tx" aria-hidden />
         ) : (
           <UserCheck className="size-4 shrink-0 text-ok-tx" aria-hidden />
         )}
         <span className={`font-medium ${isActive ? 'text-bad-tx' : 'text-ok-tx'}`}>
-          {isActive ? t('menuDeactivate') : t('menuReactivate')}
+          {isActive ? t('menuOffboard') : t('menuReactivate')}
         </span>
       </button>
     </div>
@@ -267,5 +279,264 @@ export function ReactivateEmployeeConfirm({
       loading={mutation.isPending}
       onConfirm={handleConfirm}
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OffboardEmployeeConfirm — F2.7 employment-end + session revocation
+//   Reason (OB-3 enum) · note (required for cause) · effective date (OB-7).
+//   NOTE: wired to the existing :deactivate mock until the structured
+//   `:offboard` endpoint lands (E2 F2.7, P4/BE). The reason/note/date payload
+//   is captured client-side for the UI flow; backend persistence follows.
+// ---------------------------------------------------------------------------
+
+const OFFBOARD_REASONS = [
+  'END_OF_TERM',
+  'RESIGNED',
+  'TERMINATED',
+  'RETIRED',
+  'DECEASED',
+  'ABSCONDED',
+  'OTHER',
+] as const;
+export type OffboardReason = (typeof OFFBOARD_REASONS)[number];
+
+// A note is mandatory when the reason is adverse / catch-all (OB-3).
+const NOTE_REQUIRED: Record<OffboardReason, boolean> = {
+  END_OF_TERM: false,
+  RESIGNED: false,
+  TERMINATED: true,
+  RETIRED: false,
+  DECEASED: false,
+  ABSCONDED: true,
+  OTHER: true,
+};
+
+// reason → StatusBadge tone (design-system semantic colors only).
+const REASON_TONE: Record<OffboardReason, 'neutral' | 'bad' | 'warn' | 'info'> = {
+  END_OF_TERM: 'neutral',
+  RESIGNED: 'neutral',
+  TERMINATED: 'bad',
+  RETIRED: 'info',
+  DECEASED: 'bad',
+  ABSCONDED: 'warn',
+  OTHER: 'neutral',
+};
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export interface OffboardEmployeeConfirmProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  employee: Employee | null;
+  onDone: () => void;
+  /** Pre-seed the reason (e.g. END_OF_TERM when launched from a contract-expiry decision). */
+  defaultReason?: OffboardReason;
+}
+
+export function OffboardEmployeeConfirm({
+  open,
+  onOpenChange,
+  employee,
+  onDone,
+  defaultReason,
+}: OffboardEmployeeConfirmProps) {
+  const { t } = useTranslation('employees');
+  const { toast } = useToast();
+  const mutation = useDeactivateEmployee();
+
+  const [reason, setReason] = useState<OffboardReason | ''>(defaultReason ?? '');
+  const [note, setNote] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState(todayISO);
+
+  // Reset the form each time the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setReason(defaultReason ?? '');
+      setNote('');
+      setEffectiveDate(todayISO());
+    }
+  }, [open, defaultReason]);
+
+  const noteRequired = reason ? NOTE_REQUIRED[reason] : false;
+  const isScheduled = effectiveDate > todayISO();
+  const invalid = !reason || !effectiveDate || (noteRequired && note.trim() === '');
+
+  async function handleConfirm() {
+    if (!employee || invalid) return;
+    try {
+      // TODO(F2.7/P4): replace with useOffboardEmployee carrying
+      // { reason, note, effective_date }. Mock :deactivate accepts no body.
+      await mutation.mutateAsync({ employeeId: employee.id, data: {} });
+      toast({
+        tone: 'success',
+        title: isScheduled
+          ? t('offboardSuccessScheduled', { date: effectiveDate })
+          : t('offboardSuccess'),
+      });
+      onDone();
+    } catch (err) {
+      const { message } = classifyError(err);
+      toast({ tone: 'error', title: t('offboardError'), description: message });
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={UserMinus}
+      tone="danger"
+      confirmTone="danger"
+      size="md"
+      title={t('offboardTitle')}
+      description={
+        employee ? t('offboardSubtitle', { name: employee.full_name }) : t('offboardTitle')
+      }
+      confirmLabel={isScheduled ? t('offboardConfirmScheduled') : t('offboardConfirm')}
+      cancelLabel={t('cancel')}
+      loading={mutation.isPending}
+      confirmDisabled={invalid}
+      onConfirm={handleConfirm}
+    >
+      <div className="flex flex-col gap-3.5">
+        <FormField label={t('offboardReasonLabel')} htmlFor="offboard-reason" required>
+          <FilterSelect
+            id="offboard-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value as OffboardReason)}
+          >
+            <option value="" disabled>
+              {t('offboardReasonPlaceholder')}
+            </option>
+            {OFFBOARD_REASONS.map((r) => (
+              <option key={r} value={r}>
+                {t(`offboardReason${r}`)}
+              </option>
+            ))}
+          </FilterSelect>
+        </FormField>
+
+        <FormField
+          label={noteRequired ? t('offboardNoteLabel') : t('offboardNoteLabelOptional')}
+          htmlFor="offboard-note"
+          required={noteRequired}
+        >
+          <textarea
+            id="offboard-note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder={t('offboardNotePlaceholder')}
+            className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text placeholder:text-text-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </FormField>
+
+        <FormField
+          label={t('offboardDateLabel')}
+          htmlFor="offboard-date"
+          required
+          hint={isScheduled ? t('offboardScheduledHint') : t('offboardImmediateHint')}
+        >
+          <Input
+            id="offboard-date"
+            type="date"
+            min={todayISO()}
+            value={effectiveDate}
+            onChange={(e) => setEffectiveDate(e.target.value)}
+          />
+        </FormField>
+
+        {isScheduled && (
+          <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[12px] text-text-2">
+            <CalendarClock className="mt-px size-4 shrink-0 text-text-3" aria-hidden />
+            <span>{t('offboardScheduledBanner', { date: effectiveDate })}</span>
+          </div>
+        )}
+
+        {reason && (
+          <div className="flex items-center gap-2 border-t border-border-soft pt-3">
+            <span className="text-[12px] text-text-3">{t('offboardReasonLabel')}:</span>
+            <StatusBadge dot tone={REASON_TONE[reason]}>
+              {t(`offboardReason${reason}`)}
+            </StatusBadge>
+          </div>
+        )}
+      </div>
+    </ConfirmDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TempPasswordModal — EP-3 show-once temporary password (GitHub-secret style).
+//   Displayed once after provisioning a login. Copy now; it is never shown
+//   again — regenerate if lost.
+// ---------------------------------------------------------------------------
+
+export interface TempPasswordModalProps {
+  open: boolean;
+  onClose: () => void;
+  email?: string;
+  password: string;
+}
+
+export function TempPasswordModal({ open, onClose, email, password }: TempPasswordModalProps) {
+  const { t } = useTranslation('employees');
+  const { toast } = useToast();
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (open) setCopied(false);
+  }, [open]);
+
+  function copy() {
+    void navigator.clipboard?.writeText(password);
+    setCopied(true);
+    toast({ tone: 'success', title: t('tempPwCopied') });
+  }
+
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+      icon={KeyRound}
+      tone="brand"
+      confirmTone="primary"
+      size="md"
+      title={t('tempPwTitle')}
+      description={email ? t('tempPwDesc', { email }) : t('tempPwDescNoEmail')}
+      confirmLabel={t('tempPwDone')}
+      cancelLabel={t('cancel')}
+      onConfirm={async () => onClose()}
+    >
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
+          <code className="flex-1 select-all break-all font-mono text-[14px] text-text">
+            {password}
+          </code>
+          <button
+            type="button"
+            aria-label={t('tempPwCopy')}
+            title={t('tempPwCopy')}
+            onClick={copy}
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-text-2 hover:bg-surface"
+          >
+            {copied ? (
+              <Check className="size-4 text-ok-tx" aria-hidden />
+            ) : (
+              <Copy className="size-4" aria-hidden />
+            )}
+          </button>
+        </div>
+        <p className="flex items-center gap-1.5 text-[12px] text-warn-tx">
+          <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+          {t('tempPwWarn')}
+        </p>
+      </div>
+    </ConfirmDialog>
   );
 }

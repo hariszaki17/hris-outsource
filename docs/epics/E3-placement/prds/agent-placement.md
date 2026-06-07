@@ -21,7 +21,7 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 - Lifecycle transitions after creation (renewal/termination/expiry) → F3.2.
 - Moving an already-placed agent → F3.3.
 - Designating the company's shift leader → F3.4.
-- Calculating payroll from `base_salary_ref` → payroll is read-only (E8).
+- Compensation terms (base salary) → owned by the **employment agreement** (E2 `CompensationRecord`), not the placement; payroll is read-only (E8).
 
 ## 3. Actors
 
@@ -66,15 +66,13 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | `position_id` | FK → Position (E2 master) | yes | per-placement; may differ across companies (BR-9) |
 | `start_date` | date | yes | valid date; backdating needs reason (BR-6) |
 | `end_date` | date | no | open-ended allowed; if present `> start_date` (BR-4) and within agreement (BR-1b) |
-| `annual_leave_entitlement` | int (days) | no | `>= 0` |
-| `base_salary_ref` | money | no | `>= 0`; reference only (payroll read-only, E8) |
 | `predecessor_id` | FK → Placement | system | null on plain create; set by renewal/transfer (F3.2/F3.3) |
 | `backdate_reason` | text | conditional | required when `start_date < today` (BR-6) |
 | `notes` | text | no | — |
 | `status` | enum | system | set by BR-5 |
 | `created_by` | FK → User | system | actor id |
 
-> `pkwt_reference` and the PKWT/PKWTT type now live on **EmploymentAgreement** (E2), not on the placement — see [DATA-MAPPING.md](../DATA-MAPPING.md).
+> `pkwt_reference` and the PKWT/PKWTT type now live on **EmploymentAgreement** (E2), not on the placement — see [DATA-MAPPING.md](../DATA-MAPPING.md). **Compensation (base salary) and the annual-leave entitlement (`annual_leave_entitlement_days`) are also EmploymentAgreement terms (E2), not placement fields** *(2026-06-07, EPICS §8)* — they were removed from the placement to avoid duplicating E2; E6 leave-quota sources the entitlement from E2.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -182,5 +180,7 @@ Feature: Agent placement creation
 **Resolved (2026-05-29):** C-2 → 1-day buffer, no same-day handover (BR-2). Position → master-data controlled, set per placement (BR-9). Open-ended placements valid, esp. PKWTT (BR-1). Backdating → HR admin + reason (BR-6).
 
 **Resolved (2026-05-29, round 2):** Service line → **manual classification later** (after SWP confirms) → [DATA-MAPPING.md](../DATA-MAPPING.md) G-1. Buffer → **next day after prior end** is sufficient. PKWT overrun → **auto-cap** to agreement end (BR-1b). Designation window → defaults to the employment-agreement dates, adjustable per placement.
+
+**Resolved (2026-06-07):** `annual_leave_entitlement` and `base_salary_ref` **removed from the placement** — compensation and annual-leave entitlement are employment-agreement (E2) terms, not placement terms. See EPICS §8 + [employment-agreement.md](../../E2-identity/prds/employment-agreement.md). BR-9 (position per placement) is unaffected.
 
 _No open questions remain for this feature._

@@ -12,7 +12,8 @@ import (
 // User is a login credential + role (CONVENTIONS §4 SWP-USR).
 type User struct {
 	ID           string
-	Email        string
+	Email        string // "" when unset — login identifier is phone or email (D2)
+	Phone        string // login identifier; required at create, "" only for legacy rows
 	PasswordHash string
 	Role         auth.Role
 	EmployeeID   string // "" when unset
@@ -20,8 +21,14 @@ type User struct {
 	Status       string // active | disabled
 	FullName     string // denormalized from Employee; "" for users not yet linked
 	LastLoginAt  *time.Time // nil on first-ever login; set on every successful login
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// MustChangePassword: a provisioned/regenerated temp password must be rotated on
+	// next login (EP-3). Cleared when the user sets their own password.
+	MustChangePassword bool
+	// TokensValidAfter: F2.7 session epoch. Access tokens with iat before this instant
+	// are rejected by the auth middleware (instant revocation on offboard/disable).
+	TokensValidAfter time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (u User) IsActive() bool { return u.Status == "active" }

@@ -25,22 +25,21 @@ import {
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
+  Button,
   type Column,
   CursorPagination,
   DataTable,
   EmptyState,
-  FilterSelect,
   SearchField,
   StatCard,
   StateView,
   StatusBadge,
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { CircleCheck, KeyRound, MoreVertical, UserPlus, UserX, Users } from 'lucide-react';
-import type * as React from 'react';
+import { CircleCheck, UserCheck, UserMinus, UserPlus, UserX, Users } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { EmployeeRowActionsMenu } from './employee-overlays.tsx';
+import { OffboardEmployeeConfirm, ReactivateEmployeeConfirm } from './employee-overlays.tsx';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,9 +53,8 @@ export type EmployeesSearch = {
   status?: EmployeeStatus;
   service_line?: string;
   client_company?: string;
-  has_login?: boolean;
-  /** Status-tab shortcut: 'all' | 'active' | 'inactive' | 'no-login' */
-  tab?: 'all' | 'active' | 'inactive' | 'no-login';
+  /** Status-tab shortcut: 'all' | 'active' | 'inactive' */
+  tab?: 'all' | 'active' | 'inactive';
   cursor?: string;
 };
 
@@ -125,8 +123,12 @@ export function EmployeesScreen() {
   const isShiftLeader = currentUser?.role === 'shift_leader';
 
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
-  const [openMenuEmployeeId, setOpenMenuEmployeeId] = useState<string | null>(null);
-  const kebabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  // Debounce the free-text search so we navigate once the user pauses, not per keystroke.
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Inline lifecycle action (offboard / reactivate) target + modal visibility.
+  const [lifecycleTarget, setLifecycleTarget] = useState<Employee | null>(null);
+  const [showOffboard, setShowOffboard] = useState(false);
+  const [showReactivate, setShowReactivate] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Search params → API params
@@ -141,22 +143,19 @@ export function EmployeesScreen() {
         ? EmployeeStatus.INACTIVE
         : undefined;
 
-  const tabHasLogin: boolean | undefined = activeTab === 'no-login' ? false : undefined;
-
   const params: ListEmployeesParams = {
     limit: PAGE_SIZE,
     q: search.q || undefined,
     status: tabStatus ?? search.status,
     service_line: search.service_line || undefined,
     client_company: search.client_company || undefined,
-    has_login: tabHasLogin ?? search.has_login,
     cursor: search.cursor,
   };
 
   const query = useListEmployees(params);
 
   const hasFilters = Boolean(
-    search.q || search.status || search.service_line || search.client_company || search.has_login,
+    search.q || search.status || search.service_line || search.client_company,
   );
 
   // Totals for stat cards (from page envelope, not real aggregates — use count from loaded page)
@@ -189,7 +188,7 @@ export function EmployeesScreen() {
     {
       id: 'karyawan',
       header: t('colKaryawan'),
-      width: 280,
+      width: 230,
       cell: (emp) => (
         <div className="flex items-center gap-[11px]">
           <Avatar initials={initials(emp.full_name)} size={34} />
@@ -200,10 +199,12 @@ export function EmployeesScreen() {
         </div>
       ),
     },
+    // POSISI / LINI LAYANAN / PENEMPATAN come from the employee's current (non-terminal)
+    // placement, resolved by the list query's LATERAL join. "—" = genuinely unplaced.
     {
       id: 'posisi',
       header: t('colPosisi'),
-      width: 180,
+      width: 170,
       cell: (emp) => (
         <span className="text-[13px] text-text">{emp.current_position?.name ?? '—'}</span>
       ),
@@ -211,7 +212,7 @@ export function EmployeesScreen() {
     {
       id: 'liniLayanan',
       header: t('colLiniLayanan'),
-      width: 170,
+      width: 160,
       cell: (emp) =>
         emp.current_service_line ? (
           <div className="flex items-center gap-[7px]">
@@ -225,30 +226,15 @@ export function EmployeesScreen() {
     {
       id: 'penempatan',
       header: t('colPenempatan'),
-      width: 220,
+      width: 170,
       cell: (emp) => (
         <span className="text-[13px] text-text">{emp.current_client_company?.name ?? '—'}</span>
       ),
     },
     {
-      id: 'login',
-      header: t('colLogin'),
-      width: 130,
-      cell: (emp) =>
-        emp.has_login ? (
-          <StatusBadge dot tone="info">
-            {t('loginActive')}
-          </StatusBadge>
-        ) : (
-          <StatusBadge dot tone="neutral">
-            {t('loginNone')}
-          </StatusBadge>
-        ),
-    },
-    {
       id: 'status',
       header: t('colStatus'),
-      width: 120,
+      width: 104,
       cell: (emp) => (
         <StatusBadge dot tone={statusTone[emp.status]}>
           {emp.status === EmployeeStatus.ACTIVE ? t('statusActive') : t('statusInactive')}
@@ -257,56 +243,37 @@ export function EmployeesScreen() {
     },
   ];
 
-  // Kebab column only for non-SL roles
+  // Row click opens the detail screen (all roles); fuller management lives there.
+  // The kebab was removed — its View/Edit both just navigated to detail (redundant).
+  // A single inline lifecycle action remains (offboard active / reactivate inactive),
+  // the one action not reachable by row-click. Non-SL only (SL is read-only).
   if (!isShiftLeader) {
     columns.push({
       id: 'actions',
       header: '',
-      width: 52,
+      width: 150,
       cell: (emp) => {
-        const isOpen = openMenuEmployeeId === emp.id;
-        const setRef = (el: HTMLButtonElement | null) => {
-          if (el) kebabRefs.current.set(emp.id, el);
-          else kebabRefs.current.delete(emp.id);
-        };
-        const anchorRef: React.RefObject<HTMLElement | null> = {
-          get current() {
-            return kebabRefs.current.get(emp.id) ?? null;
-          },
-        };
+        const active = emp.status === EmployeeStatus.ACTIVE;
+        const label = active ? t('menuOffboard') : t('menuReactivate');
         return (
-          <div className="relative flex justify-center">
-            <button
-              ref={setRef}
-              type="button"
-              aria-label={t('rowActions')}
-              aria-expanded={isOpen}
-              aria-haspopup="menu"
-              className="flex size-[30px] items-center justify-center rounded-[7px] text-text-3 hover:bg-surface-2"
-              onClick={() => setOpenMenuEmployeeId(isOpen ? null : emp.id)}
+          <div className="flex justify-end">
+            <Button
+              variant={active ? 'destructive' : 'secondary'}
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLifecycleTarget(emp);
+                if (active) setShowOffboard(true);
+                else setShowReactivate(true);
+              }}
             >
-              <MoreVertical className="size-4" aria-hidden />
-            </button>
-            <EmployeeRowActionsMenu
-              employee={emp}
-              open={isOpen}
-              anchorRef={anchorRef}
-              onClose={() => setOpenMenuEmployeeId(null)}
-              onView={() => {
-                void navigate({
-                  to: '/employees/$employeeId' as const,
-                  params: { employeeId: emp.id },
-                });
-              }}
-              onEdit={() => {
-                // edit opens detail screen which opens the drawer
-                void navigate({
-                  to: '/employees/$employeeId' as const,
-                  params: { employeeId: emp.id },
-                });
-              }}
-              onToggleStatus={() => setOpenMenuEmployeeId(null)}
-            />
+              {active ? (
+                <UserMinus className="size-3.5" aria-hidden />
+              ) : (
+                <UserCheck className="size-3.5" aria-hidden />
+              )}
+              {label}
+            </Button>
           </div>
         );
       },
@@ -372,12 +339,6 @@ export function EmployeesScreen() {
       active: activeTab === 'inactive',
       onClick: () => setSearch({ tab: 'inactive' }),
     },
-    {
-      id: 'no-login',
-      label: t('tabNoLogin'),
-      active: activeTab === 'no-login',
-      onClick: () => setSearch({ tab: 'no-login' }),
-    },
   ];
 
   // ---------------------------------------------------------------------------
@@ -405,7 +366,7 @@ export function EmployeesScreen() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <StatCard
           label={t('statTotal')}
           value={query.isLoading ? '—' : String(rows.length)}
@@ -434,13 +395,6 @@ export function EmployeesScreen() {
           sub={t('statInactiveSub')}
           icon={UserX}
           tone="bad"
-        />
-        <StatCard
-          label={t('statNoLogin')}
-          value={query.isLoading ? '—' : String(rows.filter((e) => !e.has_login).length)}
-          sub={t('statNoLoginSub')}
-          icon={KeyRound}
-          tone="warn"
         />
       </div>
 
@@ -471,34 +425,14 @@ export function EmployeesScreen() {
           <SearchField
             placeholder={t('searchPlaceholder')}
             defaultValue={search.q ?? ''}
-            containerClassName="w-[260px]"
-            onChange={(e) => setSearch({ q: e.target.value || undefined })}
+            containerClassName="w-[300px]"
+            onChange={(e) => {
+              const v = e.target.value;
+              if (searchDebounce.current) clearTimeout(searchDebounce.current);
+              searchDebounce.current = setTimeout(() => setSearch({ q: v || undefined }), 300);
+            }}
           />
-          <FilterSelect
-            aria-label={t('filterStatus')}
-            value={search.status ?? ''}
-            onChange={(e) => setSearch({ status: (e.target.value as EmployeeStatus) || undefined })}
-          >
-            <option value="">{t('filterStatusAll')}</option>
-            <option value={EmployeeStatus.ACTIVE}>{t('statusActive')}</option>
-            <option value={EmployeeStatus.INACTIVE}>{t('statusInactive')}</option>
-          </FilterSelect>
-          <div className="flex-1" />
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-[14px] py-[9px] text-[13px] font-medium text-text-2 hover:bg-surface-2"
-            onClick={() =>
-              setSearch({
-                q: undefined,
-                status: undefined,
-                service_line: undefined,
-                client_company: undefined,
-                has_login: undefined,
-              })
-            }
-          >
-            {t('resetFilters')}
-          </button>
+          {/* Status filtering is the tabs above (Semua / Aktif / Nonaktif) — no separate dropdown. */}
         </div>
 
         {/* Data table */}
@@ -509,14 +443,11 @@ export function EmployeesScreen() {
           getRowId={(e) => e.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={
-            isShiftLeader
-              ? (emp) =>
-                  void navigate({
-                    to: '/employees/$employeeId' as const,
-                    params: { employeeId: emp.id },
-                  })
-              : undefined
+          onRowClick={(emp) =>
+            void navigate({
+              to: '/employees/$employeeId' as const,
+              params: { employeeId: emp.id },
+            })
           }
           empty={
             hasFilters ? (
@@ -560,6 +491,26 @@ export function EmployeesScreen() {
           }
         />
       </div>
+
+      {/* Inline lifecycle modals (offboard / reactivate) — target set by the row icon */}
+      <OffboardEmployeeConfirm
+        open={showOffboard}
+        onOpenChange={setShowOffboard}
+        employee={lifecycleTarget}
+        onDone={() => {
+          setShowOffboard(false);
+          void query.refetch();
+        }}
+      />
+      <ReactivateEmployeeConfirm
+        open={showReactivate}
+        onOpenChange={setShowReactivate}
+        employee={lifecycleTarget}
+        onDone={() => {
+          setShowReactivate(false);
+          void query.refetch();
+        }}
+      />
     </div>
   );
 }

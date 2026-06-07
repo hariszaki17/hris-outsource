@@ -185,21 +185,19 @@ func (r *PlacementRepo) GetAgreement(ctx context.Context, id string) (svc.Agreem
 
 func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.CreatePlacementParams) (domain.Placement, error) {
 	row, err := r.q.WithTx(tx).CreatePlacement(ctx, sqlcgen.CreatePlacementParams{
-		EmployeeID:                 p.EmployeeID,
-		AgreementID:                p.AgreementID,
-		ClientCompanyID:            p.ClientCompanyID,
-		SiteID:                     p.SiteID,
-		ServiceLineID:              p.ServiceLineID,
-		PositionID:                 p.PositionID,
-		StartDate:                  pgtype.Date{Time: p.StartDate, Valid: true},
-		EndDate:                    ptrTimeToPgDate(p.EndDate),
-		AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIdr:           p.BaseSalaryRefIDR,
-		Notes:                      p.Notes,
-		LifecycleStatus:            p.LifecycleStatus,
-		PredecessorID:              p.PredecessorID,
-		BackdateReason:             p.BackdateReason,
-		CreatedBy:                  p.CreatedBy,
+		EmployeeID:      p.EmployeeID,
+		AgreementID:     p.AgreementID,
+		ClientCompanyID: p.ClientCompanyID,
+		SiteID:          p.SiteID,
+		ServiceLineID:   p.ServiceLineID,
+		PositionID:      p.PositionID,
+		StartDate:       pgtype.Date{Time: p.StartDate, Valid: true},
+		EndDate:         ptrTimeToPgDate(p.EndDate),
+		Notes:           p.Notes,
+		LifecycleStatus: p.LifecycleStatus,
+		PredecessorID:   p.PredecessorID,
+		BackdateReason:  p.BackdateReason,
+		CreatedBy:       p.CreatedBy,
 	})
 	if err != nil {
 		return domain.Placement{}, mapErr(err)
@@ -209,12 +207,10 @@ func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.Cr
 
 func (r *PlacementRepo) UpdatePlacementFields(ctx context.Context, tx pgx.Tx, p svc.UpdatePlacementParams) (domain.Placement, error) {
 	row, err := r.q.WithTx(tx).UpdatePlacementFields(ctx, sqlcgen.UpdatePlacementFieldsParams{
-		PositionID:                 p.PositionID,
-		EndDate:                    ptrTimeToPgDate(p.EndDate),
-		AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIdr:           p.BaseSalaryRefIDR,
-		Notes:                      p.Notes,
-		ID:                         p.ID,
+		PositionID: p.PositionID,
+		EndDate:    ptrTimeToPgDate(p.EndDate),
+		Notes:      p.Notes,
+		ID:         p.ID,
 	})
 	if err != nil {
 		return domain.Placement{}, mapErr(err)

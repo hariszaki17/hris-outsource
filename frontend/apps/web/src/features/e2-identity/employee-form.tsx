@@ -6,9 +6,9 @@
  *
  * Sections:
  *   1. Data Pribadi  — full_name*, nik*, nip, gender, birth_place+birth_date, join_at*
- *   2. Kontak        — phone, email_personal, address (textarea)
+ *   2. Kontak        — phone (required, login identifier), email_personal, address (textarea)
  *   3. Statutori & Bank — npwp, bpjs_kesehatan, bpjs_ketenagakerjaan, bank_name, account_number, account_holder_name
- *   4. Akun Login    — provision_login toggle + login_email (conditional)
+ *   4. Akun Login    — login auto-provisions on create (D1); optional login_email
  *
  * RHF + hand-written Zod schema (E2 Zod generation deferred).
  * Field errors flow via `applyFieldErrors` (CONVENTIONS §11).
@@ -35,54 +35,42 @@ import {
   FormField,
   FormSection,
   Input,
-  Toggle,
   useToast,
 } from '@swp/ui';
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
+import { TempPasswordModal } from './employee-overlays.tsx';
 
 // ---------------------------------------------------------------------------
 // Zod schema (hand-written — E2 Zod codegen deferred)
 // ---------------------------------------------------------------------------
 
-const employeeSchema = z
-  .object({
-    full_name: z.string().min(1).max(200),
-    nik: z.string().min(16).max(16, 'NIK harus 16 digit'),
-    nip: z.string().optional(),
-    join_at: z.string().min(1),
-    // FilterSelect emits '' for the empty placeholder; coerce '' → undefined before enum check.
-    gender: z.preprocess(
-      (v) => (v === '' ? undefined : v),
-      z.nativeEnum(Gender).optional(),
-    ),
-    birth_date: z.string().optional(),
-    birth_place: z.string().optional(),
-    phone: z.string().optional(),
-    email_personal: z.string().email().optional().or(z.literal('')),
-    address: z.string().optional(),
-    npwp: z.string().optional(),
-    bpjs_kesehatan: z.string().optional(),
-    bpjs_ketenagakerjaan: z.string().optional(),
-    bank_name: z.string().optional(),
-    account_number: z.string().optional(),
-    account_holder_name: z.string().optional(),
-    provision_login: z.boolean().optional().default(false),
-    login_email: z.string().optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.provision_login && !data.login_email) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Login email wajib diisi jika provisikan login diaktifkan.',
-        path: ['login_email'],
-      });
-    }
-  });
+const employeeSchema = z.object({
+  full_name: z.string().min(1).max(200),
+  nik: z.string().min(16).max(16, 'NIK harus 16 digit'),
+  nip: z.string().optional(),
+  join_at: z.string().min(1),
+  // FilterSelect emits '' for the empty placeholder; coerce '' → undefined before enum check.
+  gender: z.preprocess((v) => (v === '' ? undefined : v), z.nativeEnum(Gender).optional()),
+  birth_date: z.string().optional(),
+  birth_place: z.string().optional(),
+  // Phone is the login identifier (D2) — required.
+  phone: z.string().min(1, 'Nomor telepon wajib diisi'),
+  email_personal: z.string().email().optional().or(z.literal('')),
+  address: z.string().optional(),
+  npwp: z.string().optional(),
+  bpjs_kesehatan: z.string().optional(),
+  bpjs_ketenagakerjaan: z.string().optional(),
+  bank_name: z.string().optional(),
+  account_number: z.string().optional(),
+  account_holder_name: z.string().optional(),
+  // Optional secondary login email (D2). Phone remains the primary identifier.
+  login_email: z.string().email().optional().or(z.literal('')),
+});
 
 type EmployeeFormValues = z.infer<typeof employeeSchema>;
 
@@ -124,11 +112,7 @@ function EmployeeFormBody({ form, isEdit }: EmployeeFormBodyProps) {
   const {
     register,
     formState: { errors },
-    watch,
-    setValue,
   } = form;
-
-  const provisionLogin = watch('provision_login');
 
   return (
     <div className="flex flex-col gap-4" style={{ maxWidth: 880 }}>
@@ -211,8 +195,20 @@ function EmployeeFormBody({ form, isEdit }: EmployeeFormBodyProps) {
       {/* Section 2 — Kontak */}
       <FormSectionCard title={t('secKontak')}>
         <FormSection>
-          <FormField label={t('fieldPhone')} htmlFor="phone" error={errors.phone?.message}>
-            <Input id="phone" type="tel" placeholder="+62 812-3456-7890" {...register('phone')} />
+          <FormField
+            label={t('fieldPhone')}
+            htmlFor="phone"
+            required
+            hint={t('fieldPhoneHint')}
+            error={errors.phone?.message}
+          >
+            <Input
+              id="phone"
+              type="tel"
+              placeholder="+62 812-3456-7890"
+              {...register('phone')}
+              aria-invalid={!!errors.phone}
+            />
           </FormField>
 
           <FormField
@@ -306,50 +302,32 @@ function EmployeeFormBody({ form, isEdit }: EmployeeFormBodyProps) {
         </FormSection>
       </FormSectionCard>
 
-      {/* Section 4 — Akun Login (create only) */}
+      {/* Section 4 — Akun Login (create only). Login auto-provisions (D1); phone is
+          the identifier, login_email is an optional secondary identifier. */}
       {!isEdit && (
         <FormSectionCard title={t('secAkunLogin')} subtitle={t('secAkunLoginSubtitle')}>
           <div className="flex flex-col gap-4">
-            {/* Toggle row */}
-            <div className="flex items-center justify-between gap-3 rounded-[10px] border border-primary-soft bg-primary-soft px-[14px] py-3">
-              <div className="flex flex-col gap-[1px]">
-                <span className="text-[13px] font-semibold text-text">
-                  {t('fieldProvisionLogin')}
-                </span>
-                <span className="text-[12px] text-text-2">{t('fieldProvisionLoginSub')}</span>
-              </div>
-              <Toggle
-                checked={provisionLogin ?? false}
-                onCheckedChange={(checked) => setValue('provision_login', checked)}
-                aria-label={t('fieldProvisionLogin')}
-              />
-            </div>
-
-            {provisionLogin && (
-              <>
-                <Banner
-                  tone="info"
-                  title={t('loginProvisionBannerTitle')}
-                  description={t('loginProvisionBanner')}
+            <Banner
+              tone="info"
+              title={t('autoProvisionBannerTitle')}
+              description={t('autoProvisionBanner')}
+            />
+            <FormSection>
+              <FormField
+                label={t('fieldLoginEmail')}
+                htmlFor="login_email"
+                hint={t('fieldLoginEmailHint')}
+                error={errors.login_email?.message}
+              >
+                <Input
+                  id="login_email"
+                  type="email"
+                  placeholder="email@contoh.com"
+                  {...register('login_email')}
+                  aria-invalid={!!errors.login_email}
                 />
-                <FormSection>
-                  <FormField
-                    label={t('fieldLoginEmail')}
-                    htmlFor="login_email"
-                    required
-                    error={errors.login_email?.message}
-                  >
-                    <Input
-                      id="login_email"
-                      type="email"
-                      placeholder="email@contoh.com"
-                      {...register('login_email')}
-                      aria-invalid={!!errors.login_email}
-                    />
-                  </FormField>
-                </FormSection>
-              </>
-            )}
+              </FormField>
+            </FormSection>
           </div>
         </FormSectionCard>
       )}
@@ -368,10 +346,15 @@ export function CreateEmployeeScreen() {
 
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
-    defaultValues: { provision_login: false },
   });
 
   const mutation = useCreateEmployee();
+  // EP-3 show-once: temp password to display after a login is provisioned.
+  const [tempPw, setTempPw] = useState<{
+    employeeId: string;
+    password: string;
+    email?: string;
+  } | null>(null);
 
   async function onSubmit(values: EmployeeFormValues) {
     const body: EmployeeWriteRequest = {
@@ -382,7 +365,7 @@ export function CreateEmployeeScreen() {
       gender: values.gender,
       birth_date: values.birth_date || undefined,
       birth_place: values.birth_place || undefined,
-      phone: values.phone || undefined,
+      phone: values.phone,
       email_personal: values.email_personal || undefined,
       address: values.address || undefined,
       npwp: values.npwp || undefined,
@@ -396,14 +379,24 @@ export function CreateEmployeeScreen() {
               account_holder_name: values.account_holder_name,
             }
           : undefined,
-      provision_login: values.provision_login,
-      login_email: values.provision_login ? values.login_email : undefined,
+      login_email: values.login_email || undefined,
     };
 
     try {
       const result = await mutation.mutateAsync({ data: body });
       toast({ tone: 'success', title: t('createSuccess') });
-      const created = (result.data as { data?: { id?: string } })?.data;
+      // The create response is the Employee object directly (not a {data} envelope).
+      const created = result.data as { id?: string; temp_password?: string | null } | undefined;
+      // EP-3 show-once: if a login was provisioned, surface the temp password before
+      // navigating away (the response returns it exactly once).
+      if (created?.id && created.temp_password) {
+        setTempPw({
+          employeeId: created.id,
+          password: created.temp_password,
+          email: values.login_email,
+        });
+        return;
+      }
       if (created?.id) {
         void navigate({
           to: '/employees/$employeeId' as const,
@@ -459,6 +452,20 @@ export function CreateEmployeeScreen() {
           </div>
         </div>
       </form>
+
+      {/* EP-3 show-once temp password — navigate to detail once acknowledged */}
+      <TempPasswordModal
+        open={tempPw !== null}
+        password={tempPw?.password ?? ''}
+        email={tempPw?.email}
+        onClose={() => {
+          const id = tempPw?.employeeId;
+          setTempPw(null);
+          if (id) {
+            void navigate({ to: '/employees/$employeeId' as const, params: { employeeId: id } });
+          }
+        }}
+      />
     </div>
   );
 }
@@ -488,7 +495,6 @@ export function EditEmployeeScreen({
 
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
-    defaultValues: { provision_login: false },
   });
 
   // Populate form when employee data loads
@@ -525,7 +531,7 @@ export function EditEmployeeScreen({
       gender: values.gender,
       birth_date: values.birth_date || undefined,
       birth_place: values.birth_place || undefined,
-      phone: values.phone || undefined,
+      phone: values.phone,
       email_personal: values.email_personal || undefined,
       address: values.address || undefined,
       npwp: values.npwp || undefined,

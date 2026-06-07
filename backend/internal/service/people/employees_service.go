@@ -15,6 +15,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 )
 
@@ -25,10 +26,31 @@ type EmployeeRepository interface {
 	ListEmployees(ctx context.Context, f domain.EmployeeFilter) ([]domain.Employee, error)
 	GetEmployeeByID(ctx context.Context, id string) (domain.Employee, error)
 	GetEmployeeByNIK(ctx context.Context, nik string) (domain.Employee, error)
+	UserEmailTaken(ctx context.Context, email string) (bool, error)
+	UserPhoneTaken(ctx context.Context, phone string) (bool, error)
 	// Writes take the active transaction.
 	CreateEmployee(ctx context.Context, tx pgx.Tx, p CreateEmployeeParams) (domain.Employee, error)
 	UpdateEmployee(ctx context.Context, tx pgx.Tx, p UpdateEmployeeParams) (domain.Employee, error)
 	SetEmployeeStatus(ctx context.Context, tx pgx.Tx, id, status string) (domain.Employee, error)
+	// EP-3 login provisioning. ProvisionLogin creates the linked agent User
+	// (must_change_password=true) and returns its id; RegenerateTempPassword
+	// re-issues a temp password hash for an existing login.
+	ProvisionLogin(ctx context.Context, tx pgx.Tx, p ProvisionLoginRepoParams) (string, error)
+	RegenerateTempPassword(ctx context.Context, tx pgx.Tx, userID, passwordHash string) error
+	// F2.7: on offboard, disable the linked User + revoke its sessions (instant);
+	// on reactivate, re-enable the login (sessions are not restored).
+	DisableUserAndRevoke(ctx context.Context, tx pgx.Tx, userID string) error
+	EnableUser(ctx context.Context, tx pgx.Tx, userID string) error
+}
+
+// ProvisionLoginRepoParams carries the fields for creating an agent login + link.
+// Phone is the required login identifier (D2); Email is optional.
+type ProvisionLoginRepoParams struct {
+	EmployeeID   string
+	Phone        string
+	Email        string
+	PasswordHash string
+	FullName     string
 }
 
 // CreateEmployeeParams carries the fields for inserting a new employee.
@@ -50,10 +72,11 @@ type CreateEmployeeParams struct {
 	BankAccountNumber    string
 	BankAccountHolderName string
 	CreatedBy            string
-	// Phase-4 stubs: login provisioning deferred.
-	// provision_login and login_email are accepted from the request but
-	// UserID stays NULL in this milestone (EP-3 is Phase-4 scope).
-	// See SUMMARY.md for the stub documentation.
+	// Login provisioning is AUTOMATIC at create (D1): a linked agent User is always
+	// created in the same tx with a temporary password (show-once). The login
+	// identifier is the employee Phone (required, D2); LoginEmail is an optional
+	// secondary identifier.
+	LoginEmail string
 }
 
 // UpdateEmployeeParams carries the fields for updating an employee.
@@ -154,7 +177,9 @@ func (s *Service) GetEmployee(ctx context.Context, id string) (domain.Employee, 
 // EP-2: pre-checks for duplicate NIK → 409 DUPLICATE_NIK.
 // EP-3 (Phase-4 stub): provision_login/login_email fields are accepted but UserID
 // stays NULL in this milestone; linked E1 login provisioning is deferred.
-func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (domain.Employee, error) {
+// Returns the one-time temporary password (non-nil) when a login was provisioned
+// (EP-3 show-once). The caller surfaces it to the admin exactly once.
+func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (domain.Employee, *string, error) {
 	// Required field validation.
 	fields := map[string]string{}
 	if strings.TrimSpace(p.FullName) == "" {
@@ -166,32 +191,54 @@ func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (d
 	if p.JoinAt.IsZero() {
 		fields["join_at"] = "Wajib diisi."
 	}
-	if len(fields) > 0 {
-		return domain.Employee{}, apperr.Invalid(fields)
+	// D2: phone is the required login identifier — every employee auto-provisions
+	// a login (D1), and phone is the universal identifier (agents often lack email).
+	phone := normalizePhone(p.Phone)
+	if phone == "" {
+		fields["phone"] = "Wajib diisi (dipakai sebagai identitas login)."
 	}
+	if len(fields) > 0 {
+		return domain.Employee{}, nil, apperr.Invalid(fields)
+	}
+	p.Phone = phone
 
 	// EP-2: duplicate NIK pre-check (before the tx to give a clean error).
 	_, nikErr := s.repo.GetEmployeeByNIK(ctx, p.NIK)
 	if nikErr == nil {
-		// NIK already exists → 409 DUPLICATE_NIK.
-		return domain.Employee{}, &apperr.Error{
-			Code:       "DUPLICATE_NIK",
-			HTTPStatus: 409,
-			Fields:     map[string]string{"nik": "NIK sudah terdaftar untuk karyawan lain."},
-		}
+		return domain.Employee{}, nil, dupNIKErr()
 	}
 	if !errors.Is(nikErr, domain.ErrNotFound) {
-		return domain.Employee{}, apperr.Internal(nikErr)
+		return domain.Employee{}, nil, apperr.Internal(nikErr)
+	}
+
+	// EP-2: login phone uniqueness pre-check (phone is the primary identifier).
+	phoneTaken, err := s.repo.UserPhoneTaken(ctx, phone)
+	if err != nil {
+		return domain.Employee{}, nil, apperr.Internal(err)
+	}
+	if phoneTaken {
+		return domain.Employee{}, nil, loginPhoneConflictErr()
+	}
+	// EP-2: login email uniqueness pre-check (only when an email is supplied).
+	if strings.TrimSpace(p.LoginEmail) != "" {
+		taken, err := s.repo.UserEmailTaken(ctx, p.LoginEmail)
+		if err != nil {
+			return domain.Employee{}, nil, apperr.Internal(err)
+		}
+		if taken {
+			return domain.Employee{}, nil, loginEmailConflictErr()
+		}
 	}
 
 	var created domain.Employee
+	var tempPw *string
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		var inErr error
 		created, inErr = s.repo.CreateEmployee(ctx, tx, p)
 		if inErr != nil {
 			return inErr
 		}
-		return audit.Record(ctx, tx, audit.Entry{
+		if err := audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionCreate,
 			EntityType: "employee",
 			EntityID:   created.ID,
@@ -201,12 +248,160 @@ func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (d
 				"nik":       created.NIK,
 				"status":    created.Status,
 			},
-		})
+		}); err != nil {
+			return err
+		}
+
+		// D1: every employee auto-provisions a login in the same tx.
+		plain, userID, err := s.provisionInTx(ctx, tx, created, p.Phone, p.LoginEmail)
+		if err != nil {
+			return err
+		}
+		uid := userID
+		created.UserID = &uid
+		created.HasLogin = true
+		tempPw = &plain
+		return nil
 	}); err != nil {
-		return domain.Employee{}, apperr.Internal(err)
+		return domain.Employee{}, nil, wrapTxErr(err)
 	}
 
-	return created, nil
+	return created, tempPw, nil
+}
+
+// RegenerateTempPassword re-issues a temp password for an employee that already has
+// a login (show-once); forces a rotation on next login (EP-3).
+func (s *Service) RegenerateTempPassword(ctx context.Context, employeeID string) (string, error) {
+	emp, err := s.repo.GetEmployeeByID(ctx, employeeID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", apperr.NotFound()
+	}
+	if err != nil {
+		return "", apperr.Internal(err)
+	}
+	if emp.UserID == nil {
+		// No login to regenerate.
+		return "", apperr.Conflict("CONFLICT")
+	}
+	plain, hash, err := newTempPassword()
+	if err != nil {
+		return "", apperr.Internal(err)
+	}
+	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		if err := s.repo.RegenerateTempPassword(ctx, tx, *emp.UserID, hash); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.Action("employee.regenerate_password"),
+			EntityType: "employee",
+			EntityID:   emp.ID,
+			After:      map[string]any{"user_id": *emp.UserID},
+		})
+	}); err != nil {
+		return "", apperr.Internal(err)
+	}
+	return plain, nil
+}
+
+// provisionInTx creates the agent login + link + audit inside an existing tx and
+// returns the one-time plaintext temp password and the new user id. Phone is the
+// required login identifier (D2); loginEmail is optional.
+func (s *Service) provisionInTx(ctx context.Context, tx pgx.Tx, emp domain.Employee, phone, loginEmail string) (string, string, error) {
+	plain, hash, err := newTempPassword()
+	if err != nil {
+		return "", "", err
+	}
+	userID, err := s.repo.ProvisionLogin(ctx, tx, ProvisionLoginRepoParams{
+		EmployeeID:   emp.ID,
+		Phone:        phone,
+		Email:        loginEmail,
+		PasswordHash: hash,
+		FullName:     emp.FullName,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if err := audit.Record(ctx, tx, audit.Entry{
+		Action:     audit.Action("employee.provision_login"),
+		EntityType: "employee",
+		EntityID:   emp.ID,
+		After:      map[string]any{"user_id": userID, "phone": phone, "login_email": loginEmail, "role": "agent"},
+	}); err != nil {
+		return "", "", err
+	}
+	return plain, userID, nil
+}
+
+// normalizePhone canonicalizes an Indonesian phone number to E.164 (+62…). It
+// strips spaces/dashes, converts a leading 0 to +62, and a leading 62 to +62.
+// Returns "" for empty/blank input (caller treats that as missing).
+func normalizePhone(raw string) string {
+	s := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '-', '(', ')', '.':
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(raw))
+	if s == "" {
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(s, "+"):
+		return s
+	case strings.HasPrefix(s, "0"):
+		return "+62" + s[1:]
+	case strings.HasPrefix(s, "62"):
+		return "+" + s
+	default:
+		return "+62" + s
+	}
+}
+
+func newTempPassword() (plain, hash string, err error) {
+	plain, err = auth.GenerateTempPassword()
+	if err != nil {
+		return "", "", err
+	}
+	hash, err = auth.HashPassword(plain)
+	if err != nil {
+		return "", "", err
+	}
+	return plain, hash, nil
+}
+
+func dupNIKErr() *apperr.Error {
+	return &apperr.Error{
+		Code:       "DUPLICATE_NIK",
+		HTTPStatus: 409,
+		Fields:     map[string]string{"nik": "NIK sudah terdaftar untuk karyawan lain."},
+	}
+}
+
+func loginEmailConflictErr() *apperr.Error {
+	return &apperr.Error{
+		Code:       "CONFLICT",
+		HTTPStatus: 409,
+		Fields:     map[string]string{"login_email": "Email login sudah digunakan."},
+	}
+}
+
+func loginPhoneConflictErr() *apperr.Error {
+	return &apperr.Error{
+		Code:       "CONFLICT",
+		HTTPStatus: 409,
+		Fields:     map[string]string{"phone": "Nomor telepon sudah digunakan untuk login lain."},
+	}
+}
+
+// wrapTxErr passes through domain apperr (e.g. CONFLICT from a unique-email race)
+// and wraps anything else as Internal.
+func wrapTxErr(err error) error {
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		return ae
+	}
+	return apperr.Internal(err)
 }
 
 // UpdateEmployee patches a mutable employee fields.
@@ -282,6 +477,13 @@ func (s *Service) DeactivateEmployee(ctx context.Context, id, reason string) (do
 		if inErr != nil {
 			return inErr
 		}
+		// F2.7: cascade to the linked login — disable it and revoke every session
+		// (bump epoch + refresh tokens), so access dies immediately.
+		if current.UserID != nil {
+			if inErr = s.repo.DisableUserAndRevoke(ctx, tx, *current.UserID); inErr != nil {
+				return inErr
+			}
+		}
 		afterSnap := map[string]any{"status": "inactive"}
 		if reason != "" {
 			afterSnap["reason"] = reason
@@ -320,6 +522,13 @@ func (s *Service) ReactivateEmployee(ctx context.Context, id string) (domain.Emp
 		updated, inErr = s.repo.SetEmployeeStatus(ctx, tx, id, "active")
 		if inErr != nil {
 			return inErr
+		}
+		// F2.7: re-enable the linked login (sessions are NOT restored — the agent
+		// signs in fresh).
+		if current.UserID != nil {
+			if inErr = s.repo.EnableUser(ctx, tx, *current.UserID); inErr != nil {
+				return inErr
+			}
 		}
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.Action("employee.reactivate"),

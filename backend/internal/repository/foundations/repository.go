@@ -51,7 +51,8 @@ func (r *Repository) ListUsers(ctx context.Context, f domain.UserFilter) ([]doma
 	for _, row := range rows {
 		out = append(out, domain.User{
 			ID:          row.ID,
-			Email:       row.Email,
+			Email:       derefStr(row.Email),
+			Phone:       derefStr(row.Phone),
 			Role:        auth.Role(row.Role),
 			EmployeeID:  derefStr(row.EmployeeID),
 			CompanyID:   derefStr(row.CompanyID),
@@ -73,7 +74,8 @@ func (r *Repository) GetUserByID(ctx context.Context, id string) (domain.User, e
 	}
 	return domain.User{
 		ID:           row.ID,
-		Email:        row.Email,
+		Email:        derefStr(row.Email),
+		Phone:        derefStr(row.Phone),
 		PasswordHash: row.PasswordHash,
 		Role:         auth.Role(row.Role),
 		EmployeeID:   derefStr(row.EmployeeID),
@@ -94,35 +96,8 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.U
 	}
 	return domain.User{
 		ID:           row.ID,
-		Email:        row.Email,
-		PasswordHash: row.PasswordHash,
-		Role:         auth.Role(row.Role),
-		EmployeeID:   derefStr(row.EmployeeID),
-		CompanyID:    derefStr(row.CompanyID),
-		Status:       row.Status,
-		FullName:     row.FullName,
-		LastLoginAt:  row.LastLoginAt,
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
-	}, nil
-}
-
-// CreateUser inserts a new user (status defaults to 'active' in the SQL).
-func (r *Repository) CreateUser(ctx context.Context, tx pgx.Tx, p svc.CreateUserParams) (domain.User, error) {
-	row, err := r.q.WithTx(tx).CreateUser(ctx, sqlcgen.CreateUserParams{
-		Email:        p.Email,
-		PasswordHash: p.PasswordHash,
-		Role:         p.Role,
-		FullName:     p.FullName,
-		EmployeeID:   nullStr(p.EmployeeID),
-		CompanyID:    nil, // linked in E2 via placement
-	})
-	if err != nil {
-		return domain.User{}, mapErr(err)
-	}
-	return domain.User{
-		ID:           row.ID,
-		Email:        row.Email,
+		Email:        derefStr(row.Email),
+		Phone:        derefStr(row.Phone),
 		PasswordHash: row.PasswordHash,
 		Role:         auth.Role(row.Role),
 		EmployeeID:   derefStr(row.EmployeeID),
@@ -139,12 +114,12 @@ func (r *Repository) CreateUser(ctx context.Context, tx pgx.Tx, p svc.CreateUser
 func (r *Repository) UpdateUserEmail(ctx context.Context, tx pgx.Tx, id, email string) (domain.User, error) {
 	row, err := r.q.WithTx(tx).UpdateUserEmail(ctx, sqlcgen.UpdateUserEmailParams{
 		ID:    id,
-		Email: email,
+		Email: nullStr(email),
 	})
 	if err != nil {
 		return domain.User{}, mapErr(err)
 	}
-	return fromUpdateRow(row.ID, row.Email, row.Role, row.EmployeeID, row.CompanyID,
+	return fromUpdateRow(row.ID, row.Email, row.Phone, row.Role, row.EmployeeID, row.CompanyID,
 		row.Status, row.FullName, row.LastLoginAt, row.CreatedAt, row.UpdatedAt), nil
 }
 
@@ -157,7 +132,7 @@ func (r *Repository) ChangeUserRole(ctx context.Context, tx pgx.Tx, id, role str
 	if err != nil {
 		return domain.User{}, mapErr(err)
 	}
-	return fromUpdateRow(row.ID, row.Email, row.Role, row.EmployeeID, row.CompanyID,
+	return fromUpdateRow(row.ID, row.Email, row.Phone, row.Role, row.EmployeeID, row.CompanyID,
 		row.Status, row.FullName, row.LastLoginAt, row.CreatedAt, row.UpdatedAt), nil
 }
 
@@ -170,8 +145,18 @@ func (r *Repository) SetUserStatus(ctx context.Context, tx pgx.Tx, id, status st
 	if err != nil {
 		return domain.User{}, mapErr(err)
 	}
-	return fromUpdateRow(row.ID, row.Email, row.Role, row.EmployeeID, row.CompanyID,
+	return fromUpdateRow(row.ID, row.Email, row.Phone, row.Role, row.EmployeeID, row.CompanyID,
 		row.Status, row.FullName, row.LastLoginAt, row.CreatedAt, row.UpdatedAt), nil
+}
+
+// RevokeUserSessions bumps the session epoch and revokes all refresh tokens for a
+// user (F2.7 instant revocation), in the caller's tx.
+func (r *Repository) RevokeUserSessions(ctx context.Context, tx pgx.Tx, userID string) error {
+	q := r.q.WithTx(tx)
+	if err := q.BumpTokensValidAfter(ctx, userID); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(q.RevokeAllRefreshForUser(ctx, userID))
 }
 
 // InsertResetToken reuses the identity reset-token mechanism (sha256 hash, 1h TTL).
@@ -255,7 +240,9 @@ func toAuditEntry(row sqlcgen.AuditLog) domain.AuditEntry {
 // fromUpdateRow converts the shared management-row fields returned by
 // UpdateUserEmail/ChangeUserRole/SetUserStatus into a domain.User.
 func fromUpdateRow(
-	id, email, role string,
+	id string,
+	email, phone *string,
+	role string,
 	employeeID, companyID *string,
 	status, fullName string,
 	lastLoginAt *time.Time,
@@ -263,7 +250,8 @@ func fromUpdateRow(
 ) domain.User {
 	return domain.User{
 		ID:          id,
-		Email:       email,
+		Email:       derefStr(email),
+		Phone:       derefStr(phone),
 		Role:        auth.Role(role),
 		EmployeeID:  derefStr(employeeID),
 		CompanyID:   derefStr(companyID),

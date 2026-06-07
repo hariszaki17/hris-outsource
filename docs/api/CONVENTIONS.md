@@ -33,6 +33,7 @@
   - `401 Unauthenticated` — missing/expired token. Client must re-auth.
   - `403 Forbidden` — token valid, but role lacks permission. Client must surface no-permission state (instance `comp/EmptyNoPermission`).
 - **Session expired UX:** when client receives `401` mid-session, render the `comp/EmptySessionExpired` pattern (Wave-1 master) + re-auth flow.
+- **Not purely stateless (F2.7):** the access-token check is NOT a pure stateless JWT verify — every request also validates `users.status` and `tokens_valid_after >= token.iat` (the session epoch). This enables instant revocation (offboarding / account-disable bumps the epoch) without maintaining a per-token denylist. Already-issued tokens stay cryptographically valid but fail this check on their next validation.
 
 ---
 

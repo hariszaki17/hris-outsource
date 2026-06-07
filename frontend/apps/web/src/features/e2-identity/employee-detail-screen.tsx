@@ -23,7 +23,7 @@ import { ArrowLeft, KeyRound, MoreVertical, Pencil, Smartphone } from 'lucide-re
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { EditEmployeeScreen } from './employee-form.tsx';
-import { DeactivateEmployeeConfirm, ReactivateEmployeeConfirm } from './employee-overlays.tsx';
+import { OffboardEmployeeConfirm, ReactivateEmployeeConfirm } from './employee-overlays.tsx';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -165,7 +165,7 @@ export function EmployeeDetailScreen() {
 
   const [activeTab, setActiveTab] = useState<DetailTab>('profil');
   const [showEdit, setShowEdit] = useState(false);
-  const [showDeactivate, setShowDeactivate] = useState(false);
+  const [showOffboard, setShowOffboard] = useState(false);
   const [showReactivate, setShowReactivate] = useState(false);
 
   const query = useGetEmployee(employeeId);
@@ -237,11 +237,10 @@ export function EmployeeDetailScreen() {
                 <StatusBadge dot tone={isActive ? 'ok' : 'bad'}>
                   {isActive ? t('statusActive') : t('statusInactive')}
                 </StatusBadge>
-                {emp.has_login && (
-                  <StatusBadge dot tone="info">
-                    {t('loginActive')}
-                  </StatusBadge>
-                )}
+                {/* Every employee auto-provisions a login (D1). */}
+                <StatusBadge dot tone="info">
+                  {t('loginActive')}
+                </StatusBadge>
               </div>
               <span className="font-mono text-[12px] text-text-3">
                 NIK {emp.nik}
@@ -264,7 +263,7 @@ export function EmployeeDetailScreen() {
                 type="button"
                 aria-label={t('moreActions')}
                 className="flex size-[38px] items-center justify-center rounded-lg border border-border bg-surface text-text-2 hover:bg-surface-2"
-                onClick={() => (isActive ? setShowDeactivate(true) : setShowReactivate(true))}
+                onClick={() => (isActive ? setShowOffboard(true) : setShowReactivate(true))}
               >
                 <MoreVertical className="size-[18px]" aria-hidden />
               </button>
@@ -366,21 +365,14 @@ export function EmployeeDetailScreen() {
                   title={t('secAkunLogin')}
                   titleIcon={<KeyRound className="size-4 text-primary" aria-hidden />}
                 >
-                  {emp.has_login ? (
-                    <>
-                      <KvRow label={t('fieldLoginEmail')} value="—" mono />
-                      <KvRow label={t('fieldRole')} value={t('roleAgent')} />
-                      <KvRow label={t('fieldLoginStatus')}>
-                        <StatusBadge dot tone="ok">
-                          {t('statusActive')}
-                        </StatusBadge>
-                      </KvRow>
-                    </>
-                  ) : (
-                    <div className="py-3 text-center text-[13px] text-text-3">
-                      {t('noLoginProvisionedYet')}
-                    </div>
-                  )}
+                  {/* Login auto-provisions on create (D1); the identifier is the phone (D2). */}
+                  <KvRow label={t('fieldLoginIdentifier')} value={emp.phone} mono />
+                  <KvRow label={t('fieldRole')} value={t('roleAgent')} />
+                  <KvRow label={t('fieldLoginStatus')}>
+                    <StatusBadge dot tone="ok">
+                      {t('statusActive')}
+                    </StatusBadge>
+                  </KvRow>
                 </DetailCard>
               )}
 
@@ -426,13 +418,13 @@ export function EmployeeDetailScreen() {
         />
       )}
 
-      {/* Deactivate confirm */}
-      <DeactivateEmployeeConfirm
-        open={showDeactivate}
-        onOpenChange={setShowDeactivate}
+      {/* Offboard confirm (F2.7 — employment-end + session revocation) */}
+      <OffboardEmployeeConfirm
+        open={showOffboard}
+        onOpenChange={setShowOffboard}
         employee={emp}
         onDone={() => {
-          setShowDeactivate(false);
+          setShowOffboard(false);
           void query.refetch();
         }}
       />

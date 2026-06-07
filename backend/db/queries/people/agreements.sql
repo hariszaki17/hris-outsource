@@ -3,7 +3,7 @@
 -- Filters: employee_id, status, type, end_date__lte (agreements expiring on or before).
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE deleted_at IS NULL
@@ -21,7 +21,7 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetAgreementByID :one
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE id = sqlc.arg(id)
@@ -31,7 +31,7 @@ WHERE id = sqlc.arg(id)
 -- EA-2 pre-check + predecessor lookup for :renew/:close operations.
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE employee_id = sqlc.arg(employee_id)
@@ -42,7 +42,7 @@ WHERE employee_id = sqlc.arg(employee_id)
 -- Allocates the SWP-AG id inline from the per-prefix sequence.
 INSERT INTO employment_agreements (
     id, employee_id, type, agreement_no, start_date, end_date,
-    predecessor_id, base_salary_idr, bpjs_terms, tax_profile, comp_effective_date, created_by
+    predecessor_id, base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date, created_by
 ) VALUES (
     'SWP-AG-' || swp_next_id('AG'),
     sqlc.arg(employee_id),
@@ -52,6 +52,7 @@ INSERT INTO employment_agreements (
     sqlc.narg(end_date),
     sqlc.narg(predecessor_id),
     sqlc.narg(base_salary_idr),
+    sqlc.narg(annual_leave_entitlement_days),
     sqlc.narg(bpjs_terms),
     sqlc.narg(tax_profile),
     sqlc.narg(comp_effective_date),
@@ -59,7 +60,7 @@ INSERT INTO employment_agreements (
 )
 RETURNING id, employee_id, type, agreement_no, start_date, end_date, status,
           predecessor_id, successor_id, closed_reason, closed_at,
-          base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+          base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
           created_by, created_at, updated_at;
 
 -- name: SetAgreementStatus :one
@@ -74,5 +75,5 @@ SET status        = sqlc.arg(status),
 WHERE id = sqlc.arg(id)
 RETURNING id, employee_id, type, agreement_no, start_date, end_date, status,
           predecessor_id, successor_id, closed_reason, closed_at,
-          base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+          base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
           created_by, created_at, updated_at;

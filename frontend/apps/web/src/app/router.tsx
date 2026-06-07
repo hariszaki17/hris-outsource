@@ -199,13 +199,7 @@ const employeesRoute = createRoute({
       out.service_line = search.service_line;
     if (typeof search.client_company === 'string' && search.client_company)
       out.client_company = search.client_company;
-    if (typeof search.has_login === 'boolean') out.has_login = search.has_login;
-    if (
-      search.tab === 'all' ||
-      search.tab === 'active' ||
-      search.tab === 'inactive' ||
-      search.tab === 'no-login'
-    ) {
+    if (search.tab === 'all' || search.tab === 'active' || search.tab === 'inactive') {
       out.tab = search.tab;
     }
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;

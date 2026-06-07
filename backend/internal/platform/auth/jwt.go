@@ -74,12 +74,16 @@ func (i *Issuer) Verify(token string) (Principal, error) {
 	if err != nil {
 		return Principal{}, err
 	}
-	return Principal{
+	p := Principal{
 		UserID:     claims.Subject,
 		EmployeeID: claims.EmployeeID,
 		Role:       claims.Role,
 		CompanyID:  claims.CompanyID,
-	}, nil
+	}
+	if claims.IssuedAt != nil {
+		p.IssuedAt = claims.IssuedAt.Time
+	}
+	return p, nil
 }
 
 func newJTI() string {

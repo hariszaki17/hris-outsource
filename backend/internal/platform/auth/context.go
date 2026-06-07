@@ -4,7 +4,10 @@
 // the request context. Authorization (roles/scope) lives in package rbac.
 package auth
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Role mirrors the four roles in CONVENTIONS §17 / CLAUDE.md.
 type Role string
@@ -25,6 +28,9 @@ type Principal struct {
 	EmployeeID string // SWP-EMP-… (may be empty)
 	Role       Role
 	CompanyID  string // SWP-CMP-… (shift_leader only)
+	// IssuedAt is the access token's iat, used by the middleware's F2.7 session-epoch
+	// check (reject if IssuedAt < users.tokens_valid_after).
+	IssuedAt time.Time
 }
 
 type ctxKey int

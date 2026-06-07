@@ -113,22 +113,23 @@ func (h *AgreementHandler) CreateAgreement(w http.ResponseWriter, r *http.Reques
 		endDate = &ed
 	}
 
-	baseSalary, bpjsTerms, taxProfile, effDate := toCompensationParams(req.Compensation)
+	baseSalary, annualLeave, bpjsTerms, taxProfile, effDate := toCompensationParams(req.Compensation)
 
 	principal, _ := auth.PrincipalFrom(r.Context())
 	createdBy := principal.UserID
 
 	params := svc.CreateAgreementParams{
-		EmployeeID:        req.EmployeeID,
-		Type:              req.Type,
-		AgreementNo:       req.AgreementNo,
-		StartDate:         startDate,
-		EndDate:           endDate,
-		BaseSalaryIDR:     baseSalary,
-		BpjsTerms:         bpjsTerms,
-		TaxProfile:        taxProfile,
-		CompEffectiveDate: effDate,
-		CreatedBy:         &createdBy,
+		EmployeeID:                 req.EmployeeID,
+		Type:                       req.Type,
+		AgreementNo:                req.AgreementNo,
+		StartDate:                  startDate,
+		EndDate:                    endDate,
+		BaseSalaryIDR:              baseSalary,
+		AnnualLeaveEntitlementDays: annualLeave,
+		BpjsTerms:                  bpjsTerms,
+		TaxProfile:                 taxProfile,
+		CompEffectiveDate:          effDate,
+		CreatedBy:                  &createdBy,
 	}
 
 	ag, err := h.svc.CreateAgreement(r.Context(), params)
@@ -168,21 +169,22 @@ func (h *AgreementHandler) RenewAgreement(w http.ResponseWriter, r *http.Request
 		endDate = &ed
 	}
 
-	baseSalary, bpjsTerms, taxProfile, effDate := toCompensationParams(req.Compensation)
+	baseSalary, annualLeave, bpjsTerms, taxProfile, effDate := toCompensationParams(req.Compensation)
 
 	principal, _ := auth.PrincipalFrom(r.Context())
 	createdBy := principal.UserID
 
 	params := svc.CreateAgreementParams{
-		Type:              req.Type,
-		AgreementNo:       req.AgreementNo,
-		StartDate:         startDate,
-		EndDate:           endDate,
-		BaseSalaryIDR:     baseSalary,
-		BpjsTerms:         bpjsTerms,
-		TaxProfile:        taxProfile,
-		CompEffectiveDate: effDate,
-		CreatedBy:         &createdBy,
+		Type:                       req.Type,
+		AgreementNo:                req.AgreementNo,
+		StartDate:                  startDate,
+		EndDate:                    endDate,
+		BaseSalaryIDR:              baseSalary,
+		AnnualLeaveEntitlementDays: annualLeave,
+		BpjsTerms:                  bpjsTerms,
+		TaxProfile:                 taxProfile,
+		CompEffectiveDate:          effDate,
+		CreatedBy:                  &createdBy,
 	}
 
 	ag, err := h.svc.RenewAgreement(r.Context(), predecessorID, params)

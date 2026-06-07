@@ -55,31 +55,27 @@ type AgreementRef struct {
 
 // CreatePlacementParams carries the fields for inserting a placement.
 type CreatePlacementParams struct {
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  time.Time
-	EndDate                    *time.Time
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIDR           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	PredecessorID              *string
-	BackdateReason             *string
-	CreatedBy                  *string
+	EmployeeID      string
+	AgreementID     string
+	ClientCompanyID string
+	SiteID          string
+	ServiceLineID   string
+	PositionID      string
+	StartDate       time.Time
+	EndDate         *time.Time
+	Notes           *string
+	LifecycleStatus string
+	PredecessorID   *string
+	BackdateReason  *string
+	CreatedBy       *string
 }
 
 // UpdatePlacementParams carries the limited-field PATCH columns.
 type UpdatePlacementParams struct {
-	ID                         string
-	PositionID                 string
-	EndDate                    *time.Time
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIDR           *int64
-	Notes                      *string
+	ID         string
+	PositionID string
+	EndDate    *time.Time
+	Notes      *string
 }
 
 // SetLifecycleParams drives end/terminate/resign/transfer/supersede.
@@ -677,17 +673,15 @@ func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placeme
 
 // TransferParams carries the transfer request fields.
 type TransferParams struct {
-	ID                        string
-	NewClientCompanyID        string
-	NewServiceLineID          string
-	NewPositionID             string
-	NewStartDate              time.Time
-	NewEndDate                *time.Time
-	NewAgreementID            *string
-	NewAnnualLeaveEntitlement *int32
-	NewBaseSalaryRefIDR       *int64
-	TransferReason            string
-	ActorUserID               *string
+	ID                 string
+	NewClientCompanyID string
+	NewServiceLineID   string
+	NewPositionID      string
+	NewStartDate       time.Time
+	NewEndDate         *time.Time
+	NewAgreementID     *string
+	TransferReason     string
+	ActorUserID        *string
 }
 
 // TransferResult bundles the closed predecessor + new successor + warnings.
@@ -748,15 +742,6 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		}
 	}
 
-	annual := cur.AnnualLeaveEntitlementDays
-	if p.NewAnnualLeaveEntitlement != nil {
-		annual = p.NewAnnualLeaveEntitlement
-	}
-	salary := cur.BaseSalaryRefIDR
-	if p.NewBaseSalaryRefIDR != nil {
-		salary = p.NewBaseSalaryRefIDR
-	}
-
 	today := s.today()
 	successorStatus := "PENDING_START"
 	if !p.NewStartDate.After(today) {
@@ -783,20 +768,18 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		// 2. Create successor.
 		notesPtr := &reason
 		succ, inErr := s.repo.CreatePlacement(ctx, tx, CreatePlacementParams{
-			EmployeeID:                 cur.EmployeeID,
-			AgreementID:                agreementID,
-			ClientCompanyID:            p.NewClientCompanyID,
-			SiteID:                     siteID,
-			ServiceLineID:              p.NewServiceLineID,
-			PositionID:                 p.NewPositionID,
-			StartDate:                  p.NewStartDate,
-			EndDate:                    p.NewEndDate,
-			AnnualLeaveEntitlementDays: annual,
-			BaseSalaryRefIDR:           salary,
-			Notes:                      notesPtr,
-			LifecycleStatus:            successorStatus,
-			PredecessorID:              &cur.ID,
-			CreatedBy:                  p.ActorUserID,
+			EmployeeID:      cur.EmployeeID,
+			AgreementID:     agreementID,
+			ClientCompanyID: p.NewClientCompanyID,
+			SiteID:          siteID,
+			ServiceLineID:   p.NewServiceLineID,
+			PositionID:      p.NewPositionID,
+			StartDate:       p.NewStartDate,
+			EndDate:         p.NewEndDate,
+			Notes:           notesPtr,
+			LifecycleStatus: successorStatus,
+			PredecessorID:   &cur.ID,
+			CreatedBy:       p.ActorUserID,
 		})
 		if inErr != nil {
 			if isUniqueViolation(inErr) {
@@ -861,15 +844,13 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 
 // RenewParams carries the renew request fields.
 type RenewParams struct {
-	ID                        string
-	NewStartDate              time.Time
-	NewEndDate                *time.Time
-	NewAgreementID            *string
-	NewPositionID             *string
-	NewAnnualLeaveEntitlement *int32
-	NewBaseSalaryRefIDR       *int64
-	Notes                     *string
-	ActorUserID               *string
+	ID             string
+	NewStartDate   time.Time
+	NewEndDate     *time.Time
+	NewAgreementID *string
+	NewPositionID  *string
+	Notes          *string
+	ActorUserID    *string
 }
 
 // RenewResult bundles the superseded predecessor + new successor + warnings.
@@ -915,14 +896,6 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 	if p.NewPositionID != nil && *p.NewPositionID != "" {
 		positionID = *p.NewPositionID
 	}
-	annual := cur.AnnualLeaveEntitlementDays
-	if p.NewAnnualLeaveEntitlement != nil {
-		annual = p.NewAnnualLeaveEntitlement
-	}
-	salary := cur.BaseSalaryRefIDR
-	if p.NewBaseSalaryRefIDR != nil {
-		salary = p.NewBaseSalaryRefIDR
-	}
 
 	// PKWT auto-cap on new_end_date.
 	var warnings []string
@@ -956,20 +929,18 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 		}
 
 		succ, inErr := s.repo.CreatePlacement(ctx, tx, CreatePlacementParams{
-			EmployeeID:                 cur.EmployeeID,
-			AgreementID:                agreementID,
-			ClientCompanyID:            cur.ClientCompanyID,
-			SiteID:                     cur.SiteID,
-			ServiceLineID:              cur.ServiceLineID,
-			PositionID:                 positionID,
-			StartDate:                  p.NewStartDate,
-			EndDate:                    endDate,
-			AnnualLeaveEntitlementDays: annual,
-			BaseSalaryRefIDR:           salary,
-			Notes:                      p.Notes,
-			LifecycleStatus:            successorStatus,
-			PredecessorID:              &cur.ID,
-			CreatedBy:                  p.ActorUserID,
+			EmployeeID:      cur.EmployeeID,
+			AgreementID:     agreementID,
+			ClientCompanyID: cur.ClientCompanyID,
+			SiteID:          cur.SiteID,
+			ServiceLineID:   cur.ServiceLineID,
+			PositionID:      positionID,
+			StartDate:       p.NewStartDate,
+			EndDate:         endDate,
+			Notes:           p.Notes,
+			LifecycleStatus: successorStatus,
+			PredecessorID:   &cur.ID,
+			CreatedBy:       p.ActorUserID,
 		})
 		if inErr != nil {
 			if isUniqueViolation(inErr) {

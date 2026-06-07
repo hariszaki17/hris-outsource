@@ -105,8 +105,9 @@ func itoa(n int) string {
 // ---------------------------------------------------------------------------
 
 type fakeEmployeeRepo struct {
-	employees map[string]domain.Employee
-	nikIndex  map[string]string // nik → id
+	employees   map[string]domain.Employee
+	nikIndex    map[string]string // nik → id
+	loginPhones map[string]bool   // phones already taken by a seeded login (D2)
 
 	// error overrides (set per-test to trigger error paths)
 	createErr error
@@ -114,8 +115,9 @@ type fakeEmployeeRepo struct {
 
 func newFakeEmployeeRepo() *fakeEmployeeRepo {
 	return &fakeEmployeeRepo{
-		employees: make(map[string]domain.Employee),
-		nikIndex:  make(map[string]string),
+		employees:   make(map[string]domain.Employee),
+		nikIndex:    make(map[string]string),
+		loginPhones: make(map[string]bool),
 	}
 }
 
@@ -239,6 +241,38 @@ func (r *fakeEmployeeRepo) SetEmployeeStatus(_ context.Context, _ pgx.Tx, id, st
 	e.UpdatedAt = time.Now().UTC()
 	r.employees[id] = e
 	return e, nil
+}
+
+func (r *fakeEmployeeRepo) UserEmailTaken(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
+
+// UserPhoneTaken mirrors UserEmailTaken: phone is the primary login identifier (D2).
+// Returns true if a seeded login already owns the (normalized) phone; default false.
+func (r *fakeEmployeeRepo) UserPhoneTaken(_ context.Context, phone string) (bool, error) {
+	return r.loginPhones[phone], nil
+}
+
+func (r *fakeEmployeeRepo) ProvisionLogin(_ context.Context, _ pgx.Tx, p peoplesvc.ProvisionLoginRepoParams) (string, error) {
+	userID := "SWP-USR-test-" + p.EmployeeID
+	if e, ok := r.employees[p.EmployeeID]; ok {
+		uid := userID
+		e.UserID = &uid
+		r.employees[p.EmployeeID] = e
+	}
+	return userID, nil
+}
+
+func (r *fakeEmployeeRepo) RegenerateTempPassword(_ context.Context, _ pgx.Tx, _, _ string) error {
+	return nil
+}
+
+func (r *fakeEmployeeRepo) DisableUserAndRevoke(_ context.Context, _ pgx.Tx, _ string) error {
+	return nil
+}
+
+func (r *fakeEmployeeRepo) EnableUser(_ context.Context, _ pgx.Tx, _ string) error {
+	return nil
 }
 
 // Compile-time interface check.
@@ -410,15 +444,15 @@ func TestListEmployees_Cursor_Pagination(t *testing.T) {
 		nik := "NIK-CURSOR-" + itoa(i)
 		id := "SWP-EMP-CURSOR-" + itoa(i)
 		h.repo.addEmployee(domain.Employee{
-			ID:       id,
-			FullName: "Cursor Emp " + itoa(i),
-			NIK:      nik,
-			NIP:      "C" + itoa(i),
-			JoinAt:   time.Now().UTC(),
-			Status:   "active",
+			ID:          id,
+			FullName:    "Cursor Emp " + itoa(i),
+			NIK:         nik,
+			NIP:         "C" + itoa(i),
+			JoinAt:      time.Now().UTC(),
+			Status:      "active",
 			BankAccount: domain.BankAccount{},
-			CreatedAt: time.Now().UTC().Add(time.Duration(i) * time.Second),
-			UpdatedAt: time.Now().UTC(),
+			CreatedAt:   time.Now().UTC().Add(time.Duration(i) * time.Second),
+			UpdatedAt:   time.Now().UTC(),
 		})
 	}
 
@@ -484,6 +518,7 @@ func TestCreateEmployee_201_WithBankAccount(t *testing.T) {
 		"full_name": "Budi Santoso",
 		"nik":       "3201234567890001",
 		"join_at":   "2026-01-15",
+		"phone":     "081200000001", // required: login identifier (D2)
 		"bank_account": map[string]any{
 			"bank_name":           "BCA",
 			"account_number":      "987654321",
@@ -522,9 +557,14 @@ func TestCreateEmployee_201_WithBankAccount(t *testing.T) {
 		t.Errorf("bank_account.account_holder_name = %v, want Budi Santoso", ba["account_holder_name"])
 	}
 
-	// has_login must be bool false (no user provisioned).
-	if body["has_login"] != false {
-		t.Errorf("has_login = %v, want false", body["has_login"])
+	// D1: every employee auto-provisions a login at create — has_login must be true.
+	if body["has_login"] != true {
+		t.Errorf("has_login = %v, want true", body["has_login"])
+	}
+
+	// D1: a login is always provisioned, so temp_password is returned show-once.
+	if tp, ok := body["temp_password"].(string); !ok || tp == "" {
+		t.Errorf("temp_password = %v, want non-empty string (show-once)", body["temp_password"])
 	}
 }
 
@@ -563,6 +603,7 @@ func TestCreateEmployee_409_DuplicateNIK(t *testing.T) {
 		"full_name": "Duplikat Orang",
 		"nik":       existingNIK,
 		"join_at":   "2026-01-15",
+		"phone":     "081200000099", // required; NIK check fires before phone uniqueness
 	})
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 DUPLICATE_NIK, got %d: %s", rr.Code, rr.Body.String())
@@ -575,6 +616,51 @@ func TestCreateEmployee_409_DuplicateNIK(t *testing.T) {
 	fields, _ := errObj["fields"].(map[string]any)
 	if _, ok := fields["nik"]; !ok {
 		t.Error("error.fields.nik missing on DUPLICATE_NIK")
+	}
+}
+
+func TestCreateEmployee_409_DuplicatePhone(t *testing.T) {
+	h := newEmployeeHarness(t)
+	// Seed a login that already owns the normalized phone (E.164).
+	h.repo.loginPhones["+6281200000001"] = true
+
+	rr := h.do("POST", "/employees", map[string]any{
+		"full_name": "Nomor Bentrok",
+		"nik":       "3209999999999999",
+		"join_at":   "2026-01-15",
+		"phone":     "081200000001", // normalizes to +6281200000001 → conflict
+	})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 CONFLICT (phone), got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "CONFLICT" {
+		t.Errorf("error.code = %v, want CONFLICT", errObj["code"])
+	}
+	fields, _ := errObj["fields"].(map[string]any)
+	if _, ok := fields["phone"]; !ok {
+		t.Error("error.fields.phone missing on phone CONFLICT")
+	}
+}
+
+func TestCreateEmployee_400_MissingPhone(t *testing.T) {
+	h := newEmployeeHarness(t)
+
+	// Phone is now required (D2 login identifier) — omitting it is a 400 on `phone`.
+	rr := h.do("POST", "/employees", map[string]any{
+		"full_name": "Tanpa Telepon",
+		"nik":       "3208888888888888",
+		"join_at":   "2026-01-15",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 INVALID_REQUEST, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	fields, _ := errObj["fields"].(map[string]any)
+	if _, ok := fields["phone"]; !ok {
+		t.Error("error.fields.phone missing when phone omitted")
 	}
 }
 
@@ -647,15 +733,15 @@ func TestReactivateEmployee_200_Then_409(t *testing.T) {
 	// Seed an inactive employee.
 	now := time.Now().UTC()
 	h.repo.addEmployee(domain.Employee{
-		ID:        "SWP-EMP-INAC",
-		FullName:  "Inactive Emp",
-		NIK:       "INACTIVE-NIK-001",
-		NIP:       "INE-001",
-		JoinAt:    now,
-		Status:    "inactive",
+		ID:          "SWP-EMP-INAC",
+		FullName:    "Inactive Emp",
+		NIK:         "INACTIVE-NIK-001",
+		NIP:         "INE-001",
+		JoinAt:      now,
+		Status:      "inactive",
 		BankAccount: domain.BankAccount{},
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 
 	// Reactivate → 200 with status ACTIVE.

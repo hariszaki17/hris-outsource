@@ -13,7 +13,7 @@ A placement is not static — it activates, ages toward its end date, gets renew
 
 **Goals**
 - A single, enforced status model for every placement.
-- System-driven transitions: auto-activate scheduled placements, flag expiring ones (30 days), auto-end on expiry.
+- System-driven transitions: auto-activate scheduled placements, flag expiring ones (30 days) — then await an HR decision. The system **never auto-ends** a placement on expiry; it stays `Expiring` (grace) until HR acts.
 - HR-driven transitions: terminate early, record resignation, **renew via a linked successor**.
 - Every transition is audited and notifies the right people.
 
@@ -26,7 +26,7 @@ A placement is not static — it activates, ages toward its end date, gets renew
 
 - **HR / Placement Admin** — terminates, records resignation, renews.
 - **Super Admin** — same + corrections on terminal records.
-- **System** (scheduled job, org timezone **Asia/Jakarta**) — auto-activate, flag expiring, auto-end.
+- **System** (scheduled job, org timezone **Asia/Jakarta**) — auto-activate, flag expiring (raises an HR decision task); **never auto-ends employment**.
 - **Agent / Shift Leader** — notified of changes affecting them.
 
 ## 4. State model
@@ -38,11 +38,14 @@ stateDiagram-v2
     Draft --> Active: start today/immediate
     Scheduled --> Active: start reached (system)
     Active --> Expiring: 30d before end (system)
-    Active --> Ended: end reached (system)
     Active --> Terminated: HR ends early
     Active --> Resigned: agent resigns
     Active --> Superseded: renewed (successor)
-    Expiring --> Ended: end reached (system)
+    note right of Expiring
+      Persists under grace once end_date passes —
+      no system auto-end; login stays valid until
+      HR decides (Continue=renew / End=offboard, F2.7).
+    end note
     Expiring --> Terminated: HR ends early
     Expiring --> Resigned: agent resigns
     Expiring --> Superseded: renewed (successor)
@@ -59,8 +62,8 @@ stateDiagram-v2
 |-----|------|
 | LC-1 | Status ∈ {`Draft`, `Scheduled`, `Active`, `Expiring`, `Ended`, `Terminated`, `Resigned`, `Superseded`}. `Ended`/`Terminated`/`Resigned`/`Superseded` are **terminal & immutable** (Super Admin override only). |
 | LC-2 | A `Scheduled` placement auto-transitions to `Active` on its `start_date` (system job, Asia/Jakarta). |
-| LC-3 | An `Active` placement with an `end_date` auto-transitions to `Expiring` **30 days** before `end_date` (hardcoded). **Open-ended placements never expire.** |
-| LC-4 | An `Active`/`Expiring` placement auto-transitions to `Ended` (reason `EndOfTerm`) once `end_date` passes. |
+| LC-3 | An `Active` placement with an `end_date` auto-transitions to `Expiring` **30 days** before `end_date` (hardcoded). **Open-ended placements never expire.** Once `end_date` passes the placement **remains `Expiring`** — there is **no auto-end** — under grace until HR acts (see LC-4, F2.7 OB-6). |
+| LC-4 | There is **no system auto-end**. Once `end_date` passes, an `Expiring` placement **stays `Expiring`** (grace); HR explicitly ends it via the Inbox decision task — **Continue** = renew (LC-7) or **End** = offboard (closes the EmploymentAgreement, E2/F2.7). The agent's **login stays valid** throughout the grace window until HR ends employment (F2.7 OB-6). |
 | LC-5 | HR admin may **terminate** an `Active`/`Expiring`/`Scheduled` placement early with a **reason** + effective date → `Terminated`. |
 | LC-6 | Recording an agent **resignation** closes the active placement → `Resigned` with `resign_at`. (The employment agreement itself is closed in E2.) |
 | LC-7 | **Renewal** (same company + service line) creates a **successor placement** (`predecessor_id` → old) and sets the prior placement to `Superseded` effective the successor's `start_date`. The successor obeys F3.1 rules (incl. the 1-day buffer). |
@@ -74,7 +77,7 @@ stateDiagram-v2
 |-------|------|-------|
 | `status` | enum | per LC-1 |
 | `status_changed_at` | datetime | last transition time |
-| `ended_reason` | enum | `EndOfTerm` \| `Terminated` \| `Resigned` \| `Transferred` \| `Superseded` (null while open) |
+| `ended_reason` | enum | `EndOfTerm` \| `Terminated` \| `Resigned` \| `Transferred` \| `Superseded` \| `Deceased` \| `Retired` \| `Absconded` (null while open) |
 | `ended_at` | date | effective end for any terminal state |
 | `termination_reason` | text | required when `Terminated` |
 | `resign_at` | date | required when `Resigned` |
@@ -103,10 +106,13 @@ Feature: Placement lifecycle
     When the expiry job runs
     Then the placement remains "Active"
 
-  Scenario: Placement auto-ends after its end date
+  Scenario: Expiring placement persists under grace after its end date (no auto-end)
     Given an expiring placement whose end date passed yesterday
-    When the end-of-term job runs
-    Then the placement status becomes "Ended" with reason "EndOfTerm"
+    And no HR decision has been recorded
+    When the daily job runs
+    Then the placement status remains "Expiring"
+    And the agent's login stays valid
+    And the HR Inbox still shows a pending Continue/End decision (F2.7 OB-6)
 
   Scenario: HR terminates a placement early
     Given an active placement for "Budi"
@@ -158,5 +164,6 @@ Feature: Placement lifecycle
 
 - ✅ Renewal = linked successor (`predecessor_id`); prior → `Superseded`.
 - ✅ Expiring = 30 days, hardcoded; open-ended never expires.
+- ✅ **No placement auto-end (Resolved 2026-06-06).** The prior LC-4 auto-end (`EndOfTerm` once `end_date` passes) was **removed** in favor of an HR Inbox decision (Continue=renew / End=offboard) + a grace window where the placement stays `Expiring`. **Login revocation is tied to EMPLOYMENT-end (F2.7), not to any placement transition** — placement-end (transfer/renewal/supersede/expiry) never revokes a session.
 - **Open:** C-5 — should editing `end_date` into the past be allowed (immediate end) or blocked? (default: blocked, use Terminate instead.)
 - **Open:** does resignation always close the placement immediately, or allow a future-dated last working day? (assumed: effective `resign_at`, may be future.)

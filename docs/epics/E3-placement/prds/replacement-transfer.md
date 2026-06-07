@@ -56,7 +56,7 @@ sequenceDiagram
 | Ref | Rule |
 |-----|------|
 | TR-1 | Transfer requires an agent with a current `Active`/`Expiring` placement, a **different** target company **or** service line, and a new period. |
-| TR-2 | The current placement is closed with `ended_reason = Transferred` and `ended_at = newStart − 1 day` (honouring the 1-day buffer, F3.1 BR-2). |
+| TR-2 | The current placement is closed with `ended_reason = Transferred` and `ended_at = newStart − 1 day` (honouring the 1-day buffer, F3.1 BR-2). A transfer (like a renewal) closes **only the placement** and **never revokes the agent's login** — login revocation is employment-end only (E2 [F2.7](../../E2-identity/prds/offboarding.md), INV-6 / OB-2). |
 | TR-3 | A successor placement is created (F3.1 rules apply: active company, position from master, agreement window/auto-cap, buffer) with `predecessor_id` → the closed placement. |
 | TR-4 | If the agent was the **shift leader of the old company**, the transfer **vacates** that leadership (F3.4) and raises a vacancy for the old company. |
 | TR-5 | If the **new company has no shift leader**, the transfer still succeeds but warns and prompts F3.4. |

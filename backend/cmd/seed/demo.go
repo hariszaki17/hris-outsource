@@ -542,9 +542,9 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const plQ = `
 		INSERT INTO placements
 			(id, employee_id, agreement_id, client_company_id, site_id, service_line_id,
-			 position_id, start_date, end_date, base_salary_ref_idr, lifecycle_status,
+			 position_id, start_date, end_date, lifecycle_status,
 			 status_changed_at, ended_reason, ended_at, resign_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, $11, now(), $12, $13, $14, 'system-seed')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, now(), $11, $12, $13, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	const histQ = `
@@ -561,7 +561,6 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 		monthsAgo := 3 + demoRand.Intn(22)
 		start := demoNow.AddDate(0, -monthsAgo, -demoRand.Intn(28))
 		startStr := start.Format("2006-01-02")
-		salaryRef := int64(4500000 + demoRand.Intn(4000001))
 
 		// Decide lifecycle. ~12% of agents get a TERMINAL/history placement
 		// instead of active; the rest are ACTIVE (so INV-1 holds: exactly one
@@ -617,7 +616,7 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 
 		if _, err := pool.Pool.Exec(ctx, plQ,
 			plID, a.empID, a.agID, a.companyID, a.siteID, a.svcID, a.posID,
-			startStr, endStr, salaryRef, lifecycle, endedReason, endedAt, resignAt,
+			startStr, endStr, lifecycle, endedReason, endedAt, resignAt,
 		); err != nil {
 			return fmt.Errorf("seed demo placement %q: %w", plID, err)
 		}

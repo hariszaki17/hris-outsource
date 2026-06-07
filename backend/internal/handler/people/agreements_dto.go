@@ -12,37 +12,38 @@ import (
 // agreementWriteRequest is the POST /agreements body.
 // Matches AgreementWriteRequest in the E2 OpenAPI spec.
 type agreementWriteRequest struct {
-	EmployeeID   string               `json:"employee_id"`
-	Type         string               `json:"type"`         // PKWT | PKWTT
-	AgreementNo  string               `json:"agreement_no"`
-	StartDate    string               `json:"start_date"`   // YYYY-MM-DD
-	EndDate      *string              `json:"end_date"`     // YYYY-MM-DD, required for PKWT
+	EmployeeID   string                `json:"employee_id"`
+	Type         string                `json:"type"` // PKWT | PKWTT
+	AgreementNo  string                `json:"agreement_no"`
+	StartDate    string                `json:"start_date"` // YYYY-MM-DD
+	EndDate      *string               `json:"end_date"`   // YYYY-MM-DD, required for PKWT
 	Compensation *compensationTermsReq `json:"compensation"`
 }
 
 // renewRequest is the POST /agreements/{id}:renew body.
 type renewRequest struct {
-	Type         string               `json:"type"`
-	AgreementNo  string               `json:"agreement_no"`
-	StartDate    string               `json:"start_date"`
-	EndDate      *string              `json:"end_date"`
+	Type         string                `json:"type"`
+	AgreementNo  string                `json:"agreement_no"`
+	StartDate    string                `json:"start_date"`
+	EndDate      *string               `json:"end_date"`
 	Compensation *compensationTermsReq `json:"compensation"`
-	Note         string               `json:"note"`
+	Note         string                `json:"note"`
 }
 
 // closeRequest is the POST /agreements/{id}:close body.
 type closeRequest struct {
-	Reason        string `json:"reason"`        // RESIGNED|TERMINATED|END_OF_TERM|OTHER
+	Reason        string `json:"reason"`         // RESIGNED|TERMINATED|END_OF_TERM|OTHER
 	EffectiveDate string `json:"effective_date"` // YYYY-MM-DD
 	Note          string `json:"note"`
 }
 
 // compensationTermsReq is the nested compensation object in agreement write requests.
 type compensationTermsReq struct {
-	BaseSalaryIDR *float64      `json:"base_salary_idr"`
-	BpjsTerms     *bpjsTermsReq `json:"bpjs_terms"`
-	TaxProfile    *string       `json:"tax_profile"`
-	EffectiveDate *string       `json:"effective_date"` // YYYY-MM-DD
+	BaseSalaryIDR              *float64      `json:"base_salary_idr"`
+	AnnualLeaveEntitlementDays *int32        `json:"annual_leave_entitlement_days"`
+	BpjsTerms                  *bpjsTermsReq `json:"bpjs_terms"`
+	TaxProfile                 *string       `json:"tax_profile"`
+	EffectiveDate              *string       `json:"effective_date"` // YYYY-MM-DD
 }
 
 // bpjsTermsReq is the nested bpjs_terms object in compensation.
@@ -65,10 +66,11 @@ type bpjsTermsResp struct {
 
 // compensationTermsResp is the nested compensation object in Agreement responses.
 type compensationTermsResp struct {
-	BaseSalaryIDR *float64       `json:"base_salary_idr"`
-	BpjsTerms     *bpjsTermsResp `json:"bpjs_terms"`
-	TaxProfile    *string        `json:"tax_profile"`
-	EffectiveDate *string        `json:"effective_date"` // YYYY-MM-DD or null
+	BaseSalaryIDR              *float64       `json:"base_salary_idr"`
+	AnnualLeaveEntitlementDays *int32         `json:"annual_leave_entitlement_days"`
+	BpjsTerms                  *bpjsTermsResp `json:"bpjs_terms"`
+	TaxProfile                 *string        `json:"tax_profile"`
+	EffectiveDate              *string        `json:"effective_date"` // YYYY-MM-DD or null
 }
 
 // agreementResponse is the Agreement object per the E2 OpenAPI spec.
@@ -146,8 +148,9 @@ func toAgreementResponse(ag domain.Agreement, now time.Time) agreementResponse {
 
 	// Compensation — always present (may be zero-value).
 	comp := &compensationTermsResp{
-		BaseSalaryIDR: ag.Compensation.BaseSalaryIDR,
-		TaxProfile:    ag.Compensation.TaxProfile,
+		BaseSalaryIDR:              ag.Compensation.BaseSalaryIDR,
+		AnnualLeaveEntitlementDays: ag.Compensation.AnnualLeaveEntitlementDays,
+		TaxProfile:                 ag.Compensation.TaxProfile,
 	}
 	bpjs := ag.Compensation.BpjsTerms
 	comp.BpjsTerms = &bpjsTermsResp{
@@ -178,11 +181,12 @@ func toFileRefResponse(att domain.Attachment) fileRefResponse {
 }
 
 // toCompensationParams extracts service params from the compensation request.
-func toCompensationParams(c *compensationTermsReq) (baseSalary *float64, bpjsTerms domain.BpjsTerms, taxProfile *string, effDate *time.Time) {
+func toCompensationParams(c *compensationTermsReq) (baseSalary *float64, annualLeave *int32, bpjsTerms domain.BpjsTerms, taxProfile *string, effDate *time.Time) {
 	if c == nil {
-		return nil, domain.BpjsTerms{}, nil, nil
+		return nil, nil, domain.BpjsTerms{}, nil, nil
 	}
 	baseSalary = c.BaseSalaryIDR
+	annualLeave = c.AnnualLeaveEntitlementDays
 	taxProfile = c.TaxProfile
 	if c.BpjsTerms != nil {
 		bpjsTerms = domain.BpjsTerms{

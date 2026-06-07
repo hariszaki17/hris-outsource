@@ -220,7 +220,6 @@ func mapPlacementFromRoster(row sqlcgen.RosterForCompanyRow) domain.Placement {
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,

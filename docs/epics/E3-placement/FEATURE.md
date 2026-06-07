@@ -59,8 +59,6 @@ erDiagram
         date start_date
         date end_date "null = open-ended"
         string status
-        int annual_leave_entitlement
-        decimal base_salary_ref
         string ended_reason
         bigint predecessor_id FK "renewal or transfer chain"
         bigint created_by FK
@@ -99,14 +97,14 @@ erDiagram
 
 ### F3.1 — Agent Placement (create & activate)
 
-HR admin places an agent at a client company, in a service line, for a contract period, capturing terms (PKWT reference, period, annual-leave entitlement, base-salary reference). The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
+HR admin places an agent at a client company, in a service line, for a contract period, referencing the agent's employment agreement (PKWT/PKWTT) and selecting the per-placement position. Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         A1([Start: new placement]) --> A2[Select agent]
         A2 --> A3[Select client company + service line]
-        A3 --> A4[Set period + terms<br/>PKWT, dates, annual leave]
+        A3 --> A4[Set period + position<br/>PKWT ref, dates]
         A4 --> A7[Submit placement]
         A6[Resolve existing:<br/>end or transfer] --> A4
     end
@@ -136,7 +134,7 @@ flowchart TD
 
 ### F3.2 — Placement Lifecycle & Status
 
-Manages the placement state machine and the transitions HR admins trigger (renewal, termination, resignation) plus system-driven transitions (auto-activate on start date, flag expiring at **30 days** before end — hardcoded). **Renewal creates a linked successor placement** (a new record whose `predecessor_id` points to the old one); the prior placement is closed as `Superseded`. History is never edited in place.
+Manages the placement state machine and the transitions HR admins trigger (renewal, termination, resignation) plus system-driven transitions (auto-activate on start date, flag **Expiring** at **30 days** before end — hardcoded). The system **never auto-ends** a placement: when an `Expiring` placement reaches its `end_date` with no HR decision it **stays `Expiring`** (grace) until HR explicitly acts via an **Inbox decision task** — **Continue** (renew) or **End**. **Renewal creates a linked successor placement** (a new record whose `predecessor_id` points to the old one); the prior placement is closed as `Superseded`. History is never edited in place. Placement-end here is a *work-designation* change only — it **never revokes the agent's login**; login revocation is employment-end only (E2 [F2.7](../E2-identity/prds/offboarding.md), INV-6 / OB-2).
 
 ```mermaid
 stateDiagram-v2
@@ -145,11 +143,12 @@ stateDiagram-v2
     Draft --> Active: start date today / immediate
     Scheduled --> Active: start date reached (system)
     Active --> Expiring: 30 days before end (system)
-    Active --> Ended: end date reached (system)
+    Active --> Ended: HR End decision
     Active --> Terminated: HR ends early
     Active --> Resigned: agent resigns
     Active --> Superseded: renewed (successor created)
-    Expiring --> Ended: end date reached (system)
+    Expiring --> Expiring: end_date passed, no HR decision (grace; login stays valid)
+    Expiring --> Ended: HR End decision (no auto-end)
     Expiring --> Terminated: HR ends early
     Expiring --> Resigned: agent resigns
     Expiring --> Superseded: renewed (successor created)
@@ -257,6 +256,13 @@ flowchart LR
 - Notifications (E10) fire on: placement activated, expiring soon, ended/terminated, transfer, shift-leader (re)assigned.
 
 ## 7. Decisions & open questions
+
+**Resolved (2026-06-07 — comp/leave are E2 terms, EPICS §8):**
+- ✅ **`annual_leave_entitlement` and `base_salary_ref` removed from `Placement`.** Under alih-daya law the employment relationship is SWP↔agent and a placement is only a work *designation*; base salary stays the single source on E2 `CompensationRecord`, and the annual leave entitlement moves to the **EmploymentAgreement** (`annual_leave_entitlement_days`, E2 [employment-agreement.md](../E2-identity/prds/employment-agreement.md)). E6 leave-quota already sources the entitlement from E2. **BR-9 (position is selected per placement) is unaffected.**
+
+**Resolved (2026-06-06 — reconcile with E2 F2.7 offboarding):**
+- ✅ **No auto-end of placement at expiry.** At `end_date` an `Expiring` placement **stays `Expiring`** (grace) until HR decides via an **Inbox task** — **Continue** (renew → successor / `Superseded`) or **End**. The state machine has no system-driven `Expiring/Active → Ended` transition. → F3.2.
+- ✅ **Placement-end never revokes login.** Transfer / renewal / supersede / any placement close changes only the *work designation*; login revocation is **employment-end only** (E2 [F2.7](../E2-identity/prds/offboarding.md), INV-6 / OB-2).
 
 **Resolved (2026-06-03 — client sites, EPICS §8):**
 - ✅ **Placement targets a `Site`** (E2 F2.6), not just a company — `Placement.site_id` required (INV-5); every company has ≥1 site (auto "Main Site"). E5 geofence resolves from `placement.site`.

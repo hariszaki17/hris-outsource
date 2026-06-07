@@ -272,26 +272,42 @@ func (q *Queries) GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployee
 }
 
 const listEmployees = `-- name: ListEmployees :many
-SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
-       phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
-       bank_name, bank_account_number, bank_account_holder_name,
-       status, created_by, created_at, updated_at
-FROM employees
-WHERE deleted_at IS NULL
-  AND ($1::text IS NULL OR status = $1::text)
+SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
+       e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
+       e.bank_name, e.bank_account_number, e.bank_account_holder_name,
+       e.status, e.created_by, e.created_at, e.updated_at,
+       pos.id   AS current_position_id,
+       pos.name AS current_position_name,
+       sl.id    AS current_service_line_id,
+       sl.name  AS current_service_line_name,
+       cc.id    AS current_client_company_id,
+       cc.name  AS current_client_company_name
+FROM employees e
+LEFT JOIN LATERAL (
+    SELECT p.position_id, p.service_line_id, p.client_company_id
+    FROM placements p
+    WHERE p.employee_id = e.id
+      AND p.deleted_at IS NULL
+      AND p.lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START','EXTENDED')
+    ORDER BY p.status_changed_at DESC
+    LIMIT 1
+) cp ON true
+LEFT JOIN positions        pos ON pos.id = cp.position_id
+LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
+LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
+WHERE e.deleted_at IS NULL
+  AND ($1::text IS NULL OR e.status = $1::text)
   AND (
         $2::text IS NULL
-        OR full_name ILIKE '%' || $2::text || '%'
-        OR nik       ILIKE '%' || $2::text || '%'
-        OR nip       ILIKE '%' || $2::text || '%'
-        OR email_personal ILIKE '%' || $2::text || '%'
-        OR phone     ILIKE '%' || $2::text || '%'
+        OR e.full_name ILIKE '%' || $2::text || '%'
+        OR e.nik       ILIKE '%' || $2::text || '%'
+        OR e.nip       ILIKE '%' || $2::text || '%'
       )
   AND (
         $3::timestamptz IS NULL
-        OR (created_at, id) < ($3::timestamptz, $4::text)
+        OR (e.created_at, e.id) < ($3::timestamptz, $4::text)
       )
-ORDER BY created_at DESC, id DESC
+ORDER BY e.created_at DESC, e.id DESC
 LIMIT $5
 `
 
@@ -304,32 +320,40 @@ type ListEmployeesParams struct {
 }
 
 type ListEmployeesRow struct {
-	ID                    string
-	UserID                *string
-	FullName              string
-	Nik                   string
-	Nip                   string
-	JoinAt                pgtype.Date
-	Gender                *string
-	BirthDate             pgtype.Date
-	BirthPlace            *string
-	Phone                 *string
-	EmailPersonal         *string
-	Address               *string
-	Npwp                  *string
-	BpjsKesehatan         *string
-	BpjsKetenagakerjaan   *string
-	BankName              *string
-	BankAccountNumber     *string
-	BankAccountHolderName *string
-	Status                string
-	CreatedBy             *string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                       string
+	UserID                   *string
+	FullName                 string
+	Nik                      string
+	Nip                      string
+	JoinAt                   pgtype.Date
+	Gender                   *string
+	BirthDate                pgtype.Date
+	BirthPlace               *string
+	Phone                    *string
+	EmailPersonal            *string
+	Address                  *string
+	Npwp                     *string
+	BpjsKesehatan            *string
+	BpjsKetenagakerjaan      *string
+	BankName                 *string
+	BankAccountNumber        *string
+	BankAccountHolderName    *string
+	Status                   string
+	CreatedBy                *string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	CurrentPositionID        *string
+	CurrentPositionName      *string
+	CurrentServiceLineID     *string
+	CurrentServiceLineName   *string
+	CurrentClientCompanyID   *string
+	CurrentClientCompanyName *string
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-// Filters: q (ILIKE over full_name/nik/nip/email_personal/phone), status.
+// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
+// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
+// LEFT JOINs so unplaced employees still list (current_* null).
 func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error) {
 	rows, err := q.db.Query(ctx, listEmployees,
 		arg.Status,
@@ -368,6 +392,12 @@ func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CurrentPositionID,
+			&i.CurrentPositionName,
+			&i.CurrentServiceLineID,
+			&i.CurrentServiceLineName,
+			&i.CurrentClientCompanyID,
+			&i.CurrentClientCompanyName,
 		); err != nil {
 			return nil, err
 		}
@@ -450,6 +480,26 @@ func (q *Queries) SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setEmployeeUserID = `-- name: SetEmployeeUserID :exec
+UPDATE employees
+SET user_id    = $1,
+    updated_at = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+`
+
+type SetEmployeeUserIDParams struct {
+	UserID *string
+	ID     string
+}
+
+// EP-3: links a freshly provisioned E1 User to the employee (1:1). Flips
+// has_login (derived from user_id) to true.
+func (q *Queries) SetEmployeeUserID(ctx context.Context, arg SetEmployeeUserIDParams) error {
+	_, err := q.db.Exec(ctx, setEmployeeUserID, arg.UserID, arg.ID)
+	return err
 }
 
 const updateEmployee = `-- name: UpdateEmployee :one

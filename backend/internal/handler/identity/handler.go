@@ -59,7 +59,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.svc.Login(r.Context(), req.Email, req.Password, r.UserAgent(), httpx.ClientIP(r))
+	res, err := h.svc.Login(r.Context(), req.Identifier, req.Password, r.UserAgent(), httpx.ClientIP(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -169,6 +169,31 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ChangePassword handles POST /auth/change-password (authenticated). Sets a new
+// password for the current user — the EP-3 forced temp-password rotation and
+// voluntary changes. 204 on success; 422 WEAK_PASSWORD on policy violation.
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok {
+		httpx.WriteError(w, r, apperr.Unauthenticated())
+		return
+	}
+	var req changePasswordRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if req.NewPassword == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"new_password": "Wajib diisi."}))
+		return
+	}
+	if err := h.svc.ChangeOwnPassword(r.Context(), p.UserID, req.NewPassword); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // writeTokens emits the login response with the access token in the body and the
 // refresh token via the transport the client asked for.
 func (h *Handler) writeTokens(w http.ResponseWriter, r *http.Request, res identity.Result) {
@@ -229,8 +254,8 @@ func decodeJSON(r *http.Request, dst any) error {
 
 func validateLogin(req loginRequest) map[string]string {
 	fields := map[string]string{}
-	if req.Email == "" {
-		fields["email"] = "required"
+	if req.Identifier == "" {
+		fields["identifier"] = "required"
 	}
 	if req.Password == "" {
 		fields["password"] = "required"

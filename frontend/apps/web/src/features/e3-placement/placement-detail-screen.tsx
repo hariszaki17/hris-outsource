@@ -495,14 +495,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
               <KvRow label={t('field.company')} value={placement.client_company_name} />
               <KvRow label={t('field.serviceLine')} value={placement.service_line_name} />
               <KvRow label={t('field.position')} value={placement.position_name} />
-              <KvRow
-                label={t('field.annualLeave')}
-                value={
-                  placement.annual_leave_entitlement_days != null
-                    ? t('field.annualLeaveDays', { count: placement.annual_leave_entitlement_days })
-                    : null
-                }
-              />
               <KvRow label={t('field.period')}>
                 <span className="text-[13px] font-semibold text-text">
                   <DateText kind="date" value={placement.start_date} />
@@ -514,18 +506,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
                   )}
                 </span>
               </KvRow>
-              <KvRow
-                label={t('field.baseSalary')}
-                value={
-                  placement.base_salary_ref_idr != null
-                    ? new Intl.NumberFormat('id-ID', {
-                        style: 'currency',
-                        currency: 'IDR',
-                        maximumFractionDigits: 0,
-                      }).format(placement.base_salary_ref_idr)
-                    : null
-                }
-              />
               <KvRow label={t('field.createdBy')} value={placement.created_by ?? '—'} />
               <KvRow label={t('field.createdAt')}>
                 <DateText

@@ -59,9 +59,17 @@ export function PositionPicker({
 
   // Reset the selected value whenever the service line changes (intentionally keyed on
   // serviceLineId only — `onChange` is a stable callback we don't want to re-trigger on).
+  // Reset only on a *real* change, not on first mount (and not on StrictMode's
+  // double-invoked effect, which a simple first-run flag wouldn't survive): we track the
+  // previous serviceLineId and reset only when it actually differs, so we never clobber
+  // the form's initial value or trigger eager validation before the user interacts.
+  const prevServiceLineId = useRef(serviceLineId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset effect keyed on serviceLineId
   useEffect(() => {
-    onChange(null);
+    if (prevServiceLineId.current !== serviceLineId) {
+      prevServiceLineId.current = serviceLineId;
+      onChange(null);
+    }
   }, [serviceLineId]);
 
   const result = useListPositionsInServiceLine(

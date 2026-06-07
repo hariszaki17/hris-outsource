@@ -1672,7 +1672,12 @@ components:
           properties:
             active_placements:
               type: integer
-              description: Count of E3 placements currently active.
+              description: |
+                Count of E3 placements currently **non-terminal**
+                (`ACTIVE` / `PENDING_START` / `EXPIRING`), i.e. excluding the
+                terminal states (`ENDED`, `TRANSFERRED`, `TERMINATED`,
+                `RESIGNED`, `SUPERSEDED`). An `EXPIRING` placement is still
+                counted — per F2.7 it is not auto-ended at `end_date`.
               example: 482
             active_companies:
               type: integer
@@ -1702,7 +1707,11 @@ components:
               example: 6
         expiring_placements_30d:
           type: integer
-          description: Placements ending within 30 days (E3 cron-driven).
+          description: |
+            Placements flagged `EXPIRING` within 30 days of `end_date` (E3
+            cron-driven, LC-3). Per F2.7 these are **HR-decision Inbox
+            items** (Continue=renew vs End=offboard), **not** auto-ended —
+            the placement and the agent's login stay valid until HR acts.
           example: 12
         expiring_agreements_30d:
           type: integer

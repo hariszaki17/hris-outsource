@@ -9,11 +9,12 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
 )
 
-// loginRequest is the POST /auth/login body.
+// loginRequest is the POST /auth/login body. Identifier is a phone number or
+// email (D2).
 type loginRequest struct {
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	StaySignedIn bool  `json:"stay_signed_in"`
+	Identifier   string `json:"identifier"`
+	Password     string `json:"password"`
+	StaySignedIn bool   `json:"stay_signed_in"`
 }
 
 // refreshRequest is the POST /auth/refresh body (mobile/bearer transport). Web
@@ -33,6 +34,11 @@ type resetPasswordRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
+// changePasswordRequest is the body for POST /auth/change-password (authenticated).
+type changePasswordRequest struct {
+	NewPassword string `json:"new_password"`
+}
+
 // scopeDTO is the MeResponse.scope field (CONVENTIONS §17).
 type scopeDTO struct {
 	Type      string  `json:"type"`                // global | company | self
@@ -44,12 +50,16 @@ type scopeDTO struct {
 type meResponse struct {
 	ID          string     `json:"id"`
 	Email       string     `json:"email"`
+	Phone       string     `json:"phone"`
 	Role        string     `json:"role"`
 	Status      string     `json:"status"`       // UPPERCASE per spec (ACTIVE | DISABLED)
 	EmployeeID  string     `json:"employee_id"`
 	FullName    string     `json:"full_name"`
 	LastLoginAt *time.Time `json:"last_login_at"` // RFC3339 UTC; null on first login
 	Scope       scopeDTO   `json:"scope"`
+	// MustChangePassword: the user logged in with a temp password and must rotate it
+	// before normal use (EP-3). The client routes to the change-password screen.
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 // loginResponse is the LoginResponse schema from the OpenAPI spec.
@@ -82,12 +92,14 @@ func meFromUser(u domain.User) meResponse {
 	return meResponse{
 		ID:          u.ID,
 		Email:       u.Email,
+		Phone:       u.Phone,
 		Role:        string(u.Role),
 		Status:      strings.ToUpper(u.Status), // "active" → "ACTIVE" per spec
-		EmployeeID:  u.EmployeeID,
-		FullName:    u.FullName,
-		LastLoginAt: u.LastLoginAt,
-		Scope:       scope,
+		EmployeeID:         u.EmployeeID,
+		FullName:           u.FullName,
+		LastLoginAt:        u.LastLoginAt,
+		Scope:              scope,
+		MustChangePassword: u.MustChangePassword,
 	}
 }
 

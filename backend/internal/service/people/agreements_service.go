@@ -37,17 +37,18 @@ type AgreementRepository interface {
 
 // CreateAgreementParams carries fields for inserting a new employment agreement.
 type CreateAgreementParams struct {
-	EmployeeID        string
-	Type              string  // "PKWT" | "PKWTT"
-	AgreementNo       string
-	StartDate         time.Time
-	EndDate           *time.Time // nil for PKWTT
-	PredecessorID     *string
-	BaseSalaryIDR     *float64
-	BpjsTerms         domain.BpjsTerms
-	TaxProfile        *string
-	CompEffectiveDate *time.Time
-	CreatedBy         *string
+	EmployeeID                 string
+	Type                       string // "PKWT" | "PKWTT"
+	AgreementNo                string
+	StartDate                  time.Time
+	EndDate                    *time.Time // nil for PKWTT
+	PredecessorID              *string
+	BaseSalaryIDR              *float64
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  domain.BpjsTerms
+	TaxProfile                 *string
+	CompEffectiveDate          *time.Time
+	CreatedBy                  *string
 }
 
 // SetAgreementStatusParams carries fields for SetAgreementStatus (close / supersede).
@@ -310,7 +311,10 @@ func (s *AgreementService) CloseAgreement(ctx context.Context, id, reason string
 	}
 
 	// Validate reason enum.
-	validReasons := map[string]bool{"RESIGNED": true, "TERMINATED": true, "END_OF_TERM": true, "OTHER": true}
+	validReasons := map[string]bool{
+		"RESIGNED": true, "TERMINATED": true, "END_OF_TERM": true,
+		"DECEASED": true, "RETIRED": true, "ABSCONDED": true, "OTHER": true,
+	}
 	if !validReasons[reason] {
 		return domain.Agreement{}, apperr.Invalid(map[string]string{"reason": "Alasan tidak valid. Pilih: RESIGNED, TERMINATED, END_OF_TERM, OTHER."})
 	}

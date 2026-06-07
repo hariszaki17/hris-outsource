@@ -78,6 +78,16 @@ func (f *fakeRepo) GetUserByEmail(_ context.Context, email string) (domain.User,
 	return u, nil
 }
 
+func (f *fakeRepo) GetUserByIdentifier(_ context.Context, identifier string) (domain.User, error) {
+	id := toLower(identifier)
+	for _, u := range f.users {
+		if toLower(u.Email) == id || toLower(u.Phone) == id {
+			return u, nil
+		}
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
 func (f *fakeRepo) GetUserByID(_ context.Context, id string) (domain.User, error) {
 	u, ok := f.usersByID[id]
 	if !ok {
@@ -247,8 +257,8 @@ func TestLogin_SpecShape(t *testing.T) {
 	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
 
 	rr := h.doJSON("POST", "/auth/login", map[string]any{
-		"email":    "sari.hadi@swp.test",
-		"password": "Pass1ng-Garuda!",
+		"identifier": "sari.hadi@swp.test",
+		"password":   "Pass1ng-Garuda!",
 	})
 
 	if rr.Code != http.StatusOK {
@@ -301,6 +311,10 @@ func TestLogin_SpecShape(t *testing.T) {
 	if user["full_name"] != "Sari Hadi" {
 		t.Errorf("user.full_name = %v, want Sari Hadi", user["full_name"])
 	}
+	// phone is part of the user shape (login is by identifier: phone OR email).
+	if _, ok := user["phone"]; !ok {
+		t.Error("missing user.phone")
+	}
 	// scope
 	scopeRaw, ok := user["scope"]
 	if !ok {
@@ -323,8 +337,8 @@ func TestLogin_WrongPassword_401(t *testing.T) {
 	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
 
 	rr := h.doJSON("POST", "/auth/login", map[string]any{
-		"email":    "sari.hadi@swp.test",
-		"password": "wrongpassword",
+		"identifier": "sari.hadi@swp.test",
+		"password":   "wrongpassword",
 	})
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rr.Code)
@@ -348,8 +362,8 @@ func TestLogin_DisabledAccount_403(t *testing.T) {
 	})
 
 	rr := h.doJSON("POST", "/auth/login", map[string]any{
-		"email":    "disabled@swp.test",
-		"password": "Pass1ng-Garuda!",
+		"identifier": "disabled@swp.test",
+		"password":   "Pass1ng-Garuda!",
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rr.Code)
@@ -358,6 +372,41 @@ func TestLogin_DisabledAccount_403(t *testing.T) {
 	errObj, _ := body["error"].(map[string]any)
 	if errObj["code"] != "ACCOUNT_DISABLED" {
 		t.Errorf("error.code = %v, want ACCOUNT_DISABLED", errObj["code"])
+	}
+}
+
+// TestLogin_ByPhone verifies login works when the identifier is a phone number
+// (login is by identifier: phone OR email).
+func TestLogin_ByPhone(t *testing.T) {
+	h := newHarness(t)
+	hash, _ := auth.HashPassword("Pass1ng-Garuda!")
+	h.repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari.hadi@swp.test",
+		Phone:        "081234567890",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+		FullName:     "Sari Hadi",
+	})
+
+	rr := h.doJSON("POST", "/auth/login", map[string]any{
+		"identifier": "081234567890",
+		"password":   "Pass1ng-Garuda!",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	user, ok := body["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("user is not an object, got %T", body["user"])
+	}
+	if user["phone"] != "081234567890" {
+		t.Errorf("user.phone = %v, want 081234567890", user["phone"])
+	}
+	if user["email"] != "sari.hadi@swp.test" {
+		t.Errorf("user.email = %v, want sari.hadi@swp.test", user["email"])
 	}
 }
 
@@ -371,8 +420,8 @@ func TestMe_SpecShape(t *testing.T) {
 
 	// Login to get access token.
 	loginRR := h.doJSON("POST", "/auth/login", map[string]any{
-		"email":    "sari.hadi@swp.test",
-		"password": "Pass1ng-Garuda!",
+		"identifier": "sari.hadi@swp.test",
+		"password":   "Pass1ng-Garuda!",
 	})
 	if loginRR.Code != http.StatusOK {
 		t.Fatalf("login failed: %d %s", loginRR.Code, loginRR.Body.String())
@@ -422,8 +471,8 @@ func TestMe_ShiftLeader_CompanyScope(t *testing.T) {
 	h.addActiveUser("SWP-USR-1108", "rudi.wijaya@swp.test", "Lead3r-Senayan!", "shift_leader", "Rudi Wijaya", "SWP-CMP-0021")
 
 	loginRR := h.doJSON("POST", "/auth/login", map[string]any{
-		"email":    "rudi.wijaya@swp.test",
-		"password": "Lead3r-Senayan!",
+		"identifier": "rudi.wijaya@swp.test",
+		"password":   "Lead3r-Senayan!",
 	})
 	if loginRR.Code != http.StatusOK {
 		t.Fatalf("login failed: %d %s", loginRR.Code, loginRR.Body.String())
@@ -602,7 +651,7 @@ func TestRefresh_ValidToken_200(t *testing.T) {
 	h.addActiveUser("SWP-USR-1042", "sari@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
 
 	// Login with bearer transport to get refresh token in body.
-	req := httptest.NewRequest("POST", "/auth/login", bytes.NewBufferString(`{"email":"sari@swp.test","password":"Pass1ng-Garuda!"}`))
+	req := httptest.NewRequest("POST", "/auth/login", bytes.NewBufferString(`{"identifier":"sari@swp.test","password":"Pass1ng-Garuda!"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Auth-Transport", "bearer")
 	rr := httptest.NewRecorder()
@@ -638,7 +687,7 @@ func TestLogout_204(t *testing.T) {
 	h.addActiveUser("SWP-USR-1042", "sari@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
 
 	// Login with bearer transport.
-	req := httptest.NewRequest("POST", "/auth/login", bytes.NewBufferString(`{"email":"sari@swp.test","password":"Pass1ng-Garuda!"}`))
+	req := httptest.NewRequest("POST", "/auth/login", bytes.NewBufferString(`{"identifier":"sari@swp.test","password":"Pass1ng-Garuda!"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Auth-Transport", "bearer")
 	rr := httptest.NewRecorder()

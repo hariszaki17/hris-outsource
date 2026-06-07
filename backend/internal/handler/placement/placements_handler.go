@@ -164,19 +164,17 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 
 	actor := actorPtr(r)
 	created, err := h.placements.CreatePlacement(r.Context(), svc.CreatePlacementParams{
-		EmployeeID:                 req.EmployeeID,
-		AgreementID:                req.AgreementID,
-		ClientCompanyID:            req.ClientCompanyID,
-		SiteID:                     req.SiteID,
-		ServiceLineID:              req.ServiceLineID,
-		PositionID:                 req.PositionID,
-		StartDate:                  startDate,
-		EndDate:                    endDate,
-		AnnualLeaveEntitlementDays: req.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIDR:           req.BaseSalaryRefIDR,
-		Notes:                      req.Notes,
-		BackdateReason:             req.BackdateReason,
-		CreatedBy:                  actor,
+		EmployeeID:      req.EmployeeID,
+		AgreementID:     req.AgreementID,
+		ClientCompanyID: req.ClientCompanyID,
+		SiteID:          req.SiteID,
+		ServiceLineID:   req.ServiceLineID,
+		PositionID:      req.PositionID,
+		StartDate:       startDate,
+		EndDate:         endDate,
+		Notes:           req.Notes,
+		BackdateReason:  req.BackdateReason,
+		CreatedBy:       actor,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -230,10 +228,8 @@ func (h *Handler) UpdatePlacement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := svc.UpdatePlacementParams{
-		ID:                         id,
-		AnnualLeaveEntitlementDays: req.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIDR:           req.BaseSalaryRefIDR,
-		Notes:                      req.Notes,
+		ID:    id,
+		Notes: req.Notes,
 	}
 	if req.PositionID != nil {
 		params.PositionID = *req.PositionID
@@ -277,17 +273,15 @@ func (h *Handler) TransferPlacement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.placements.TransferPlacement(r.Context(), svc.TransferParams{
-		ID:                        id,
-		NewClientCompanyID:        req.NewClientCompanyID,
-		NewServiceLineID:          req.NewServiceLineID,
-		NewPositionID:             req.NewPositionID,
-		NewStartDate:              startDate,
-		NewEndDate:                endDate,
-		NewAgreementID:            req.NewAgreementID,
-		NewAnnualLeaveEntitlement: req.NewAnnualLeaveEntitlement,
-		NewBaseSalaryRefIDR:       req.NewBaseSalaryRefIDR,
-		TransferReason:            req.TransferReason,
-		ActorUserID:               actorPtr(r),
+		ID:                 id,
+		NewClientCompanyID: req.NewClientCompanyID,
+		NewServiceLineID:   req.NewServiceLineID,
+		NewPositionID:      req.NewPositionID,
+		NewStartDate:       startDate,
+		NewEndDate:         endDate,
+		NewAgreementID:     req.NewAgreementID,
+		TransferReason:     req.TransferReason,
+		ActorUserID:        actorPtr(r),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -336,10 +330,6 @@ func (h *Handler) RenewPlacement(w http.ResponseWriter, r *http.Request) {
 		NewPositionID:  req.NewPositionID,
 		Notes:          req.Notes,
 		ActorUserID:    actorPtr(r),
-	}
-	if req.TermsChanges != nil {
-		params.NewAnnualLeaveEntitlement = req.TermsChanges.AnnualLeaveEntitlementDays
-		params.NewBaseSalaryRefIDR = req.TermsChanges.BaseSalaryRefIDR
 	}
 
 	res, err := h.placements.RenewPlacement(r.Context(), params)

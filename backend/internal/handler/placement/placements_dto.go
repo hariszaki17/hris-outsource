@@ -14,26 +14,22 @@ import (
 // --- request DTOs ---
 
 type placementWriteRequest struct {
-	EmployeeID                 string  `json:"employee_id"`
-	AgreementID                string  `json:"agreement_id"`
-	ClientCompanyID            string  `json:"client_company_id"`
-	SiteID                     string  `json:"site_id"`
-	ServiceLineID              string  `json:"service_line_id"`
-	PositionID                 string  `json:"position_id"`
-	StartDate                  string  `json:"start_date"`
-	EndDate                    *string `json:"end_date"`
-	AnnualLeaveEntitlementDays *int32  `json:"annual_leave_entitlement_days"`
-	BaseSalaryRefIDR           *int64  `json:"base_salary_ref_idr"`
-	BackdateReason             *string `json:"backdate_reason"`
-	Notes                      *string `json:"notes"`
+	EmployeeID      string  `json:"employee_id"`
+	AgreementID     string  `json:"agreement_id"`
+	ClientCompanyID string  `json:"client_company_id"`
+	SiteID          string  `json:"site_id"`
+	ServiceLineID   string  `json:"service_line_id"`
+	PositionID      string  `json:"position_id"`
+	StartDate       string  `json:"start_date"`
+	EndDate         *string `json:"end_date"`
+	BackdateReason  *string `json:"backdate_reason"`
+	Notes           *string `json:"notes"`
 }
 
 type placementPatchRequest struct {
-	PositionID                 *string `json:"position_id"`
-	EndDate                    *string `json:"end_date"`
-	AnnualLeaveEntitlementDays *int32  `json:"annual_leave_entitlement_days"`
-	BaseSalaryRefIDR           *int64  `json:"base_salary_ref_idr"`
-	Notes                      *string `json:"notes"`
+	PositionID *string `json:"position_id"`
+	EndDate    *string `json:"end_date"`
+	Notes      *string `json:"notes"`
 	// Read-only fields — rejected if present.
 	EmployeeID      *string `json:"employee_id"`
 	AgreementID     *string `json:"agreement_id"`
@@ -46,30 +42,22 @@ type placementPatchRequest struct {
 }
 
 type transferRequest struct {
-	NewClientCompanyID        string  `json:"new_client_company_id"`
-	NewServiceLineID          string  `json:"new_service_line_id"`
-	NewPositionID             string  `json:"new_position_id"`
-	NewStartDate              string  `json:"new_start_date"`
-	NewEndDate                *string `json:"new_end_date"`
-	NewAgreementID            *string `json:"new_agreement_id"`
-	NewAnnualLeaveEntitlement *int32  `json:"new_annual_leave_entitlement_days"`
-	NewBaseSalaryRefIDR       *int64  `json:"new_base_salary_ref_idr"`
-	TransferReason            string  `json:"transfer_reason"`
-	TransferNote              *string `json:"transfer_note"`
-}
-
-type renewTermsChanges struct {
-	AnnualLeaveEntitlementDays *int32 `json:"annual_leave_entitlement_days"`
-	BaseSalaryRefIDR           *int64 `json:"base_salary_ref_idr"`
+	NewClientCompanyID string  `json:"new_client_company_id"`
+	NewServiceLineID   string  `json:"new_service_line_id"`
+	NewPositionID      string  `json:"new_position_id"`
+	NewStartDate       string  `json:"new_start_date"`
+	NewEndDate         *string `json:"new_end_date"`
+	NewAgreementID     *string `json:"new_agreement_id"`
+	TransferReason     string  `json:"transfer_reason"`
+	TransferNote       *string `json:"transfer_note"`
 }
 
 type renewRequest struct {
-	NewStartDate   string             `json:"new_start_date"`
-	NewEndDate     *string            `json:"new_end_date"`
-	NewAgreementID *string            `json:"new_agreement_id"`
-	NewPositionID  *string            `json:"new_position_id"`
-	TermsChanges   *renewTermsChanges `json:"terms_changes"`
-	Notes          *string            `json:"notes"`
+	NewStartDate   string  `json:"new_start_date"`
+	NewEndDate     *string `json:"new_end_date"`
+	NewAgreementID *string `json:"new_agreement_id"`
+	NewPositionID  *string `json:"new_position_id"`
+	Notes          *string `json:"notes"`
 }
 
 type endRequest struct {
@@ -95,37 +83,35 @@ type terminateRequest struct {
 // placementResponse is the openapi Placement object (snake_case, nullable
 // handling). lifecycle_status is derived at the boundary.
 type placementResponse struct {
-	ID                         string   `json:"id"`
-	EmployeeID                 string   `json:"employee_id"`
-	EmployeeName               *string  `json:"employee_name"`
-	AgreementID                string   `json:"agreement_id"`
-	AgreementType              *string  `json:"agreement_type"`
-	ClientCompanyID            string   `json:"client_company_id"`
-	ClientCompanyName          *string  `json:"client_company_name"`
-	SiteID                     string   `json:"site_id"`
-	SiteName                   *string  `json:"site_name"`
-	ServiceLineID              string   `json:"service_line_id"`
-	ServiceLineName            *string  `json:"service_line_name"`
-	PositionID                 string   `json:"position_id"`
-	PositionName               *string  `json:"position_name"`
-	StartDate                  string   `json:"start_date"`
-	EndDate                    *string  `json:"end_date"`
-	AnnualLeaveEntitlementDays *int32   `json:"annual_leave_entitlement_days"`
-	BaseSalaryRefIDR           *int64   `json:"base_salary_ref_idr"`
-	Notes                      *string  `json:"notes"`
-	LifecycleStatus            string   `json:"lifecycle_status"`
-	StatusChangedAt            string   `json:"status_changed_at"`
-	EndedReason                *string  `json:"ended_reason"`
-	EndedAt                    *string  `json:"ended_at"`
-	TerminationReason          *string  `json:"termination_reason"`
-	ResignAt                   *string  `json:"resign_at"`
-	PredecessorID              *string  `json:"predecessor_id"`
-	SuccessorID                *string  `json:"successor_id"`
-	BackdateReason             *string  `json:"backdate_reason"`
-	CreatedBy                  *string  `json:"created_by"`
-	CreatedAt                  string   `json:"created_at"`
-	UpdatedAt                  string   `json:"updated_at"`
-	Warnings                   []string `json:"warnings"`
+	ID                string   `json:"id"`
+	EmployeeID        string   `json:"employee_id"`
+	EmployeeName      *string  `json:"employee_name"`
+	AgreementID       string   `json:"agreement_id"`
+	AgreementType     *string  `json:"agreement_type"`
+	ClientCompanyID   string   `json:"client_company_id"`
+	ClientCompanyName *string  `json:"client_company_name"`
+	SiteID            string   `json:"site_id"`
+	SiteName          *string  `json:"site_name"`
+	ServiceLineID     string   `json:"service_line_id"`
+	ServiceLineName   *string  `json:"service_line_name"`
+	PositionID        string   `json:"position_id"`
+	PositionName      *string  `json:"position_name"`
+	StartDate         string   `json:"start_date"`
+	EndDate           *string  `json:"end_date"`
+	Notes             *string  `json:"notes"`
+	LifecycleStatus   string   `json:"lifecycle_status"`
+	StatusChangedAt   string   `json:"status_changed_at"`
+	EndedReason       *string  `json:"ended_reason"`
+	EndedAt           *string  `json:"ended_at"`
+	TerminationReason *string  `json:"termination_reason"`
+	ResignAt          *string  `json:"resign_at"`
+	PredecessorID     *string  `json:"predecessor_id"`
+	SuccessorID       *string  `json:"successor_id"`
+	BackdateReason    *string  `json:"backdate_reason"`
+	CreatedBy         *string  `json:"created_by"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
+	Warnings          []string `json:"warnings"`
 }
 
 // placementSummaryResponse is the openapi PlacementSummary (history_chain item).
@@ -197,34 +183,32 @@ func toPlacementResponse(p domain.Placement, today time.Time) placementResponse 
 	}
 
 	resp := placementResponse{
-		ID:                         p.ID,
-		EmployeeID:                 p.EmployeeID,
-		EmployeeName:               p.EmployeeName,
-		AgreementID:                p.AgreementID,
-		AgreementType:              p.AgreementType,
-		ClientCompanyID:            p.ClientCompanyID,
-		ClientCompanyName:          p.ClientCompanyName,
-		SiteID:                     p.SiteID,
-		SiteName:                   p.SiteName,
-		ServiceLineID:              p.ServiceLineID,
-		ServiceLineName:            p.ServiceLineName,
-		PositionID:                 p.PositionID,
-		PositionName:               p.PositionName,
-		StartDate:                  p.StartDate.Format("2006-01-02"),
-		AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIDR:           p.BaseSalaryRefIDR,
-		Notes:                      p.Notes,
-		LifecycleStatus:            status,
-		StatusChangedAt:            p.StatusChangedAt.UTC().Format(time.RFC3339),
-		EndedReason:                p.EndedReason,
-		TerminationReason:          p.TerminationReason,
-		PredecessorID:              p.PredecessorID,
-		SuccessorID:                p.SuccessorID,
-		BackdateReason:             p.BackdateReason,
-		CreatedBy:                  p.CreatedBy,
-		CreatedAt:                  p.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:                  p.UpdatedAt.UTC().Format(time.RFC3339),
-		Warnings:                   p.Warnings,
+		ID:                p.ID,
+		EmployeeID:        p.EmployeeID,
+		EmployeeName:      p.EmployeeName,
+		AgreementID:       p.AgreementID,
+		AgreementType:     p.AgreementType,
+		ClientCompanyID:   p.ClientCompanyID,
+		ClientCompanyName: p.ClientCompanyName,
+		SiteID:            p.SiteID,
+		SiteName:          p.SiteName,
+		ServiceLineID:     p.ServiceLineID,
+		ServiceLineName:   p.ServiceLineName,
+		PositionID:        p.PositionID,
+		PositionName:      p.PositionName,
+		StartDate:         p.StartDate.Format("2006-01-02"),
+		Notes:             p.Notes,
+		LifecycleStatus:   status,
+		StatusChangedAt:   p.StatusChangedAt.UTC().Format(time.RFC3339),
+		EndedReason:       p.EndedReason,
+		TerminationReason: p.TerminationReason,
+		PredecessorID:     p.PredecessorID,
+		SuccessorID:       p.SuccessorID,
+		BackdateReason:    p.BackdateReason,
+		CreatedBy:         p.CreatedBy,
+		CreatedAt:         p.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:         p.UpdatedAt.UTC().Format(time.RFC3339),
+		Warnings:          p.Warnings,
 	}
 	if resp.Warnings == nil {
 		resp.Warnings = []string{}

@@ -1,35 +1,56 @@
+-- name: GetUserByIdentifier :one
+-- Login lookup (D2): active, non-deleted user by phone OR case-insensitive
+-- email. Phone is matched exactly (stored normalized E.164); email lowercased.
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password,
+       created_at, updated_at, deleted_at
+FROM users
+WHERE (phone = sqlc.arg(identifier)::text OR lower(email) = lower(sqlc.arg(identifier)::text))
+  AND deleted_at IS NULL;
+
 -- name: GetUserByEmail :one
--- Login lookup: active, non-deleted user by case-insensitive email.
-SELECT id, email, password_hash, role, employee_id, company_id, status,
-       full_name, last_login_at,
+-- Email-only lookup: used by forgot-password (reset link is email-delivered).
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password,
        created_at, updated_at, deleted_at
 FROM users
 WHERE lower(email) = lower(sqlc.arg(email))
   AND deleted_at IS NULL;
 
 -- name: GetUserByID :one
-SELECT id, email, password_hash, role, employee_id, company_id, status,
-       full_name, last_login_at,
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password, tokens_valid_after,
        created_at, updated_at, deleted_at
 FROM users
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
+-- name: BumpTokensValidAfter :exec
+-- F2.7 session epoch: invalidate every access token issued before now() for this
+-- user (called on offboard/deactivate alongside refresh-token revocation).
+UPDATE users
+SET tokens_valid_after = now(),
+    updated_at         = now()
+WHERE id = sqlc.arg(id);
+
 -- name: CreateUser :one
--- Allocates the SWP-USR id inline from the per-prefix sequence.
-INSERT INTO users (id, email, password_hash, role, employee_id, company_id, status, full_name)
+-- Allocates the SWP-USR id inline from the per-prefix sequence. Phone is the
+-- required login identifier (D2); email is optional.
+INSERT INTO users (id, email, phone, password_hash, role, employee_id, company_id, status, full_name, must_change_password)
 VALUES (
     'SWP-USR-' || swp_next_id('USR'),
-    sqlc.arg(email),
+    sqlc.narg(email),
+    sqlc.arg(phone),
     sqlc.arg(password_hash),
     sqlc.arg(role),
     sqlc.narg(employee_id),
     sqlc.narg(company_id),
     'active',
-    sqlc.arg(full_name)
+    sqlc.arg(full_name),
+    sqlc.arg(must_change_password)
 )
-RETURNING id, email, password_hash, role, employee_id, company_id, status,
-          full_name, last_login_at,
+RETURNING id, email, phone, password_hash, role, employee_id, company_id, status,
+          full_name, last_login_at, must_change_password,
           created_at, updated_at, deleted_at;
 
 -- name: SetLastLogin :exec
@@ -40,17 +61,28 @@ SET last_login_at = now(),
 WHERE id = sqlc.arg(id);
 
 -- name: UpdatePassword :exec
--- Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
+-- Sets a new password hash after a reset/change (AU-4). The user has chosen their
+-- own password, so any temp-password rotation requirement is cleared.
 UPDATE users
-SET password_hash = sqlc.arg(password_hash),
-    updated_at    = now()
+SET password_hash        = sqlc.arg(password_hash),
+    must_change_password = false,
+    updated_at           = now()
 WHERE id = sqlc.arg(id);
+
+-- name: RegenerateTempPassword :exec
+-- EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
+-- forces a rotation on next login. Used by :regenerate-password.
+UPDATE users
+SET password_hash        = sqlc.arg(password_hash),
+    must_change_password = true,
+    updated_at           = now()
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 
 -- name: ListUsers :many
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 to compute has_more.
 -- Filters are optional: a NULL sqlc.narg means "no filter" via the `(arg IS NULL OR col = arg)` idiom.
 -- Free-text q matches email or full_name (ILIKE '%' || q || '%').
-SELECT id, email, role, employee_id, company_id, status, full_name,
+SELECT id, email, phone, role, employee_id, company_id, status, full_name,
        last_login_at, created_at, updated_at
 FROM users
 WHERE deleted_at IS NULL
@@ -70,17 +102,17 @@ LIMIT sqlc.arg(row_limit);
 UPDATE users
 SET email = sqlc.arg(email), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;
 
 -- name: ChangeUserRole :one
 UPDATE users
 SET role = sqlc.arg(role), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;
 
 -- name: SetUserStatus :one
 -- Used by :deactivate (status='disabled') and :reactivate (status='active').
 UPDATE users
 SET status = sqlc.arg(status), updated_at = now()
 WHERE id = sqlc.arg(id) AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at;

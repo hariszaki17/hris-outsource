@@ -221,24 +221,6 @@ func (r *fakeFoundationsRepo) ListPlatformSettings(_ context.Context) ([]domain.
 	return r.settings, nil
 }
 
-func (r *fakeFoundationsRepo) CreateUser(_ context.Context, _ pgx.Tx, p foundationssvc.CreateUserParams) (domain.User, error) {
-	id := "SWP-USR-" + time.Now().Format("150405000")
-	now := time.Now().UTC()
-	u := domain.User{
-		ID:           id,
-		Email:        p.Email,
-		PasswordHash: p.PasswordHash,
-		Role:         auth.Role(p.Role),
-		FullName:     p.FullName,
-		EmployeeID:   p.EmployeeID,
-		Status:       "active",
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	}
-	r.addUser(u)
-	return u, nil
-}
-
 func (r *fakeFoundationsRepo) UpdateUserEmail(_ context.Context, _ pgx.Tx, id, email string) (domain.User, error) {
 	u, ok := r.users[id]
 	if !ok {
@@ -274,6 +256,10 @@ func (r *fakeFoundationsRepo) SetUserStatus(_ context.Context, _ pgx.Tx, id, sta
 	r.users[id] = u
 	r.usersByEmail[lowerEmail(u.Email)] = u
 	return u, nil
+}
+
+func (r *fakeFoundationsRepo) RevokeUserSessions(_ context.Context, _ pgx.Tx, _ string) error {
+	return nil
 }
 
 func (r *fakeFoundationsRepo) InsertResetToken(_ context.Context, _ pgx.Tx, userID, tokenHash string, expiresAt time.Time) error {
@@ -333,7 +319,6 @@ func newHarness(t *testing.T) *foundationsHarness {
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 		r.Get("/users", h.ListUsers)
-		r.Post("/users", h.CreateUser)
 		r.Patch("/users/{user_id}", h.UpdateUser)
 		r.Post("/users/{user_id}:change-role", h.ChangeUserRole)
 		r.Post("/users/{user_id}:deactivate", h.DeactivateUser)
@@ -556,64 +541,6 @@ func TestListUsers_CursorAdvances(t *testing.T) {
 	}
 }
 
-func TestCreateUser_201(t *testing.T) {
-	h := newHarness(t)
-
-	rr := h.do("POST", "/users", map[string]any{
-		"email": "new.user@swp.test",
-		"role":  "hr_admin",
-	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Location header must be set.
-	loc := rr.Header().Get("Location")
-	if loc == "" {
-		t.Error("missing Location header")
-	}
-
-	body := decodeBody(t, rr)
-	requiredKeys := []string{"id", "email", "role", "status", "created_at", "updated_at"}
-	for _, k := range requiredKeys {
-		if _, ok := body[k]; !ok {
-			t.Errorf("create response missing key: %s", k)
-		}
-	}
-	if body["email"] != "new.user@swp.test" {
-		t.Errorf("email = %v, want new.user@swp.test", body["email"])
-	}
-	if body["status"] != "ACTIVE" {
-		t.Errorf("status = %v, want ACTIVE", body["status"])
-	}
-}
-
-func TestCreateUser_409_EmailTaken(t *testing.T) {
-	h := newHarness(t)
-	// Seed a user with that email.
-	h.repo.addUser(domain.User{
-		ID:        "SWP-USR-EXIST",
-		Email:     "taken@swp.test",
-		Role:      auth.RoleAgent,
-		Status:    "active",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	})
-
-	rr := h.do("POST", "/users", map[string]any{
-		"email": "taken@swp.test",
-		"role":  "agent",
-	})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := decodeBody(t, rr)
-	errObj, _ := body["error"].(map[string]any)
-	if errObj["code"] != "CONFLICT" {
-		t.Errorf("error.code = %v, want CONFLICT", errObj["code"])
-	}
-}
-
 func TestChangeUserRole_422_RoleNotAllowed(t *testing.T) {
 	h := newHarness(t)
 	// Seed a user to change.
@@ -716,7 +643,6 @@ func TestRBAC_NonAdmin_403(t *testing.T) {
 		body   any
 	}{
 		{"GET", "/users", nil},
-		{"POST", "/users", map[string]any{"email": "x@swp.test", "role": "agent"}},
 		{"GET", "/audit-log", nil},
 		{"GET", "/platform/settings", nil},
 	}

@@ -186,7 +186,9 @@ paths:
         - **`pro_rate: true`** — applies `entitlement × remaining_months / 12` to probation employees
           (active < 12 months) and mid-year joiners (LQ-8). Rounding is half-up to the nearest day.
         - **`employee_ids: ["all"]`** is a sentinel meaning "every active employee with a placement
-          covering any day of `period`". Explicit lists are validated against the active employee set.
+          covering any day of `period`". Here **"active" means the employee's employment agreement is
+          active** (F2.7); the placement need only be **non-terminal** (`Active` / `Scheduled` /
+          `Expiring`) on a covered day. Explicit lists are validated against the active employee set.
         - **Does NOT overwrite `used`** (`total` is set; `remaining = total - used - pending`). The
           server refuses to set `total` below the current `used` value for any employee — those rows are
           returned in `failed[]` per the bulk shape (CONVENTIONS §14).
@@ -1370,7 +1372,7 @@ components:
               example: ["SWP-EMP-1042", "SWP-EMP-1043"]
             - type: array
               items: { type: string, enum: [all] }
-              description: "Sentinel — `[\"all\"]` means every active placed employee."
+              description: "Sentinel — `[\"all\"]` means every employee with an active employment agreement (F2.7) holding a non-terminal placement (Active/Scheduled/Expiring)."
               example: ["all"]
         pro_rate:
           type: boolean

@@ -15,7 +15,7 @@ import (
 const createAgreement = `-- name: CreateAgreement :one
 INSERT INTO employment_agreements (
     id, employee_id, type, agreement_no, start_date, end_date,
-    predecessor_id, base_salary_idr, bpjs_terms, tax_profile, comp_effective_date, created_by
+    predecessor_id, base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date, created_by
 ) VALUES (
     'SWP-AG-' || swp_next_id('AG'),
     $1,
@@ -28,47 +28,50 @@ INSERT INTO employment_agreements (
     $8,
     $9,
     $10,
-    $11
+    $11,
+    $12
 )
 RETURNING id, employee_id, type, agreement_no, start_date, end_date, status,
           predecessor_id, successor_id, closed_reason, closed_at,
-          base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+          base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
           created_by, created_at, updated_at
 `
 
 type CreateAgreementParams struct {
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	PredecessorID     *string
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	PredecessorID              *string
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
 }
 
 type CreateAgreementRow struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // Allocates the SWP-AG id inline from the per-prefix sequence.
@@ -81,6 +84,7 @@ func (q *Queries) CreateAgreement(ctx context.Context, arg CreateAgreementParams
 		arg.EndDate,
 		arg.PredecessorID,
 		arg.BaseSalaryIdr,
+		arg.AnnualLeaveEntitlementDays,
 		arg.BpjsTerms,
 		arg.TaxProfile,
 		arg.CompEffectiveDate,
@@ -100,6 +104,7 @@ func (q *Queries) CreateAgreement(ctx context.Context, arg CreateAgreementParams
 		&i.ClosedReason,
 		&i.ClosedAt,
 		&i.BaseSalaryIdr,
+		&i.AnnualLeaveEntitlementDays,
 		&i.BpjsTerms,
 		&i.TaxProfile,
 		&i.CompEffectiveDate,
@@ -113,7 +118,7 @@ func (q *Queries) CreateAgreement(ctx context.Context, arg CreateAgreementParams
 const getActiveAgreementForEmployee = `-- name: GetActiveAgreementForEmployee :one
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE employee_id = $1
@@ -122,24 +127,25 @@ WHERE employee_id = $1
 `
 
 type GetActiveAgreementForEmployeeRow struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // EA-2 pre-check + predecessor lookup for :renew/:close operations.
@@ -159,6 +165,7 @@ func (q *Queries) GetActiveAgreementForEmployee(ctx context.Context, employeeID 
 		&i.ClosedReason,
 		&i.ClosedAt,
 		&i.BaseSalaryIdr,
+		&i.AnnualLeaveEntitlementDays,
 		&i.BpjsTerms,
 		&i.TaxProfile,
 		&i.CompEffectiveDate,
@@ -172,7 +179,7 @@ func (q *Queries) GetActiveAgreementForEmployee(ctx context.Context, employeeID 
 const getAgreementByID = `-- name: GetAgreementByID :one
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE id = $1
@@ -180,24 +187,25 @@ WHERE id = $1
 `
 
 type GetAgreementByIDRow struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 func (q *Queries) GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error) {
@@ -216,6 +224,7 @@ func (q *Queries) GetAgreementByID(ctx context.Context, id string) (GetAgreement
 		&i.ClosedReason,
 		&i.ClosedAt,
 		&i.BaseSalaryIdr,
+		&i.AnnualLeaveEntitlementDays,
 		&i.BpjsTerms,
 		&i.TaxProfile,
 		&i.CompEffectiveDate,
@@ -229,7 +238,7 @@ func (q *Queries) GetAgreementByID(ctx context.Context, id string) (GetAgreement
 const listAgreements = `-- name: ListAgreements :many
 SELECT id, employee_id, type, agreement_no, start_date, end_date, status,
        predecessor_id, successor_id, closed_reason, closed_at,
-       base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+       base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
        created_by, created_at, updated_at
 FROM employment_agreements
 WHERE deleted_at IS NULL
@@ -256,24 +265,25 @@ type ListAgreementsParams struct {
 }
 
 type ListAgreementsRow struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
@@ -308,6 +318,7 @@ func (q *Queries) ListAgreements(ctx context.Context, arg ListAgreementsParams) 
 			&i.ClosedReason,
 			&i.ClosedAt,
 			&i.BaseSalaryIdr,
+			&i.AnnualLeaveEntitlementDays,
 			&i.BpjsTerms,
 			&i.TaxProfile,
 			&i.CompEffectiveDate,
@@ -335,7 +346,7 @@ SET status        = $1,
 WHERE id = $5
 RETURNING id, employee_id, type, agreement_no, start_date, end_date, status,
           predecessor_id, successor_id, closed_reason, closed_at,
-          base_salary_idr, bpjs_terms, tax_profile, comp_effective_date,
+          base_salary_idr, annual_leave_entitlement_days, bpjs_terms, tax_profile, comp_effective_date,
           created_by, created_at, updated_at
 `
 
@@ -348,24 +359,25 @@ type SetAgreementStatusParams struct {
 }
 
 type SetAgreementStatusRow struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	AnnualLeaveEntitlementDays *int32
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // Drives :close (status='closed') and supersede-on-renew (status='superseded').
@@ -392,6 +404,7 @@ func (q *Queries) SetAgreementStatus(ctx context.Context, arg SetAgreementStatus
 		&i.ClosedReason,
 		&i.ClosedAt,
 		&i.BaseSalaryIdr,
+		&i.AnnualLeaveEntitlementDays,
 		&i.BpjsTerms,
 		&i.TaxProfile,
 		&i.CompEffectiveDate,

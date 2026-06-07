@@ -60,6 +60,90 @@ func (r *Repository) GetEmployeeByID(ctx context.Context, id string) (domain.Emp
 	return mapEmployeeFromGetByID(row), nil
 }
 
+// UserEmailTaken reports whether a (non-deleted) user already uses this email (EP-2).
+func (r *Repository) UserEmailTaken(ctx context.Context, email string) (bool, error) {
+	_, err := r.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(mapErr(err), domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// UserPhoneTaken reports whether a (non-deleted) user already uses this phone (EP-2).
+func (r *Repository) UserPhoneTaken(ctx context.Context, phone string) (bool, error) {
+	_, err := r.q.GetUserByIdentifier(ctx, phone)
+	if err != nil {
+		if errors.Is(mapErr(err), domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// ProvisionLogin creates the linked agent User (must_change_password=true,
+// company_id NULL — agents scope via placement) and links employees.user_id.
+// Both writes run in the caller's tx (EP-3). Returns the new SWP-USR id. Phone is
+// the required login identifier (D2); Email is optional.
+func (r *Repository) ProvisionLogin(ctx context.Context, tx pgx.Tx, p svc.ProvisionLoginRepoParams) (string, error) {
+	q := r.q.WithTx(tx)
+	user, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
+		Email:              nullStr(p.Email),
+		Phone:              nullStr(p.Phone),
+		PasswordHash:       p.PasswordHash,
+		Role:               "agent",
+		EmployeeID:         &p.EmployeeID,
+		CompanyID:          nil,
+		FullName:           p.FullName,
+		MustChangePassword: true,
+	})
+	if err != nil {
+		return "", mapErr(err)
+	}
+	if err := q.SetEmployeeUserID(ctx, sqlcgen.SetEmployeeUserIDParams{
+		UserID: &user.ID,
+		ID:     p.EmployeeID,
+	}); err != nil {
+		return "", mapErr(err)
+	}
+	return user.ID, nil
+}
+
+// RegenerateTempPassword re-issues a temp password hash for an existing login and
+// forces a rotation on next login (EP-3 :regenerate-password).
+func (r *Repository) RegenerateTempPassword(ctx context.Context, tx pgx.Tx, userID, passwordHash string) error {
+	return mapErr(r.q.WithTx(tx).RegenerateTempPassword(ctx, sqlcgen.RegenerateTempPasswordParams{
+		PasswordHash: passwordHash,
+		ID:           userID,
+	}))
+}
+
+// DisableUserAndRevoke disables the linked login and revokes its sessions in the
+// caller's tx (F2.7): status=disabled + session-epoch bump + refresh revocation.
+func (r *Repository) DisableUserAndRevoke(ctx context.Context, tx pgx.Tx, userID string) error {
+	q := r.q.WithTx(tx)
+	if _, err := q.SetUserStatus(ctx, sqlcgen.SetUserStatusParams{ID: userID, Status: "disabled"}); err != nil {
+		return mapErr(err)
+	}
+	if err := q.BumpTokensValidAfter(ctx, userID); err != nil {
+		return mapErr(err)
+	}
+	return mapErr(q.RevokeAllRefreshForUser(ctx, userID))
+}
+
+// EnableUser re-enables a linked login (F2.7 reactivation). Sessions are not
+// restored — the epoch already advanced, so the agent must sign in again.
+func (r *Repository) EnableUser(ctx context.Context, tx pgx.Tx, userID string) error {
+	q := r.q.WithTx(tx)
+	if _, err := q.SetUserStatus(ctx, sqlcgen.SetUserStatusParams{ID: userID, Status: "active"}); err != nil {
+		return mapErr(err)
+	}
+	return nil
+}
+
 // GetEmployeeByNIK fetches a single employee by NIK (duplicate-NIK pre-check, EP-2).
 func (r *Repository) GetEmployeeByNIK(ctx context.Context, nik string) (domain.Employee, error) {
 	row, err := r.q.GetEmployeeByNIK(ctx, nik)
@@ -151,7 +235,7 @@ func (r *Repository) SetEmployeeStatus(ctx context.Context, tx pgx.Tx, id, statu
 // --- mapping helpers ---
 
 func mapEmployeeFromList(row sqlcgen.ListEmployeesRow) domain.Employee {
-	return domain.Employee{
+	emp := domain.Employee{
 		ID:                  row.ID,
 		UserID:              row.UserID,
 		FullName:            row.FullName,
@@ -178,6 +262,17 @@ func mapEmployeeFromList(row sqlcgen.ListEmployeesRow) domain.Employee {
 		UpdatedAt: row.UpdatedAt,
 		CreatedBy: row.CreatedBy,
 	}
+	// current_* come from the employee's non-terminal placement (null when unplaced).
+	if row.CurrentPositionID != nil {
+		emp.CurrentPosition = &domain.PositionRef{ID: *row.CurrentPositionID, Name: derefStr(row.CurrentPositionName)}
+	}
+	if row.CurrentServiceLineID != nil {
+		emp.CurrentServiceLine = &domain.ServiceLineRef{ID: *row.CurrentServiceLineID, Name: derefStr(row.CurrentServiceLineName)}
+	}
+	if row.CurrentClientCompanyID != nil {
+		emp.CurrentClientCompany = &domain.ClientCompanyRef{ID: *row.CurrentClientCompanyID, Name: derefStr(row.CurrentClientCompanyName)}
+	}
+	return emp
 }
 
 func mapEmployeeFromGetByID(row sqlcgen.GetEmployeeByIDRow) domain.Employee {

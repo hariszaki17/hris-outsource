@@ -15,8 +15,7 @@ import (
 const createPlacement = `-- name: CreatePlacement :one
 INSERT INTO placements (
     employee_id, agreement_id, client_company_id, site_id, service_line_id,
-    position_id, start_date, end_date, annual_leave_entitlement_days,
-    base_salary_ref_idr, notes, lifecycle_status, predecessor_id,
+    position_id, start_date, end_date, notes, lifecycle_status, predecessor_id,
     backdate_reason, created_by
 ) VALUES (
     $1,
@@ -31,61 +30,55 @@ INSERT INTO placements (
     $10,
     $11,
     $12,
-    $13,
-    $14,
-    $15
+    $13
 )
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at
 `
 
 type CreatePlacementParams struct {
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	PredecessorID              *string
-	BackdateReason             *string
-	CreatedBy                  *string
+	EmployeeID      string
+	AgreementID     string
+	ClientCompanyID string
+	SiteID          string
+	ServiceLineID   string
+	PositionID      string
+	StartDate       pgtype.Date
+	EndDate         pgtype.Date
+	Notes           *string
+	LifecycleStatus string
+	PredecessorID   *string
+	BackdateReason  *string
+	CreatedBy       *string
 }
 
 type CreatePlacementRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
@@ -99,8 +92,6 @@ func (q *Queries) CreatePlacement(ctx context.Context, arg CreatePlacementParams
 		arg.PositionID,
 		arg.StartDate,
 		arg.EndDate,
-		arg.AnnualLeaveEntitlementDays,
-		arg.BaseSalaryRefIdr,
 		arg.Notes,
 		arg.LifecycleStatus,
 		arg.PredecessorID,
@@ -118,8 +109,6 @@ func (q *Queries) CreatePlacement(ctx context.Context, arg CreatePlacementParams
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,
@@ -140,7 +129,7 @@ func (q *Queries) CreatePlacement(ctx context.Context, arg CreatePlacementParams
 const getActivePlacementForEmployee = `-- name: GetActivePlacementForEmployee :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -163,36 +152,34 @@ WHERE p.employee_id = $1
 `
 
 type GetActivePlacementForEmployeeRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 // INV-1 service pre-check (friendly 409 before hitting the partial unique index).
@@ -209,8 +196,6 @@ func (q *Queries) GetActivePlacementForEmployee(ctx context.Context, employeeID 
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,
@@ -237,7 +222,7 @@ func (q *Queries) GetActivePlacementForEmployee(ctx context.Context, employeeID 
 const getActivePlacementForEmployeeAtCompanyForUpdate = `-- name: GetActivePlacementForEmployeeAtCompanyForUpdate :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at
@@ -255,30 +240,28 @@ type GetActivePlacementForEmployeeAtCompanyForUpdateParams struct {
 }
 
 type GetActivePlacementForEmployeeAtCompanyForUpdateRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // INV-4 lock: the agent's active placement at a specific company, row-locked.
@@ -295,8 +278,6 @@ func (q *Queries) GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Co
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,
@@ -317,7 +298,7 @@ func (q *Queries) GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Co
 const getPlacementByID = `-- name: GetPlacementByID :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -339,36 +320,34 @@ WHERE p.id = $1
 `
 
 type GetPlacementByIDRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error) {
@@ -384,8 +363,6 @@ func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacement
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,
@@ -421,7 +398,7 @@ WITH RECURSIVE chain AS (
 )
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -443,36 +420,34 @@ ORDER BY p.start_date ASC, p.id ASC
 `
 
 type GetPlacementChainRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 // All placements sharing a predecessor/successor chain with the given placement
@@ -496,8 +471,6 @@ func (q *Queries) GetPlacementChain(ctx context.Context, id string) ([]GetPlacem
 			&i.PositionID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.AnnualLeaveEntitlementDays,
-			&i.BaseSalaryRefIdr,
 			&i.Notes,
 			&i.LifecycleStatus,
 			&i.StatusChangedAt,
@@ -531,7 +504,7 @@ func (q *Queries) GetPlacementChain(ctx context.Context, id string) ([]GetPlacem
 const listExpiringPlacements = `-- name: ListExpiringPlacements :many
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -570,36 +543,34 @@ type ListExpiringPlacementsParams struct {
 }
 
 type ListExpiringPlacementsRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 // Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
@@ -629,8 +600,6 @@ func (q *Queries) ListExpiringPlacements(ctx context.Context, arg ListExpiringPl
 			&i.PositionID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.AnnualLeaveEntitlementDays,
-			&i.BaseSalaryRefIdr,
 			&i.Notes,
 			&i.LifecycleStatus,
 			&i.StatusChangedAt,
@@ -665,7 +634,7 @@ const listPlacements = `-- name: ListPlacements :many
 
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -724,36 +693,34 @@ type ListPlacementsParams struct {
 }
 
 type ListPlacementsRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 // E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
@@ -798,8 +765,6 @@ func (q *Queries) ListPlacements(ctx context.Context, arg ListPlacementsParams) 
 			&i.PositionID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.AnnualLeaveEntitlementDays,
-			&i.BaseSalaryRefIdr,
 			&i.Notes,
 			&i.LifecycleStatus,
 			&i.StatusChangedAt,
@@ -833,7 +798,7 @@ func (q *Queries) ListPlacements(ctx context.Context, arg ListPlacementsParams) 
 const lockEmployeePlacements = `-- name: LockEmployeePlacements :many
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at
@@ -844,30 +809,28 @@ FOR UPDATE
 `
 
 type LockEmployeePlacementsRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // INV-1 / period-overlap lock: all of the agent's placements, row-locked.
@@ -890,8 +853,6 @@ func (q *Queries) LockEmployeePlacements(ctx context.Context, employeeID string)
 			&i.PositionID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.AnnualLeaveEntitlementDays,
-			&i.BaseSalaryRefIdr,
 			&i.Notes,
 			&i.LifecycleStatus,
 			&i.StatusChangedAt,
@@ -919,7 +880,7 @@ func (q *Queries) LockEmployeePlacements(ctx context.Context, employeeID string)
 const rosterForCompany = `-- name: RosterForCompany :many
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -965,36 +926,34 @@ type RosterForCompanyParams struct {
 }
 
 type RosterForCompanyRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	EmployeeName               *string
-	ClientCompanyName          *string
-	SiteName                   *string
-	ServiceLineName            *string
-	PositionName               *string
-	AgreementType              *string
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	EmployeeName      *string
+	ClientCompanyName *string
+	SiteName          *string
+	ServiceLineName   *string
+	PositionName      *string
+	AgreementType     *string
 }
 
 // Company roster (RO-*). Filters: status (single), status__in (CSV),
@@ -1027,8 +986,6 @@ func (q *Queries) RosterForCompany(ctx context.Context, arg RosterForCompanyPara
 			&i.PositionID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.AnnualLeaveEntitlementDays,
-			&i.BaseSalaryRefIdr,
 			&i.Notes,
 			&i.LifecycleStatus,
 			&i.StatusChangedAt,
@@ -1145,7 +1102,7 @@ SET lifecycle_status   = $1,
 WHERE id = $7
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at
@@ -1162,30 +1119,28 @@ type SetPlacementLifecycleParams struct {
 }
 
 type SetPlacementLifecycleRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Drives end/terminate/resign/transfer/supersede. status_changed_at=now().
@@ -1210,8 +1165,6 @@ func (q *Queries) SetPlacementLifecycle(ctx context.Context, arg SetPlacementLif
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,
@@ -1263,62 +1216,54 @@ const updatePlacementFields = `-- name: UpdatePlacementFields :one
 UPDATE placements
 SET position_id                   = $1,
     end_date                      = $2,
-    annual_leave_entitlement_days = $3,
-    base_salary_ref_idr           = $4,
-    notes                         = $5,
+    notes                         = $3,
     updated_at                    = now()
-WHERE id = $6
+WHERE id = $4
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at
 `
 
 type UpdatePlacementFieldsParams struct {
-	PositionID                 string
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	ID                         string
+	PositionID string
+	EndDate    pgtype.Date
+	Notes      *string
+	ID         string
 }
 
 type UpdatePlacementFieldsRow struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
-// Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
+// Limited-field PATCH (position_id, end_date, notes).
 func (q *Queries) UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error) {
 	row := q.db.QueryRow(ctx, updatePlacementFields,
 		arg.PositionID,
 		arg.EndDate,
-		arg.AnnualLeaveEntitlementDays,
-		arg.BaseSalaryRefIdr,
 		arg.Notes,
 		arg.ID,
 	)
@@ -1333,8 +1278,6 @@ func (q *Queries) UpdatePlacementFields(ctx context.Context, arg UpdatePlacement
 		&i.PositionID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.AnnualLeaveEntitlementDays,
-		&i.BaseSalaryRefIdr,
 		&i.Notes,
 		&i.LifecycleStatus,
 		&i.StatusChangedAt,

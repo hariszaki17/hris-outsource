@@ -85,6 +85,16 @@ func (f *fakeRepo) GetUserByEmail(_ context.Context, email string) (domain.User,
 	return u, nil
 }
 
+func (f *fakeRepo) GetUserByIdentifier(_ context.Context, identifier string) (domain.User, error) {
+	id := lower(identifier)
+	for _, u := range f.users {
+		if lower(u.Email) == id || lower(u.Phone) == id {
+			return u, nil
+		}
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
 func (f *fakeRepo) GetUserByID(_ context.Context, id string) (domain.User, error) {
 	u, ok := f.usersByID[id]
 	if !ok {
@@ -223,6 +233,30 @@ func TestLogin_SetLastLoginCalled(t *testing.T) {
 	}
 	if !result.User.LastLoginAt.Equal(fixed) {
 		t.Errorf("LastLoginAt = %v, want %v", *result.User.LastLoginAt, fixed)
+	}
+}
+
+func TestLogin_ByPhone(t *testing.T) {
+	repo := newFakeRepo()
+	pw := "Pass1ng-Garuda!"
+	hash, _ := auth.HashPassword(pw)
+	repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari@test.swp",
+		Phone:        "081234567890",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+	})
+
+	s := newTestService(t, repo, time.Now())
+
+	result, err := s.Login(context.Background(), "081234567890", pw, "go-test", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login by phone: %v", err)
+	}
+	if result.User.ID != "SWP-USR-1042" {
+		t.Errorf("logged-in user ID = %q, want SWP-USR-1042", result.User.ID)
 	}
 }
 

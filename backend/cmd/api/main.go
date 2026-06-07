@@ -124,6 +124,16 @@ func run() error {
 
 	// Identity slice: repository -> service -> handler.
 	idRepo := identityrepo.New(pool)
+
+	// F2.7: wire the per-request session-epoch + status check into the authenticator
+	// (instant revocation on offboard/disable). One indexed PK read per request.
+	authn.WithUserState(func(ctx context.Context, userID string) (string, time.Time, error) {
+		u, err := idRepo.GetUserByID(ctx, userID)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		return u.Status, u.TokensValidAfter, nil
+	})
 	idSvc := identitysvc.NewService(idRepo, txm, issuer, cfg.Auth.RefreshTTL)
 	idHandler := identityhttp.NewHandler(idSvc, identityhttp.CookieConfig{
 		Domain: cfg.Auth.CookieDomain,

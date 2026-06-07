@@ -20,7 +20,7 @@ import { z } from 'zod';
  * ACCOUNT_LOCKED/429→'locked' (ENGINEERING.md B1 / authentication.md AU-5).
  */
 const loginSchema = z.object({
-  email: z.string().email(),
+  identifier: z.string().min(1),
   password: z.string().min(1),
 });
 type LoginValues = z.infer<typeof loginSchema>;
@@ -45,7 +45,11 @@ export function LoginScreen() {
     if (!parsed.success) return;
     try {
       const res = await loginMut.mutateAsync({
-        data: { email: parsed.data.email, password: parsed.data.password, stay_signed_in: rememberMe },
+        data: {
+          identifier: parsed.data.identifier,
+          password: parsed.data.password,
+          stay_signed_in: rememberMe,
+        },
       });
       const body = res.data as LoginResponse;
       auth.login(body.access_token, buildSessionUser(body.user));
@@ -94,16 +98,21 @@ export function LoginScreen() {
       )}
 
       <form onSubmit={onSubmit} className="flex flex-col gap-[18px]">
-        <FormField label={t('auth.email')} htmlFor="email" error={errors.email?.message} span={2}>
+        <FormField
+          label={t('auth.identifier')}
+          htmlFor="identifier"
+          error={errors.identifier?.message}
+          span={2}
+        >
           <div className="relative">
             <Input
-              id="email"
-              type="email"
-              autoComplete="email"
-              placeholder={t('auth.emailPlaceholder')}
-              aria-invalid={!!errors.email}
+              id="identifier"
+              type="text"
+              autoComplete="username"
+              placeholder={t('auth.identifierPlaceholder')}
+              aria-invalid={!!errors.identifier}
               className="pr-10"
-              {...register('email', { required: true })}
+              {...register('identifier', { required: true })}
             />
             <Mail className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-4 text-text-3" />
           </div>
@@ -145,7 +154,11 @@ export function LoginScreen() {
             {t('auth.lockedRetry')}
           </Button>
         ) : (
-          <Button type="submit" className="w-full" disabled={disabled || isSubmitting || loginMut.isPending}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={disabled || isSubmitting || loginMut.isPending}
+          >
             {t('auth.login')}
           </Button>
         )}

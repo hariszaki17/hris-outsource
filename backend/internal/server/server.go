@@ -107,6 +107,8 @@ func New(d Deps) http.Handler {
 			r.Use(d.Authn.Require)
 			r.Use(rl.Middleware)
 			r.Get("/auth/me", d.Auth.Me)
+			// Authenticated self-service password change (EP-3 forced rotation + voluntary).
+			r.Post("/auth/change-password", d.Auth.ChangePassword)
 
 			// E1 Foundations: user management, audit-log, platform settings.
 			// All endpoints require super_admin or hr_admin (CONVENTIONS §17 x-rbac).
@@ -115,7 +117,9 @@ func New(d Deps) http.Handler {
 
 				// Users management
 				r.Get("/users", d.Foundations.ListUsers)
-				r.With(d.Idempotency.Handler).Post("/users", d.Foundations.CreateUser)
+				// D1 (2026-06-07): standalone user-create removed — every user is
+				// auto-provisioned at employee create (POST /employees). Admin role is
+				// then set via :change-role. Listing/role/status management stay here.
 				r.Patch("/users/{user_id}", d.Foundations.UpdateUser)
 				// Action endpoints: chi matches the literal ':' suffix on the path param route.
 				r.With(d.Idempotency.Handler).Post("/users/{user_id}:change-role", d.Foundations.ChangeUserRole)
@@ -252,6 +256,9 @@ func New(d Deps) http.Handler {
 				r.Patch("/employees/{employee_id}", d.People.UpdateEmployee)
 				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:deactivate", d.People.DeactivateEmployee)
 				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:reactivate", d.People.ReactivateEmployee)
+				// Login is auto-provisioned at create (D1); admins may re-issue the
+				// show-once temp password here.
+				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}:regenerate-password", d.People.RegenerateTempPassword)
 			})
 			// PEOPLE slice end (04-02). 04-03 agreements: append r.Group{} here.
 

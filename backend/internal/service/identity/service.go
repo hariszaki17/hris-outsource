@@ -22,6 +22,7 @@ import (
 // can be mocked in tests. The repository layer implements it over sqlc.
 type Repository interface {
 	// Reads run on the pool.
+	GetUserByIdentifier(ctx context.Context, identifier string) (domain.User, error)
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
 	GetUserByID(ctx context.Context, id string) (domain.User, error)
 	GetRefreshTokenByHash(ctx context.Context, hash string) (domain.RefreshToken, error)
@@ -84,8 +85,9 @@ type Result struct {
 }
 
 // Login verifies credentials and issues a token pair. Records last_login_at (AU-3).
-func (s *Service) Login(ctx context.Context, email, password, userAgent, ip string) (Result, error) {
-	user, err := s.repo.GetUserByEmail(ctx, email)
+// The identifier is a phone number or an email (D2).
+func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip string) (Result, error) {
+	user, err := s.repo.GetUserByIdentifier(ctx, identifier)
 	if errors.Is(err, domain.ErrNotFound) {
 		return Result{}, errInvalidCredentials()
 	}
@@ -93,7 +95,7 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, ip stri
 		return Result{}, apperr.Internal(err)
 	}
 	if err := auth.VerifyPassword(password, user.PasswordHash); err != nil {
-		// Same generic error whether the email or the password was wrong.
+		// Same generic error whether the identifier or the password was wrong.
 		return Result{}, errInvalidCredentials()
 	}
 	if !user.IsActive() {
@@ -186,6 +188,26 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		_, err := s.repo.InsertResetToken(ctx, tx, user.ID, hash, expiresAt)
 		return err
+	})
+}
+
+// ChangeOwnPassword sets a new password for the authenticated user (no reset
+// token). Enforces the policy, clears any must_change_password flag (via
+// UpdatePassword), and revokes the user's sessions (AU-6) so the next sign-in uses
+// the new password. Drives the EP-3 forced temp-password rotation.
+func (s *Service) ChangeOwnPassword(ctx context.Context, userID, newPassword string) error {
+	if err := validatePasswordPolicy(newPassword); err != nil {
+		return err
+	}
+	newHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		if err := s.repo.UpdatePassword(ctx, tx, userID, newHash); err != nil {
+			return err
+		}
+		return s.repo.RevokeAllRefreshForUser(ctx, tx, userID)
 	})
 }
 

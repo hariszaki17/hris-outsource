@@ -10,6 +10,7 @@
  * Visibility is gated in nav.ts (any `*.approve` permission); this screen is defense-in-depth.
  */
 
+import { AgreementExpiryPanel } from '@/features/e2-identity/agreement-expiry-panel.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { type Dashboard, useGetMyDashboard } from '@swp/api-client/e10';
 import { StateView } from '@swp/ui';
@@ -57,7 +58,8 @@ export function InboxScreen() {
         <h1 className="font-bold text-3xl text-text">{t('nav.inbox')}</h1>
         <p className="text-[14px] text-text-3">{td('inbox.emptyBody')}</p>
       </div>
-      <div className="max-w-[560px]">
+      <div className="flex flex-col gap-5 max-w-[640px]">
+        <AgreementExpiryPanel />
         <ApprovalInboxPanel rows={rows} />
       </div>
     </div>

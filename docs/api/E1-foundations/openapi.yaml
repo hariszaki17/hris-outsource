@@ -33,10 +33,10 @@ servers:
 tags:
   - name: authentication
     description: |
-      Email + password login, refresh, logout, forgot/reset password, current
-      user introspection. PRD F1.1 / `authentication.md`. Login + forgot-password
-      are the only two unauthenticated endpoints in the entire system
-      (CONVENTIONS §1).
+      Identifier (phone or email) + password login, refresh, logout,
+      forgot/reset password, current user introspection. PRD F1.1 /
+      `authentication.md`. Login + forgot-password are the only two
+      unauthenticated endpoints in the entire system (CONVENTIONS §1).
   - name: users
     description: |
       User account CRUD, role assignment, deactivation/reactivation,
@@ -64,9 +64,11 @@ paths:
     post:
       operationId: authLogin
       tags: [authentication]
-      summary: Log in with email + password
+      summary: Log in with phone or email + password
       description: |
-        Authenticates a user (AU-1) and, if the account is **active** (AU-2),
+        Authenticates a user (AU-1) by `identifier` — their phone number
+        (E.164, e.g. `+62...`) or email — plus password, and, if the account
+        is **active** (AU-2),
         issues an access + refresh token pair and records `last_login_at`
         (AU-3). Repeated failures trigger rate-limit / lockout (AU-5).
         Auth events are audited (AU-7) — that side-effect is implicit
@@ -87,15 +89,15 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
             examples:
               hrAdminLogin:
-                summary: HR Admin Sari Hadi logs in (web)
+                summary: HR Admin Sari Hadi logs in by email (web)
                 value:
-                  email: sari.hadi@swp.co.id
+                  identifier: sari.hadi@swp.co.id
                   password: "Pass1ng-Garuda!"
                   stay_signed_in: false
               agentMobileLogin:
-                summary: Agent Budi Santoso logs in (mobile)
+                summary: Agent Budi Santoso logs in by phone (mobile)
                 value:
-                  email: budi.santoso@swp.co.id
+                  identifier: "+6281233445566"
                   password: "Lor3m-Ipsum-2026"
                   stay_signed_in: true
       responses:
@@ -114,6 +116,7 @@ paths:
                     expires_in: 1800
                     user:
                       id: SWP-USR-1042
+                      phone: "+628111000042"
                       email: sari.hadi@swp.co.id
                       role: hr_admin
                       status: ACTIVE
@@ -133,11 +136,11 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
               examples:
                 invalidCredentials:
-                  summary: Wrong email or password (AU-1 fail)
+                  summary: Wrong identifier or password (AU-1 fail)
                   value:
                     error:
                       code: INVALID_CREDENTIALS
-                      message: "Email atau kata sandi salah."
+                      message: "Nomor telepon/email atau kata sandi salah."
                       request_id: req_01J7K3W2BX
                 accountDisabled:
                   summary: Account is disabled (AU-2)
@@ -183,7 +186,10 @@ paths:
         Used by the mobile app for silent renewal (AU-6, C-3 of
         `authentication.md`). The old access token is invalidated; the
         refresh token MAY be rotated (server's choice). Disabled accounts
-        receive 401 `ACCOUNT_DISABLED` (AU-2).
+        receive 401 `ACCOUNT_DISABLED` (AU-2) — refresh also fails with this
+        code when the user was disabled since the token was issued, caught by
+        the same per-request status + session-epoch (`tokens_valid_after`)
+        check (F2.7).
       x-rbac:
         roles: [public]
         scope: global
@@ -233,6 +239,10 @@ paths:
         NOT reveal whether the email is registered — to prevent account
         enumeration. Always returns 202 unless the request itself is
         malformed.
+
+        This reset channel is **email-delivered** and therefore requires the
+        account to have an email on file; phone-only accounts cannot use it
+        (out of scope here).
 
         This is one of the only two unauthenticated endpoints in the system.
       x-rbac:
@@ -366,6 +376,7 @@ paths:
                   summary: Sari Hadi (HR Admin)
                   value:
                     id: SWP-USR-1042
+                    phone: "+628111000042"
                     email: sari.hadi@swp.co.id
                     role: hr_admin
                     status: ACTIVE
@@ -379,6 +390,7 @@ paths:
                   summary: Rudi Wijaya (Shift Leader, Plaza Senayan)
                   value:
                     id: SWP-USR-1108
+                    phone: "+628111000108"
                     email: rudi.wijaya@swp.co.id
                     role: shift_leader
                     status: ACTIVE
@@ -389,10 +401,11 @@ paths:
                       type: company
                       company_id: SWP-CMP-0021
                 agent:
-                  summary: Budi Santoso (Agent)
+                  summary: Budi Santoso (Agent, phone-only login)
                   value:
                     id: SWP-USR-2891
-                    email: budi.santoso@swp.co.id
+                    phone: "+6281233445566"
+                    email: null
                     role: agent
                     status: ACTIVE
                     employee_id: SWP-EMP-2891
@@ -461,6 +474,7 @@ paths:
                   value:
                     data:
                       - id: SWP-USR-1042
+                        phone: "+628111000042"
                         email: sari.hadi@swp.co.id
                         role: hr_admin
                         status: ACTIVE
@@ -472,6 +486,7 @@ paths:
                         created_at: "2025-11-02T03:22:08Z"
                         updated_at: "2026-06-03T07:14:52Z"
                       - id: SWP-USR-1108
+                        phone: "+628111000108"
                         email: rudi.wijaya@swp.co.id
                         role: shift_leader
                         status: ACTIVE
@@ -483,7 +498,8 @@ paths:
                         created_at: "2025-12-15T01:10:00Z"
                         updated_at: "2026-06-03T05:48:11Z"
                       - id: SWP-USR-2891
-                        email: budi.santoso@swp.co.id
+                        phone: "+6281233445566"
+                        email: null
                         role: agent
                         status: ACTIVE
                         employee_id: SWP-EMP-2891
@@ -502,91 +518,10 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
-    post:
-      operationId: createUser
-      tags: [users]
-      summary: Create a user account
-      description: |
-        Provisions a login credential and links it to an existing Employee
-        (RB-1, RB-6). Required by the **"Tambah Pengguna"** flow (BLOCKER
-        from E1-AUDIT.md §3). Email must be unique; the linked Employee
-        must exist and not already have a User (INV-1).
-
-        On success the user is created in `ACTIVE` status with a password
-        invitation email dispatched (out-of-band; see §16.2 of CONVENTIONS).
-      x-rbac:
-        roles: [super_admin, hr_admin]
-        scope: global
-      x-design-screens: [kHNWT]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateUserRequest'
-            examples:
-              newAgent:
-                value:
-                  email: dewi.lestari@swp.co.id
-                  role: agent
-                  employee_id: SWP-EMP-3104
-                  send_invitation_email: true
-              newShiftLeader:
-                value:
-                  email: agus.pratama@swp.co.id
-                  role: shift_leader
-                  employee_id: SWP-EMP-1209
-                  send_invitation_email: true
-      responses:
-        '201':
-          description: User created.
-          headers:
-            Location:
-              description: URL of the newly-created user.
-              schema:
-                type: string
-                example: /api/v1/users/SWP-USR-3104
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/User'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthenticated'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          description: Email already in use OR employee already has a user.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-              examples:
-                emailTaken:
-                  value:
-                    error:
-                      code: CONFLICT
-                      message: "Email sudah dipakai."
-                      fields:
-                        email: "Sudah terdaftar untuk pengguna lain."
-                      request_id: req_01J7K3W2C3
-                employeeAlreadyHasUser:
-                  value:
-                    error:
-                      code: INV_1_VIOLATION
-                      message: "Karyawan ini sudah memiliki akun (INV-1)."
-                      fields:
-                        employee_id: "Karyawan sudah ditautkan ke pengguna lain."
-                      request_id: req_01J7K3W2C4
-        '422':
-          description: Role-not-allowed or other business-rule violation.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+    # NOTE: There is no standalone "create user" endpoint. Per D1
+    # (2026-06-07) every Employee auto-provisions a 1:1 login at create
+    # (E2 `POST /employees`), so user accounts are never created on their
+    # own. User management here is read + role/status/credential mutation.
 
   /users/{user_id}:
     parameters:
@@ -744,6 +679,13 @@ paths:
         Sets the user's `status` to `DISABLED` (RB-1). Per AU-2, disabled
         accounts cannot log in; per AU-6, all of their active sessions are
         revoked immediately. Audited per RB-6.
+
+        Revocation mechanism (F2.7): this bumps `users.tokens_valid_after`
+        (the session epoch) and calls `RevokeAllRefreshForUser`. Already-issued
+        access tokens remain cryptographically valid, but fail the epoch check
+        (`tokens_valid_after > token.iat`) on their next middleware validation —
+        so revocation is instant without a per-token denylist. This is the only
+        path that revokes login.
       x-rbac:
         roles: [super_admin, hr_admin]
         scope: global
@@ -1381,7 +1323,7 @@ components:
             message:
               type: string
               description: Human-readable message, defaults to Bahasa Indonesia.
-              example: "Email atau kata sandi salah."
+              example: "Nomor telepon/email atau kata sandi salah."
             fields:
               type: object
               description: |
@@ -1478,11 +1420,14 @@ components:
     # -- auth ---------------------------------------------------------------
     LoginRequest:
       type: object
-      required: [email, password]
+      required: [identifier, password]
       properties:
-        email:
+        identifier:
           type: string
-          format: email
+          description: |
+            Login identifier — either the user's phone number (E.164,
+            `+62...`) or their email. Phone is always present; email only
+            for accounts that have one on file (D2, 2026-06-07).
           example: sari.hadi@swp.co.id
         password:
           type: string
@@ -1541,15 +1486,21 @@ components:
 
     MeResponse:
       type: object
-      required: [id, email, role, status, employee_id, full_name]
+      required: [id, phone, role, status, employee_id, full_name]
       properties:
         id:
           type: string
           description: User ID. `SWP-USR-<numeric>`.
           example: SWP-USR-1042
+        phone:
+          type: string
+          description: Login phone identifier (E.164, `+62...`). Always present (D2).
+          example: "+628111000042"
         email:
           type: string
           format: email
+          nullable: true
+          description: Optional login email; `null` for phone-only accounts (D2).
           example: sari.hadi@swp.co.id
         role:
           $ref: '#/components/schemas/Role'
@@ -1587,14 +1538,20 @@ components:
     # -- users --------------------------------------------------------------
     User:
       type: object
-      required: [id, email, role, status, employee_id, full_name, created_at, updated_at]
+      required: [id, phone, role, status, employee_id, full_name, created_at, updated_at]
       properties:
         id:
           type: string
           example: SWP-USR-1042
+        phone:
+          type: string
+          description: Login phone identifier (E.164, `+62...`). Required, unique (D2).
+          example: "+628111000042"
         email:
           type: string
           format: email
+          nullable: true
+          description: Optional login email; unique when present, else `null` (D2).
           example: sari.hadi@swp.co.id
         role:
           $ref: '#/components/schemas/Role'
@@ -1636,29 +1593,8 @@ components:
           description: Server-set. Clients MUST NOT send (CONVENTIONS §10).
           example: "2026-06-03T07:14:52Z"
 
-    CreateUserRequest:
-      type: object
-      required: [email, role, employee_id]
-      properties:
-        email:
-          type: string
-          format: email
-          description: Must be unique across all users.
-          example: dewi.lestari@swp.co.id
-        role:
-          $ref: '#/components/schemas/Role'
-        employee_id:
-          type: string
-          description: |
-            The Employee to link (1:1, INV-1). Must exist (E2) and must
-            not already have a User.
-          example: SWP-EMP-3104
-        send_invitation_email:
-          type: boolean
-          description: |
-            If true, dispatch a password-set invitation email (same flow as
-            `/auth/forgot-password`). Default true.
-          default: true
+    # CreateUserRequest removed (D1, 2026-06-07): users are no longer created
+    # standalone — every Employee auto-provisions its 1:1 login at create (E2).
 
     UpdateUserRequest:
       type: object
@@ -1667,9 +1603,15 @@ components:
         through `/users/{id}:change-role`. Status changes through the
         `:deactivate` / `:reactivate` actions.
       properties:
+        phone:
+          type: string
+          description: Login phone identifier (E.164, `+62...`). Unique (D2).
+          example: "+628111000042"
         email:
           type: string
           format: email
+          nullable: true
+          description: Optional login email; unique when present (D2).
           example: sari.hadi-baru@swp.co.id
 
     # -- audit log ---------------------------------------------------------

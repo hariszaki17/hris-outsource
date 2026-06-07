@@ -24,14 +24,6 @@ type userResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
-// createUserRequest is the POST /users body.
-type createUserRequest struct {
-	Email               string `json:"email"`
-	Role                string `json:"role"`
-	EmployeeID          string `json:"employee_id"`
-	SendInvitationEmail *bool  `json:"send_invitation_email"`
-}
-
 // updateUserRequest is the PATCH /users/{user_id} body.
 type updateUserRequest struct {
 	Email *string `json:"email"`

@@ -3,11 +3,13 @@
  *
  * .pen frames implemented:
  *   Zjzvo  UserRowActionsMenu
- *   FGkC2  CreateUserModal
  *   y4qyuS ChangeRoleModal
  *   xmWHa  EditUserDrawer
  *   oXZNQ  SendResetConfirm
  *   cACO9  DeactivateUserConfirm / ReactivateUserConfirm
+ *
+ * Standalone create-user (POST /users) was removed (D1, 2026-06-07); admins are
+ * now created via employee-create + change-role.
  *
  * ENGINEERING.md F1.2 · RB-1..RB-7 · INV-1.
  */
@@ -19,7 +21,6 @@ import {
   type User,
   UserStatus,
   useChangeUserRole,
-  useCreateUser,
   useDeactivateUser,
   useReactivateUser,
   useSendUserPasswordReset,
@@ -55,7 +56,6 @@ import {
   TriangleAlert,
   UserCheck,
   UserCog,
-  UserPlus,
   UserX,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -210,219 +210,9 @@ export function UserRowActionsMenu({
 }
 
 // ---------------------------------------------------------------------------
-// 2) CreateUserModal  (.pen frame FGkC2)
-// ---------------------------------------------------------------------------
-
-const createSchema = z
-  .object({
-    email: z.string().min(1, 'Email wajib diisi').email('Format email tidak valid'),
-    display_name: z.string().optional(),
-    role: z.nativeEnum(Role, { required_error: 'Peran wajib dipilih' }),
-    initial_status: z.enum(['ACTIVE', 'DISABLED']).default('ACTIVE'),
-    employee_id: z.string().optional(),
-  })
-  .refine(
-    (v) => {
-      if (v.role === Role.shift_leader && !v.employee_id?.trim()) return false;
-      return true;
-    },
-    { message: 'Tautan karyawan wajib untuk peran shift_leader', path: ['employee_id'] },
-  );
-
-type CreateForm = z.infer<typeof createSchema>;
-
-export interface CreateUserModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onDone: () => void;
-}
-
-export function CreateUserModal({ open, onOpenChange, onDone }: CreateUserModalProps) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const mutation = useCreateUser();
-  const [serverError, setServerError] = useState<string | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    setError,
-    watch,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateForm>({
-    resolver: zodResolver(createSchema),
-    defaultValues: { initial_status: 'ACTIVE' },
-  });
-
-  const roleValue = watch('role');
-
-  function handleClose() {
-    reset();
-    setServerError(null);
-    onOpenChange(false);
-  }
-
-  function onSubmit(values: CreateForm) {
-    setServerError(null);
-    mutation.mutate(
-      {
-        data: {
-          email: values.email,
-          role: values.role,
-          employee_id: values.employee_id ?? '',
-          send_invitation_email: true,
-        },
-      },
-      {
-        onSuccess: () => {
-          toast({ tone: 'success', title: t('userOverlays.createSuccess') });
-          handleClose();
-          onDone();
-        },
-        onError: (err) => {
-          if (!applyFieldErrors(err, setError)) {
-            const { message } = classifyError(err);
-            setServerError(t(message));
-          }
-        },
-      },
-    );
-  }
-
-  const saving = isSubmitting || mutation.isPending;
-
-  return (
-    <Modal open={open} onOpenChange={handleClose} size="lg">
-      <ModalHeader
-        icon={UserPlus}
-        tone="brand"
-        title={t('userOverlays.createTitle')}
-        closeLabel={t('common.close')}
-      />
-
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalBody>
-          <p className="text-[13px] text-text-2">{t('userOverlays.createSubtitle')}</p>
-
-          {serverError && <Banner tone="bad" title={serverError} />}
-
-          <FormSection>
-            <FormField
-              label={t('userOverlays.fieldEmailLogin')}
-              htmlFor="cu-email"
-              required
-              hint={t('userOverlays.fieldEmailLoginHint')}
-              error={errors.email?.message}
-            >
-              <Input
-                id="cu-email"
-                type="email"
-                placeholder="nama@swp.id"
-                aria-invalid={errors.email ? true : undefined}
-                aria-describedby={errors.email ? 'cu-email-error' : undefined}
-                disabled={saving}
-                {...register('email')}
-              />
-            </FormField>
-
-            <FormField
-              label={t('userOverlays.fieldDisplayName')}
-              htmlFor="cu-display-name"
-              error={errors.display_name?.message}
-            >
-              <Input
-                id="cu-display-name"
-                placeholder={t('userOverlays.fieldDisplayNamePlaceholder')}
-                disabled={saving}
-                {...register('display_name')}
-              />
-            </FormField>
-          </FormSection>
-
-          <FormSection>
-            <FormField
-              label={t('userOverlays.fieldRole')}
-              htmlFor="cu-role"
-              required
-              error={errors.role?.message}
-            >
-              <FilterSelect
-                id="cu-role"
-                aria-invalid={errors.role ? true : undefined}
-                disabled={saving}
-                {...register('role')}
-              >
-                <option value="">{t('userOverlays.fieldRolePlaceholder')}</option>
-                {Object.values(Role).map((r) => (
-                  <option key={r} value={r}>
-                    {t(`role.${r}`)}
-                  </option>
-                ))}
-              </FilterSelect>
-            </FormField>
-
-            <FormField
-              label={t('userOverlays.fieldInitialStatus')}
-              htmlFor="cu-status"
-              error={errors.initial_status?.message}
-            >
-              <FilterSelect id="cu-status" disabled={saving} {...register('initial_status')}>
-                <option value="ACTIVE">{t('users.statusActive')}</option>
-                <option value="DISABLED">{t('users.statusDisabled')}</option>
-              </FilterSelect>
-            </FormField>
-          </FormSection>
-
-          <FormField
-            label={t('userOverlays.fieldEmployeeLink')}
-            htmlFor="cu-employee-id"
-            hint={
-              roleValue === Role.shift_leader
-                ? t('userOverlays.fieldEmployeeLinkHintRequired')
-                : t('userOverlays.fieldEmployeeLinkHint')
-            }
-            error={errors.employee_id?.message}
-            span={2}
-          >
-            <Input
-              id="cu-employee-id"
-              placeholder={t('userOverlays.fieldEmployeeLinkPlaceholder')}
-              aria-invalid={errors.employee_id ? true : undefined}
-              disabled={saving}
-              {...register('employee_id')}
-            />
-          </FormField>
-
-          {/* Audit notice */}
-          <div className="flex items-start gap-2 rounded-md border border-info-bd bg-info-bg px-3 py-2.5 text-[13px] text-info-tx">
-            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-            <span>{t('userOverlays.createAuditNotice')}</span>
-          </div>
-        </ModalBody>
-
-        <ModalFooter>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={saving}
-            onClick={handleClose}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" variant="primary" size="sm" disabled={saving} aria-busy={saving}>
-            <Check aria-hidden />
-            {t('userOverlays.createSubmit')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 3) ChangeRoleModal  (.pen frame y4qyuS)
+// 2) ChangeRoleModal  (.pen frame y4qyuS)
+//    NOTE: standalone create-user (POST /users) was removed (D1, 2026-06-07) —
+//    admins are now created via employee-create + change-role.
 // ---------------------------------------------------------------------------
 
 const changeRoleSchema = z.object({
@@ -501,7 +291,7 @@ export function ChangeRoleModal({ open, onOpenChange, user, onDone }: ChangeRole
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span className="font-semibold text-sm text-text">{user.full_name}</span>
                 <span className="font-mono text-xs text-text-3">
-                  {user.email} · #{user.id}
+                  {user.email ?? user.phone} · #{user.id}
                 </span>
               </div>
             </div>
@@ -593,7 +383,10 @@ export function ChangeRoleModal({ open, onOpenChange, user, onDone }: ChangeRole
 // ---------------------------------------------------------------------------
 
 const editSchema = z.object({
-  email: z.string().min(1, 'Email wajib diisi').email('Format email tidak valid'),
+  // Phone is the primary login identifier (D2) — required.
+  phone: z.string().min(1, 'Nomor telepon wajib diisi'),
+  // Optional secondary login email.
+  email: z.string().email('Format email tidak valid').optional().or(z.literal('')),
 });
 
 type EditForm = z.infer<typeof editSchema>;
@@ -628,7 +421,7 @@ export function EditUserDrawer({
     formState: { errors, isSubmitting },
   } = useForm<EditForm>({
     resolver: zodResolver(editSchema),
-    values: user ? { email: user.email } : undefined,
+    values: user ? { phone: user.phone, email: user.email ?? '' } : undefined,
   });
 
   function handleClose() {
@@ -641,7 +434,7 @@ export function EditUserDrawer({
     if (!user) return;
     setServerError(null);
     mutation.mutate(
-      { userId: user.id, data: { email: values.email } },
+      { userId: user.id, data: { phone: values.phone, email: values.email || null } },
       {
         onSuccess: () => {
           toast({ tone: 'success', title: t('userOverlays.editSuccess') });
@@ -677,7 +470,7 @@ export function EditUserDrawer({
               <Avatar initials={initials(user.full_name)} size={52} />
               <div className="flex flex-col gap-0.5">
                 <span className="text-[18px] font-bold text-text">{user.full_name}</span>
-                <span className="text-[13px] text-text-2">{user.email}</span>
+                <span className="text-[13px] text-text-2">{user.email ?? user.phone}</span>
               </div>
             </div>
 
@@ -709,6 +502,23 @@ export function EditUserDrawer({
             <p className="text-[11px] font-bold uppercase tracking-wider text-text-3">
               {t('userOverlays.sectionProfile')}
             </p>
+
+            <FormField
+              label={t('userOverlays.fieldPhoneLogin')}
+              htmlFor="eu-phone"
+              required
+              hint={t('userOverlays.fieldPhoneLoginHint')}
+              error={errors.phone?.message}
+            >
+              <Input
+                id="eu-phone"
+                type="tel"
+                placeholder="+62 812-3456-7890"
+                aria-invalid={errors.phone ? true : undefined}
+                disabled={saving}
+                {...register('phone')}
+              />
+            </FormField>
 
             <FormField
               label={t('userOverlays.fieldEmailLogin')}

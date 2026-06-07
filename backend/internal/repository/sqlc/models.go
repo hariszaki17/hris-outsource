@@ -198,25 +198,26 @@ type Employee struct {
 }
 
 type EmploymentAgreement struct {
-	ID                string
-	EmployeeID        string
-	Type              string
-	AgreementNo       string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Status            string
-	PredecessorID     *string
-	SuccessorID       *string
-	ClosedReason      *string
-	ClosedAt          *time.Time
-	BaseSalaryIdr     pgtype.Numeric
-	BpjsTerms         []byte
-	TaxProfile        *string
-	CompEffectiveDate pgtype.Date
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DeletedAt         *time.Time
+	ID                         string
+	EmployeeID                 string
+	Type                       string
+	AgreementNo                string
+	StartDate                  pgtype.Date
+	EndDate                    pgtype.Date
+	Status                     string
+	PredecessorID              *string
+	SuccessorID                *string
+	ClosedReason               *string
+	ClosedAt                   *time.Time
+	BaseSalaryIdr              pgtype.Numeric
+	BpjsTerms                  []byte
+	TaxProfile                 *string
+	CompEffectiveDate          pgtype.Date
+	CreatedBy                  *string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+	DeletedAt                  *time.Time
+	AnnualLeaveEntitlementDays *int32
 }
 
 type ExportJob struct {
@@ -478,31 +479,29 @@ type PayslipComponent struct {
 }
 
 type Placement struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
-	DeletedAt                  *time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
 }
 
 type PlacementHistory struct {
@@ -609,16 +608,19 @@ type ShiftMaster struct {
 }
 
 type User struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	Role         string
-	EmployeeID   *string
-	CompanyID    *string
-	Status       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
-	FullName     string
-	LastLoginAt  *time.Time
+	ID                 string
+	Email              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	Status             string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	FullName           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	TokensValidAfter   time.Time
+	Phone              *string
 }

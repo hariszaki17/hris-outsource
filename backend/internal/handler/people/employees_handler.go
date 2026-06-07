@@ -83,9 +83,9 @@ func (h *Handler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateEmployee handles POST /employees.
-// Returns 201 + Location header.
-// EP-3 stub: provision_login / login_email are accepted but login provisioning
-// is deferred to Phase 4. See SUMMARY.md.
+// Returns 201 + Location header. D1: every employee auto-provisions a login at
+// create — the response carries the one-time temp_password (show-once). The login
+// identifier is the phone (required); login_email is optional (D2).
 func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	var req employeeWriteRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -133,16 +133,19 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 		BankName:              bankName,
 		BankAccountNumber:     bankAccNum,
 		BankAccountHolderName: bankHolder,
+		LoginEmail:            derefString(req.LoginEmail),
 	}
 
-	emp, err := h.svc.CreateEmployee(r.Context(), params)
+	emp, tempPw, err := h.svc.CreateEmployee(r.Context(), params)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 
 	w.Header().Set("Location", "/api/v1/employees/"+emp.ID)
-	httpx.WriteJSON(w, http.StatusCreated, toEmployeeResponse(emp))
+	resp := toEmployeeResponse(emp)
+	resp.TempPassword = tempPw // show-once: login is always provisioned at create (D1)
+	httpx.WriteJSON(w, http.StatusCreated, resp)
 }
 
 // UpdateEmployee handles PATCH /employees/{employee_id}.
@@ -257,6 +260,19 @@ func (h *Handler) ReactivateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, toEmployeeResponse(emp))
+}
+
+// RegenerateTempPassword handles POST /employees/{employee_id}:regenerate-password.
+// Re-issues the temporary password (show-once) and forces a rotation on next login.
+func (h *Handler) RegenerateTempPassword(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "employee_id")
+
+	tempPw, err := h.svc.RegenerateTempPassword(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"temp_password": tempPw})
 }
 
 // --- private helpers ---

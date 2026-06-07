@@ -12,30 +12,28 @@ import "time"
 // The *Name fields are denormalized at read time via LEFT JOINs.
 // Nullable columns are pointers.
 type Placement struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string // INV-5: required
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  time.Time
-	EndDate                    *time.Time // nil = open-ended (PKWTT)
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIDR           *int64 // IDR amounts exceed int32
-	Notes                      *string
-	LifecycleStatus            string // PENDING_START|ACTIVE|EXTENDED|EXPIRING|ENDED|TRANSFERRED|TERMINATED|RESIGNED|SUPERSEDED
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    *time.Time
-	TerminationReason          *string
-	ResignAt                   *time.Time
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string // INV-5: required
+	ServiceLineID     string
+	PositionID        string
+	StartDate         time.Time
+	EndDate           *time.Time // nil = open-ended (PKWTT)
+	Notes             *string
+	LifecycleStatus   string // PENDING_START|ACTIVE|EXTENDED|EXPIRING|ENDED|TRANSFERRED|TERMINATED|RESIGNED|SUPERSEDED
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           *time.Time
+	TerminationReason *string
+	ResignAt          *time.Time
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 	// Denormalized for display (server-authoritative; filled via JOINs).
 	EmployeeName      *string
 	ClientCompanyName *string

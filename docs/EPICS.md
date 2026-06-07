@@ -166,7 +166,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 
 **E1 — Foundations**
 - MFA: not in v1 (admin/HR hardening later) *(default)*
-- Email-less agents: assign an email at provisioning (login stays email+password) *(default)*
+- ✅ **Every employee auto-provisions a login at create; phone is the primary login identifier** *(resolved 2026-06-07)* — supersedes the prior "email-less agents: assign an email at provisioning (login stays email+password)" default. Login no longer requires email; the login identifier is the agent's **phone number** (required) or **email** (optional). See the cross-cutting auto-provision decision below.
 - Role assignment: super_admin + hr_admin may assign roles *(default)*
 - Finance sub-role: none in v1 (HR sees payroll); IDR-only, no multi-currency; bulk actions audited per affected row *(default)*
 
@@ -177,6 +177,13 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - ✅ **Shift-leader scope = configurable per company** *(2026-06-03)* — `ClientCompany.leader_scope ∈ {company, site}` (default `company`). `company` → one leader for the whole company (today's behavior); `site` → one leader **per site**. Rewrites E3 INV-2/3/4 to a "leadership unit" (company **or** site). See [E3 FEATURE §4].
 - Agent mobile-editable fields: phone, address, bank (HR-approved) *(default)*
 - Service lines: the 3 are seeded but **admin-extendable** *(default)*
+- ✅ **Compensation & annual-leave entitlement are employment-agreement (E2) terms, not placement (E3) terms** *(resolved 2026-06-07)* — under alih-daya law the employment relationship is SWP↔agent; a placement is only a work *designation* to a client. So **base salary** stays the single source on E2 `CompensationRecord`, and the **annual leave entitlement** moves onto the **EmploymentAgreement** as new field `annual_leave_entitlement_days` (int, ≥0, nullable). The duplicated `Placement.annual_leave_entitlement` + `Placement.base_salary_ref` are **removed from E3**; transfer/replacement no longer carry comp overrides. E6 leave-quota already sources the annual entitlement from E2, so this aligns the model. **E3 BR-9 (position is selected per-placement and may differ across companies) is unaffected — only the compensation/leave duplication is removed.** See [E2 employment-agreement PRD] + [E3 FEATURE §4].
+- ✅ **Every employee auto-provisions a login; phone-or-email identifier (reverses "data-only employees")** *(resolved 2026-06-07)* — supersedes the E1 "email-less agents: assign an email at provisioning" default. Cross-cutting (E1 auth · E2 employee create · E9 migration):
+  - **D1 — auto-provision, 1:1 non-null.** Creating an employee **always** provisions a User in the same step. `Employee`↔`User` is now **1:1 NON-NULL** (no nullable `user_id`). The **"data-only / no-login employee" concept is removed entirely** — and with it the separate `:provision-login` endpoint, the `provision_login` flag, the `has_user`/`HasLogin` filter, the "Tanpa Login" list tab/stat, and the "Punya Akun" column.
+  - **D2 — phone-or-email identifier.** The login identifier is **phone number** (**required**, unique, normalized E.164 / Indonesian `+62`) **or email** (optional, unique), plus password. The login endpoint accepts a single `identifier` (phone or email) + password. Schema: add **`users.phone` (unique)**; **`users.email` becomes nullable**.
+  - **D3 — temporary credential (unchanged).** Initial credential is a **system-generated temporary password**, shown once to the creating admin, **force-rotated on first login** (already implemented; kept — no HR-typed passwords).
+  - **D4 — migration backfill.** E9 (DATA-MAPPING G-5): every legacy employee without a user is **backfilled a User keyed on phone** (email if present). **No null `user_id` post-migration.**
+  - See [E1 FEATURE], [E2 employees PRD], [E9 DATA-MAPPING G-5].
 
 **E4 — Shift & Scheduling**
 - ✅ Agent shift-swap / day-off requests: **deferred to post-v1** (v1 = leader-driven schedule edits only; F4.4 swaps drop from v1 scope)

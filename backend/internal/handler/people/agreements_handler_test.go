@@ -132,10 +132,11 @@ func (r *fakeAgreementRepo) CreateAgreement(_ context.Context, _ pgx.Tx, p peopl
 		Status:        "active",
 		PredecessorID: p.PredecessorID,
 		Compensation: domain.CompensationTerms{
-			BaseSalaryIDR: p.BaseSalaryIDR,
-			BpjsTerms:     p.BpjsTerms,
-			TaxProfile:    p.TaxProfile,
-			EffectiveDate: p.CompEffectiveDate,
+			BaseSalaryIDR:              p.BaseSalaryIDR,
+			AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
+			BpjsTerms:                  p.BpjsTerms,
+			TaxProfile:                 p.TaxProfile,
+			EffectiveDate:              p.CompEffectiveDate,
 		},
 		CreatedBy: p.CreatedBy,
 		CreatedAt: now,
@@ -487,12 +488,13 @@ func TestCreateAgreement_PKWT_201_WithCompensation(t *testing.T) {
 		"start_date":   "2026-01-01",
 		"end_date":     "2027-06-30",
 		"compensation": map[string]any{
-			"base_salary_idr": 5000000.0,
+			"base_salary_idr":               5000000.0,
+			"annual_leave_entitlement_days": 12.0,
 			"bpjs_terms": map[string]any{
-				"kesehatan_employee_pct":        1.0,
-				"kesehatan_employer_pct":        4.0,
-				"ketenagakerjaan_employee_pct":  3.0,
-				"ketenagakerjaan_employer_pct":  5.7,
+				"kesehatan_employee_pct":       1.0,
+				"kesehatan_employer_pct":       4.0,
+				"ketenagakerjaan_employee_pct": 3.0,
+				"ketenagakerjaan_employer_pct": 5.7,
 			},
 			"tax_profile":    "PTKP_TK0",
 			"effective_date": "2026-01-01",
@@ -514,6 +516,9 @@ func TestCreateAgreement_PKWT_201_WithCompensation(t *testing.T) {
 
 	// compensation must have all 4 bpjs pcts.
 	comp, _ := body["compensation"].(map[string]any)
+	if ald, ok := comp["annual_leave_entitlement_days"]; !ok || ald != 12.0 {
+		t.Errorf("annual_leave_entitlement_days = %v, want 12", comp["annual_leave_entitlement_days"])
+	}
 	bpjs, _ := comp["bpjs_terms"].(map[string]any)
 	for _, pct := range []string{
 		"kesehatan_employee_pct",

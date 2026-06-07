@@ -56,10 +56,18 @@ export function AgreementPicker({
     };
   }, [query]);
 
-  // Reset selection when the employee changes.
+  // Reset selection when the employee changes — but only on a *real* change, not on
+  // first mount (and not on StrictMode's double-invoked effect, which a simple
+  // first-run flag wouldn't survive). We track the previous employeeId and reset
+  // only when it actually differs, so we never clobber the form's initial value or
+  // trigger eager validation before the user interacts.
+  const prevEmployeeId = useRef(employeeId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset effect keyed on employeeId
   useEffect(() => {
-    onChange(null);
+    if (prevEmployeeId.current !== employeeId) {
+      prevEmployeeId.current = employeeId;
+      onChange(null);
+    }
   }, [employeeId]);
 
   const result = useListAgreements(

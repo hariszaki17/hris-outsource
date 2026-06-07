@@ -30,20 +30,12 @@ type Repository interface {
 	GetAuditLogByID(ctx context.Context, id string) (domain.AuditEntry, error)
 	ListPlatformSettings(ctx context.Context) ([]domain.PlatformSetting, error)
 	// Writes take the active transaction.
-	CreateUser(ctx context.Context, tx pgx.Tx, p CreateUserParams) (domain.User, error)
 	UpdateUserEmail(ctx context.Context, tx pgx.Tx, id, email string) (domain.User, error)
 	ChangeUserRole(ctx context.Context, tx pgx.Tx, id, role string) (domain.User, error)
 	SetUserStatus(ctx context.Context, tx pgx.Tx, id, status string) (domain.User, error)
+	// RevokeUserSessions bumps the session epoch and revokes refresh tokens (F2.7).
+	RevokeUserSessions(ctx context.Context, tx pgx.Tx, userID string) error
 	InsertResetToken(ctx context.Context, tx pgx.Tx, userID, tokenHash string, expiresAt time.Time) error
-}
-
-// CreateUserParams carries the fields for inserting a new user.
-type CreateUserParams struct {
-	Email        string
-	PasswordHash string
-	Role         string
-	FullName     string
-	EmployeeID   string
 }
 
 // TxRunner is a thin interface over db.TxManager (injectable for tests).
@@ -113,73 +105,6 @@ func (s *Service) ListUsers(ctx context.Context, f domain.UserFilter) ([]domain.
 	}
 
 	return rows, nextCursor, nil
-}
-
-// CreateUser inserts a new user, enforces email uniqueness (409 CONFLICT), and
-// audits the creation. If sendInvite is true, a reset token is also created
-// (reusing the identity reset-token mechanism) so invite/reset flows work.
-func (s *Service) CreateUser(ctx context.Context, email, role, employeeID string, sendInvite bool) (domain.User, error) {
-	if !validRoles[role] {
-		return domain.User{}, apperr.Rule("ROLE_NOT_ALLOWED", map[string]string{
-			"role": "Nilai peran tidak valid.",
-		})
-	}
-
-	// Email uniqueness pre-check.
-	_, err := s.repo.GetUserByEmail(ctx, email)
-	if err == nil {
-		// Found — conflict.
-		return domain.User{}, apperr.Conflict("CONFLICT")
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return domain.User{}, apperr.Internal(err)
-	}
-
-	// Generate a placeholder password (user must reset via invite link).
-	_, placeholder := auth.NewRefreshToken()
-	pwHash := placeholder // send_invitation_email flow: the hash is never used directly
-
-	var created domain.User
-	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		var inErr error
-		created, inErr = s.repo.CreateUser(ctx, tx, CreateUserParams{
-			Email:        email,
-			PasswordHash: pwHash,
-			Role:         role,
-			FullName:     "",
-			EmployeeID:   employeeID,
-		})
-		if inErr != nil {
-			return inErr
-		}
-
-		if err := audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.ActionCreate,
-			EntityType: "user",
-			EntityID:   created.ID,
-			Before:     nil,
-			After: map[string]any{
-				"email": created.Email,
-				"role":  string(created.Role),
-			},
-		}); err != nil {
-			return err
-		}
-
-		if sendInvite {
-			plaintext, hash := auth.NewRefreshToken()
-			_ = plaintext // E2E reads from DB; no mailer in this phase
-			expiresAt := s.now().Add(time.Hour)
-			if err := s.repo.InsertResetToken(ctx, tx, created.ID, hash, expiresAt); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return domain.User{}, err
-	}
-
-	return created, nil
 }
 
 // UpdateUser patches the user's email and audits the change.
@@ -254,8 +179,9 @@ func (s *Service) ChangeUserRole(ctx context.Context, id, newRole, reason string
 	return updated, nil
 }
 
-// DeactivateUser sets status to 'disabled'. Returns 409 CONFLICT if already disabled.
-// Session revocation is auth-side and out of scope for this phase.
+// DeactivateUser sets status to 'disabled' and revokes the user's sessions (F2.7):
+// the session epoch is bumped and all refresh tokens revoked, so every existing
+// access token is rejected on its next request. Returns 409 if already disabled.
 func (s *Service) DeactivateUser(ctx context.Context, id, reason string) (domain.User, error) {
 	current, err := s.repo.GetUserByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -273,6 +199,9 @@ func (s *Service) DeactivateUser(ctx context.Context, id, reason string) (domain
 		var inErr error
 		updated, inErr = s.repo.SetUserStatus(ctx, tx, id, "disabled")
 		if inErr != nil {
+			return inErr
+		}
+		if inErr = s.repo.RevokeUserSessions(ctx, tx, id); inErr != nil {
 			return inErr
 		}
 		afterSnap := map[string]any{"status": "disabled"}

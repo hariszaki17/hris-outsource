@@ -27,9 +27,9 @@ type employeeWriteRequest struct {
 	BPJSKesehatan         *string         `json:"bpjs_kesehatan"`
 	BPJSKetenagakerjaan   *string         `json:"bpjs_ketenagakerjaan"`
 	BankAccount           *bankAccountReq `json:"bank_account"`
-	// EP-3 stub fields — accepted but ignored in Phase 4.
-	ProvisionLogin *bool   `json:"provision_login"`
-	LoginEmail     *string `json:"login_email"`
+	// LoginEmail is the optional secondary login identifier (D2). The primary
+	// identifier is Phone (required); a login is always auto-provisioned (D1).
+	LoginEmail *string `json:"login_email"`
 }
 
 // bankAccountReq is the nested bank_account object in write requests.
@@ -99,6 +99,9 @@ type employeeResponse struct {
 	CreatedAt            string            `json:"created_at"` // RFC3339
 	UpdatedAt            string            `json:"updated_at"` // RFC3339
 	CreatedBy            *string           `json:"created_by"`
+	// TempPassword is the one-time temporary password (EP-3 show-once). Present only
+	// in the create / provision-login / regenerate responses; never on reads.
+	TempPassword *string `json:"temp_password,omitempty"`
 }
 
 // toEmployeeResponse maps a domain.Employee to the wire-format response.
@@ -123,10 +126,18 @@ func toEmployeeResponse(e domain.Employee) employeeResponse {
 		CreatedAt:            e.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:            e.UpdatedAt.UTC().Format(time.RFC3339),
 		CreatedBy:            e.CreatedBy,
-		// Phase-5 stubs: always null until placements table is wired.
-		CurrentPosition:      nil,
-		CurrentServiceLine:   nil,
-		CurrentClientCompany: nil,
+	}
+
+	// current_* — populated from the employee's non-terminal placement (list query);
+	// null when unplaced or for endpoints that don't resolve the placement.
+	if e.CurrentPosition != nil {
+		resp.CurrentPosition = &positionRef{ID: e.CurrentPosition.ID, Name: e.CurrentPosition.Name}
+	}
+	if e.CurrentServiceLine != nil {
+		resp.CurrentServiceLine = &serviceLineRef{ID: e.CurrentServiceLine.ID, Name: e.CurrentServiceLine.Name}
+	}
+	if e.CurrentClientCompany != nil {
+		resp.CurrentClientCompany = &clientCompanyRef{ID: e.CurrentClientCompany.ID, Name: e.CurrentClientCompany.Name}
 	}
 
 	// birth_date: omit (null) if zero.

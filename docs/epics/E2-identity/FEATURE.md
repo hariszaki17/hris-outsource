@@ -131,6 +131,7 @@ erDiagram
 - **INV-3:** a Position belongs to **exactly one** ServiceLine; position name is unique within its line.
 - **INV-4:** ServiceLine is the fixed seed set (Facility Services, Building Management, Parking); admin-extendable but not deletable while referenced.
 - **INV-5:** a ClientCompany has **at least one** Site, **exactly one** of which is `is_primary` (the default "Main Site"). Geofence config (lat/lng/`geofence_radius_m`) lives on **Site**, never on ClientCompany. Site name is unique within its company. *(Added 2026-06-03, F2.6.)*
+- **INV-6:** login access is bound to **employment**, not placement. Revocation fires **only** when the EmploymentAgreement closes (offboarding); ending/transferring/renewing a *placement* never revokes a login. *(Added 2026-06-06, F2.7.)*
 
 ## 5. Features
 
@@ -142,6 +143,7 @@ erDiagram
 | **F2.6** | Client Sites & Geofence | [client-sites-geofence.md](prds/client-sites-geofence.md) |
 | **F2.4** | Service Lines & Position Master | [service-lines-positions.md](prds/service-lines-positions.md) |
 | **F2.5** | Operational Master Data (leave / attendance / overtime) | [operational-master-data.md](prds/operational-master-data.md) |
+| **F2.7** | Employee Offboarding & Session Revocation | [offboarding.md](prds/offboarding.md) |
 
 ---
 
@@ -295,6 +297,36 @@ flowchart LR
 ```
 
 **Entities:** `LeaveType`, `AttendanceCode`, `OvertimeRule`. **Consumed by:** E5, E6, E7.
+
+---
+
+### F2.7 — Employee Offboarding & Session Revocation
+
+The deliberate end of the SWP↔agent **employment** relationship — distinct from ending a *placement* (E3). One atomic action closes the active EmploymentAgreement, deactivates the Employee, ends the open placement, disables the linked User, and **instantly revokes every session** (INV-6). Two trigger classes: **expiry-driven** (system flags a PKWT 30d before `end_date` → HR decides *continue* or *end*; nothing auto-terminates — a lapsed contract keeps access under **grace** until HR acts) and **event-driven** (HR records resignation, termination/PHK, retirement, death, or absconding with a reason + effective date, which may be future-dated). Revocation uses a **session epoch** on `User` (E1) so the stateless access token is instantly invalidated without a per-token denylist.
+
+```mermaid
+flowchart TD
+    subgraph SYS[System job · Asia/Jakarta]
+        P1([PKWT within 30d of end]) --> P2[Agreement → expiring]
+        P2 --> P3[Raise decision task to HR Inbox]
+        P3 -. no decision by end_date .-> P4[Stay expiring · login valid · escalate]
+        P4 --> D1
+    end
+    subgraph HR[HR / Super Admin]
+        P3 --> D1{Decide}
+        D1 -- Continue --> R1[Renew agreement + placement · NO revoke]
+        D1 -- End --> OFF
+        E1([Event: resign / terminate / retire / death / mangkir]) --> OFF
+    end
+    subgraph OFF[Offboard · atomic tx]
+        T1[Close agreement + closed_reason] --> T2[End placement]
+        T2 --> T3[Employee → inactive]
+        T3 --> T4[Disable User · bump tokens_valid_after · revoke refresh]
+        T4 --> T5[(Audit + reason)]
+    end
+```
+
+**Entities:** `Offboarding` (new) + extends `EmploymentAgreement` (status `expiring`, `closed_reason` enum). **Depends on:** F2.1, F2.2, E3 (placement terminal states), E1 (session revocation hook). **Consumed by:** E10 (Inbox task + notifications).
 
 ---
 

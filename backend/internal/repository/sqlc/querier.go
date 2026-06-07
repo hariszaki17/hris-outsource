@@ -60,6 +60,9 @@ type Querier interface {
 	// summary totals across the whole filtered set (verified-only). verification_rate
 	// numerator/denominator returned so the service computes the pct (null when 0).
 	BillableSummary(ctx context.Context, arg BillableSummaryParams) (BillableSummaryRow, error)
+	// F2.7 session epoch: invalidate every access token issued before now() for this
+	// user (called on offboard/deactivate alongside refresh-token revocation).
+	BumpTokensValidAfter(ctx context.Context, id string) error
 	// Cancel a still-running job (QUEUED/RUNNING -> CANCELLED). No-op-safe: the
 	// service re-reads via GetExportJob when 0 rows return (already terminal).
 	CancelExportJob(ctx context.Context, id string) (CancelExportJobRow, error)
@@ -160,7 +163,8 @@ type Querier interface {
 	CreateShiftMaster(ctx context.Context, arg CreateShiftMasterParams) (CreateShiftMasterRow, error)
 	// Allocates the SWP-SITE id inline from the per-prefix sequence.
 	CreateSite(ctx context.Context, arg CreateSiteParams) (CreateSiteRow, error)
-	// Allocates the SWP-USR id inline from the per-prefix sequence.
+	// Allocates the SWP-USR id inline from the per-prefix sequence. Phone is the
+	// required login identifier (D2); email is optional.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	// Final-approval deduct: move days from the soft-reservation into used.
 	DeductLeaveQuota(ctx context.Context, arg DeductLeaveQuotaParams) (LeaveQuota, error)
@@ -267,9 +271,12 @@ type Querier interface {
 	// Row-lock for the update / activate-toggle path (omits joins; service re-reads for DTO).
 	GetShiftMasterForUpdate(ctx context.Context, id string) (GetShiftMasterForUpdateRow, error)
 	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
-	// Login lookup: active, non-deleted user by case-insensitive email.
+	// Email-only lookup: used by forgot-password (reset link is email-delivered).
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
+	// Login lookup (D2): active, non-deleted user by phone OR case-insensitive
+	// email. Phone is matched exactly (stored normalized E.164); email lowercased.
+	GetUserByIdentifier(ctx context.Context, identifier string) (GetUserByIdentifierRow, error)
 	// INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
 	// leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
 	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
@@ -377,7 +384,9 @@ type Querier interface {
 	//   date_from/date_to: bound on attendance_shift_date.
 	ListCorrections(ctx context.Context, arg ListCorrectionsParams) ([]ListCorrectionsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: q (ILIKE over full_name/nik/nip/email_personal/phone), status.
+	// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
+	// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
+	// LEFT JOINs so unplaced employees still list (current_* null).
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
@@ -512,6 +521,9 @@ type Querier interface {
 	MarkResetTokenUsed(ctx context.Context, id int64) error
 	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
 	PayslipExists(ctx context.Context, id string) (bool, error)
+	// EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
+	// forces a rotation on next login. Used by :regenerate-password.
+	RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error
 	// Reject an exception record (reason required). Same PENDING/ESCALATED guard.
 	RejectAttendance(ctx context.Context, arg RejectAttendanceParams) (RejectAttendanceRow, error)
 	// Reject a PENDING correction (reason required). Same PENDING guard.
@@ -542,6 +554,9 @@ type Querier interface {
 	SetClientCompanyStatus(ctx context.Context, arg SetClientCompanyStatusParams) (SetClientCompanyStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusParams) (SetEmployeeStatusRow, error)
+	// EP-3: links a freshly provisioned E1 User to the employee (1:1). Flips
+	// has_login (derived from user_id) to true.
+	SetEmployeeUserID(ctx context.Context, arg SetEmployeeUserIDParams) error
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
 	// HR override that drove remaining negative (LA-8): records last_override.
@@ -595,9 +610,10 @@ type Querier interface {
 	// The transition writer (RETURNING-or-409 pattern). 09-02 guards the legal
 	// from→to transition before calling this.
 	UpdateOvertimeStatus(ctx context.Context, arg UpdateOvertimeStatusParams) (UpdateOvertimeStatusRow, error)
-	// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
+	// Sets a new password hash after a reset/change (AU-4). The user has chosen their
+	// own password, so any temp-password rotation requirement is cleared.
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
-	// Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
+	// Limited-field PATCH (position_id, end_date, notes).
 	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
 	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
 	UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error)

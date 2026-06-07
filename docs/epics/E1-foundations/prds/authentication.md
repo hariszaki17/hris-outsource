@@ -7,12 +7,12 @@
 
 ## 1. Context & problem
 
-Every user — agents (mobile) and staff (web) — signs in with **email + password**. The platform needs secure login, password reset, and session handling that works for both a long-lived mobile app and a web console. (One caveat: legacy `email_personal` was nullable, so some agents may lack email — addressed at provisioning, see §10.)
+Every user — agents (mobile) and staff (web) — signs in with a single **identifier (phone OR email) + password**. **Phone is the universal identifier** (every agent has one, stored unique/normalized E.164 `+62`); **email is optional** and used mainly by staff. The platform needs secure login, password reset, and session handling that works for both a long-lived mobile app and a web console. Every employee is **auto-provisioned a login at create** (1:1, non-null — see §10), so there are no email-less or login-less users to special-case.
 
 ## 2. Goals & non-goals
 
 **Goals**
-- Email/password login on web + mobile; secure password storage.
+- Phone-or-email + password login on web + mobile; secure password storage.
 - Password reset; session/token lifecycle (incl. mobile "stay logged in").
 - Record `last_login`; rate-limit/lockout on abuse.
 
@@ -35,17 +35,17 @@ All users (login), System (auth, sessions), Super Admin/HR (disable accounts).
 
 | Ref | Rule |
 |-----|------|
-| AU-1 | Login is **email + password**; passwords stored hashed (bcrypt/argon2), never plaintext. |
+| AU-1 | Login is by **identifier (phone OR email) + password**; passwords stored hashed (argon2id/bcrypt), never plaintext. |
 | AU-2 | Only **active** users may log in; disabled accounts are rejected. |
 | AU-3 | Successful login records `last_login_at` and establishes a session/token (model per §10). |
 | AU-4 | **Password reset** is available (token via email — see §10 for email-less agents). |
 | AU-5 | Repeated failures trigger **rate-limiting / lockout** (thresholds §10). |
-| AU-6 | Sessions can be **revoked** (logout-all / on disable); mobile supports refresh for long sessions. |
+| AU-6 | Sessions can be **revoked** (logout-all / on disable / on **offboard**); mobile supports refresh for long sessions. Revocation is **instant**: a session-epoch (`users.tokens_valid_after`) bump + `RevokeAllRefreshForUser` invalidate every outstanding access token at the **next request**. The auth middleware does a **per-request user status + epoch check** (no longer purely stateless JWT). Revocation is tied to **employment-end** ([F2.7](../../E2-identity/prds/offboarding.md), OB-#); placement transfer/renewal/supersede/auto-end **never** revoke. |
 | AU-7 | Auth events (login, failed login, reset, lockout) are **audited** (F1.3). |
 
 ## 6. Data model
 
-`User` (email unique, password_hash, status, last_login_at — FEATURE §4) + sessions/tokens (model TBD §10).
+`User` (phone unique+required, email nullable/optional-unique, password_hash, status, last_login_at — FEATURE §4) + sessions/tokens (model TBD §10).
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -77,7 +77,18 @@ Feature: Authentication
 
   Scenario: Revoke on disable
     Given an admin disables a user
-    Then that user's active sessions are invalidated
+    Then that user's session-epoch (tokens_valid_after) is bumped
+    And their outstanding access tokens fail the next per-request middleware check
+    # "invalidated" = rejected at the next request, not waiting for token expiry
+
+  Scenario: Offboard revokes login
+    Given HR ends an employee's employment (F2.7)
+    Then the user's sessions are revoked instantly via epoch bump + RevokeAllRefreshForUser
+
+  Scenario: Placement transfer does not revoke sessions
+    Given an agent is transferred to a new placement (placement-end, not employment-end)
+    Then their session-epoch is unchanged
+    And their active sessions remain valid
 ```
 
 ## 8. Cases & edge cases
@@ -95,7 +106,7 @@ E2 (provisioning/email), F1.2 (role load post-login), F1.3 (audit), E10 (reset e
 
 ## 10. Decisions & open questions
 
-- ✅ Email + password for all; hashed; reset; lockout.
+- ✅ Phone-or-email + password for all; hashed; reset; lockout.
+- ✅ (2026-06-07) Every employee **auto-provisions a login at create** (Employee↔User 1:1, non-null); no data-only/no-login users and no opt-in provision step. Initial credential is a **system-generated temp password, shown once, force-rotated on first login**.
 - **Open:** session model — **JWT (access+refresh)** vs server sessions; token lifetimes.
-- **Open (C-1):** how email-less agents reset/recover (assign email at provisioning? phone fallback?).
 - **Open:** password policy + lockout thresholds; **MFA** for admin/HR in v1 or later?

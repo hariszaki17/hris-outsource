@@ -29,6 +29,7 @@ const (
 // persona holds the data required to seed a single user row.
 type persona struct {
 	email      string
+	phone      string // E.164 login identifier (D2)
 	password   string
 	role       string
 	fullName   string
@@ -50,6 +51,7 @@ func strPtr(s string) *string { return &s }
 var personas = []persona{
 	{
 		email:      "sari.hadi@swp.test",
+		phone:      "+628110000042",
 		password:   PasswordHRAdmin,
 		role:       "hr_admin",
 		fullName:   "Sari Hadi",
@@ -61,6 +63,7 @@ var personas = []persona{
 		// Phase 3; SWP-CMP-0021 is the deterministic literal used across the
 		// harness spec (FK not enforced until the companies migration is applied).
 		email:      "rudi.wijaya@swp.test",
+		phone:      "+628110001108",
 		password:   PasswordShiftLeader,
 		role:       "shift_leader",
 		fullName:   "Rudi Wijaya",
@@ -69,6 +72,7 @@ var personas = []persona{
 	},
 	{
 		email:      "super.admin@swp.test",
+		phone:      "+628110000001",
 		password:   PasswordSuperAdmin,
 		role:       "super_admin",
 		fullName:   "Super Admin",
@@ -77,6 +81,7 @@ var personas = []persona{
 	},
 	{
 		email:      "agent.budi@swp.test",
+		phone:      "+628110002891",
 		password:   PasswordAgent,
 		role:       "agent",
 		fullName:   "Budi Santoso",
@@ -90,6 +95,7 @@ var personas = []persona{
 var extraPersonas = []persona{
 	{
 		email:      "dewi.lestari@swp.test",
+		phone:      "+628110003001",
 		password:   "Dew1-Lestari-2026!",
 		role:       "agent",
 		fullName:   "Dewi Lestari",
@@ -98,6 +104,7 @@ var extraPersonas = []persona{
 	},
 	{
 		email:      "agus.pratama@swp.test",
+		phone:      "+628110003002",
 		password:   "Agus-Pr4tama-2026!",
 		role:       "shift_leader",
 		fullName:   "Agus Pratama",
@@ -106,6 +113,7 @@ var extraPersonas = []persona{
 	},
 	{
 		email:      "bambang.admin@swp.test",
+		phone:      "+628110003003",
 		password:   "B4mbang-Admin-2026!",
 		role:       "hr_admin",
 		fullName:   "Bambang Sutrisno",
@@ -153,7 +161,8 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		}
 
 		user, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
-			Email:        p.email,
+			Email:        strPtr(p.email),
+			Phone:        strPtr(p.phone),
 			PasswordHash: hash,
 			Role:         p.role,
 			FullName:     p.fullName,

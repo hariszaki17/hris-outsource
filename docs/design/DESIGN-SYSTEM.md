@@ -221,15 +221,16 @@ Screens by role / platform (all under feature group `Z3cS3`):
 - **Web · HR/Admin** (canonical): List `WElYh` · Detail `JBjBb` · Form (Tambah/Edit) `h6bDz`.
 - **Web · Shift Leader** (read-only, company/location-scoped): scoped List `n3wi1w` (no Tambah, scope
   banner) · read-only Detail `rtKzk` (no Edit; Statutori & Akun Login hidden → replaced by a locked
-  note; role can't provision login or see statutory fields).
+  note; role can't manage credentials or see statutory fields).
 - **Mobile · Agen** (self-service phone, 390×844): Profil Saya `s5RO1` (read-only; statutory locked,
   Kontak/Bank flagged editable) · Ajukan Perubahan `n465cT` (only `phone`/`address`/bank editable,
   statutory locked, submits to HR review) · Status Pengajuan `SXqA5` (request states:
   Menunggu→`warn`, Disetujui→`info`, Ditolak→`bad`).
 
-Role access rule of thumb: HR/Admin = full CRUD + login provisioning + statutory; Shift Leader =
-read-only within their location, no statutory/login; Agen = own record, read-only except a request
-flow for phone/address/bank that HR must approve. Fields, grouped as on the form:
+Role access rule of thumb: HR/Admin = full CRUD + credential management (regenerate temp password,
+deactivate; every employee already has a login) + statutory; Shift Leader = read-only within their
+location, no statutory/credentials; Agen = own record, read-only except a request flow for
+phone/address/bank that HR must approve. Fields, grouped as on the form:
 
 | Group | Field | Type | Rules |
 |---|---|---|---|

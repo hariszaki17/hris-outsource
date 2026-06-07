@@ -20,24 +20,24 @@ type BankAccount struct {
 // CurrentPosition, CurrentServiceLine, CurrentClientCompany are Phase-5 stubs
 // (always nil until the placements table is wired in Phase 5).
 type Employee struct {
-	ID                   string
-	UserID               *string     // nullable — linked E1 user when provisioned (EP-3)
-	FullName             string
-	NIK                  string      // Indonesian KTP; unique among non-deleted (EP-2)
-	NIP                  string      // SWP internal employee number (may be empty)
-	JoinAt               time.Time   // date; stored as pgtype.Date in sqlc
-	Gender               *string     // "MALE" | "FEMALE" | nil
-	BirthDate            *time.Time  // nullable date
-	BirthPlace           *string
-	Phone                *string
-	EmailPersonal        *string
-	Address              *string
-	NPWP                 *string
-	BPJSKesehatan        *string
-	BPJSKetenagakerjaan  *string
-	BankAccount          BankAccount // flat columns; empty strings = not set
-	Status               string      // "active" | "inactive" (DB lowercase)
-	HasLogin             bool        // derived: UserID != nil
+	ID                  string
+	UserID              *string // nullable — linked E1 user when provisioned (EP-3)
+	FullName            string
+	NIK                 string     // Indonesian KTP; unique among non-deleted (EP-2)
+	NIP                 string     // SWP internal employee number (may be empty)
+	JoinAt              time.Time  // date; stored as pgtype.Date in sqlc
+	Gender              *string    // "MALE" | "FEMALE" | nil
+	BirthDate           *time.Time // nullable date
+	BirthPlace          *string
+	Phone               *string
+	EmailPersonal       *string
+	Address             *string
+	NPWP                *string
+	BPJSKesehatan       *string
+	BPJSKetenagakerjaan *string
+	BankAccount         BankAccount // flat columns; empty strings = not set
+	Status              string      // "active" | "inactive" (DB lowercase)
+	HasLogin            bool        // derived: UserID != nil
 	// Phase-5 stubs — always nil until placements table is wired.
 	CurrentPosition      *PositionRef
 	CurrentServiceLine   *ServiceLineRef
@@ -79,19 +79,20 @@ type EmployeeFilter struct {
 
 // BpjsTerms holds the four BPJS percentage deduction fields stored as JSONB.
 type BpjsTerms struct {
-	KesehatanEmployerPct         *float64 `json:"kesehatan_employer_pct"`
-	KesehatanEmployeePct         *float64 `json:"kesehatan_employee_pct"`
-	KetenagakerjaanEmployerPct   *float64 `json:"ketenagakerjaan_employer_pct"`
-	KetenagakerjaanEmployeePct   *float64 `json:"ketenagakerjaan_employee_pct"`
+	KesehatanEmployerPct       *float64 `json:"kesehatan_employer_pct"`
+	KesehatanEmployeePct       *float64 `json:"kesehatan_employee_pct"`
+	KetenagakerjaanEmployerPct *float64 `json:"ketenagakerjaan_employer_pct"`
+	KetenagakerjaanEmployeePct *float64 `json:"ketenagakerjaan_employee_pct"`
 }
 
 // CompensationTerms groups all compensation fields stored on an employment agreement.
 // Stored plaintext this milestone; encryption at rest deferred (EA-4).
 type CompensationTerms struct {
-	BaseSalaryIDR  *float64   // base_salary_idr numeric
-	BpjsTerms      BpjsTerms  // bpjs_terms jsonb
-	TaxProfile     *string    // PTKP code e.g. PTKP_K0
-	EffectiveDate  *time.Time // comp_effective_date date
+	BaseSalaryIDR              *float64   // base_salary_idr numeric
+	AnnualLeaveEntitlementDays *int32     // annual_leave_entitlement_days integer (statutory leave term)
+	BpjsTerms                  BpjsTerms  // bpjs_terms jsonb
+	TaxProfile                 *string    // PTKP code e.g. PTKP_K0
+	EffectiveDate              *time.Time // comp_effective_date date
 }
 
 // Agreement is the domain entity for an employment agreement (F2.2 / EA-*).
@@ -100,21 +101,21 @@ type CompensationTerms struct {
 // Type is "PKWT" or "PKWTT" (stored uppercase, DB-checked).
 // EndDate is nil for PKWTT agreements.
 type Agreement struct {
-	ID             string
-	EmployeeID     string
-	Type           string     // "PKWT" | "PKWTT"
-	AgreementNo    string
-	StartDate      time.Time
-	EndDate        *time.Time // nil for PKWTT
-	Status         string     // "active" | "superseded" | "closed"
-	PredecessorID  *string
-	SuccessorID    *string
-	ClosedReason   *string
-	ClosedAt       *time.Time
-	Compensation   CompensationTerms
-	CreatedBy      *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            string
+	EmployeeID    string
+	Type          string // "PKWT" | "PKWTT"
+	AgreementNo   string
+	StartDate     time.Time
+	EndDate       *time.Time // nil for PKWTT
+	Status        string     // "active" | "superseded" | "closed"
+	PredecessorID *string
+	SuccessorID   *string
+	ClosedReason  *string
+	ClosedAt      *time.Time
+	Compensation  CompensationTerms
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // AgreementFilter holds the decoded query parameters for GET /agreements.
@@ -159,10 +160,10 @@ type ChangeRequestChanges struct {
 type ChangeRequest struct {
 	ID              string
 	EmployeeID      string
-	Status          string               // "pending" | "approved" | "rejected" (DB lowercase)
+	Status          string // "pending" | "approved" | "rejected" (DB lowercase)
 	SubmittedAt     time.Time
 	ResolvedAt      *time.Time
-	ResolvedBy      *string              // SWP-EMP-<N> of resolving HR user
+	ResolvedBy      *string // SWP-EMP-<N> of resolving HR user
 	RejectionReason *string
 	Note            *string
 	Changes         ChangeRequestChanges // deserialized from jsonb

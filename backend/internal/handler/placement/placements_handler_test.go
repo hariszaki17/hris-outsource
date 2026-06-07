@@ -270,26 +270,24 @@ func (r *fakePlacementRepo) CreatePlacement(_ context.Context, _ pgx.Tx, p svc.C
 	now := fixedNow
 	comp := r.companies[p.ClientCompanyID]
 	out := domain.Placement{
-		ID:                         id,
-		EmployeeID:                 p.EmployeeID,
-		AgreementID:                p.AgreementID,
-		ClientCompanyID:            p.ClientCompanyID,
-		SiteID:                     p.SiteID,
-		ServiceLineID:              p.ServiceLineID,
-		PositionID:                 p.PositionID,
-		StartDate:                  p.StartDate,
-		EndDate:                    p.EndDate,
-		AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIDR:           p.BaseSalaryRefIDR,
-		Notes:                      p.Notes,
-		LifecycleStatus:            p.LifecycleStatus,
-		StatusChangedAt:            now,
-		PredecessorID:              p.PredecessorID,
-		BackdateReason:             p.BackdateReason,
-		CreatedBy:                  p.CreatedBy,
-		CreatedAt:                  now,
-		UpdatedAt:                  now,
-		ClientCompanyName:          strp(comp.Name),
+		ID:                id,
+		EmployeeID:        p.EmployeeID,
+		AgreementID:       p.AgreementID,
+		ClientCompanyID:   p.ClientCompanyID,
+		SiteID:            p.SiteID,
+		ServiceLineID:     p.ServiceLineID,
+		PositionID:        p.PositionID,
+		StartDate:         p.StartDate,
+		EndDate:           p.EndDate,
+		Notes:             p.Notes,
+		LifecycleStatus:   p.LifecycleStatus,
+		StatusChangedAt:   now,
+		PredecessorID:     p.PredecessorID,
+		BackdateReason:    p.BackdateReason,
+		CreatedBy:         p.CreatedBy,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		ClientCompanyName: strp(comp.Name),
 	}
 	r.placements[id] = out
 	return out, nil
@@ -305,12 +303,6 @@ func (r *fakePlacementRepo) UpdatePlacementFields(_ context.Context, _ pgx.Tx, p
 	}
 	if p.EndDate != nil {
 		cur.EndDate = p.EndDate
-	}
-	if p.AnnualLeaveEntitlementDays != nil {
-		cur.AnnualLeaveEntitlementDays = p.AnnualLeaveEntitlementDays
-	}
-	if p.BaseSalaryRefIDR != nil {
-		cur.BaseSalaryRefIDR = p.BaseSalaryRefIDR
 	}
 	if p.Notes != nil {
 		cur.Notes = p.Notes

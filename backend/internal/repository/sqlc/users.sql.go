@@ -10,11 +10,25 @@ import (
 	"time"
 )
 
+const bumpTokensValidAfter = `-- name: BumpTokensValidAfter :exec
+UPDATE users
+SET tokens_valid_after = now(),
+    updated_at         = now()
+WHERE id = $1
+`
+
+// F2.7 session epoch: invalidate every access token issued before now() for this
+// user (called on offboard/deactivate alongside refresh-token revocation).
+func (q *Queries) BumpTokensValidAfter(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, bumpTokensValidAfter, id)
+	return err
+}
+
 const changeUserRole = `-- name: ChangeUserRole :one
 UPDATE users
 SET role = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
 `
 
 type ChangeUserRoleParams struct {
@@ -24,7 +38,8 @@ type ChangeUserRoleParams struct {
 
 type ChangeUserRoleRow struct {
 	ID          string
-	Email       string
+	Email       *string
+	Phone       *string
 	Role        string
 	EmployeeID  *string
 	CompanyID   *string
@@ -41,6 +56,7 @@ func (q *Queries) ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) 
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.Role,
 		&i.EmployeeID,
 		&i.CompanyID,
@@ -54,7 +70,7 @@ func (q *Queries) ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) 
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, email, password_hash, role, employee_id, company_id, status, full_name)
+INSERT INTO users (id, email, phone, password_hash, role, employee_id, company_id, status, full_name, must_change_password)
 VALUES (
     'SWP-USR-' || swp_next_id('USR'),
     $1,
@@ -62,52 +78,62 @@ VALUES (
     $3,
     $4,
     $5,
+    $6,
     'active',
-    $6
+    $7,
+    $8
 )
-RETURNING id, email, password_hash, role, employee_id, company_id, status,
-          full_name, last_login_at,
+RETURNING id, email, phone, password_hash, role, employee_id, company_id, status,
+          full_name, last_login_at, must_change_password,
           created_at, updated_at, deleted_at
 `
 
 type CreateUserParams struct {
-	Email        string
-	PasswordHash string
-	Role         string
-	EmployeeID   *string
-	CompanyID    *string
-	FullName     string
+	Email              *string
+	Phone              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	FullName           string
+	MustChangePassword bool
 }
 
 type CreateUserRow struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	Role         string
-	EmployeeID   *string
-	CompanyID    *string
-	Status       string
-	FullName     string
-	LastLoginAt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ID                 string
+	Email              *string
+	Phone              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	Status             string
+	FullName           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
 }
 
-// Allocates the SWP-USR id inline from the per-prefix sequence.
+// Allocates the SWP-USR id inline from the per-prefix sequence. Phone is the
+// required login identifier (D2); email is optional.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Email,
+		arg.Phone,
 		arg.PasswordHash,
 		arg.Role,
 		arg.EmployeeID,
 		arg.CompanyID,
 		arg.FullName,
+		arg.MustChangePassword,
 	)
 	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.PasswordHash,
 		&i.Role,
 		&i.EmployeeID,
@@ -115,6 +141,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.Status,
 		&i.FullName,
 		&i.LastLoginAt,
+		&i.MustChangePassword,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -123,8 +150,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, role, employee_id, company_id, status,
-       full_name, last_login_at,
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password,
        created_at, updated_at, deleted_at
 FROM users
 WHERE lower(email) = lower($1)
@@ -132,27 +159,30 @@ WHERE lower(email) = lower($1)
 `
 
 type GetUserByEmailRow struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	Role         string
-	EmployeeID   *string
-	CompanyID    *string
-	Status       string
-	FullName     string
-	LastLoginAt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ID                 string
+	Email              *string
+	Phone              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	Status             string
+	FullName           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
 }
 
-// Login lookup: active, non-deleted user by case-insensitive email.
+// Email-only lookup: used by forgot-password (reset link is email-delivered).
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.PasswordHash,
 		&i.Role,
 		&i.EmployeeID,
@@ -160,6 +190,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.Status,
 		&i.FullName,
 		&i.LastLoginAt,
+		&i.MustChangePassword,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -168,8 +199,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, role, employee_id, company_id, status,
-       full_name, last_login_at,
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password, tokens_valid_after,
        created_at, updated_at, deleted_at
 FROM users
 WHERE id = $1
@@ -177,18 +208,21 @@ WHERE id = $1
 `
 
 type GetUserByIDRow struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	Role         string
-	EmployeeID   *string
-	CompanyID    *string
-	Status       string
-	FullName     string
-	LastLoginAt  *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ID                 string
+	Email              *string
+	Phone              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	Status             string
+	FullName           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	TokensValidAfter   time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error) {
@@ -197,6 +231,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.PasswordHash,
 		&i.Role,
 		&i.EmployeeID,
@@ -204,6 +239,58 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 		&i.Status,
 		&i.FullName,
 		&i.LastLoginAt,
+		&i.MustChangePassword,
+		&i.TokensValidAfter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getUserByIdentifier = `-- name: GetUserByIdentifier :one
+SELECT id, email, phone, password_hash, role, employee_id, company_id, status,
+       full_name, last_login_at, must_change_password,
+       created_at, updated_at, deleted_at
+FROM users
+WHERE (phone = $1::text OR lower(email) = lower($1::text))
+  AND deleted_at IS NULL
+`
+
+type GetUserByIdentifierRow struct {
+	ID                 string
+	Email              *string
+	Phone              *string
+	PasswordHash       string
+	Role               string
+	EmployeeID         *string
+	CompanyID          *string
+	Status             string
+	FullName           string
+	LastLoginAt        *time.Time
+	MustChangePassword bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
+// Login lookup (D2): active, non-deleted user by phone OR case-insensitive
+// email. Phone is matched exactly (stored normalized E.164); email lowercased.
+func (q *Queries) GetUserByIdentifier(ctx context.Context, identifier string) (GetUserByIdentifierRow, error) {
+	row := q.db.QueryRow(ctx, getUserByIdentifier, identifier)
+	var i GetUserByIdentifierRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Phone,
+		&i.PasswordHash,
+		&i.Role,
+		&i.EmployeeID,
+		&i.CompanyID,
+		&i.Status,
+		&i.FullName,
+		&i.LastLoginAt,
+		&i.MustChangePassword,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -212,7 +299,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (GetUserByIDRow, e
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, role, employee_id, company_id, status, full_name,
+SELECT id, email, phone, role, employee_id, company_id, status, full_name,
        last_login_at, created_at, updated_at
 FROM users
 WHERE deleted_at IS NULL
@@ -240,7 +327,8 @@ type ListUsersParams struct {
 
 type ListUsersRow struct {
 	ID          string
-	Email       string
+	Email       *string
+	Phone       *string
 	Role        string
 	EmployeeID  *string
 	CompanyID   *string
@@ -274,6 +362,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 		if err := rows.Scan(
 			&i.ID,
 			&i.Email,
+			&i.Phone,
 			&i.Role,
 			&i.EmployeeID,
 			&i.CompanyID,
@@ -293,6 +382,26 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
+const regenerateTempPassword = `-- name: RegenerateTempPassword :exec
+UPDATE users
+SET password_hash        = $1,
+    must_change_password = true,
+    updated_at           = now()
+WHERE id = $2 AND deleted_at IS NULL
+`
+
+type RegenerateTempPasswordParams struct {
+	PasswordHash string
+	ID           string
+}
+
+// EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
+// forces a rotation on next login. Used by :regenerate-password.
+func (q *Queries) RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error {
+	_, err := q.db.Exec(ctx, regenerateTempPassword, arg.PasswordHash, arg.ID)
+	return err
+}
+
 const setLastLogin = `-- name: SetLastLogin :exec
 UPDATE users
 SET last_login_at = now(),
@@ -310,7 +419,7 @@ const setUserStatus = `-- name: SetUserStatus :one
 UPDATE users
 SET status = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
 `
 
 type SetUserStatusParams struct {
@@ -320,7 +429,8 @@ type SetUserStatusParams struct {
 
 type SetUserStatusRow struct {
 	ID          string
-	Email       string
+	Email       *string
+	Phone       *string
 	Role        string
 	EmployeeID  *string
 	CompanyID   *string
@@ -338,6 +448,7 @@ func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.Role,
 		&i.EmployeeID,
 		&i.CompanyID,
@@ -352,8 +463,9 @@ func (q *Queries) SetUserStatus(ctx context.Context, arg SetUserStatusParams) (S
 
 const updatePassword = `-- name: UpdatePassword :exec
 UPDATE users
-SET password_hash = $1,
-    updated_at    = now()
+SET password_hash        = $1,
+    must_change_password = false,
+    updated_at           = now()
 WHERE id = $2
 `
 
@@ -362,7 +474,8 @@ type UpdatePasswordParams struct {
 	ID           string
 }
 
-// Sets a new password hash, e.g. after a successful reset-password flow (AU-4).
+// Sets a new password hash after a reset/change (AU-4). The user has chosen their
+// own password, so any temp-password rotation requirement is cleared.
 func (q *Queries) UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error {
 	_, err := q.db.Exec(ctx, updatePassword, arg.PasswordHash, arg.ID)
 	return err
@@ -372,17 +485,18 @@ const updateUserEmail = `-- name: UpdateUserEmail :one
 UPDATE users
 SET email = $1, updated_at = now()
 WHERE id = $2 AND deleted_at IS NULL
-RETURNING id, email, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
+RETURNING id, email, phone, role, employee_id, company_id, status, full_name, last_login_at, created_at, updated_at
 `
 
 type UpdateUserEmailParams struct {
-	Email string
+	Email *string
 	ID    string
 }
 
 type UpdateUserEmailRow struct {
 	ID          string
-	Email       string
+	Email       *string
+	Phone       *string
 	Role        string
 	EmployeeID  *string
 	CompanyID   *string
@@ -400,6 +514,7 @@ func (q *Queries) UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Phone,
 		&i.Role,
 		&i.EmployeeID,
 		&i.CompanyID,

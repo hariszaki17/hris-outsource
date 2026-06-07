@@ -80,40 +80,6 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
-// CreateUser handles POST /users.
-func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	var req createUserRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-
-	fields := map[string]string{}
-	if req.Email == "" {
-		fields["email"] = "Wajib diisi."
-	}
-	if req.Role == "" {
-		fields["role"] = "Wajib diisi."
-	}
-	if len(fields) > 0 {
-		httpx.WriteError(w, r, apperr.Invalid(fields))
-		return
-	}
-
-	sendInvite := false
-	if req.SendInvitationEmail != nil {
-		sendInvite = *req.SendInvitationEmail
-	}
-
-	user, err := h.svc.CreateUser(r.Context(), req.Email, req.Role, req.EmployeeID, sendInvite)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-
-	w.Header().Set("Location", "/api/v1/users/"+user.ID)
-	httpx.WriteJSON(w, http.StatusCreated, toUserResponse(user))
-}
 
 // UpdateUser handles PATCH /users/{user_id}.
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {

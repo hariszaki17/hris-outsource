@@ -12,58 +12,54 @@ import (
 // placement row type sqlc generates. Each mapper copies its row into this and
 // then attaches the denormalized *_name fields when present.
 type placementCore struct {
-	ID                         string
-	EmployeeID                 string
-	AgreementID                string
-	ClientCompanyID            string
-	SiteID                     string
-	ServiceLineID              string
-	PositionID                 string
-	StartDate                  pgtype.Date
-	EndDate                    pgtype.Date
-	AnnualLeaveEntitlementDays *int32
-	BaseSalaryRefIdr           *int64
-	Notes                      *string
-	LifecycleStatus            string
-	StatusChangedAt            time.Time
-	EndedReason                *string
-	EndedAt                    pgtype.Date
-	TerminationReason          *string
-	ResignAt                   pgtype.Date
-	PredecessorID              *string
-	SuccessorID                *string
-	BackdateReason             *string
-	CreatedBy                  *string
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	ID                string
+	EmployeeID        string
+	AgreementID       string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 func (c placementCore) toDomain() domain.Placement {
 	return domain.Placement{
-		ID:                         c.ID,
-		EmployeeID:                 c.EmployeeID,
-		AgreementID:                c.AgreementID,
-		ClientCompanyID:            c.ClientCompanyID,
-		SiteID:                     c.SiteID,
-		ServiceLineID:              c.ServiceLineID,
-		PositionID:                 c.PositionID,
-		StartDate:                  pgtypeToTime(c.StartDate),
-		EndDate:                    pgDateToPtr(c.EndDate),
-		AnnualLeaveEntitlementDays: c.AnnualLeaveEntitlementDays,
-		BaseSalaryRefIDR:           c.BaseSalaryRefIdr,
-		Notes:                      c.Notes,
-		LifecycleStatus:            c.LifecycleStatus,
-		StatusChangedAt:            c.StatusChangedAt,
-		EndedReason:                c.EndedReason,
-		EndedAt:                    pgDateToPtr(c.EndedAt),
-		TerminationReason:          c.TerminationReason,
-		ResignAt:                   pgDateToPtr(c.ResignAt),
-		PredecessorID:              c.PredecessorID,
-		SuccessorID:                c.SuccessorID,
-		BackdateReason:             c.BackdateReason,
-		CreatedBy:                  c.CreatedBy,
-		CreatedAt:                  c.CreatedAt,
-		UpdatedAt:                  c.UpdatedAt,
+		ID:                c.ID,
+		EmployeeID:        c.EmployeeID,
+		AgreementID:       c.AgreementID,
+		ClientCompanyID:   c.ClientCompanyID,
+		SiteID:            c.SiteID,
+		ServiceLineID:     c.ServiceLineID,
+		PositionID:        c.PositionID,
+		StartDate:         pgtypeToTime(c.StartDate),
+		EndDate:           pgDateToPtr(c.EndDate),
+		Notes:             c.Notes,
+		LifecycleStatus:   c.LifecycleStatus,
+		StatusChangedAt:   c.StatusChangedAt,
+		EndedReason:       c.EndedReason,
+		EndedAt:           pgDateToPtr(c.EndedAt),
+		TerminationReason: c.TerminationReason,
+		ResignAt:          pgDateToPtr(c.ResignAt),
+		PredecessorID:     c.PredecessorID,
+		SuccessorID:       c.SuccessorID,
+		BackdateReason:    c.BackdateReason,
+		CreatedBy:         c.CreatedBy,
+		CreatedAt:         c.CreatedAt,
+		UpdatedAt:         c.UpdatedAt,
 	}
 }
 
@@ -72,7 +68,6 @@ func mapPlacementFromList(row sqlcgen.ListPlacementsRow) domain.Placement {
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -92,7 +87,6 @@ func mapPlacementFromExpiring(row sqlcgen.ListExpiringPlacementsRow) domain.Plac
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -112,7 +106,6 @@ func mapPlacementFromGetByID(row sqlcgen.GetPlacementByIDRow) domain.Placement {
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -132,7 +125,6 @@ func mapPlacementFromChain(row sqlcgen.GetPlacementChainRow) domain.Placement {
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -152,7 +144,6 @@ func mapPlacementFromActive(row sqlcgen.GetActivePlacementForEmployeeRow) domain
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -172,7 +163,6 @@ func mapPlacementFromAtCompany(row sqlcgen.GetActivePlacementForEmployeeAtCompan
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -185,7 +175,6 @@ func mapPlacementFromLock(row sqlcgen.LockEmployeePlacementsRow) domain.Placemen
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -198,7 +187,6 @@ func mapPlacementFromCreate(row sqlcgen.CreatePlacementRow) domain.Placement {
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -211,7 +199,6 @@ func mapPlacementFromUpdate(row sqlcgen.UpdatePlacementFieldsRow) domain.Placeme
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -224,7 +211,6 @@ func mapPlacementFromSetLifecycle(row sqlcgen.SetPlacementLifecycleRow) domain.P
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
-		AnnualLeaveEntitlementDays: row.AnnualLeaveEntitlementDays, BaseSalaryRefIdr: row.BaseSalaryRefIdr,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,

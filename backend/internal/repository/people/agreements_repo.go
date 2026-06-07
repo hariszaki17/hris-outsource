@@ -104,17 +104,18 @@ func (r *AgreementRepo) CreateAgreement(ctx context.Context, tx pgx.Tx, p svc.Cr
 	}
 
 	row, err := r.q.WithTx(tx).CreateAgreement(ctx, sqlcgen.CreateAgreementParams{
-		EmployeeID:        p.EmployeeID,
-		Type:              p.Type,
-		AgreementNo:       p.AgreementNo,
-		StartDate:         dateToPgtype(p.StartDate),
-		EndDate:           ptrTimeToPgDate(p.EndDate),
-		PredecessorID:     p.PredecessorID,
-		BaseSalaryIdr:     salary,
-		BpjsTerms:         bpjsJSON,
-		TaxProfile:        p.TaxProfile,
-		CompEffectiveDate: ptrTimeToPgDate(p.CompEffectiveDate),
-		CreatedBy:         p.CreatedBy,
+		EmployeeID:                 p.EmployeeID,
+		Type:                       p.Type,
+		AgreementNo:                p.AgreementNo,
+		StartDate:                  dateToPgtype(p.StartDate),
+		EndDate:                    ptrTimeToPgDate(p.EndDate),
+		PredecessorID:              p.PredecessorID,
+		BaseSalaryIdr:              salary,
+		AnnualLeaveEntitlementDays: p.AnnualLeaveEntitlementDays,
+		BpjsTerms:                  bpjsJSON,
+		TaxProfile:                 p.TaxProfile,
+		CompEffectiveDate:          ptrTimeToPgDate(p.CompEffectiveDate),
+		CreatedBy:                  p.CreatedBy,
 	})
 	if err != nil {
 		return domain.Agreement{}, mapAgreementErr(err)
@@ -195,7 +196,7 @@ func mapAgreementFromList(row sqlcgen.ListAgreementsRow) domain.Agreement {
 		SuccessorID:   row.SuccessorID,
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
-		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
@@ -215,7 +216,7 @@ func mapAgreementFromGetByID(row sqlcgen.GetAgreementByIDRow) domain.Agreement {
 		SuccessorID:   row.SuccessorID,
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
-		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
@@ -235,7 +236,7 @@ func mapAgreementFromActive(row sqlcgen.GetActiveAgreementForEmployeeRow) domain
 		SuccessorID:   row.SuccessorID,
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
-		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
@@ -255,7 +256,7 @@ func mapAgreementFromCreate(row sqlcgen.CreateAgreementRow) domain.Agreement {
 		SuccessorID:   row.SuccessorID,
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
-		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
@@ -275,7 +276,7 @@ func mapAgreementFromSetStatus(row sqlcgen.SetAgreementStatusRow) domain.Agreeme
 		SuccessorID:   row.SuccessorID,
 		ClosedReason:  row.ClosedReason,
 		ClosedAt:      row.ClosedAt,
-		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
+		Compensation:  unmarshalComp(row.BaseSalaryIdr, row.AnnualLeaveEntitlementDays, row.BpjsTerms, row.TaxProfile, row.CompEffectiveDate),
 		CreatedBy:     row.CreatedBy,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
@@ -284,8 +285,10 @@ func mapAgreementFromSetStatus(row sqlcgen.SetAgreementStatusRow) domain.Agreeme
 
 // unmarshalComp converts sqlc compensation columns to domain.CompensationTerms.
 // bpjsJSON is the raw JSONB bytes from Postgres.
-func unmarshalComp(salary pgtype.Numeric, bpjsJSON []byte, taxProfile *string, effDate pgtype.Date) domain.CompensationTerms {
+func unmarshalComp(salary pgtype.Numeric, annualLeave *int32, bpjsJSON []byte, taxProfile *string, effDate pgtype.Date) domain.CompensationTerms {
 	var comp domain.CompensationTerms
+
+	comp.AnnualLeaveEntitlementDays = annualLeave
 
 	// base_salary_idr: pgtype.Numeric → *float64
 	if salary.Valid {

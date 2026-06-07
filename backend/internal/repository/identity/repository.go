@@ -34,6 +34,15 @@ func New(pool *db.Pool) *Repository {
 	return &Repository{pool: pool, q: sqlcgen.New(pool.Pool)}
 }
 
+// GetUserByIdentifier is the login lookup (D2): matches by phone OR email.
+func (r *Repository) GetUserByIdentifier(ctx context.Context, identifier string) (domain.User, error) {
+	row, err := r.q.GetUserByIdentifier(ctx, identifier)
+	if err != nil {
+		return domain.User{}, mapErr(err)
+	}
+	return toDomainUserFromIdentifier(row), nil
+}
+
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
 	row, err := r.q.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -159,35 +168,58 @@ func (r *Repository) RevokeAllRefreshForUser(ctx context.Context, tx pgx.Tx, use
 
 // --- mapping helpers ---
 
-func toDomainUserFromEmail(u sqlcgen.GetUserByEmailRow) domain.User {
+func toDomainUserFromIdentifier(u sqlcgen.GetUserByIdentifierRow) domain.User {
 	return domain.User{
 		ID:           u.ID,
-		Email:        u.Email,
+		Email:        derefStr(u.Email),
+		Phone:        derefStr(u.Phone),
 		PasswordHash: u.PasswordHash,
 		Role:         auth.Role(u.Role),
 		EmployeeID:   derefStr(u.EmployeeID),
 		CompanyID:    derefStr(u.CompanyID),
-		Status:       u.Status,
-		FullName:     u.FullName,
-		LastLoginAt:  u.LastLoginAt,
-		CreatedAt:    u.CreatedAt,
-		UpdatedAt:    u.UpdatedAt,
+		Status:             u.Status,
+		FullName:           u.FullName,
+		LastLoginAt:        u.LastLoginAt,
+		MustChangePassword: u.MustChangePassword,
+		CreatedAt:          u.CreatedAt,
+		UpdatedAt:          u.UpdatedAt,
+	}
+}
+
+func toDomainUserFromEmail(u sqlcgen.GetUserByEmailRow) domain.User {
+	return domain.User{
+		ID:           u.ID,
+		Email:        derefStr(u.Email),
+		Phone:        derefStr(u.Phone),
+		PasswordHash: u.PasswordHash,
+		Role:         auth.Role(u.Role),
+		EmployeeID:   derefStr(u.EmployeeID),
+		CompanyID:    derefStr(u.CompanyID),
+		Status:             u.Status,
+		FullName:           u.FullName,
+		LastLoginAt:        u.LastLoginAt,
+		MustChangePassword: u.MustChangePassword,
+		CreatedAt:          u.CreatedAt,
+		UpdatedAt:          u.UpdatedAt,
 	}
 }
 
 func toDomainUserFromID(u sqlcgen.GetUserByIDRow) domain.User {
 	return domain.User{
 		ID:           u.ID,
-		Email:        u.Email,
+		Email:        derefStr(u.Email),
+		Phone:        derefStr(u.Phone),
 		PasswordHash: u.PasswordHash,
 		Role:         auth.Role(u.Role),
 		EmployeeID:   derefStr(u.EmployeeID),
 		CompanyID:    derefStr(u.CompanyID),
-		Status:       u.Status,
-		FullName:     u.FullName,
-		LastLoginAt:  u.LastLoginAt,
-		CreatedAt:    u.CreatedAt,
-		UpdatedAt:    u.UpdatedAt,
+		Status:             u.Status,
+		FullName:           u.FullName,
+		LastLoginAt:        u.LastLoginAt,
+		MustChangePassword: u.MustChangePassword,
+		TokensValidAfter:   u.TokensValidAfter,
+		CreatedAt:          u.CreatedAt,
+		UpdatedAt:          u.UpdatedAt,
 	}
 }
 

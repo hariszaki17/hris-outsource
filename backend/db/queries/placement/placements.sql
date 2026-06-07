@@ -11,7 +11,7 @@
 --   end_date__lte (expiring cutoff), include_history (exclude terminal states unless true).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -58,7 +58,7 @@ LIMIT sqlc.arg(row_limit);
 -- @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -90,7 +90,7 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetPlacementByID :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -124,7 +124,7 @@ WITH RECURSIVE chain AS (
 )
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -148,7 +148,7 @@ ORDER BY p.start_date ASC, p.id ASC;
 -- INV-1 service pre-check (friendly 409 before hitting the partial unique index).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
@@ -173,7 +173,7 @@ WHERE p.employee_id = sqlc.arg(employee_id)
 -- INV-4 lock: the agent's active placement at a specific company, row-locked.
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at
@@ -188,7 +188,7 @@ FOR UPDATE;
 -- INV-1 / period-overlap lock: all of the agent's placements, row-locked.
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at
@@ -201,8 +201,7 @@ FOR UPDATE;
 -- id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
 INSERT INTO placements (
     employee_id, agreement_id, client_company_id, site_id, service_line_id,
-    position_id, start_date, end_date, annual_leave_entitlement_days,
-    base_salary_ref_idr, notes, lifecycle_status, predecessor_id,
+    position_id, start_date, end_date, notes, lifecycle_status, predecessor_id,
     backdate_reason, created_by
 ) VALUES (
     sqlc.arg(employee_id),
@@ -213,8 +212,6 @@ INSERT INTO placements (
     sqlc.arg(position_id),
     sqlc.arg(start_date),
     sqlc.narg(end_date),
-    sqlc.narg(annual_leave_entitlement_days),
-    sqlc.narg(base_salary_ref_idr),
     sqlc.narg(notes),
     sqlc.arg(lifecycle_status),
     sqlc.narg(predecessor_id),
@@ -223,24 +220,22 @@ INSERT INTO placements (
 )
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at;
 
 -- name: UpdatePlacementFields :one
--- Limited-field PATCH (position_id, end_date, entitlement, salary ref, notes).
+-- Limited-field PATCH (position_id, end_date, notes).
 UPDATE placements
 SET position_id                   = sqlc.arg(position_id),
     end_date                      = sqlc.narg(end_date),
-    annual_leave_entitlement_days = sqlc.narg(annual_leave_entitlement_days),
-    base_salary_ref_idr           = sqlc.narg(base_salary_ref_idr),
     notes                         = sqlc.narg(notes),
     updated_at                    = now()
 WHERE id = sqlc.arg(id)
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at;
@@ -259,7 +254,7 @@ SET lifecycle_status   = sqlc.arg(lifecycle_status),
 WHERE id = sqlc.arg(id)
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
-          annual_leave_entitlement_days, base_salary_ref_idr, notes,
+          notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at;
@@ -277,7 +272,7 @@ WHERE id = sqlc.arg(id);
 -- service_line_id, include_history. Keyset on (status_changed_at desc, id desc).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,
-       p.annual_leave_entitlement_days, p.base_salary_ref_idr, p.notes,
+       p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
        p.backdate_reason, p.created_by, p.created_at, p.updated_at,
