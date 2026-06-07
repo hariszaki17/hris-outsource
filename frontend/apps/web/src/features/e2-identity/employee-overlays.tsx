@@ -12,13 +12,13 @@ import { classifyError } from '@/lib/api-error.ts';
 import {
   type Employee,
   EmployeeStatus,
+  DeactivateEmployeeBodyReason,
   useDeactivateEmployee,
   useReactivateEmployee,
 } from '@swp/api-client/e2';
-import { ConfirmDialog, FilterSelect, FormField, Input, StatusBadge, useToast } from '@swp/ui';
+import { ConfirmDialog, FilterSelect, FormField, StatusBadge, useToast } from '@swp/ui';
 import {
   Briefcase,
-  CalendarClock,
   Check,
   Copy,
   Eye,
@@ -27,7 +27,6 @@ import {
   TriangleAlert,
   UserCheck,
   UserMinus,
-  UserX,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -179,58 +178,6 @@ export function EmployeeRowActionsMenu({
 }
 
 // ---------------------------------------------------------------------------
-// DeactivateEmployeeConfirm — ConfirmDialog (.pen comp/ModalDestructive V4LG8)
-// ---------------------------------------------------------------------------
-
-export interface DeactivateEmployeeConfirmProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  employee: Employee | null;
-  onDone: () => void;
-}
-
-export function DeactivateEmployeeConfirm({
-  open,
-  onOpenChange,
-  employee,
-  onDone,
-}: DeactivateEmployeeConfirmProps) {
-  const { t } = useTranslation('employees');
-  const { toast } = useToast();
-  const mutation = useDeactivateEmployee();
-
-  async function handleConfirm() {
-    if (!employee) return;
-    try {
-      await mutation.mutateAsync({ employeeId: employee.id, data: {} });
-      toast({ tone: 'success', title: t('deactivateSuccess') });
-      onDone();
-    } catch (err) {
-      const { message } = classifyError(err);
-      toast({ tone: 'error', title: t('deactivateError'), description: message });
-    }
-  }
-
-  return (
-    <ConfirmDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      icon={UserX}
-      tone="danger"
-      confirmTone="danger"
-      title={t('deactivateTitle')}
-      description={
-        employee ? t('deactivateDescription', { name: employee.full_name }) : t('deactivateTitle')
-      }
-      confirmLabel={t('deactivateConfirm')}
-      cancelLabel={t('cancel')}
-      loading={mutation.isPending}
-      onConfirm={handleConfirm}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
 // ReactivateEmployeeConfirm — ConfirmDialog (primary tone)
 // ---------------------------------------------------------------------------
 
@@ -290,15 +237,10 @@ export function ReactivateEmployeeConfirm({
 //   is captured client-side for the UI flow; backend persistence follows.
 // ---------------------------------------------------------------------------
 
-const OFFBOARD_REASONS = [
-  'END_OF_TERM',
-  'RESIGNED',
-  'TERMINATED',
-  'RETIRED',
-  'DECEASED',
-  'ABSCONDED',
-  'OTHER',
-] as const;
+// MVP offboard reasons — the 4 values the backend agreement closed_reason CHECK
+// supports (F2.7 OB-1). RETIRED/DECEASED/ABSCONDED are deferred (need a CHECK
+// migration). These map 1:1 to DeactivateEmployeeBodyReason.
+const OFFBOARD_REASONS = ['END_OF_TERM', 'RESIGNED', 'TERMINATED', 'OTHER'] as const;
 export type OffboardReason = (typeof OFFBOARD_REASONS)[number];
 
 // A note is mandatory when the reason is adverse / catch-all (OB-3).
@@ -306,9 +248,6 @@ const NOTE_REQUIRED: Record<OffboardReason, boolean> = {
   END_OF_TERM: false,
   RESIGNED: false,
   TERMINATED: true,
-  RETIRED: false,
-  DECEASED: false,
-  ABSCONDED: true,
   OTHER: true,
 };
 
@@ -317,15 +256,8 @@ const REASON_TONE: Record<OffboardReason, 'neutral' | 'bad' | 'warn' | 'info'> =
   END_OF_TERM: 'neutral',
   RESIGNED: 'neutral',
   TERMINATED: 'bad',
-  RETIRED: 'info',
-  DECEASED: 'bad',
-  ABSCONDED: 'warn',
   OTHER: 'neutral',
 };
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export interface OffboardEmployeeConfirmProps {
   open: boolean;
@@ -349,33 +281,31 @@ export function OffboardEmployeeConfirm({
 
   const [reason, setReason] = useState<OffboardReason | ''>(defaultReason ?? '');
   const [note, setNote] = useState('');
-  const [effectiveDate, setEffectiveDate] = useState(todayISO);
 
   // Reset the form each time the dialog opens.
   useEffect(() => {
     if (open) {
       setReason(defaultReason ?? '');
       setNote('');
-      setEffectiveDate(todayISO());
     }
   }, [open, defaultReason]);
 
   const noteRequired = reason ? NOTE_REQUIRED[reason] : false;
-  const isScheduled = effectiveDate > todayISO();
-  const invalid = !reason || !effectiveDate || (noteRequired && note.trim() === '');
+  const invalid = !reason || (noteRequired && note.trim() === '');
 
   async function handleConfirm() {
-    if (!employee || invalid) return;
+    if (!employee || invalid || !reason) return;
     try {
-      // TODO(F2.7/P4): replace with useOffboardEmployee carrying
-      // { reason, note, effective_date }. Mock :deactivate accepts no body.
-      await mutation.mutateAsync({ employeeId: employee.id, data: {} });
-      toast({
-        tone: 'success',
-        title: isScheduled
-          ? t('offboardSuccessScheduled', { date: effectiveDate })
-          : t('offboardSuccess'),
+      // F2.7 OB-1: offboard is immediate (effective-dated scheduling is deferred).
+      // The reason drives the traceable agreement+placement cascade server-side.
+      await mutation.mutateAsync({
+        employeeId: employee.id,
+        data: {
+          reason: reason as DeactivateEmployeeBodyReason,
+          note: note.trim() || undefined,
+        },
       });
+      toast({ tone: 'success', title: t('offboardSuccess') });
       onDone();
     } catch (err) {
       const { message } = classifyError(err);
@@ -395,7 +325,7 @@ export function OffboardEmployeeConfirm({
       description={
         employee ? t('offboardSubtitle', { name: employee.full_name }) : t('offboardTitle')
       }
-      confirmLabel={isScheduled ? t('offboardConfirmScheduled') : t('offboardConfirm')}
+      confirmLabel={t('offboardConfirm')}
       cancelLabel={t('cancel')}
       loading={mutation.isPending}
       confirmDisabled={invalid}
@@ -433,28 +363,6 @@ export function OffboardEmployeeConfirm({
             className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-text placeholder:text-text-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </FormField>
-
-        <FormField
-          label={t('offboardDateLabel')}
-          htmlFor="offboard-date"
-          required
-          hint={isScheduled ? t('offboardScheduledHint') : t('offboardImmediateHint')}
-        >
-          <Input
-            id="offboard-date"
-            type="date"
-            min={todayISO()}
-            value={effectiveDate}
-            onChange={(e) => setEffectiveDate(e.target.value)}
-          />
-        </FormField>
-
-        {isScheduled && (
-          <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-[12px] text-text-2">
-            <CalendarClock className="mt-px size-4 shrink-0 text-text-3" aria-hidden />
-            <span>{t('offboardScheduledBanner', { date: effectiveDate })}</span>
-          </div>
-        )}
 
         {reason && (
           <div className="flex items-center gap-2 border-t border-border-soft pt-3">

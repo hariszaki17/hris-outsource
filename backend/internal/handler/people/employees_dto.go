@@ -39,9 +39,13 @@ type bankAccountReq struct {
 	AccountHolderName *string `json:"account_holder_name"`
 }
 
-// reasonRequest is the body for :deactivate (optional reason).
+// reasonRequest is the body for :deactivate (offboard, F2.7 OB-1). reason is
+// REQUIRED and enum-validated (RESIGNED|TERMINATED|END_OF_TERM|OTHER); note is
+// an optional free-text. The reason drives the traceable agreement+placement
+// cascade in the service.
 type reasonRequest struct {
 	Reason *string `json:"reason"`
+	Note   *string `json:"note"`
 }
 
 // --- Response structs ---

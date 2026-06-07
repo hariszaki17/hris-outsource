@@ -273,6 +273,19 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           termination_reason, resign_at, predecessor_id, successor_id,
           backdate_reason, created_by, created_at, updated_at;
 
+-- name: EndPlacementsForEmployee :many
+-- Offboard cascade (OB-1): end every non-terminal placement of an employee.
+UPDATE placements
+SET lifecycle_status  = sqlc.arg(lifecycle_status)::text,
+    ended_reason      = sqlc.arg(ended_reason)::text,
+    ended_at          = sqlc.arg(ended_at)::date,
+    status_changed_at = now(),
+    updated_at        = now()
+WHERE employee_id = sqlc.arg(employee_id)
+  AND deleted_at IS NULL
+  AND lifecycle_status NOT IN ('ENDED','TRANSFERRED','SUPERSEDED','TERMINATED','RESIGNED')
+RETURNING id, client_company_id, lifecycle_status, ended_reason;
+
 -- name: SetPlacementPredecessor :exec
 UPDATE placements SET predecessor_id = sqlc.arg(predecessor_id), updated_at = now()
 WHERE id = sqlc.arg(id);

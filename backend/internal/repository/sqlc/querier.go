@@ -173,6 +173,8 @@ type Querier interface {
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
+	// Offboard cascade (OB-1): end every non-terminal placement of an employee.
+	EndPlacementsForEmployee(ctx context.Context, arg EndPlacementsForEmployeeParams) ([]EndPlacementsForEmployeeRow, error)
 	// Sets unassigned_at=now() + vacated_reason (release the active partial unique index).
 	EndShiftLeaderAssignment(ctx context.Context, arg EndShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
 	// INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement

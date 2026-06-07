@@ -391,12 +391,24 @@ paths:
     post:
       operationId: deactivateEmployee
       tags: [employees]
-      summary: Soft-deactivate employee (EP-7)
+      summary: Offboard employee — atomic, traceable cascade (F2.7 OB-1)
       description: |
-        Sets employee status to `INACTIVE` and disables the linked User
-        login (EP-7). Historical records (placements, attendance, leave) are
-        preserved. Terminal state per Wave 3.4 — reactivation possible via
-        `:reactivate` (C-3).
+        Offboards an employee in a SINGLE transaction (F2.7 OB-1). It sets the
+        employee status to `INACTIVE`, **closes the active employment agreement**
+        (sets `closed_reason` to the offboard `reason`), **ends every
+        non-terminal placement** (E3), and disables the linked User login (EP-7).
+        Historical records (attendance, leave, payroll) are preserved. Terminal
+        state per Wave 3.4 — reactivation possible via `:reactivate` (C-3).
+
+        The cascade is **traceable** (OB-3): the agreement-close and each
+        placement-end emit their own audit entries carrying
+        `caused_by=employee_offboard` + `source_employee_id`, so it is clear they
+        closed *because of* the offboard rather than via a direct close. The
+        parent `employee.offboard` audit entry lists the cascaded ids.
+
+        `reason` → agreement `closed_reason` (same value) and → placement terminal
+        pair: `RESIGNED`→(RESIGNED, RESIGNED), `TERMINATED`→(TERMINATED,
+        TERMINATED), `END_OF_TERM`→(ENDED, END_OF_TERM), `OTHER`→(ENDED, ENDED).
 
         Disabling the login bumps the user's session epoch
         (`users.tokens_valid_after`) and calls `RevokeAllRefreshForUser`
@@ -405,8 +417,6 @@ paths:
         fail on their next validation rather than living out their TTL (F2.7,
         OB-#). This is the ONLY path that revokes login: placement-end
         (transfer/renewal/supersede/auto-end) NEVER revokes.
-
-        Auto-cascades: active placements (E3) are flagged for review.
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -416,15 +426,23 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [reason]
               properties:
                 reason:
                   type: string
-                  description: Optional reason for audit log.
+                  enum: [RESIGNED, TERMINATED, END_OF_TERM, OTHER]
+                  description: |
+                    Required offboard reason (F2.7 OB-1). Drives the traceable
+                    cascade: becomes the agreement `closed_reason` and is mapped to
+                    the placement terminal `lifecycle_status` / `ended_reason`.
+                note:
+                  type: string
+                  description: Optional free-text note recorded on the offboard audit entry.
       responses:
         '200':
           description: Deactivated.

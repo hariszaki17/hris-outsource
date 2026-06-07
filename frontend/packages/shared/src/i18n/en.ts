@@ -752,12 +752,21 @@ export const en: Messages = {
     saving: 'Saving…',
     cancel: 'Cancel',
     requiredNote: 'Required',
-    deactivateTitle: 'Deactivate employee?',
+    deactivateTitle: 'Offboard employee?',
     deactivateDescription:
-      '{{name}} will be marked inactive. Active placement will be flagged for review. This action can be reversed.',
-    deactivateConfirm: 'Deactivate',
-    deactivateSuccess: 'Employee deactivated.',
-    deactivateError: 'Failed to deactivate employee.',
+      '{{name}} will be marked inactive, the active employment agreement closed, and all active placements ended. The login is revoked immediately. This can be reversed via reactivate.',
+    deactivateConfirm: 'Offboard',
+    deactivateReasonLabel: 'Offboard reason',
+    deactivateReason: {
+      TERMINATED: 'Terminated',
+      RESIGNED: 'Resigned',
+      END_OF_TERM: 'End of term',
+      OTHER: 'Other',
+    },
+    deactivateCascadeNote:
+      'The employment agreement is closed with this reason and placements are ended as a cascade of the offboard (recorded in the audit log).',
+    deactivateSuccess: 'Employee offboarded.',
+    deactivateError: 'Failed to offboard employee.',
     reactivateTitle: 'Reactivate employee?',
     reactivateDescription: '{{name}} will be set back to active status.',
     reactivateConfirm: 'Reactivate',
@@ -954,7 +963,6 @@ export const en: Messages = {
 
     cardDetail: 'Agreement Detail',
     cardCompensation: 'Compensation History',
-    cardFile: 'Agreement File',
     cardChain: 'Agreement Chain',
 
     fieldNomor: 'Agreement Number',
@@ -990,13 +998,6 @@ export const en: Messages = {
     compensationHidden: 'Compensation is hidden for your role.',
     compensationEncryptNote:
       'Compensation fields are encrypted at rest (DBEncryption · EA-4). Access restricted to HR Manager & Super Admin.',
-
-    noAttachment: 'No file uploaded yet.',
-    actionUpload: 'Upload File',
-    actionPreview: 'Preview',
-    actionDownload: 'Download',
-    uploadSuccess: 'File uploaded successfully.',
-    uploadError: 'Failed to upload file.',
 
     actionRenew: 'Renew',
     actionClose: 'Close Agreement',

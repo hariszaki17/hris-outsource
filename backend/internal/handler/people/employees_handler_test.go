@@ -109,15 +109,27 @@ type fakeEmployeeRepo struct {
 	nikIndex    map[string]string // nik → id
 	loginPhones map[string]bool   // phones already taken by a seeded login (D2)
 
+	// offboard cascade (OB-1) fixtures + capture
+	activeAgreements map[string]string // employee_id → active agreement id
+	placements       map[string][]string // employee_id → non-terminal placement ids
+
+	closedAgreementID    string // last agreement closed via CloseAgreement
+	closedAgreementReason string
+	endedPlacementIDs    []string
+	endLifecycleStatus   string
+	endReason            string
+
 	// error overrides (set per-test to trigger error paths)
 	createErr error
 }
 
 func newFakeEmployeeRepo() *fakeEmployeeRepo {
 	return &fakeEmployeeRepo{
-		employees:   make(map[string]domain.Employee),
-		nikIndex:    make(map[string]string),
-		loginPhones: make(map[string]bool),
+		employees:        make(map[string]domain.Employee),
+		nikIndex:         make(map[string]string),
+		loginPhones:      make(map[string]bool),
+		activeAgreements: make(map[string]string),
+		placements:       make(map[string][]string),
 	}
 }
 
@@ -273,6 +285,21 @@ func (r *fakeEmployeeRepo) DisableUserAndRevoke(_ context.Context, _ pgx.Tx, _ s
 
 func (r *fakeEmployeeRepo) EnableUser(_ context.Context, _ pgx.Tx, _ string) error {
 	return nil
+}
+
+// Offboard-cascade ports (F2.7 OB-1). The fake reports no active agreement and no
+// placements, so the cascade is a no-op in handler tests (the cascade logic itself
+// is exercised at the service layer).
+func (r *fakeEmployeeRepo) GetActiveAgreementForEmployee(_ context.Context, _ string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (r *fakeEmployeeRepo) CloseAgreement(_ context.Context, _ pgx.Tx, _, _ string, _ time.Time) error {
+	return nil
+}
+
+func (r *fakeEmployeeRepo) EndPlacementsForEmployee(_ context.Context, _ pgx.Tx, _, _, _ string, _ time.Time) ([]string, error) {
+	return nil, nil
 }
 
 // Compile-time interface check.
@@ -705,8 +732,8 @@ func TestDeactivateEmployee_200_Then_409(t *testing.T) {
 	emps := h.seedEmployee(1)
 	id := emps[0].ID
 
-	// First deactivate → 200 with status INACTIVE.
-	rr := h.do("POST", "/employees/"+id+":deactivate", nil)
+	// First deactivate (offboard) → 200 with status INACTIVE. reason is required (OB-1).
+	rr := h.do("POST", "/employees/"+id+":deactivate", map[string]any{"reason": "TERMINATED"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("deactivate: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -716,7 +743,7 @@ func TestDeactivateEmployee_200_Then_409(t *testing.T) {
 	}
 
 	// Second deactivate → 409 already inactive.
-	rr2 := h.do("POST", "/employees/"+id+":deactivate", nil)
+	rr2 := h.do("POST", "/employees/"+id+":deactivate", map[string]any{"reason": "TERMINATED"})
 	if rr2.Code != http.StatusConflict {
 		t.Fatalf("deactivate again: expected 409, got %d: %s", rr2.Code, rr2.Body.String())
 	}

@@ -818,12 +818,21 @@ export const id = {
     saving: 'Menyimpan…',
     cancel: 'Batal',
     requiredNote: 'Wajib diisi',
-    deactivateTitle: 'Nonaktifkan karyawan?',
+    deactivateTitle: 'Berhentikan karyawan?',
     deactivateDescription:
-      '{{name}} akan ditandai nonaktif. Penempatan aktif akan ditandai untuk ditinjau. Tindakan ini dapat dibatalkan.',
-    deactivateConfirm: 'Nonaktifkan',
-    deactivateSuccess: 'Karyawan dinonaktifkan.',
-    deactivateError: 'Gagal menonaktifkan karyawan.',
+      '{{name}} akan ditandai nonaktif, perjanjian kerja aktif ditutup, dan semua penempatan aktif diakhiri. Login dicabut seketika. Tindakan ini dapat dibatalkan via aktifkan kembali.',
+    deactivateConfirm: 'Berhentikan',
+    deactivateReasonLabel: 'Alasan pemberhentian',
+    deactivateReason: {
+      TERMINATED: 'Diberhentikan (PHK)',
+      RESIGNED: 'Mengundurkan diri',
+      END_OF_TERM: 'Kontrak berakhir',
+      OTHER: 'Lainnya',
+    },
+    deactivateCascadeNote:
+      'Perjanjian kerja ditutup dengan alasan ini dan penempatan diakhiri sebagai akibat pemberhentian (tercatat di audit).',
+    deactivateSuccess: 'Karyawan diberhentikan.',
+    deactivateError: 'Gagal memberhentikan karyawan.',
     reactivateTitle: 'Aktifkan kembali karyawan?',
     reactivateDescription: '{{name}} akan dikembalikan ke status aktif.',
     reactivateConfirm: 'Aktifkan Kembali',
@@ -1023,7 +1032,6 @@ export const id = {
 
     cardDetail: 'Detail Perjanjian',
     cardCompensation: 'Riwayat Kompensasi',
-    cardFile: 'Berkas Perjanjian',
     cardChain: 'Rantai Perjanjian',
 
     fieldNomor: 'Nomor Perjanjian',
@@ -1059,13 +1067,6 @@ export const id = {
     compensationHidden: 'Kompensasi tersembunyi untuk peran Anda.',
     compensationEncryptNote:
       'Field dikompensasi dienkripsi (DBEncryption · EA-4). Akses dibatasi peran HR Manager & Super Admin.',
-
-    noAttachment: 'Belum ada berkas diunggah.',
-    actionUpload: 'Unggah Berkas',
-    actionPreview: 'Pratinjau',
-    actionDownload: 'Unduh',
-    uploadSuccess: 'Berkas berhasil diunggah.',
-    uploadError: 'Gagal mengunggah berkas.',
 
     actionRenew: 'Perpanjang',
     actionClose: 'Tutup Perjanjian',

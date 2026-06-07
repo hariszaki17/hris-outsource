@@ -185,6 +185,7 @@
   },
   "active": "195dae781d0bbfce",
   "lastOpenFiles": [
+    "frontend/packages/api-client/src/gen/e2/model/deactivateEmployeeBodyReason.ts",
     "frontend/apps/web/src/features/e3-placement/agreement-field.tsx",
     "frontend/packages/api-client/src/gen/e3/model/placementStats.ts",
     "backend/db/migrations/00041_users_phone_identifier.sql",
@@ -195,7 +196,6 @@
     "frontend/apps/web/dist/assets/index-J2ZMkBbI.css",
     "frontend/packages/api-client/src/gen/e7/model/error.ts",
     "backend/db/migrations/00040_relocate_annual_leave_to_agreement.sql",
-    "backend/db/migrations/00039_fix_tokens_valid_after_default.sql",
     "docs/epics/E2-identity/prds/offboarding.md",
     "frontend/e2e/playwright-report/data/ce233bfb60997443215652ecb7aee3b59a79b05c.png",
     "frontend/e2e/test-results/e10-billable-report-REPORT-d8c39-ary-StatCards-billable-rows-chromium/test-failed-1.png",

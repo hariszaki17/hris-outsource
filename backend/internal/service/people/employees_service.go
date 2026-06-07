@@ -41,6 +41,12 @@ type EmployeeRepository interface {
 	// on reactivate, re-enable the login (sessions are not restored).
 	DisableUserAndRevoke(ctx context.Context, tx pgx.Tx, userID string) error
 	EnableUser(ctx context.Context, tx pgx.Tx, userID string) error
+	// F2.7 OB-1 offboard cascade: in the same tx, close the active employment
+	// agreement and end every non-terminal placement of the employee.
+	// GetActiveAgreementForEmployee returns found=false when there is none.
+	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (id string, found bool, err error)
+	CloseAgreement(ctx context.Context, tx pgx.Tx, agreementID, closedReason string, closedAt time.Time) error
+	EndPlacementsForEmployee(ctx context.Context, tx pgx.Tx, employeeID, lifecycleStatus, endedReason string, endedAt time.Time) ([]string, error)
 }
 
 // ProvisionLoginRepoParams carries the fields for creating an agent login + link.
@@ -452,13 +458,51 @@ func (s *Service) UpdateEmployee(ctx context.Context, p UpdateEmployeeParams) (d
 	return updated, nil
 }
 
-// DeactivateEmployee sets an employee to inactive.
-// Returns CONFLICT (409) if already inactive.
-// NOTE: disabling the linked E1 login is deferred to Phase 4 (matches the
-// Phase-2 decision "Session revocation on deactivate ... deferred"). The
-// employee status is set; auth session remains valid until natural expiry or
-// until Phase-4 wires the revocation. See SUMMARY.md.
-func (s *Service) DeactivateEmployee(ctx context.Context, id, reason string) (domain.Employee, error) {
+// OffboardReason is the required offboard reason enum (F2.7 OB-1). It maps 1:1 to
+// agreement.closed_reason and is translated to the placement terminal pair.
+const (
+	offboardReasonResigned  = "RESIGNED"
+	offboardReasonTerminated = "TERMINATED"
+	offboardReasonEndOfTerm = "END_OF_TERM"
+	offboardReasonOther     = "OTHER"
+)
+
+// placementTerminalFor maps an offboard reason to the placement terminal pair
+// (lifecycle_status, ended_reason) per F2.7 OB-1. The agreement closed_reason is
+// always the reason value itself (same enum domain).
+func placementTerminalFor(reason string) (lifecycleStatus, endedReason string) {
+	switch reason {
+	case offboardReasonResigned:
+		return "RESIGNED", "RESIGNED"
+	case offboardReasonTerminated:
+		return "TERMINATED", "TERMINATED"
+	case offboardReasonEndOfTerm:
+		return "ENDED", "END_OF_TERM"
+	default: // OTHER
+		return "ENDED", "ENDED"
+	}
+}
+
+// DeactivateEmployee offboards an employee (F2.7 OB-1): in ONE transaction it
+// sets the employee inactive, closes the active employment agreement, ends every
+// non-terminal placement, and disables+revokes the linked login. reason is the
+// REQUIRED offboard enum (RESIGNED|TERMINATED|END_OF_TERM|OTHER); note is an
+// optional free-text. Returns CONFLICT (409) if already inactive.
+//
+// Traceability: the cascaded agreement/placement audit entries carry the marker
+// keys caused_by="employee_offboard" + source_employee_id, distinguishing them
+// from direct closes (OB-3). The parent "employee.offboard" entry lists what it
+// cascaded.
+func (s *Service) DeactivateEmployee(ctx context.Context, id, reason, note string) (domain.Employee, error) {
+	switch reason {
+	case offboardReasonResigned, offboardReasonTerminated, offboardReasonEndOfTerm, offboardReasonOther:
+		// valid
+	default:
+		return domain.Employee{}, apperr.Invalid(map[string]string{
+			"reason": "Wajib diisi salah satu: RESIGNED, TERMINATED, END_OF_TERM, OTHER.",
+		})
+	}
+
 	current, err := s.repo.GetEmployeeByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.Employee{}, apperr.NotFound()
@@ -470,6 +514,9 @@ func (s *Service) DeactivateEmployee(ctx context.Context, id, reason string) (do
 		return domain.Employee{}, apperr.Conflict("CONFLICT")
 	}
 
+	now := s.now()
+	lifecycleStatus, endedReason := placementTerminalFor(reason)
+
 	var updated domain.Employee
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		var inErr error
@@ -477,6 +524,57 @@ func (s *Service) DeactivateEmployee(ctx context.Context, id, reason string) (do
 		if inErr != nil {
 			return inErr
 		}
+
+		// OB-1: close the active employment agreement (if any). closed_reason mirrors
+		// the offboard reason. A SEPARATE audit entry records the cascade with the
+		// traceability marker so it is distinguishable from a direct agreement close.
+		agreementID, found, inErr := s.repo.GetActiveAgreementForEmployee(ctx, id)
+		if inErr != nil {
+			return inErr
+		}
+		var cascadedAgreementID any // null in the parent entry when no active agreement
+		if found {
+			if inErr = s.repo.CloseAgreement(ctx, tx, agreementID, reason, now); inErr != nil {
+				return inErr
+			}
+			cascadedAgreementID = agreementID
+			if inErr = audit.Record(ctx, tx, audit.Entry{
+				Action:     audit.Action("agreement.close"),
+				EntityType: "employment_agreement",
+				EntityID:   agreementID,
+				After: map[string]any{
+					"status":             "closed",
+					"closed_reason":      reason,
+					"caused_by":          "employee_offboard",
+					"source_employee_id": id,
+				},
+			}); inErr != nil {
+				return inErr
+			}
+		}
+
+		// OB-1: end every non-terminal placement. One audit entry per ended placement,
+		// each carrying the traceability marker.
+		placementIDs, inErr := s.repo.EndPlacementsForEmployee(ctx, tx, id, lifecycleStatus, endedReason, now)
+		if inErr != nil {
+			return inErr
+		}
+		for _, pid := range placementIDs {
+			if inErr = audit.Record(ctx, tx, audit.Entry{
+				Action:     audit.Action("placement.end"),
+				EntityType: "placement",
+				EntityID:   pid,
+				After: map[string]any{
+					"lifecycle_status":   lifecycleStatus,
+					"ended_reason":       endedReason,
+					"caused_by":          "employee_offboard",
+					"source_employee_id": id,
+				},
+			}); inErr != nil {
+				return inErr
+			}
+		}
+
 		// F2.7: cascade to the linked login — disable it and revoke every session
 		// (bump epoch + refresh tokens), so access dies immediately.
 		if current.UserID != nil {
@@ -484,19 +582,26 @@ func (s *Service) DeactivateEmployee(ctx context.Context, id, reason string) (do
 				return inErr
 			}
 		}
-		afterSnap := map[string]any{"status": "inactive"}
-		if reason != "" {
-			afterSnap["reason"] = reason
+
+		// Parent offboard entry: lists what the cascade closed/ended.
+		afterSnap := map[string]any{
+			"status":                  "inactive",
+			"reason":                  reason,
+			"cascaded_agreement_id":   cascadedAgreementID,
+			"cascaded_placement_ids":  placementIDs,
+		}
+		if note != "" {
+			afterSnap["note"] = note
 		}
 		return audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.Action("employee.deactivate"),
+			Action:     audit.Action("employee.offboard"),
 			EntityType: "employee",
 			EntityID:   id,
 			Before:     map[string]any{"status": current.Status},
 			After:      afterSnap,
 		})
 	}); err != nil {
-		return domain.Employee{}, apperr.Internal(err)
+		return domain.Employee{}, wrapTxErr(err)
 	}
 
 	return updated, nil

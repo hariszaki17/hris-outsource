@@ -126,6 +126,64 @@ func (q *Queries) CreatePlacement(ctx context.Context, arg CreatePlacementParams
 	return i, err
 }
 
+const endPlacementsForEmployee = `-- name: EndPlacementsForEmployee :many
+UPDATE placements
+SET lifecycle_status  = $1::text,
+    ended_reason      = $2::text,
+    ended_at          = $3::date,
+    status_changed_at = now(),
+    updated_at        = now()
+WHERE employee_id = $4
+  AND deleted_at IS NULL
+  AND lifecycle_status NOT IN ('ENDED','TRANSFERRED','SUPERSEDED','TERMINATED','RESIGNED')
+RETURNING id, client_company_id, lifecycle_status, ended_reason
+`
+
+type EndPlacementsForEmployeeParams struct {
+	LifecycleStatus string
+	EndedReason     string
+	EndedAt         pgtype.Date
+	EmployeeID      string
+}
+
+type EndPlacementsForEmployeeRow struct {
+	ID              string
+	ClientCompanyID string
+	LifecycleStatus string
+	EndedReason     *string
+}
+
+// Offboard cascade (OB-1): end every non-terminal placement of an employee.
+func (q *Queries) EndPlacementsForEmployee(ctx context.Context, arg EndPlacementsForEmployeeParams) ([]EndPlacementsForEmployeeRow, error) {
+	rows, err := q.db.Query(ctx, endPlacementsForEmployee,
+		arg.LifecycleStatus,
+		arg.EndedReason,
+		arg.EndedAt,
+		arg.EmployeeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EndPlacementsForEmployeeRow{}
+	for rows.Next() {
+		var i EndPlacementsForEmployeeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClientCompanyID,
+			&i.LifecycleStatus,
+			&i.EndedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getActivePlacementForEmployee = `-- name: GetActivePlacementForEmployee :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.service_line_id, p.position_id, p.start_date, p.end_date,

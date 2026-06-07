@@ -231,18 +231,22 @@ func (h *Handler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, toEmployeeResponse(emp))
 }
 
-// DeactivateEmployee handles POST /employees/{employee_id}:deactivate.
-// Reads optional JSON body with reason.
+// DeactivateEmployee handles POST /employees/{employee_id}:deactivate (offboard,
+// F2.7 OB-1). reason is REQUIRED and enum-validated; note is optional. The reason
+// drives a traceable cascade (close agreement + end placements) in the service,
+// which returns 400 with field "reason" when missing/invalid.
 func (h *Handler) DeactivateEmployee(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "employee_id")
 
 	var req reasonRequest
-	// Body is optional — ignore decode errors for empty or missing bodies.
+	// Body is optional to decode (a missing/empty body yields an empty reason, which
+	// the service rejects as INVALID_REQUEST on "reason").
 	_ = decodeJSON(r, &req)
 
 	reason := derefString(req.Reason)
+	note := derefString(req.Note)
 
-	emp, err := h.svc.DeactivateEmployee(r.Context(), id, reason)
+	emp, err := h.svc.DeactivateEmployee(r.Context(), id, reason, note)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

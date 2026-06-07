@@ -144,6 +144,54 @@ func (r *Repository) EnableUser(ctx context.Context, tx pgx.Tx, userID string) e
 	return nil
 }
 
+// GetActiveAgreementForEmployee resolves the employee's active employment
+// agreement for the offboard cascade (OB-1). found=false when there is no active
+// agreement (allowed — the close step is skipped).
+func (r *Repository) GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (string, bool, error) {
+	row, err := r.q.GetActiveAgreementForEmployee(ctx, employeeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return row.ID, true, nil
+}
+
+// CloseAgreement closes an employment agreement in the caller's tx (offboard
+// cascade OB-1): status='closed' + closed_reason + closed_at. successor_id stays
+// nil — this is a terminal close, not a supersede-on-renew.
+func (r *Repository) CloseAgreement(ctx context.Context, tx pgx.Tx, agreementID, closedReason string, closedAt time.Time) error {
+	_, err := r.q.WithTx(tx).SetAgreementStatus(ctx, sqlcgen.SetAgreementStatusParams{
+		Status:       "closed",
+		ClosedReason: &closedReason,
+		ClosedAt:     &closedAt,
+		SuccessorID:  nil,
+		ID:           agreementID,
+	})
+	return mapErr(err)
+}
+
+// EndPlacementsForEmployee ends every non-terminal placement of an employee in
+// the caller's tx (offboard cascade OB-1) and returns the ended placement ids
+// (for the per-placement audit entry).
+func (r *Repository) EndPlacementsForEmployee(ctx context.Context, tx pgx.Tx, employeeID, lifecycleStatus, endedReason string, endedAt time.Time) ([]string, error) {
+	rows, err := r.q.WithTx(tx).EndPlacementsForEmployee(ctx, sqlcgen.EndPlacementsForEmployeeParams{
+		LifecycleStatus: lifecycleStatus,
+		EndedReason:     endedReason,
+		EndedAt:         dateToPgtype(endedAt),
+		EmployeeID:      employeeID,
+	})
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, nil
+}
+
 // GetEmployeeByNIK fetches a single employee by NIK (duplicate-NIK pre-check, EP-2).
 func (r *Repository) GetEmployeeByNIK(ctx context.Context, nik string) (domain.Employee, error) {
 	row, err := r.q.GetEmployeeByNIK(ctx, nik)
