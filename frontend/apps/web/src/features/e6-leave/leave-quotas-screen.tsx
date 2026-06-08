@@ -182,11 +182,29 @@ function EmployeeCombobox({
     meta: e.id,
   }));
 
+  // Remember the picked employee so the trigger keeps showing their name after
+  // the popover closes and the search query (hence options) resets to empty.
+  const [selected, setSelected] = useState<ComboboxOption | null>(null);
+  const mergedOptions =
+    selected && !options.some((o) => o.value === selected.value)
+      ? [selected, ...options]
+      : options;
+
+  const handleChange = (id: string | null) => {
+    if (id) {
+      const picked = options.find((o) => o.value === id) ?? selected;
+      setSelected(picked ?? null);
+    } else {
+      setSelected(null);
+    }
+    onChange(id);
+  };
+
   return (
     <Combobox
       value={value}
-      onChange={onChange}
-      options={options}
+      onChange={handleChange}
+      options={mergedOptions}
       onSearch={setQ}
       isLoading={listQuery.isLoading}
       placeholder={placeholder ?? 'Ketik nama, NIK, atau NIP…'}
