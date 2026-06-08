@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
 status: in_progress
-stopped_at: Phase 14 complete (FE+BE); Phase 15 (attendance correction) next
+stopped_at: Phase 15 complete (FE+BE); Phase 16 (my schedule) next
 last_updated: "2026-06-08T00:00:00.000Z"
 last_activity: "2026-06-08 — Phase 14 (clock in/out + geofence + my-attendance) COMPLETE, full-stack. FIRST rebased the mobile branch onto the parallel backend's new E5 commit (feat/backend-impl 3816b3a: attendance filters + true-absence + absence-sweep) so clock-in builds on current attendance code. BE (new agent clock path, no migration): clock.sql (4 queries) + ClockService (Haversine geofence + late/early eval) + ClockRepo + ClockHandler; POST /attendance:clock-in|:clock-out (RequireRole agent, Idempotency); opened GET /attendance + /{id} to agent self-scope (List forces caller employee_id; Get 404s others). Contract-exact: GPS_UNAVAILABLE/OUT_OF_GEOFENCE(force)/ALREADY|NOT_CLOCKED_IN, verification flag→PENDING else AUTO_APPROVED/VERIFIED. go build+vet+45 tests green, make gen idempotent. FE: expo-location GPS, clock card with geofence force-confirm flow + all variants, my-attendance history + StatusBadge + Attendance tab, i18n. tsc/biome/expo export 1780 green. CLOCK-03 (clock photo) DEFERRED. NOTE: BE edits attendance_service.go/server.go/cmd/api — conflicts with parallel backend work; coordinate merge. human_needed: live clock needs device GPS + running BE. Next: Phase 15 — attendance correction (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
-  percent: 25
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 38
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–14 done; Phase 15 (attendance correction) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–15 done; Phase 16 (my schedule) next.
 
 ## Current Position
 
-Phase: 15 of 20 (Attendance correction) — next
-Plan: Phase 14 COMPLETE (FE ad6d5c4 + BE 5f1f968)
-Status: Phase 14 clock in/out + geofence shipped full-stack (build/tests green; live needs device GPS). Branch rebased onto current backend.
-Last activity: 2026-06-08 — Phase 14 complete; clock-in/out endpoints + RN screen, geofence + my-attendance.
+Phase: 16 of 20 (My schedule) — next
+Plan: Phase 15 COMPLETE (FE fab9403 + BE 3587781)
+Status: Phase 15 attendance correction shipped full-stack (go build + 391 tests green; FE tsc/biome/bundle green). 3/8 agent-MVP phases done.
+Last activity: 2026-06-08 — Phase 15 complete; agent POST /corrections (7-day window, one-pending) + RN correction form.
 
-Progress: [██        ] 25% (2/8 phases)
+Progress: [███       ] 38% (3/8 phases)
 
 ## Performance Metrics
 

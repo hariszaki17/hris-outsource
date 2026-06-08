@@ -25,7 +25,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
   BE: `POST /attendance:clock-in|:clock-out|:photo` + server geofence; open `GET /attendance` to agent self.
   FE: GPS clock screen (all variants) + my-attendance history/detail.
   - Success: agent clocks in inside/outside the site geofence (flagged, not blocked) and sees the record in history.
-- [ ] **Phase 15: Attendance correction** (ATTEND-03..04) — backend NEW.
+- [x] **Phase 15: Attendance correction** (ATTEND-03..04) — backend NEW. ✅ 2026-06-08 · CODE-type deferred.
   BE: agent-scoped `POST /corrections` (7-day window, re-eval). FE: file-correction form + status.
   - Success: agent files a check-in correction on an Absent/wrong record; it appears pending for the SL.
 - [ ] **Phase 16: My schedule** (SCHED-01..02) — backend OPEN-ROUTE.

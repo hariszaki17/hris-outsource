@@ -40,8 +40,8 @@ Three states drive per-feature effort:
 
 - [x] **ATTEND-01** (BE): Open `GET /attendance` to `agent` self-scope (own records only) (F5.5).
 - [x] **ATTEND-02** (FE): My-attendance history + detail screen (status, late minutes, geofence flag).
-- [ ] **ATTEND-03** (BE): Implement agent-scoped `POST /corrections` (type check_in/check_out/code, proposed time, reason; 7-day self window) (F5.4).
-- [ ] **ATTEND-04** (FE): File-correction form from an attendance record + correction status view.
+- [x] **ATTEND-03** (BE): Implement agent-scoped `POST /corrections` (type check_in/check_out/code, proposed time, reason; 7-day self window) (F5.4).
+- [x] **ATTEND-04** (FE): File-correction form from an attendance record + correction status view.
 
 ### My schedule (SCHED) — backend OPEN-ROUTE
 
@@ -92,7 +92,7 @@ Three states drive per-feature effort:
 | CLOCK-01..02 | Phase 14 | Done (FE+BE; live needs device GPS) |
 | CLOCK-03 (photo) | Phase 14 | Deferred (additive multipart; follow-up) |
 | ATTEND-01..02 | Phase 14 | Done |
-| ATTEND-03..04 | Phase 15 | Pending |
+| ATTEND-03..04 | Phase 15 | Done (CODE-type correction deferred) |
 | SCHED-01..02 | Phase 16 | Pending |
 | LEAVE-01..02 | Phase 17 | Pending |
 | OT-01..02 | Phase 18 | Pending |
