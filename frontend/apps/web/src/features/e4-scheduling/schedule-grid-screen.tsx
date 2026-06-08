@@ -22,6 +22,7 @@
 
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type ListScheduleParams,
   type ScheduleEntry,
@@ -125,7 +126,15 @@ export function ScheduleGridScreen() {
   const days: string[] = weekDays(monday);
 
   // ---- Company state ----
-  const [companyId, setCompanyId] = React.useState<string | null>(search.company_id ?? null);
+  // A shift leader is scoped to ONE company (INV-3 / SV-1): pin the grid to their
+  // own company and hide the picker. The server auto-scopes too (defense-in-depth);
+  // this just removes the friction + the cross-company company list from the UI.
+  const user = useCurrentUser();
+  const isShiftLeader = user?.role === 'shift_leader';
+  const slCompanyId = isShiftLeader ? (user?.companyId ?? null) : null;
+  const [companyId, setCompanyId] = React.useState<string | null>(
+    slCompanyId ?? search.company_id ?? null,
+  );
 
   // ---- Popover state ----
   const [popoverTarget, setPopoverTarget] = React.useState<CellTarget | null>(null);
@@ -385,16 +394,18 @@ export function ScheduleGridScreen() {
         </div>
       </div>
 
-      {/* Company selector */}
-      <div className="w-72">
-        <ClientCompanyPicker
-          value={companyId}
-          onChange={(id) => {
-            handleCompanyChange(id);
-          }}
-          placeholder={t('screen.companyPlaceholder')}
-        />
-      </div>
+      {/* Company selector — hidden for shift leaders (pinned to their own company) */}
+      {!isShiftLeader && (
+        <div className="w-72">
+          <ClientCompanyPicker
+            value={companyId}
+            onChange={(id) => {
+              handleCompanyChange(id);
+            }}
+            placeholder={t('screen.companyPlaceholder')}
+          />
+        </div>
+      )}
 
       {/* Auto-publish banner (INV-4) */}
       <div className="flex items-center gap-2 rounded-lg border border-ok-bd bg-ok-bg px-3 py-2.5">

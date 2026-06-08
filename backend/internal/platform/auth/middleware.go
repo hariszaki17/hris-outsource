@@ -15,11 +15,21 @@ import (
 // stateless JWT verify (used by unit tests).
 type UserStateFunc func(ctx context.Context, userID string) (status string, tokensValidAfter time.Time, err error)
 
+// CompanyResolverFunc derives a shift_leader's company scope at REQUEST time from
+// the authoritative E3 leader-assignment (GAP 3), so reassigning a leader takes
+// effect on their next request — not at next login. It returns the employee's
+// active-assignment company, or an error (incl. not-found) when they lead none;
+// in that case the middleware strips company scope so any company-scoped action is
+// denied by rbac.GuardCompany (fail-safe — never escalates). Only the JWT `cmp`
+// claim is advisory once this is wired. Consulted for shift_leader only.
+type CompanyResolverFunc func(ctx context.Context, employeeID string) (companyID string, err error)
+
 // Authenticator verifies the Bearer access token and injects the Principal.
 // Mount it on all routes except the public ones (login, forgot-password).
 type Authenticator struct {
-	issuer    *Issuer
-	userState UserStateFunc
+	issuer          *Issuer
+	userState       UserStateFunc
+	companyResolver CompanyResolverFunc
 }
 
 func NewAuthenticator(issuer *Issuer) *Authenticator { return &Authenticator{issuer: issuer} }
@@ -30,6 +40,15 @@ func NewAuthenticator(issuer *Issuer) *Authenticator { return &Authenticator{iss
 // chaining.
 func (a *Authenticator) WithUserState(fn UserStateFunc) *Authenticator {
 	a.userState = fn
+	return a
+}
+
+// WithCompanyResolver wires read-time shift_leader company-scope derivation (GAP 3):
+// the verified Principal's CompanyID is overwritten from the live E3 leader-assignment
+// instead of trusting the (possibly stale) JWT `cmp` claim. Returns the receiver for
+// chaining.
+func (a *Authenticator) WithCompanyResolver(fn CompanyResolverFunc) *Authenticator {
+	a.companyResolver = fn
 	return a
 }
 
@@ -55,6 +74,17 @@ func (a *Authenticator) Require(next http.Handler) http.Handler {
 				httpx.WriteError(w, r, apperr.Unauthenticated())
 				return
 			}
+		}
+		// GAP 3: derive a shift_leader's company scope at request time from the live
+		// E3 leader-assignment, overriding the advisory `cmp` claim. On any error
+		// (incl. no active assignment) scope is stripped (""), so GuardCompany denies
+		// every company-scoped action — fail-safe, never an escalation.
+		if p.Role == RoleShiftLeader && a.companyResolver != nil {
+			companyID, err := a.companyResolver(r.Context(), p.EmployeeID)
+			if err != nil {
+				companyID = ""
+			}
+			p.CompanyID = companyID
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})

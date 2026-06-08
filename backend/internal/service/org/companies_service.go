@@ -16,6 +16,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 )
 
@@ -145,6 +146,24 @@ func validateGeofenceRadius(radius int) error {
 
 // ListClientCompanies returns a cursor-paginated page of client companies.
 func (s *Service) ListClientCompanies(ctx context.Context, f domain.CompanyFilter) ([]domain.ClientCompany, *string, error) {
+	// Shift-leader scope (CONVENTIONS §17, scope: company_or_global): a leader may
+	// only enumerate their OWN assigned company — never the full client roster.
+	// Return a single-item page (a leader has exactly one company). HR/super-admin
+	// are global and fall through to the normal filtered list below.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleShiftLeader {
+		if p.CompanyID == "" {
+			return []domain.ClientCompany{}, nil, nil
+		}
+		company, err := s.repo.GetCompanyByID(ctx, p.CompanyID)
+		if errors.Is(err, domain.ErrNotFound) {
+			return []domain.ClientCompany{}, nil, nil
+		}
+		if err != nil {
+			return nil, nil, apperr.Internal(err)
+		}
+		return []domain.ClientCompany{company}, nil, nil
+	}
+
 	limit := httpx.ClampLimit(f.Limit)
 	f.Limit = limit + 1 // fetch one extra to detect has_more
 

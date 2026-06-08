@@ -184,6 +184,15 @@ func run() error {
 	// current leader), so wire the leader service into the placement service.
 	placementRepo := placementrepo.NewPlacementRepo(pool)
 	leaderRepo := placementrepo.NewShiftLeaderRepo(pool)
+
+	// GAP 3: derive shift_leader company scope at request time from the live E3
+	// leader-assignment (instead of the baked-in JWT `cmp` claim), so reassigning a
+	// leader takes effect on their next request. domain.ErrNotFound (leads no company)
+	// flows through as an error → the middleware strips scope (fail-safe deny).
+	authn.WithCompanyResolver(func(ctx context.Context, employeeID string) (string, error) {
+		return leaderRepo.GetActiveLeaderCompanyForEmployee(ctx, employeeID)
+	})
+
 	placementSvc := placementsvc.NewPlacementService(placementRepo, txm)
 	leaderSvc := placementsvc.NewShiftLeaderService(leaderRepo, txm)
 	placementSvc.SetLeaderService(leaderSvc)

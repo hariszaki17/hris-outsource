@@ -27,6 +27,12 @@ export interface SessionUser {
   initials: string;
   /** Shift leaders are scoped to ONE client company; surfaced in the shell. */
   companyName?: string;
+  /**
+   * Shift leaders are scoped to ONE client company. This is the raw `SWP-CMP-…`
+   * id (vs `companyName`, the display label). Used to pin company-scoped screens
+   * to the leader's own company — undefined for HR/super-admin (global scope).
+   */
+  companyId?: string;
 }
 
 let accessToken: string | null = null;
@@ -92,7 +98,7 @@ export function buildSessionUser(u: MeResponse): SessionUser {
     .join('')
     .toUpperCase();
 
-  const companyName =
+  const companyId =
     u.scope?.type === 'company' && u.scope.company_id ? u.scope.company_id : undefined;
 
   return {
@@ -100,7 +106,8 @@ export function buildSessionUser(u: MeResponse): SessionUser {
     role: u.role as Role,
     permissions: permissionsForRole(u.role as Role),
     initials,
-    companyName,
+    companyName: companyId,
+    companyId,
   };
 }
 

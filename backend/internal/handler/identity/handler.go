@@ -117,7 +117,15 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, meFromUser(user))
+	resp := meFromUser(user)
+	// GAP 3: a shift_leader's scope.company_id is derived at request time (the auth
+	// middleware put the live E3 leader-assignment company on the principal), not read
+	// from the possibly-stale users.company_id — so /auth/me reflects a reassignment
+	// immediately, consistent with the authorization gate.
+	if p.Role == auth.RoleShiftLeader {
+		resp.Scope = scopeFromRole(p.Role, p.CompanyID)
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 // ForgotPassword handles POST /auth/forgot-password.

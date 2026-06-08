@@ -60,6 +60,26 @@ func (r *ShiftLeaderRepo) GetCurrentLeaderForCompany(ctx context.Context, compan
 	return mapAssignmentFromList(rows[0]), nil
 }
 
+// GetActiveLeaderCompanyForEmployee returns the company the employee currently
+// leads (active assignment), or domain.ErrNotFound if they lead none. Non-locking
+// pool read used by the auth middleware to DERIVE a shift_leader's company scope at
+// request time (GAP 3) — so reassigning a leader takes effect on their next request
+// rather than at next login. The sla_active_employee_uq partial unique index
+// guarantees at most one active row, so rows[0] is authoritative.
+func (r *ShiftLeaderRepo) GetActiveLeaderCompanyForEmployee(ctx context.Context, employeeID string) (string, error) {
+	rows, err := r.q.ListShiftLeaderAssignments(ctx, sqlcgen.ListShiftLeaderAssignmentsParams{
+		EmployeeID: &employeeID,
+		ActiveOnly: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", domain.ErrNotFound
+	}
+	return rows[0].ClientCompanyID, nil
+}
+
 func (r *ShiftLeaderRepo) GetAssignmentByID(ctx context.Context, id string) (domain.ShiftLeaderAssignment, error) {
 	row, err := r.q.GetShiftLeaderAssignmentByID(ctx, id)
 	if err != nil {

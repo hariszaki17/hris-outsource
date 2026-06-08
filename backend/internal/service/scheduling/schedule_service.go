@@ -97,6 +97,12 @@ func (s *ScheduleService) today() time.Time {
 // ListSchedule returns the company × date-range grid (not paginated; the grid
 // always loads a bounded window). Leader scope is enforced on the company.
 func (s *ScheduleService) ListSchedule(ctx context.Context, f domain.ScheduleFilter) ([]domain.ScheduleEntry, error) {
+	// Shift-leader auto-scope (openapi E4 /schedule): pin company_id to the leader's
+	// own company and ignore any client-supplied value, so a leader can never read
+	// another company's grid. HR/super-admin keep the requested company_id.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleShiftLeader && p.CompanyID != "" {
+		f.CompanyID = p.CompanyID
+	}
 	if serr := rbac.GuardCompany(ctx, f.CompanyID); serr != nil {
 		return nil, serr
 	}

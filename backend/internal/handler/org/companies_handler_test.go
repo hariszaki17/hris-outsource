@@ -525,6 +525,31 @@ func TestListClientCompanies_ShapeAndEnvelope(t *testing.T) {
 	}
 }
 
+// A shift leader must see ONLY their own assigned company — never the full client
+// roster (CONVENTIONS §17 scope: company_or_global; INV-3 / SV-1). Server-side scope.
+func TestListClientCompanies_ShiftLeaderScopedToOwnCompany(t *testing.T) {
+	h := newCompanyHarness(t)
+	companies := h.seedCompany(3)
+	own := companies[1].ID // SWP-CMP-2
+
+	h.principal = auth.Principal{UserID: "SWP-USR-SL", Role: auth.RoleShiftLeader, CompanyID: own}
+
+	rr := h.do("GET", "/client-companies", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	data, ok := decodeBody(t, rr)["data"].([]any)
+	if !ok {
+		t.Fatalf("data is not an array")
+	}
+	if len(data) != 1 {
+		t.Fatalf("shift leader saw %d companies, want exactly 1 (own)", len(data))
+	}
+	if got := data[0].(map[string]any)["id"]; got != own {
+		t.Errorf("shift leader saw company %v, want own %v", got, own)
+	}
+}
+
 func TestGetClientCompany_200(t *testing.T) {
 	h := newCompanyHarness(t)
 	companies := h.seedCompany(1)
