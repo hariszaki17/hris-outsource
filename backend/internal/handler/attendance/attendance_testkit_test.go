@@ -470,6 +470,32 @@ func (r *fakeCorrectionRepo) RejectCorrection(_ context.Context, _ pgx.Tx, id st
 	return c, 1, nil
 }
 
+func (r *fakeCorrectionRepo) CreateCorrection(_ context.Context, _ pgx.Tx, p svc.CreateCorrectionParams) (string, error) {
+	id := "SWP-COR-" + strconv.Itoa(len(r.records)+1)
+	r.records[id] = att.Correction{
+		ID:                       id,
+		AttendanceID:             p.AttendanceID,
+		RequesterID:              p.RequesterID,
+		CompanyID:                p.CompanyID,
+		Type:                     att.CorrectionType(p.Type),
+		ProposedCheckInAt:        p.ProposedCheckInAt,
+		ProposedCheckOutAt:       p.ProposedCheckOutAt,
+		ProposedAttendanceCodeID: p.ProposedAttendanceCodeID,
+		Reason:                   p.Reason,
+		EvidenceFileID:           p.EvidenceFileID,
+		Status:                   att.CorrectionStatusPending,
+		AttendanceShiftDate:      p.AttendanceShiftDate,
+		CreatedAt:                fixedNow,
+		UpdatedAt:                fixedNow,
+	}
+	return id, nil
+}
+
+func (r *fakeCorrectionRepo) GetPendingCorrectionForAttendance(_ context.Context, attendanceID string) (string, bool, error) {
+	id, n := r.countPending(attendanceID)
+	return id, n > 0, nil
+}
+
 // countPending counts PENDING corrections on one attendance (the
 // CORRECTION_ALREADY_PENDING pre-check seam: the production create endpoint is
 // out of web scope, so this contract test drives the guard shape directly).
@@ -552,6 +578,11 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 		r.With(idem.Handler).Post("/attendance:bulk-reject", handler.BulkReject)
 		r.With(idem.Handler).Post("/corrections/{id}:approve", handler.ApproveCorrection)
 		r.With(idem.Handler).Post("/corrections/{id}:reject", handler.RejectCorrection)
+	})
+	// Correction CREATE: agent-inclusive group (mirrors server.go).
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+		r.With(idem.Handler).Post("/corrections", handler.CreateCorrection)
 	})
 
 	h.router = r

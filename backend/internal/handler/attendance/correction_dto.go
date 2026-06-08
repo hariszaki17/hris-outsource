@@ -16,6 +16,18 @@ type approveRequest struct {
 	Note string `json:"note"`
 }
 
+// correctionWriteRequest is the openapi CorrectionWriteRequest (POST /corrections).
+// Times are RFC3339 (decoded into *time.Time by encoding/json).
+type correctionWriteRequest struct {
+	AttendanceID             string     `json:"attendance_id"`
+	Type                     string     `json:"type"`
+	ProposedCheckInAt        *time.Time `json:"proposed_check_in_at"`
+	ProposedCheckOutAt       *time.Time `json:"proposed_check_out_at"`
+	ProposedAttendanceCodeID *string    `json:"proposed_attendance_code_id"`
+	Reason                   string     `json:"reason"`
+	EvidenceFileID           *string    `json:"evidence_file_id"`
+}
+
 // (reject reuses rejectRequest from attendance_dto.go)
 
 // --- response DTOs ---

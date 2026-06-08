@@ -402,6 +402,16 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/attendance:clock-out", d.Clock.ClockOut)
 			})
 
+			// Correction CREATE (F5.4): an agent files their own correction;
+			// shift_leader/HR/super may file too (scope enforced in the service).
+			// Own group so agents are admitted; POST is a distinct method from the
+			// admin/leader-only GET /corrections below, so no chi route conflict.
+			// Idempotency-Key required per openapi.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/corrections", d.Attendance.CreateCorrection)
+			})
+
 			// Attendance/corrections WRITES + corrections reads: super_admin,
 			// hr_admin, shift_leader (the web verify/reject/corrections surface).
 			r.Group(func(r chi.Router) {

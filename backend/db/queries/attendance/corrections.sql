@@ -32,6 +32,30 @@ WHERE co.deleted_at IS NULL
 ORDER BY co.created_at DESC, co.id DESC
 LIMIT sqlc.arg(page_limit);
 
+-- name: GetPendingCorrectionForAttendance :one
+-- Active-pending guard for the agent CREATE path (F5.4 / one open correction per
+-- attendance): returns the PENDING correction id for a target attendance, if any.
+SELECT id
+FROM attendance_corrections
+WHERE attendance_id = sqlc.arg(attendance_id)
+  AND status = 'PENDING'
+  AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: CreateCorrection :one
+-- Insert a new agent/leader-filed correction in PENDING. company_id +
+-- attendance_shift_date are denormalized from the target attendance by the service.
+INSERT INTO attendance_corrections (
+    attendance_id, requester_id, company_id, type,
+    proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
+    reason, evidence_file_id, attendance_shift_date, status
+) VALUES (
+    sqlc.arg(attendance_id), sqlc.arg(requester_id), sqlc.arg(company_id), sqlc.arg(type),
+    sqlc.narg(proposed_check_in_at), sqlc.narg(proposed_check_out_at), sqlc.narg(proposed_attendance_code_id),
+    sqlc.arg(reason), sqlc.narg(evidence_file_id), sqlc.arg(attendance_shift_date), 'PENDING'
+)
+RETURNING id;
+
 -- name: GetCorrection :one
 -- Single correction with denormalized requester/company names.
 SELECT co.id, co.attendance_id, co.requester_id, co.company_id, co.type,

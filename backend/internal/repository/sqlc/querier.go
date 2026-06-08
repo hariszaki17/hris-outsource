@@ -164,6 +164,9 @@ type Querier interface {
 	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (ChangeRequest, error)
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
+	// Insert a new agent/leader-filed correction in PENDING. company_id +
+	// attendance_shift_date are denormalized from the target attendance by the service.
+	CreateCorrection(ctx context.Context, arg CreateCorrectionParams) (string, error)
 	// Allocates the SWP-EMP id inline from the per-prefix sequence.
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
 	// E6 leave-grant ledger queries (F6.1 / SWP-LG-* / SWP-LC-*). One lot per
@@ -338,6 +341,9 @@ type Querier interface {
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
 	// Single payslip with all columns incl. ENCRYPTED money (for GET /payslips/{id}).
 	GetPayslip(ctx context.Context, id string) (GetPayslipRow, error)
+	// Active-pending guard for the agent CREATE path (F5.4 / one open correction per
+	// attendance): returns the PENDING correction id for a target attendance, if any.
+	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (string, error)
 	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
 	// All placements sharing a predecessor/successor chain with the given placement
 	// (for history_chain). Walks both directions from the seed via a recursive CTE.

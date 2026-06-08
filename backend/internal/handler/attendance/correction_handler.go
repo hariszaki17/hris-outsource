@@ -13,6 +13,47 @@ import (
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 )
 
+// CreateCorrection handles POST /corrections (F5.4): an agent/leader/HR files a
+// correction against a target attendance. Scope, the 7-day window, single-active-
+// PENDING dedupe, and per-type validation are enforced in the service. Returns 201.
+func (h *Handler) CreateCorrection(w http.ResponseWriter, r *http.Request) {
+	var req correctionWriteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// Cheap required-field gate (full per-type validation lives in the service).
+	fields := map[string]string{}
+	if req.AttendanceID == "" {
+		fields["attendance_id"] = "Wajib diisi."
+	}
+	if req.Type == "" {
+		fields["type"] = "Wajib diisi."
+	}
+	if req.Reason == "" {
+		fields["reason"] = "Wajib diisi."
+	}
+	if len(fields) > 0 {
+		httpx.WriteError(w, r, apperr.Invalid(fields))
+		return
+	}
+
+	cor, err := h.corrections.Create(r.Context(), svc.CreateCorrectionInput{
+		AttendanceID:             req.AttendanceID,
+		Type:                     req.Type,
+		ProposedCheckInAt:        req.ProposedCheckInAt,
+		ProposedCheckOutAt:       req.ProposedCheckOutAt,
+		ProposedAttendanceCodeID: req.ProposedAttendanceCodeID,
+		Reason:                   req.Reason,
+		EvidenceFileID:           req.EvidenceFileID,
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, dataResponse[correctionResponse]{Data: toCorrectionResponse(cor)})
+}
+
 // ListCorrections handles GET /corrections (cursor-paged, scoped by role).
 func (h *Handler) ListCorrections(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()

@@ -122,6 +122,169 @@ func (s *CorrectionService) Get(ctx context.Context, id string) (att.Correction,
 	return cor, nil
 }
 
+// --- create (agent / leader file a correction, F5.4) ---
+
+// CreateCorrectionInput is the decoded POST /corrections request (openapi
+// CorrectionWriteRequest). Times are RFC3339-parsed at the handler boundary.
+type CreateCorrectionInput struct {
+	AttendanceID             string
+	Type                     string
+	ProposedCheckInAt        *time.Time
+	ProposedCheckOutAt       *time.Time
+	ProposedAttendanceCodeID *string
+	Reason                   string
+	EvidenceFileID           *string
+}
+
+// Create files a new PENDING correction against a target attendance (F5.4).
+// Scope: an agent may only correct their own record (cross-record hidden as 404,
+// no existence leak); a shift_leader is company-scoped via GuardCompany; HR/super
+// are global. Then: the 7-day OUTSIDE_CORRECTION_WINDOW guard (HR-exempt), a
+// single-active-PENDING dedupe (409 CORRECTION_ALREADY_PENDING), and per-type
+// field validation. Inserts + audits in one tx; re-reads for denormalized names.
+func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput) (att.Correction, error) {
+	principal, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return att.Correction{}, apperr.Unauthenticated()
+	}
+
+	rec, err := s.attRepo.GetAttendance(ctx, in.AttendanceID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return att.Correction{}, apperr.NotFound()
+	}
+	if err != nil {
+		return att.Correction{}, apperr.Internal(err)
+	}
+
+	// Scope. Agent: own-record only (else 404, no leak). Leader: company-scoped.
+	// HR/super: global (GuardCompany passes them through).
+	switch principal.Role {
+	case auth.RoleAgent:
+		if principal.EmployeeID == "" || principal.EmployeeID != rec.EmployeeID {
+			return att.Correction{}, apperr.NotFound()
+		}
+	default:
+		if serr := rbac.GuardCompany(ctx, rec.CompanyID); serr != nil {
+			return att.Correction{}, serr // OUT_OF_SCOPE 403
+		}
+	}
+
+	// 7-day window (HR/super exempt). Basis: the target shift date, falling back to
+	// the clock-in, then now() for an unscheduled record.
+	isHR := principal.Role == auth.RoleHRAdmin || principal.Role == auth.RoleSuperAdmin
+	var shiftDate time.Time
+	switch {
+	case rec.ShiftStartAt != nil:
+		shiftDate = *rec.ShiftStartAt
+	case rec.CheckInAt != nil:
+		shiftDate = *rec.CheckInAt
+	default:
+		shiftDate = s.now()
+	}
+	if werr := CheckCorrectionWindow(shiftDate, isHR, s.now()); werr != nil {
+		return att.Correction{}, werr
+	}
+
+	// One active PENDING correction per attendance (409 with the open correction id).
+	if pid, found, perr := s.repo.GetPendingCorrectionForAttendance(ctx, in.AttendanceID); perr != nil {
+		return att.Correction{}, apperr.Internal(perr)
+	} else if found {
+		return att.Correction{}, apperr.ConflictWithDetails(
+			"CORRECTION_ALREADY_PENDING",
+			map[string]string{"correction_id": pid},
+			nil,
+		)
+	}
+
+	// Per-type field validation (openapi CorrectionWriteRequest). evidence_file_id is
+	// intentionally OPTIONAL for this MVP — see TODO below.
+	if verr := validateCorrectionInput(in); verr != nil {
+		return att.Correction{}, verr
+	}
+	// TODO(CLOCK-03): enforce evidence_file_id for CHECK_IN/CHECK_OUT once photo-upload lands.
+
+	shiftDateOnly := time.Date(shiftDate.Year(), shiftDate.Month(), shiftDate.Day(), 0, 0, 0, 0, time.UTC)
+	var newID string
+	err = s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		id, cerr := s.repo.CreateCorrection(ctx, tx, CreateCorrectionParams{
+			AttendanceID:             in.AttendanceID,
+			RequesterID:              principal.EmployeeID,
+			CompanyID:                rec.CompanyID,
+			Type:                     in.Type,
+			ProposedCheckInAt:        in.ProposedCheckInAt,
+			ProposedCheckOutAt:       in.ProposedCheckOutAt,
+			ProposedAttendanceCodeID: in.ProposedAttendanceCodeID,
+			Reason:                   in.Reason,
+			EvidenceFileID:           in.EvidenceFileID,
+			AttendanceShiftDate:      shiftDateOnly,
+		})
+		if cerr != nil {
+			return cerr
+		}
+		newID = id
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionCreate,
+			EntityType: "attendance_correction",
+			EntityID:   id,
+			After: map[string]any{
+				"attendance_id": in.AttendanceID,
+				"type":          in.Type,
+				"status":        "PENDING",
+				"requester_id":  principal.EmployeeID,
+			},
+		})
+	})
+	if err != nil {
+		return att.Correction{}, asAppErr(err)
+	}
+	// Re-read for the denormalized requester/company names on the DTO.
+	return s.GetCorrection(ctx, newID)
+}
+
+// GetCorrection re-reads a correction by id for the create path (no scope guard:
+// the caller has already passed the create-time scope checks). Diff is rendered
+// for consistency with the detail endpoint.
+func (s *CorrectionService) GetCorrection(ctx context.Context, id string) (att.Correction, error) {
+	cor, err := s.repo.GetCorrection(ctx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return att.Correction{}, apperr.NotFound()
+	}
+	if err != nil {
+		return att.Correction{}, apperr.Internal(err)
+	}
+	cor.Diff = buildDiff(cor)
+	return cor, nil
+}
+
+// validateCorrectionInput enforces the per-type required-field rules + reason
+// length (openapi CorrectionWriteRequest). evidence_file_id is optional (MVP).
+func validateCorrectionInput(in CreateCorrectionInput) error {
+	fields := map[string]string{}
+	switch att.CorrectionType(in.Type) {
+	case att.CorrectionTypeCheckIn:
+		if in.ProposedCheckInAt == nil {
+			fields["proposed_check_in_at"] = "Wajib diisi untuk koreksi check-in."
+		}
+	case att.CorrectionTypeCheckOut:
+		if in.ProposedCheckOutAt == nil {
+			fields["proposed_check_out_at"] = "Wajib diisi untuk koreksi check-out."
+		}
+	case att.CorrectionTypeCode:
+		if in.ProposedAttendanceCodeID == nil || *in.ProposedAttendanceCodeID == "" {
+			fields["proposed_attendance_code_id"] = "Wajib diisi untuk koreksi kode kehadiran."
+		}
+	default:
+		fields["type"] = "Tidak valid (CHECK_IN, CHECK_OUT, atau CODE)."
+	}
+	if len([]rune(in.Reason)) < 5 {
+		fields["reason"] = "Wajib diisi (minimum 5 karakter)."
+	}
+	if len(fields) > 0 {
+		return apperr.Invalid(fields)
+	}
+	return nil
+}
+
 // --- approve / reject ---
 
 // Approve applies a PENDING correction: scope guard (OUT_OF_SCOPE), terminal

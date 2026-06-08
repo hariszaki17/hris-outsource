@@ -82,6 +82,52 @@ func (q *Queries) ApproveCorrection(ctx context.Context, arg ApproveCorrectionPa
 	return i, err
 }
 
+const createCorrection = `-- name: CreateCorrection :one
+INSERT INTO attendance_corrections (
+    attendance_id, requester_id, company_id, type,
+    proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
+    reason, evidence_file_id, attendance_shift_date, status
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, $10, 'PENDING'
+)
+RETURNING id
+`
+
+type CreateCorrectionParams struct {
+	AttendanceID             string
+	RequesterID              string
+	CompanyID                string
+	Type                     string
+	ProposedCheckInAt        *time.Time
+	ProposedCheckOutAt       *time.Time
+	ProposedAttendanceCodeID *string
+	Reason                   string
+	EvidenceFileID           *string
+	AttendanceShiftDate      pgtype.Date
+}
+
+// Insert a new agent/leader-filed correction in PENDING. company_id +
+// attendance_shift_date are denormalized from the target attendance by the service.
+func (q *Queries) CreateCorrection(ctx context.Context, arg CreateCorrectionParams) (string, error) {
+	row := q.db.QueryRow(ctx, createCorrection,
+		arg.AttendanceID,
+		arg.RequesterID,
+		arg.CompanyID,
+		arg.Type,
+		arg.ProposedCheckInAt,
+		arg.ProposedCheckOutAt,
+		arg.ProposedAttendanceCodeID,
+		arg.Reason,
+		arg.EvidenceFileID,
+		arg.AttendanceShiftDate,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getCorrection = `-- name: GetCorrection :one
 SELECT co.id, co.attendance_id, co.requester_id, co.company_id, co.type,
        co.proposed_check_in_at, co.proposed_check_out_at,
@@ -208,6 +254,24 @@ func (q *Queries) GetCorrectionForUpdate(ctx context.Context, id string) (GetCor
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getPendingCorrectionForAttendance = `-- name: GetPendingCorrectionForAttendance :one
+SELECT id
+FROM attendance_corrections
+WHERE attendance_id = $1
+  AND status = 'PENDING'
+  AND deleted_at IS NULL
+LIMIT 1
+`
+
+// Active-pending guard for the agent CREATE path (F5.4 / one open correction per
+// attendance): returns the PENDING correction id for a target attendance, if any.
+func (q *Queries) GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (string, error) {
+	row := q.db.QueryRow(ctx, getPendingCorrectionForAttendance, attendanceID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listCorrections = `-- name: ListCorrections :many
