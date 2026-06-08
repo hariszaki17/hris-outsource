@@ -4,11 +4,11 @@
 
 - ✅ **v1.0 — Backend + Full-Stack E2E** — Phases 1–11 (shipped 2026-06-05)
 - ✅ **v1.1 — Mobile Foundation (Expo Scaffold)** — Phase 12 (shipped 2026-06-08)
-- 📋 **v1.2 — Mobile MVP (Agent App)** — Phases 13–20 (planned 2026-06-08)
+- ✅ **v1.2 — Mobile MVP (Agent App)** — Phases 13–20 (shipped 2026-06-08)
 
 ## Phases
 
-### 📋 v1.2 — Mobile MVP (Agent App)
+### ✅ v1.2 — Mobile MVP (Agent App)
 
 Full-stack vertical slices: each phase ships the Go endpoint(s) + the RN screen(s) together,
 end-to-end against the real backend. Agent persona only — the shift-leader app is a later
@@ -41,7 +41,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
 - [x] **Phase 19: Payslip history** (PAY-01..02) — backend OPEN-ROUTE. ✅ 2026-06-08.
   BE: open `GET /payslips` to agent self. FE: payslip history + summary (read-only).
   - Success: agent views their own payslip summaries (take-home/gross/paid date).
-- [ ] **Phase 20: Profile self-service** (PROFILE-01..02) — read OPEN-ROUTE + change-request NEW.
+- [x] **Phase 20: Profile self-service** (PROFILE-01..02) — OPEN-ROUTE + change-request NEW. ✅ 2026-06-08.
   BE: agent self-read `GET /employees/{id}` + `POST /change-requests`. FE: profile view/limited-edit → change-request + Pengaturan.
   - Success: agent edits phone/bank → a change-request lands for HR; password change + logout work.
 

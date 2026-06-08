@@ -65,8 +65,8 @@ Three states drive per-feature effort:
 
 ### Profile self-service (PROFILE) — read OPEN-ROUTE, change-request NEW
 
-- [ ] **PROFILE-01** (BE): Open `GET /employees/{id}` self-read to `agent`; implement `POST /change-requests` (phone/address/bank → HR approval) (F2.1).
-- [ ] **PROFILE-02** (FE): Profile view + limited-edit (phone/address/bank) submitting a change-request; Pengaturan (change password, logout).
+- [x] **PROFILE-01** (BE): Open `GET /employees/{id}` self-read to `agent`; implement `POST /change-requests` (phone/address/bank → HR approval) (F2.1).
+- [x] **PROFILE-02** (FE): Profile view + limited-edit (phone/address/bank) submitting a change-request; Pengaturan (change password, logout).
 
 ## Future (next milestone)
 
@@ -97,4 +97,4 @@ Three states drive per-feature effort:
 | LEAVE-01..02 | Phase 17 | Done (attachment + doc-required types deferred) |
 | OT-01..02 | Phase 18 | Done |
 | PAY-01..02 | Phase 19 | Done |
-| PROFILE-01..02 | Phase 20 | Pending |
+| PROFILE-01..02 | Phase 20 | Done (bank-account edit deferred) |

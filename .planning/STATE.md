@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
-status: in_progress
-stopped_at: Phase 19 complete (FE+BE); Phase 20 (profile) next
+status: completed
+stopped_at: Phase 20 complete — milestone v1.2 CLOSED
 last_updated: "2026-06-08T00:00:00.000Z"
 last_activity: "2026-06-08 — Phase 17 (leave request) COMPLETE, full-stack. Rebased onto latest backend (feat/backend-impl 97e7a6e: E6 leave grant-lot + Kuota), then built agent leave create→submit aligned with the grant-lot ledger: submitTx refactor (shared Submit/Create reserve core), CheckOverlappingLeave + CountLeaveDurationDays queries, validation order INVALID_DATE_RANGE→MISSING_REQUIRED_DOCUMENT→OVERLAPPING_LEAVE→BACKDATED_LEAVE→QUOTA_EXCEEDED, agent self-scope on List/Get/Balance, routes split (reads admit agent; agent-write group POST /leave-requests/:submit/:cancel). 427 tests green. FE: /leave list + /leave-new form (type chips, dates, reason) + More reworked into a feature menu. Also hardened my-attendance for the E5 true-absence model (check_in_at nullable). Ran pnpm gen (api-client gen is gitignored) to fix stale e6 barrel (leave-balances). Deferred: attachment upload, doc-required types, allows_backdated column. Next: Phase 18 — overtime (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 5
-  completed_plans: 7
-  percent: 88
+  completed_plans: 8
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–19 done; Phase 20 (profile) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). ALL 8 phases done — milestone v1.2 COMPLETE.
 
 ## Current Position
 
-Phase: 20 of 20 (Profile self-service) — next
-Plan: Phase 19 COMPLETE (FE ce7f755 + BE)
-Status: Phase 19 payslip open-route shipped; 437 tests green. 7/8 agent-MVP phases done.
-Last activity: 2026-06-08 — Phase 19 complete; payslip reads opened to agent + RN list.
+Phase: 20 of 20 (Profile self-service) — COMPLETE
+Plan: ALL phases complete (13–20)
+Status: Milestone v1.2 complete — full agent app (shell/auth, clock+geofence, correction, schedule, leave, OT, payslip, profile). 443 backend tests green.
+Last activity: 2026-06-08 — Phase 20 complete; agent profile self-read + change-request. Milestone v1.2 CLOSED.
 
-Progress: [████████  ] 88% (7/8 phases)
+Progress: [██████████] 100% (8/8 phases)
 
 ## Performance Metrics
 
