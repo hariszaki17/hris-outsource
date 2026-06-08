@@ -1302,6 +1302,7 @@ export const id = {
       createTitle: 'Tambah Perusahaan Klien',
       createSubtitle: 'Isi data perusahaan klien baru',
       editTitle: 'Edit Perusahaan Klien',
+      editSubtitle: 'Perbarui data perusahaan klien. Perubahan dicatat di audit log.',
       footerHint: '* wajib · Aksi dicatat di audit log',
       optional: 'opsional',
       save: 'Simpan',

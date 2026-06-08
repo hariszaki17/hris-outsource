@@ -5,7 +5,7 @@
  *
  * Exports:
  *   - CreateClientCompanyScreen  — full-page create route (/client-companies/new)
- *   - EditClientCompanyDrawer    — Drawer variant for edit-in-place from list or detail
+ *   - EditClientCompanyScreen    — full-page edit route (/client-companies/$id/edit)
  *
  * Sections (two-column layout matching .pen L + R):
  *   Left col:
@@ -30,17 +30,7 @@ import {
   useGetClientCompany,
   useUpdateClientCompany,
 } from '@swp/api-client/e2';
-import {
-  Button,
-  Drawer,
-  DrawerBody,
-  DrawerFooter,
-  DrawerHeader,
-  FormField,
-  Input,
-  StateView,
-  useToast,
-} from '@swp/ui';
+import { Button, FormField, Input, StateView, useToast } from '@swp/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, CheckCircle2, Circle, CircleAlert, Info, ShieldCheck } from 'lucide-react';
 import { useEffect } from 'react';
@@ -392,26 +382,15 @@ export function CreateClientCompanyScreen() {
 }
 
 // ---------------------------------------------------------------------------
-// Edit drawer
+// Edit screen (full page)
 // ---------------------------------------------------------------------------
 
-interface EditClientCompanyDrawerProps {
-  clientCompanyId: string;
-  open: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-}
-
-export function EditClientCompanyDrawer({
-  clientCompanyId,
-  open,
-  onClose,
-  onSaved,
-}: EditClientCompanyDrawerProps) {
+export function EditClientCompanyScreen({ clientCompanyId }: { clientCompanyId: string }) {
   const { t } = useTranslation('clientCompanies');
+  const navigate = useNavigate();
   const { toast } = useToast();
 
-  const query = useGetClientCompany(clientCompanyId, { query: { enabled: open } });
+  const query = useGetClientCompany(clientCompanyId);
   const company = query.data?.data as ClientCompany | undefined;
 
   const form = useForm<ClientCompanyFormValues>({
@@ -450,7 +429,10 @@ export function EditClientCompanyDrawer({
       {
         onSuccess: () => {
           toast({ tone: 'success', title: t('toast.updated') });
-          onSaved();
+          navigate({
+            to: '/client-companies/$clientCompanyId' as never,
+            params: { clientCompanyId } as never,
+          });
         },
         onError: (err) => {
           if (applyFieldErrors(err, form.setError as never)) return;
@@ -461,44 +443,71 @@ export function EditClientCompanyDrawer({
     );
   }
 
+  if (query.isPending) {
+    return (
+      <div className="p-6 bg-app-bg h-full">
+        <StateView kind="loading" title={t('state.loading')} />
+      </div>
+    );
+  }
+
+  if (query.isError || !company) {
+    return (
+      <div className="p-6 bg-app-bg h-full">
+        <StateView
+          kind="error"
+          title={t('state.errorTitle')}
+          description={classifyError(query.error).message}
+          onRetry={() => void query.refetch()}
+        />
+      </div>
+    );
+  }
+
   return (
-    <Drawer
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) onClose();
-      }}
-      width={640}
-    >
-      <DrawerHeader title={t('form.editTitle')} onClose={onClose} />
-      <DrawerBody>
-        {query.isPending ? (
-          <StateView kind="loading" title={t('state.loading')} />
-        ) : query.isError ? (
-          <StateView
-            kind="error"
-            title={t('state.errorTitle')}
-            description={classifyError(query.error).message}
-            onRetry={() => void query.refetch()}
-          />
-        ) : (
-          <form id="edit-client-company-form" onSubmit={form.handleSubmit(onSubmit)} noValidate>
-            <ClientCompanyFormBody form={form} />
-          </form>
-        )}
-      </DrawerBody>
-      <DrawerFooter>
-        <span className="text-[11px] text-text-3 flex-1">{t('form.footerHint')}</span>
-        <Button type="button" variant="secondary" onClick={onClose}>
-          {t('form.cancel')}
-        </Button>
-        <Button
-          type="submit"
-          form="edit-client-company-form"
-          disabled={updateMut.isPending || query.isPending}
+    <div className="flex flex-col gap-4 p-6 bg-app-bg h-full overflow-y-auto">
+      {/* Back row */}
+      <div className="flex items-center gap-[7px]">
+        <Link
+          to={'/client-companies/$clientCompanyId' as never}
+          params={{ clientCompanyId } as never}
+          className="flex items-center gap-[7px] text-text-2 hover:text-text"
         >
-          {updateMut.isPending ? t('form.saving') : t('form.save')}
-        </Button>
-      </DrawerFooter>
-    </Drawer>
+          <ArrowLeft size={16} aria-hidden />
+          <span className="text-[13px] font-medium">{t('detail.backLink')}</span>
+        </Link>
+      </div>
+
+      {/* Header */}
+      <div className="rounded-xl bg-surface border border-border px-5 py-[18px] flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-[18px] font-semibold text-text">{t('form.editTitle')}</h1>
+          <p className="text-[12px] text-text-2">{t('form.editSubtitle')}</p>
+        </div>
+      </div>
+
+      {/* Form body */}
+      <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        <ClientCompanyFormBody form={form} />
+
+        {/* Footer */}
+        <div className="mt-4 rounded-xl bg-surface border border-border px-5 py-[14px] flex items-center justify-between">
+          <span className="text-[11px] text-text-3">{t('form.footerHint')}</span>
+          <div className="flex items-center gap-[10px]">
+            <Link
+              to={'/client-companies/$clientCompanyId' as never}
+              params={{ clientCompanyId } as never}
+            >
+              <Button type="button" variant="secondary">
+                {t('form.cancel')}
+              </Button>
+            </Link>
+            <Button type="submit" disabled={updateMut.isPending}>
+              {updateMut.isPending ? t('form.saving') : t('form.save')}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </div>
   );
 }

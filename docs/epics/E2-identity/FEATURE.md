@@ -228,6 +228,8 @@ flowchart LR
 
 **Entities:** `ClientCompany` (auto-creates a primary `Site`). **Consumed by:** E3, F2.6.
 
+> **UI/flow** *(2026-06-07, EPICS §8):* edit is a **full-page screen launched from the detail page** (`/client-companies/$id/edit`), not a drawer; the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, guarded by CC-5); the detail **"Profil" tab** shows statutory/billing + `leader_scope` only — **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated.
+
 ---
 
 ### F2.6 — Client Sites & Geofence
@@ -276,6 +278,8 @@ flowchart LR
 ```
 
 **Entities:** `ServiceLine`, `Position`. **Consumed by:** E3, E4, E5.
+
+> **UI/flow** *(2026-06-07, EPICS §8):* service-line + position maintenance is **consolidated on the detail page** (rename the line and add/update/remove its positions there); the list's "Edit" action **routes to the detail page**, not a rename-only modal.
 
 ---
 

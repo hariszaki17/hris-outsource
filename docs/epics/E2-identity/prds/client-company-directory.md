@@ -28,7 +28,7 @@ HR/Placement Admin & Super Admin (author), System (validate, audit). Read consum
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | HR/Super Admin | Full CRUD of client companies. |
+| **Web console** | HR/Super Admin | Full CRUD of client companies. **List** shows the directory; its only per-row action is **Aktifkan/Nonaktifkan** (no row kebab) — create and edit live elsewhere. **Edit** is a dedicated full-page screen reached from the **detail** page (route `/client-companies/$id/edit`), not a drawer. The detail **"Profil" tab** shows statutory/billing fields + `leader_scope` only; **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated in Profil. |
 | **Mobile app** | Agent / Shift Leader | Read-only: see the client they're placed at (name, address, geo) — surfaced via placement/attendance, not as a directory. |
 
 ## 5. Business rules
@@ -99,4 +99,5 @@ E1 (RBAC/audit), E3 (placement target), E5 (geofence), E9 (migration), E10 (repo
 
 - ✅ ClientCompany = `companies.role=2`. ~~flat (no sub-sites)~~ **superseded 2026-06-03**: companies now have one or more **Sites** (F2.6); geofence moved to Site. (EPICS §8.)
 - ✅ `leader_scope` (company | site) added to support per-site shift leaders (E3 F3.4).
+- ✅ **UI/flow** *(resolved 2026-06-07, EPICS §8)* — edit is a **full-page screen from the detail page** (`/client-companies/$id/edit`), not a drawer (the `EditClientCompanyDrawer` is removed); the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, still guarded by CC-5); the detail **"Profil" tab** does **not** duplicate Sites/geofence (those live only in the "Lokasi & Site" tab, F2.6).
 - **Open:** should deactivation with active placements **hard-block** or **warn-and-guide**? (currently warn-and-guide / block-until-resolved.)

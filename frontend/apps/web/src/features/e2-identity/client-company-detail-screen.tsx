@@ -5,8 +5,8 @@
  * Penempatan Aktif | Pemimpin Shift | Riwayat) → content.
  *
  * Geofence config moved off the company onto its Sites (F2.6, 2026-06-03): the "Lokasi & Site"
- * tab and the Profil right column render `SitesPanel` (list + add/edit with the map geofence
- * editor). The company keeps statutory/billing fields + `leader_scope`.
+ * tab renders `SitesPanel` (list + add/edit with the map geofence editor). The Profil tab shows
+ * only the company profile card (statutory/billing fields + `leader_scope`).
  *
  * F2.3 — CC-2 (NPWP unique), CC-5 (active-placement guard). INV: company is referenced by
  * placements — only deactivate, never delete.
@@ -20,7 +20,6 @@ import { ArrowLeft, Building2, Edit2, Info } from 'lucide-react';
 import type * as React from 'react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { EditClientCompanyDrawer } from './client-company-form.tsx';
 import { SitesPanel } from './site-form.tsx';
 
 type DetailTab = 'profil' | 'lokasi' | 'penempatan' | 'pemimpin' | 'riwayat';
@@ -47,7 +46,6 @@ function FieldRow({
 export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDetailScreenProps) {
   const { t } = useTranslation('clientCompanies');
   const [activeTab, setActiveTab] = useState<DetailTab>('profil');
-  const [editOpen, setEditOpen] = useState(false);
 
   const query = useGetClientCompany(clientCompanyId);
   const company = query.data?.data as ClientCompany | undefined;
@@ -120,14 +118,14 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
               ? t('status.active')
               : t('status.inactive')}
           </StatusBadge>
-          <button
-            type="button"
-            onClick={() => setEditOpen(true)}
+          <Link
+            to={'/client-companies/$clientCompanyId/edit' as never}
+            params={{ clientCompanyId } as never}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-[13px] font-medium text-text hover:bg-surface-2"
           >
             <Edit2 size={14} aria-hidden />
             {t('actions.edit')}
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -150,35 +148,27 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
         ))}
       </div>
 
-      {/* Profil tab — profile card (left) + sites (right) */}
+      {/* Profil tab — company profile card (full width); Sites live on the Lokasi tab */}
       {activeTab === 'profil' && (
-        <div className="flex gap-4">
-          <div className="flex-1 flex flex-col gap-4">
-            <div className="rounded-xl bg-surface border border-border overflow-hidden">
-              <div className="px-5 pt-4 pb-3 flex items-center justify-between">
-                <span className="text-[14px] font-semibold text-text">
-                  {t('detail.profileCard.title')}
-                </span>
-              </div>
-              <FieldRow label={t('fields.name')} value={company.name} />
-              <FieldRow label={t('fields.npwp')} value={company.npwp} mono />
-              <FieldRow label={t('fields.address')} value={company.address} />
-              <FieldRow label={t('fields.leaderScope')} value={leaderScopeLabel} />
-              <FieldRow label={t('fields.pic')} value={company.pic_name} />
-              <FieldRow label={t('fields.phone')} value={company.phone} mono />
-              <FieldRow label={t('fields.email')} value={company.email} />
-              {company.created_at && (
-                <FieldRow
-                  label={t('fields.createdAt')}
-                  value={<DateText value={company.created_at} kind="instant" />}
-                />
-              )}
-            </div>
+        <div className="rounded-xl bg-surface border border-border overflow-hidden">
+          <div className="px-5 pt-4 pb-3 flex items-center justify-between">
+            <span className="text-[14px] font-semibold text-text">
+              {t('detail.profileCard.title')}
+            </span>
           </div>
-
-          <div className="w-[520px] flex flex-col gap-4">
-            <SitesPanel clientCompanyId={clientCompanyId} />
-          </div>
+          <FieldRow label={t('fields.name')} value={company.name} />
+          <FieldRow label={t('fields.npwp')} value={company.npwp} mono />
+          <FieldRow label={t('fields.address')} value={company.address} />
+          <FieldRow label={t('fields.leaderScope')} value={leaderScopeLabel} />
+          <FieldRow label={t('fields.pic')} value={company.pic_name} />
+          <FieldRow label={t('fields.phone')} value={company.phone} mono />
+          <FieldRow label={t('fields.email')} value={company.email} />
+          {company.created_at && (
+            <FieldRow
+              label={t('fields.createdAt')}
+              value={<DateText value={company.created_at} kind="instant" />}
+            />
+          )}
         </div>
       )}
 
@@ -197,19 +187,6 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
         <Info size={15} className="text-text-3 shrink-0" aria-hidden />
         <p className="text-[12px] text-text-2">{t('detail.roleNote')}</p>
       </div>
-
-      {/* Edit drawer */}
-      {editOpen && (
-        <EditClientCompanyDrawer
-          clientCompanyId={clientCompanyId}
-          open
-          onClose={() => setEditOpen(false)}
-          onSaved={() => {
-            setEditOpen(false);
-            query.refetch();
-          }}
-        />
-      )}
     </div>
   );
 }

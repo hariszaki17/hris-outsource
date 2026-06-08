@@ -5,8 +5,8 @@
  *
  * Layout: TitleBand → 4× StatCards → TableCard (FilterRow, THead, rows, pagination).
  * Columns: Perusahaan (icon+name+alamat) | Lini Layanan | Pemimpin Shift | Penempatan |
- * Geofence | Status | kebab actions.
- * Row actions: Edit (opens EditClientCompanyDrawer), Deactivate / Reactivate.
+ * Geofence | Status | inline action.
+ * Row action: inline Deactivate / Reactivate (opens ConfirmDialog). Edit is on the detail page.
  *
  * ENGINEERING.md D1 — typed URL search params + cursor pagination.
  * F2.3 — Client Company directory. CC-5 — active-placement guard on deactivate.
@@ -34,18 +34,9 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import {
-  Ban,
-  Building2,
-  CircleCheck,
-  MapPin,
-  MoreVertical,
-  PowerOff,
-  RotateCcw,
-} from 'lucide-react';
+import { Ban, Building2, CircleCheck, MapPin, PowerOff, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { EditClientCompanyDrawer } from './client-company-form.tsx';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,72 +52,6 @@ export type ClientCompaniesSearch = {
 };
 
 // ---------------------------------------------------------------------------
-// Row actions menu
-// ---------------------------------------------------------------------------
-
-interface RowActionsMenuProps {
-  company: ClientCompany;
-  onEdit: (company: ClientCompany) => void;
-  onDeactivate: (company: ClientCompany) => void;
-  onReactivate: (company: ClientCompany) => void;
-}
-
-function RowActionsMenu({ company, onEdit, onDeactivate, onReactivate }: RowActionsMenuProps) {
-  const [open, setOpen] = useState(false);
-  const { t } = useTranslation('clientCompanies');
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        aria-label={t('actions.openMenu')}
-        onClick={() => setOpen((p) => !p)}
-        className="flex items-center justify-center w-8 h-8 rounded-md hover:bg-surface-2 text-text-2"
-      >
-        <MoreVertical size={18} aria-hidden />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-9 z-20 min-w-[160px] rounded-lg border border-border bg-surface shadow-md py-1">
-          <button
-            type="button"
-            className="w-full text-left px-4 py-2 text-sm text-text hover:bg-surface-2"
-            onClick={() => {
-              setOpen(false);
-              onEdit(company);
-            }}
-          >
-            {t('actions.edit')}
-          </button>
-          {company.status === ClientCompanyStatus.ACTIVE ? (
-            <button
-              type="button"
-              className="w-full text-left px-4 py-2 text-sm text-bad-tx hover:bg-bad-bg"
-              onClick={() => {
-                setOpen(false);
-                onDeactivate(company);
-              }}
-            >
-              {t('actions.deactivate')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="w-full text-left px-4 py-2 text-sm text-ok-tx hover:bg-ok-bg"
-              onClick={() => {
-                setOpen(false);
-                onReactivate(company);
-              }}
-            >
-              {t('actions.reactivate')}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main screen
 // ---------------------------------------------------------------------------
 
@@ -137,7 +62,6 @@ export function ClientCompaniesScreen() {
   const search = useSearch({ strict: false }) as ClientCompaniesSearch;
   const { toast } = useToast();
 
-  const [editCompany, setEditCompany] = useState<ClientCompany | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<ClientCompany | null>(null);
   const [reactivateTarget, setReactivateTarget] = useState<ClientCompany | null>(null);
 
@@ -303,16 +227,26 @@ export function ClientCompaniesScreen() {
     {
       id: 'actions',
       header: '',
-      width: 52,
+      width: 140,
       align: 'center',
-      cell: (row) => (
-        <RowActionsMenu
-          company={row}
-          onEdit={setEditCompany}
-          onDeactivate={setDeactivateTarget}
-          onReactivate={setReactivateTarget}
-        />
-      ),
+      cell: (row) =>
+        row.status === ClientCompanyStatus.ACTIVE ? (
+          <button
+            type="button"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-bad-tx hover:bg-bad-bg"
+            onClick={() => setDeactivateTarget(row)}
+          >
+            {t('actions.deactivate')}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-ok-tx hover:bg-ok-bg"
+            onClick={() => setReactivateTarget(row)}
+          >
+            {t('actions.reactivate')}
+          </button>
+        ),
     },
   ];
 
@@ -442,19 +376,6 @@ export function ClientCompaniesScreen() {
           </div>
         )}
       </div>
-
-      {/* Edit drawer */}
-      {editCompany && (
-        <EditClientCompanyDrawer
-          clientCompanyId={editCompany.id}
-          open
-          onClose={() => setEditCompany(null)}
-          onSaved={() => {
-            setEditCompany(null);
-            void query.refetch();
-          }}
-        />
-      )}
 
       {/* Deactivate confirm */}
       <ConfirmDialog

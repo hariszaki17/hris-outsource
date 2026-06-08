@@ -147,7 +147,7 @@ function PosRowMenu({ position, onEdit, onDelete }: PosRowMenuProps) {
             }}
           >
             <Pencil className="size-[14px] shrink-0 text-text-2" aria-hidden />
-            {t('common.save')}
+            {t('serviceLines.posModal.editTitle')}
           </button>
           {position.status === PositionStatus.ACTIVE && (
             <button

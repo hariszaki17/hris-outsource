@@ -26,7 +26,7 @@ Super Admin (primary), HR Admin (positions), System (validate, audit). Read cons
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | Super Admin / HR | CRUD service lines & positions. |
+| **Web console** | Super Admin / HR | CRUD service lines & positions. Maintenance is consolidated on the service-line **detail page**: renaming the line **and** adding/updating/removing its **positions** all happen there. The list's "Edit" action **navigates to the detail page** (not a rename-only modal). |
 | **Mobile app** | Agent / Shift Leader | Read-only (a position label shown on their placement/schedule). |
 
 ## 5. Business rules
@@ -94,4 +94,5 @@ E1 (RBAC/audit), E3 (placement position selection), E4/E5 (service-line-driven r
 ## 10. Decisions & open questions
 
 - ✅ Position scoped by service line; service lines seeded (3), admin-extendable.
+- ✅ **UI/flow** *(resolved 2026-06-07, EPICS §8)* — service-line + position maintenance is **consolidated on the detail page** (rename the line and add/update/remove its positions there); the list's "Edit" action **routes to the detail page** instead of opening a rename-only modal.
 - **Open:** confirm the initial position catalog per line with SWP (drives the manual classification of migrated `recruitment_roles`).

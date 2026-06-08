@@ -18,7 +18,6 @@ import {
   useCreateServiceLine,
   useDiscontinueServiceLine,
   useListServiceLines,
-  useUpdateServiceLine,
 } from '@swp/api-client/e2';
 import {
   Button,
@@ -39,7 +38,7 @@ import {
   StatusBadge,
   useToast,
 } from '@swp/ui';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Info, Layers, MoreVertical, Plus, Sparkles } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -168,23 +167,21 @@ function RowMenu({ row, onEdit, onDiscontinue }: RowMenuProps) {
 }
 
 // ---------------------------------------------------------------------------
-// AddEditModal — Tambah/Edit Lini Layanan (.pen IwKfo)
+// AddModal — Tambah Lini Layanan (create only; .pen IwKfo)
+// Edit + position management live on the detail hub (/service-lines/$id).
 // ---------------------------------------------------------------------------
 
-interface AddEditModalProps {
+interface AddModalProps {
   open: boolean;
-  editing: ServiceLine | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-function AddEditModal({ open, editing, onClose, onSuccess }: AddEditModalProps) {
+function AddEditModal({ open, onClose, onSuccess }: AddModalProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const isEdit = editing !== null;
 
   const createMutation = useCreateServiceLine();
-  const updateMutation = useUpdateServiceLine();
 
   const {
     register,
@@ -198,9 +195,9 @@ function AddEditModal({ open, editing, onClose, onSuccess }: AddEditModalProps) 
 
   useEffect(() => {
     if (open) {
-      reset({ name: editing?.name ?? '' });
+      reset({ name: '' });
     }
-  }, [open, editing, reset]);
+  }, [open, reset]);
 
   function handleClose() {
     reset();
@@ -209,14 +206,7 @@ function AddEditModal({ open, editing, onClose, onSuccess }: AddEditModalProps) 
 
   async function onSubmit(values: ServiceLineFormValues) {
     try {
-      if (isEdit && editing) {
-        await updateMutation.mutateAsync({
-          serviceLineId: editing.id,
-          data: { name: values.name },
-        });
-      } else {
-        await createMutation.mutateAsync({ data: { name: values.name } });
-      }
+      await createMutation.mutateAsync({ data: { name: values.name } });
       toast({ tone: 'success', title: t('common.save') });
       handleClose();
       onSuccess();
@@ -233,7 +223,7 @@ function AddEditModal({ open, editing, onClose, onSuccess }: AddEditModalProps) 
         <ModalHeader
           icon={Layers}
           tone="brand"
-          title={isEdit ? t('serviceLines.addModal.editTitle') : t('serviceLines.addModal.title')}
+          title={t('serviceLines.addModal.title')}
           closeLabel={t('common.close')}
         />
         <ModalBody>
@@ -277,6 +267,7 @@ function AddEditModal({ open, editing, onClose, onSuccess }: AddEditModalProps) 
 export function ServiceLinesScreen() {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Filter / pagination state
   const [search, setSearch] = useState('');
@@ -284,9 +275,8 @@ export function ServiceLinesScreen() {
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
 
-  // Modal state
+  // Modal state (create only — edit + positions live on the detail hub)
   const [addEditOpen, setAddEditOpen] = useState(false);
-  const [editingRow, setEditingRow] = useState<ServiceLine | null>(null);
   const [discontinueTarget, setDiscontinueTarget] = useState<ServiceLine | null>(null);
 
   const queryParams = {
@@ -309,8 +299,8 @@ export function ServiceLinesScreen() {
     : rows;
 
   function handleEdit(row: ServiceLine) {
-    setEditingRow(row);
-    setAddEditOpen(true);
+    // Edit (name + positions) is the detail hub, not a rename-only modal.
+    void navigate({ to: '/service-lines/$serviceLineId', params: { serviceLineId: row.id } });
   }
 
   function handleDiscontinue(row: ServiceLine) {
@@ -441,13 +431,7 @@ export function ServiceLinesScreen() {
           <h1 className="text-[20px] font-semibold text-text">{t('serviceLines.title')}</h1>
           <p className="text-[13px] text-text-2">{t('serviceLines.subtitle')}</p>
         </div>
-        <Button
-          type="button"
-          onClick={() => {
-            setEditingRow(null);
-            setAddEditOpen(true);
-          }}
-        >
+        <Button type="button" onClick={() => setAddEditOpen(true)}>
           <Plus className="size-[15px]" aria-hidden />
           {t('serviceLines.addButton')}
         </Button>
@@ -504,13 +488,7 @@ export function ServiceLinesScreen() {
                 title={t('serviceLines.emptyTitle')}
                 description={t('serviceLines.emptyBody')}
                 action={
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setEditingRow(null);
-                      setAddEditOpen(true);
-                    }}
-                  >
+                  <Button type="button" onClick={() => setAddEditOpen(true)}>
                     <Plus className="size-[14px]" aria-hidden />
                     {t('serviceLines.addButton')}
                   </Button>
@@ -542,7 +520,6 @@ export function ServiceLinesScreen() {
       {/* Modals */}
       <AddEditModal
         open={addEditOpen}
-        editing={editingRow}
         onClose={() => setAddEditOpen(false)}
         onSuccess={() => void query.refetch()}
       />

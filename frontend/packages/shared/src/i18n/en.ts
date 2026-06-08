@@ -1228,6 +1228,7 @@ export const en: Messages = {
       createTitle: 'Add Client Company',
       createSubtitle: 'Fill in the new client company details',
       editTitle: 'Edit Client Company',
+      editSubtitle: 'Update client company details. Changes are recorded in the audit log.',
       footerHint: '* required · Actions are logged in the audit log',
       optional: 'optional',
       save: 'Save',

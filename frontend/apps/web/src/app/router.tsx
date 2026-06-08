@@ -28,7 +28,10 @@ import {
   type ClientCompaniesSearch,
 } from '@/features/e2-identity/client-companies-screen.tsx';
 import { ClientCompanyDetailScreen } from '@/features/e2-identity/client-company-detail-screen.tsx';
-import { CreateClientCompanyScreen } from '@/features/e2-identity/client-company-form.tsx';
+import {
+  CreateClientCompanyScreen,
+  EditClientCompanyScreen,
+} from '@/features/e2-identity/client-company-form.tsx';
 import { EmployeeDetailScreen } from '@/features/e2-identity/employee-detail-screen.tsx';
 import { CreateEmployeeScreen } from '@/features/e2-identity/employee-form.tsx';
 import { EmployeesScreen, type EmployeesSearch } from '@/features/e2-identity/employees-screen.tsx';
@@ -368,6 +371,14 @@ const clientCompanyDetailRoute = createRoute({
     return <ClientCompanyDetailScreen clientCompanyId={clientCompanyId} />;
   },
 });
+const clientCompanyEditRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies/$clientCompanyId/edit',
+  component: function ClientCompanyEditRoute() {
+    const { clientCompanyId } = clientCompanyEditRoute.useParams();
+    return <EditClientCompanyScreen clientCompanyId={clientCompanyId} />;
+  },
+});
 
 // E3 — Penempatan (placements list, create)
 const placementsRoute = createRoute({
@@ -701,6 +712,7 @@ const routeTree = rootRoute.addChildren([
     clientCompaniesRoute,
     clientCompanyNewRoute,
     clientCompanyDetailRoute,
+    clientCompanyEditRoute,
     placementsRoute,
     placementNewRoute,
     placementDetailRoute,
