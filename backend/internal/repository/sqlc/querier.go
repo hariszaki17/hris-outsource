@@ -80,6 +80,12 @@ type Querier interface {
 	// the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
 	CancelScheduleEntriesForLeave(ctx context.Context, arg CancelScheduleEntriesForLeaveParams) ([]CancelScheduleEntriesForLeaveRow, error)
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
+	// LR-5 OVERLAPPING_LEAVE pre-check: does this employee already hold a live
+	// (non-REJECTED / non-CANCELLED, non-deleted) leave_request whose [start_date,
+	// end_date] overlaps the requested range? Two ranges overlap iff
+	// start <= other.end AND end >= other.start. Returns true when at least one such
+	// row exists. (F6.2 agent file-a-request — the create-time conflict guard.)
+	CheckOverlappingLeave(ctx context.Context, arg CheckOverlappingLeaveParams) (bool, error)
 	// Insert ONE clock-in row. id fires via the column DEFAULT (omitted). schedule_id is
 	// nullable (NULL ⇒ unscheduled). ON CONFLICT (the partial schedule_id unique index)
 	// DO NOTHING makes a concurrent absence-sweep / double-tap a no-op — RETURNING then
@@ -105,6 +111,14 @@ type Querier interface {
 	CountExpiringAgreements30d(ctx context.Context, today pgtype.Date) (int64, error)
 	// Active/expiring placements ending within the next 30 days (inclusive of today).
 	CountExpiringPlacements30d(ctx context.Context, arg CountExpiringPlacements30dParams) (int64, error)
+	// E6 F6.2 server-authoritative leave duration: the count of days in
+	// [start_date, end_date] the agent would otherwise be ROSTERED for a shift
+	// (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not
+	// CANCELLED_BY_LEAVE, not deleted) MINUS the days that fall on a public holiday
+	// (E7 holidays). Mirrors the openapi rule: "days the agent would be rostered
+	// (per E4 Schedule) minus E7 public holidays." DISTINCT work_date guards against
+	// duplicate live rows; the NOT EXISTS holiday subquery excludes holiday dates.
+	CountLeaveDurationDays(ctx context.Context, arg CountLeaveDurationDaysParams) (int64, error)
 	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
 	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)

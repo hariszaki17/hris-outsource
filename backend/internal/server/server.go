@@ -445,25 +445,41 @@ func New(d Deps) http.Handler {
 			// COORDINATION POINT: future Phase-8 slices append AFTER this block.
 			// ---------------------------------------------------------------
 
-			// Reads + L1 approve + reject + calendar + quota list:
-			// super_admin, hr_admin, shift_leader (company_or_global).
+			// Reads: super_admin, hr_admin, shift_leader, AGENT. Agent reads are
+			// SELF-scoped in the service (List forces employee_id; Get → 404 on
+			// another employee; balance-by-employee → 403 on another employee).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 				r.Get("/leave-requests", d.Leave.ListLeaveRequests)
 				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
+				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
+			})
+
+			// Staff-only reads (calendar / quota / grant ledger / aggregate balance):
+			// super_admin, hr_admin, shift_leader (company_or_global). Agent excluded.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-l1", d.Leave.ApproveLeaveRequestL1)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:reject", d.Leave.RejectLeaveRequest)
 				r.Get("/leave-quotas", d.Leave.ListLeaveQuotas) // DEPRECATED 2026-06-08
 				r.Get("/leave-calendar", d.Leave.GetLeaveCalendar)
-				// F6.1 grant-lot ledger + balance reads (company_or_global).
+				// F6.1 grant-lot ledger + aggregate balance reads (company_or_global).
 				r.Get("/leave-grants", d.Leave.ListLeaveGrants)
 				r.Get("/leave-grants/{id}", d.Leave.GetLeaveGrant)
 				r.Get("/leave-balances", d.Leave.ListLeaveBalances)
-				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
-				// HR shorten / cancel-approved of an APPROVED leave (cancel/shorten
-				// release/reverse the grant lots). Agent cancel of own request is mobile.
-				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel", d.Leave.CancelLeaveRequest)
+				// HR cancel-approved of an APPROVED leave (reverses the grant lots).
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel-approved", d.Leave.CancelApprovedLeaveRequest)
+			})
+
+			// Agent file-a-request + own-request actions (F6.2): agent, hr_admin,
+			// super_admin. Create / submit / cancel are SELF-guarded in the service
+			// (Cancel guards own request; an agent withdraws only their own). All
+			// action routes require Idempotency-Key.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/leave-requests", d.Leave.CreateLeaveRequest)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:submit", d.Leave.SubmitLeaveRequest)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel", d.Leave.CancelLeaveRequest)
 			})
 
 			// Final/override approval + grant/quota writes: super_admin, hr_admin (global).

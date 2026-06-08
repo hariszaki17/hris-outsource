@@ -82,6 +82,47 @@ func (r *LeaveRepo) GetLeaveRequestForUpdate(ctx context.Context, tx pgx.Tx, id 
 	return mapRequestFromForUpdate(row), nil
 }
 
+// --- create (F6.2 agent file-a-request) ---
+
+func (r *LeaveRepo) CreateLeaveRequest(ctx context.Context, tx pgx.Tx, p svc.CreateLeaveRequestParams) (dom.LeaveRequest, error) {
+	row, err := r.q.WithTx(tx).CreateLeaveRequest(ctx, sqlcgen.CreateLeaveRequestParams{
+		EmployeeID:       p.EmployeeID,
+		PlacementID:      strptr(p.PlacementID),
+		CompanyID:        strptr(p.CompanyID),
+		ServiceLineID:    strptr(p.ServiceLineID),
+		LeaveTypeID:      p.LeaveTypeID,
+		StartDate:        timeToPgDate(p.StartDate),
+		EndDate:          timeToPgDate(p.EndDate),
+		DurationDays:     i32(p.DurationDays),
+		Reason:           strptr(p.Reason),
+		Notes:            strptr(p.Notes),
+		Status:           string(p.Status),
+		DelegateID:       strptr(p.DelegateID),
+		DocumentFileID:   strptr(p.DocumentFileID),
+		Backdated:        p.Backdated,
+		ClockInConflict:  false,
+		NoLeader:         p.NoLeader,
+		AssignedLeaderID: strptr(p.AssignedLeaderID),
+		CreatedBy:        strptr(p.CreatedBy),
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, mapErr(err)
+	}
+	return mapRequestFromCreate(row), nil
+}
+
+func (r *LeaveRepo) CheckOverlappingLeave(ctx context.Context, employeeID string, start, end time.Time) (bool, error) {
+	overlaps, err := r.q.CheckOverlappingLeave(ctx, sqlcgen.CheckOverlappingLeaveParams{
+		EmployeeID: employeeID,
+		StartDate:  timeToPgDate(start),
+		EndDate:    timeToPgDate(end),
+	})
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return overlaps, nil
+}
+
 // --- transitions ---
 
 func (r *LeaveRepo) UpdateLeaveRequestStatus(ctx context.Context, tx pgx.Tx, p svc.UpdateStatusParams) (dom.LeaveRequest, error) {
@@ -166,11 +207,15 @@ func (r *LeaveRepo) GetLeaveType(ctx context.Context, id string) (svc.LeaveTypeI
 		return svc.LeaveTypeInfo{}, mapErr(err)
 	}
 	return svc.LeaveTypeInfo{
-		ID:       row.ID,
-		Code:     row.Code,
-		Name:     row.Name,
-		IsAnnual: row.IsAnnual,
-		Earmark:  earmarkForCode(row.Code),
+		ID:                 row.ID,
+		Code:               row.Code,
+		Name:               row.Name,
+		IsAnnual:           row.IsAnnual,
+		Earmark:            earmarkForCode(row.Code),
+		IsDocumentRequired: row.RequiresDocument,
+		// No leave_types.allows_backdated column yet; any backdated request fails the
+		// gate (BACKDATED_LEAVE). See LeaveTypeInfo TODO.
+		AllowsBackdated: false,
 	}, nil
 }
 

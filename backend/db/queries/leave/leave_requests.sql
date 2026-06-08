@@ -158,6 +158,22 @@ RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type
           balance_remaining_at_check, balance_requires_override, balance_earmark,
           balance_allocation, created_by, created_at, updated_at;
 
+-- name: CheckOverlappingLeave :one
+-- LR-5 OVERLAPPING_LEAVE pre-check: does this employee already hold a live
+-- (non-REJECTED / non-CANCELLED, non-deleted) leave_request whose [start_date,
+-- end_date] overlaps the requested range? Two ranges overlap iff
+-- start <= other.end AND end >= other.start. Returns true when at least one such
+-- row exists. (F6.2 agent file-a-request — the create-time conflict guard.)
+SELECT EXISTS (
+    SELECT 1
+    FROM leave_requests lr
+    WHERE lr.employee_id = sqlc.arg(employee_id)
+      AND lr.deleted_at IS NULL
+      AND lr.status NOT IN ('REJECTED','CANCELLED')
+      AND lr.start_date <= sqlc.arg(end_date)::date
+      AND lr.end_date   >= sqlc.arg(start_date)::date
+) AS overlaps;
+
 -- name: UpdateLeaveRequestStatus :one
 -- The approval state transitions (PENDING_L1→PENDING_HR→APPROVED, →REJECTED,
 -- →CANCELLED). Also refreshes the routing + balance_check snapshot columns.

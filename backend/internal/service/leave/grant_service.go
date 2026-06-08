@@ -234,6 +234,10 @@ func (s *GrantService) Get(ctx context.Context, id string, includeConsumptions b
 // line per active earmarked lot. include_expired_lots adds zeroed/expired lots to
 // all_lots[] for the history view.
 func (s *GrantService) Balance(ctx context.Context, employeeID string, includeExpired bool) (dom.LeaveBalance, error) {
+	// SELF scope: an agent may read ONLY their own balance.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent && employeeID != p.EmployeeID {
+		return dom.LeaveBalance{}, apperr.Forbidden()
+	}
 	now := s.now().UTC()
 	groups, err := s.repo.SumActiveBalanceByEarmark(ctx, employeeID, now)
 	if err != nil {

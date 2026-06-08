@@ -78,6 +78,12 @@ func (s *LeaveService) List(ctx context.Context, f RequestFilter) ([]dom.LeaveRe
 	if !ok {
 		return nil, nil, false, apperr.Unauthenticated()
 	}
+	// Agents see ONLY their own requests (SELF scope) — force the employee filter
+	// regardless of any client-supplied employee_id.
+	if p.Role == auth.RoleAgent {
+		eid := p.EmployeeID
+		f.EmployeeID = &eid
+	}
 	if p.Role == auth.RoleShiftLeader {
 		if f.CompanyID != nil && *f.CompanyID != p.CompanyID {
 			return nil, nil, false, apperr.OutOfScope()
@@ -120,7 +126,13 @@ func (s *LeaveService) Get(ctx context.Context, id string) (dom.LeaveRequest, er
 	if err != nil {
 		return dom.LeaveRequest{}, apperr.Internal(err)
 	}
-	if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
+	// Agent self-scope: another employee's request is hidden as 404 (no existence
+	// leak). Staff keep the company GuardCompany scope.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if rec.EmployeeID != p.EmployeeID {
+			return dom.LeaveRequest{}, apperr.NotFound()
+		}
+	} else if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 		return dom.LeaveRequest{}, apperr.NotFound()
 	}
 	rec.Timeline = s.buildTimeline(ctx, rec)
@@ -433,6 +445,144 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 	return s.reread(ctx, out)
 }
 
+// --- create (F6.2 agent file-a-request) ---
+
+// CreateLeaveInput is the validated POST /leave-requests body (LeaveRequestWriteRequest).
+// EmployeeID is optional on the wire: an agent omits it (server fills from the token);
+// staff may target an employee. Submit defaults true (nil ⇒ submit) — the create-and-
+// submit single-call path. DurationDays is NOT carried: it is always server-computed.
+type CreateLeaveInput struct {
+	LeaveTypeID    string
+	StartDate      time.Time
+	EndDate        time.Time
+	Reason         string
+	EmployeeID     *string
+	DelegateID     *string
+	DocumentFileID *string
+	Submit         *bool
+}
+
+// Create files a leave request (F6.2). It resolves the principal (an agent may only
+// file for themselves — 403 if EmployeeID is set to anyone else), loads the leave type,
+// then in ONE tx validates in the contract order
+// (INVALID_DATE_RANGE → MISSING_REQUIRED_DOCUMENT → OVERLAPPING_LEAVE → BACKDATED_LEAVE),
+// computes duration_days via the server-authoritative calculator (rostered days minus
+// public holidays), inserts the DRAFT, and — when submit (default true) — runs submitTx
+// (FIFO reservation; QUOTA_EXCEEDED surfaces here). Returns the full request.
+// TODO: attachment upload + edit-draft + document-required leave types — the
+// attachment endpoint is deferred; document_file_id stays optional on the wire but
+// MISSING_REQUIRED_DOCUMENT is still enforced for document-required types.
+func (s *LeaveService) Create(ctx context.Context, in CreateLeaveInput) (dom.LeaveRequest, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return dom.LeaveRequest{}, apperr.Unauthenticated()
+	}
+
+	// Resolve the target employee. An agent files only for themselves.
+	employeeID := deref(in.EmployeeID)
+	if p.Role == auth.RoleAgent {
+		if in.EmployeeID != nil && *in.EmployeeID != "" && *in.EmployeeID != p.EmployeeID {
+			return dom.LeaveRequest{}, apperr.Forbidden()
+		}
+		employeeID = p.EmployeeID
+	}
+	if employeeID == "" {
+		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"employee_id": "Wajib diisi."})
+	}
+
+	lt, lterr := s.repo.GetLeaveType(ctx, in.LeaveTypeID)
+	if errors.Is(lterr, domain.ErrNotFound) {
+		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"leave_type_id": "Jenis cuti tidak ditemukan."})
+	}
+	if lterr != nil {
+		return dom.LeaveRequest{}, apperr.Internal(lterr)
+	}
+
+	submit := true
+	if in.Submit != nil {
+		submit = *in.Submit
+	}
+
+	var out dom.LeaveRequest
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		// 1. INVALID_DATE_RANGE (422) — end before start.
+		if in.EndDate.Before(in.StartDate) {
+			return apperr.Rule("INVALID_DATE_RANGE", map[string]string{"end_date": "Harus >= tanggal mulai."})
+		}
+		// 2. MISSING_REQUIRED_DOCUMENT (422) — document-required type without a doc.
+		if lt.IsDocumentRequired && deref(in.DocumentFileID) == "" {
+			return apperr.Rule("MISSING_REQUIRED_DOCUMENT", map[string]string{"document_file_id": "Wajib dilampirkan untuk jenis cuti ini."})
+		}
+		// 3. OVERLAPPING_LEAVE (409, LR-5) — a live leave overlaps the range.
+		overlaps, oerr := s.repo.CheckOverlappingLeave(ctx, employeeID, in.StartDate, in.EndDate)
+		if oerr != nil {
+			return oerr
+		}
+		if overlaps {
+			return apperr.Conflict("OVERLAPPING_LEAVE")
+		}
+		// 4. BACKDATED_LEAVE (422) — start before today and the type does not allow it.
+		today := s.now().UTC().Truncate(24 * time.Hour)
+		backdated := in.StartDate.Before(today)
+		if backdated && !lt.AllowsBackdated {
+			return apperr.Rule("BACKDATED_LEAVE", map[string]string{"requires_hr_override": "true"})
+		}
+
+		// 5. server-authoritative duration (rostered days minus public holidays).
+		duration, derr := s.schedule.CountLeaveDuration(ctx, employeeID, in.StartDate, in.EndDate)
+		if derr != nil {
+			return derr
+		}
+
+		// 6. insert the DRAFT.
+		created, cerr := s.repo.CreateLeaveRequest(ctx, tx, CreateLeaveRequestParams{
+			EmployeeID:     employeeID,
+			LeaveTypeID:    in.LeaveTypeID,
+			StartDate:      in.StartDate,
+			EndDate:        in.EndDate,
+			DurationDays:   duration,
+			Reason:         strOrNil(in.Reason),
+			Status:         dom.LeaveStatusDraft,
+			DelegateID:     strptrNil(in.DelegateID),
+			DocumentFileID: strptrNil(in.DocumentFileID),
+			Backdated:      backdated,
+			CreatedBy:      strOrNil(actorUserID(ctx)),
+		})
+		if cerr != nil {
+			return cerr
+		}
+		out = created
+
+		// 7. audit the create.
+		if aerr := audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionCreate,
+			EntityType: "leave_request",
+			EntityID:   created.ID,
+			After: map[string]any{
+				"employee_id": created.EmployeeID, "leave_type_id": created.LeaveTypeID,
+				"start_date": created.StartDate.Format("2006-01-02"), "end_date": created.EndDate.Format("2006-01-02"),
+				"duration_days": created.DurationDays, "status": string(created.Status),
+			},
+		}); aerr != nil {
+			return aerr
+		}
+
+		// 8. submit (default true): reserve → transition → QUOTA_EXCEEDED surfaces here.
+		if submit {
+			submitted, serr := s.submitTx(ctx, tx, created)
+			if serr != nil {
+				return serr
+			}
+			out = submitted
+		}
+		return nil
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, asAppErr(err)
+	}
+	return s.reread(ctx, out)
+}
+
 // --- submit (reserve) ---
 
 // Submit transitions DRAFT → PENDING_L1 (or PENDING_HR when no leader) and FIFO-
@@ -440,60 +590,78 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 // the BalanceCheck allocation snapshot. Insufficient balance → QUOTA_EXCEEDED (HR
 // pre-funds a lot instead of going negative). Quota-untracked types skip reservation.
 func (s *LeaveService) Submit(ctx context.Context, id string) (dom.LeaveRequest, error) {
-	actor := actorEmployeeID(ctx)
-	role := actorRole(ctx)
 	var out dom.LeaveRequest
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		rec, lerr := s.lockRequest(ctx, tx, id)
 		if lerr != nil {
 			return lerr
 		}
-		if rec.Status != dom.LeaveStatusDraft {
-			return stateConflict(rec.Status)
-		}
-		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
-		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
-			return lterr
-		}
-		earmark := earmarkForType(lt)
-
-		var alloc []dom.AllocationLine
-		var availPtr *int
-		if lt.IsAnnual {
-			a, available, rerr := s.grants.reserve(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
-			if rerr != nil {
-				return rerr
-			}
-			alloc = a
-			availPtr = &available
-		}
-
-		next := dom.LeaveStatusPendingL1
-		if rec.Routing.NoLeader {
-			next = dom.LeaveStatusPendingHR
-		}
-		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
-			ID:               id,
-			Status:           next,
-			NoLeader:         rec.Routing.NoLeader,
-			AssignedLeaderID: rec.Routing.AssignedLeaderID,
-			ClockInConflict:  rec.ClockInConflict,
-		})
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		req := rec.DurationDays
-		if serr := s.writeSnapshot(ctx, tx, id, &req, availPtr, boolPtr(false), earmark, alloc); serr != nil {
+		if serr := guardSelfOwn(ctx, rec); serr != nil {
 			return serr
 		}
-		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(next), actor, "SUBMIT"))
+		updated, serr := s.submitTx(ctx, tx, rec)
+		if serr != nil {
+			return serr
+		}
+		out = updated
+		return nil
 	})
-	_ = role
 	if err != nil {
 		return dom.LeaveRequest{}, asAppErr(err)
 	}
 	return s.reread(ctx, out)
+}
+
+// submitTx is the shared DRAFT → PENDING_L1/PENDING_HR reservation core, called from
+// both the public Submit (after lock + self-guard) and Create (with submit=true, on
+// the freshly-inserted DRAFT). It state-checks DRAFT, FIFO-reserves the duration for
+// quota-tracked types (QUOTA_EXCEEDED on insufficient balance), writes the snapshot,
+// transitions, and audits — all inside the caller's tx. Returns the updated row.
+func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveRequest) (dom.LeaveRequest, error) {
+	actor := actorEmployeeID(ctx)
+	id := rec.ID
+	if rec.Status != dom.LeaveStatusDraft {
+		return dom.LeaveRequest{}, stateConflict(rec.Status)
+	}
+	lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
+	if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
+		return dom.LeaveRequest{}, lterr
+	}
+	earmark := earmarkForType(lt)
+
+	var alloc []dom.AllocationLine
+	var availPtr *int
+	if lt.IsAnnual {
+		a, available, rerr := s.grants.reserve(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
+		if rerr != nil {
+			return dom.LeaveRequest{}, rerr
+		}
+		alloc = a
+		availPtr = &available
+	}
+
+	next := dom.LeaveStatusPendingL1
+	if rec.Routing.NoLeader {
+		next = dom.LeaveStatusPendingHR
+	}
+	updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+		ID:               id,
+		Status:           next,
+		NoLeader:         rec.Routing.NoLeader,
+		AssignedLeaderID: rec.Routing.AssignedLeaderID,
+		ClockInConflict:  rec.ClockInConflict,
+	})
+	if uerr != nil {
+		return dom.LeaveRequest{}, uerr
+	}
+	req := rec.DurationDays
+	if serr := s.writeSnapshot(ctx, tx, id, &req, availPtr, boolPtr(false), earmark, alloc); serr != nil {
+		return dom.LeaveRequest{}, serr
+	}
+	if aerr := audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(next), actor, "SUBMIT")); aerr != nil {
+		return dom.LeaveRequest{}, aerr
+	}
+	return updated, nil
 }
 
 // --- cancel (withdraw a not-yet-approved request) ---
@@ -857,6 +1025,14 @@ func strOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// strptrNil normalizes an optional string pointer: nil or empty → nil.
+func strptrNil(p *string) *string {
+	if p == nil || *p == "" {
+		return nil
+	}
+	return p
 }
 
 func deref(p *string) string {

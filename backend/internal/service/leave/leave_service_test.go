@@ -89,6 +89,19 @@ func (f *fakeLeaveRepo) InsertLeaveApproval(_ context.Context, _ pgx.Tx, p Appro
 func (f *fakeLeaveRepo) ListLeaveApprovalsForRequest(context.Context, string) ([]dom.LeaveApproval, error) {
 	return f.approvals, nil
 }
+func (f *fakeLeaveRepo) CreateLeaveRequest(_ context.Context, _ pgx.Tx, p CreateLeaveRequestParams) (dom.LeaveRequest, error) {
+	r := dom.LeaveRequest{
+		ID: "SWP-LR-NEW", EmployeeID: p.EmployeeID, LeaveTypeID: p.LeaveTypeID,
+		StartDate: p.StartDate, EndDate: p.EndDate, DurationDays: p.DurationDays,
+		Reason: p.Reason, Status: p.Status, DelegateID: p.DelegateID, DocumentFileID: p.DocumentFileID,
+		Backdated: p.Backdated, Routing: dom.LeaveRouting{NoLeader: p.NoLeader, AssignedLeaderID: p.AssignedLeaderID},
+	}
+	f.req = r
+	return r, nil
+}
+func (f *fakeLeaveRepo) CheckOverlappingLeave(context.Context, string, time.Time, time.Time) (bool, error) {
+	return false, nil
+}
 func (f *fakeLeaveRepo) GetLeaveType(context.Context, string) (LeaveTypeInfo, error) {
 	return f.leaveType, nil
 }
@@ -387,6 +400,9 @@ func (f *fakeSchedule) CancelScheduleEntriesForLeave(_ context.Context, _ pgx.Tx
 func (f *fakeSchedule) InsertApprovedLeaveDay(context.Context, pgx.Tx, string, time.Time, string, string) error {
 	f.inserted++
 	return nil
+}
+func (f *fakeSchedule) CountLeaveDuration(_ context.Context, _ string, start, end time.Time) (int, error) {
+	return int(end.Sub(start).Hours()/24) + 1, nil
 }
 
 // --- helpers ---

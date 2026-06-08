@@ -174,6 +174,33 @@ func mapRequestFromForUpdate(r sqlcgen.GetLeaveRequestForUpdateRow) dom.LeaveReq
 	return lr
 }
 
+func mapRequestFromCreate(r sqlcgen.CreateLeaveRequestRow) dom.LeaveRequest {
+	lr := dom.LeaveRequest{
+		ID:              r.ID,
+		EmployeeID:      r.EmployeeID,
+		PlacementID:     r.PlacementID,
+		CompanyID:       r.CompanyID,
+		ServiceLineID:   r.ServiceLineID,
+		LeaveTypeID:     r.LeaveTypeID,
+		StartDate:       pgDateToTime(r.StartDate),
+		EndDate:         pgDateToTime(r.EndDate),
+		DurationDays:    int(r.DurationDays),
+		Reason:          r.Reason,
+		Notes:           r.Notes,
+		Status:          dom.LeaveStatus(r.Status),
+		DelegateID:      r.DelegateID,
+		DocumentFileID:  r.DocumentFileID,
+		Backdated:       r.Backdated,
+		ClockInConflict: r.ClockInConflict,
+		CreatedBy:       r.CreatedBy,
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+	}
+	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
+	return lr
+}
+
 func mapRequestFromUpdate(r sqlcgen.UpdateLeaveRequestStatusRow) dom.LeaveRequest {
 	lr := dom.LeaveRequest{
 		ID:              r.ID,

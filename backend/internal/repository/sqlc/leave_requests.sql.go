@@ -12,6 +12,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const checkOverlappingLeave = `-- name: CheckOverlappingLeave :one
+SELECT EXISTS (
+    SELECT 1
+    FROM leave_requests lr
+    WHERE lr.employee_id = $1
+      AND lr.deleted_at IS NULL
+      AND lr.status NOT IN ('REJECTED','CANCELLED')
+      AND lr.start_date <= $2::date
+      AND lr.end_date   >= $3::date
+) AS overlaps
+`
+
+type CheckOverlappingLeaveParams struct {
+	EmployeeID string
+	EndDate    pgtype.Date
+	StartDate  pgtype.Date
+}
+
+// LR-5 OVERLAPPING_LEAVE pre-check: does this employee already hold a live
+// (non-REJECTED / non-CANCELLED, non-deleted) leave_request whose [start_date,
+// end_date] overlaps the requested range? Two ranges overlap iff
+// start <= other.end AND end >= other.start. Returns true when at least one such
+// row exists. (F6.2 agent file-a-request — the create-time conflict guard.)
+func (q *Queries) CheckOverlappingLeave(ctx context.Context, arg CheckOverlappingLeaveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, checkOverlappingLeave, arg.EmployeeID, arg.EndDate, arg.StartDate)
+	var overlaps bool
+	err := row.Scan(&overlaps)
+	return overlaps, err
+}
+
 const countPendingLeaveDaysForQuota = `-- name: CountPendingLeaveDaysForQuota :one
 SELECT COALESCE(SUM(lr.duration_days), 0)::bigint AS pending_days
 FROM leave_requests lr

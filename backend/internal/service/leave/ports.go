@@ -102,6 +102,15 @@ type LeaveTypeInfo struct {
 	Name     string
 	IsAnnual bool   // the quota-tracked gate (the real leave_types.is_annual column)
 	Earmark  string // purpose code for earmarked allocation (LQ-10); "" = flat pool
+
+	// F6.2 create-time validation gates (openapi LeaveType). IsDocumentRequired maps
+	// to the leave_types.requires_document column (MISSING_REQUIRED_DOCUMENT). There is
+	// no allows_backdated column yet, so AllowsBackdated is currently always false (any
+	// start_date < today on any type → BACKDATED_LEAVE).
+	// TODO: attachment upload + edit-draft + document-required leave types; add a real
+	// leave_types.allows_backdated column to source AllowsBackdated.
+	IsDocumentRequired bool
+	AllowsBackdated    bool
 }
 
 // --- leave-request repository port ---
@@ -111,6 +120,14 @@ type LeaveRepository interface {
 	ListLeaveRequests(ctx context.Context, f RequestFilter) ([]dom.LeaveRequest, error)
 	GetLeaveRequest(ctx context.Context, id string) (dom.LeaveRequest, error)
 	GetLeaveRequestForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveRequest, error)
+
+	// CreateLeaveRequest inserts a DRAFT request (F6.2 agent file-a-request). The
+	// caller (Create) computes duration + routing + the validation gates first.
+	CreateLeaveRequest(ctx context.Context, tx pgx.Tx, p CreateLeaveRequestParams) (dom.LeaveRequest, error)
+	// CheckOverlappingLeave reports whether the employee already holds a live
+	// (non-REJECTED/non-CANCELLED) leave overlapping [start,end] (LR-5).
+	CheckOverlappingLeave(ctx context.Context, employeeID string, start, end time.Time) (bool, error)
+
 	UpdateLeaveRequestStatus(ctx context.Context, tx pgx.Tx, p UpdateStatusParams) (dom.LeaveRequest, error)
 	UpdateLeaveRequestDates(ctx context.Context, tx pgx.Tx, id string, start, end time.Time, durationDays int) (dom.LeaveRequest, error)
 
@@ -151,6 +168,29 @@ type UpdateStatusParams struct {
 	BalanceRequestedDays    *int
 	BalanceRemainingAtCheck *int
 	BalanceRequiresOverride *bool
+}
+
+// CreateLeaveRequestParams carries one DRAFT leave_requests insert (F6.2). The id is
+// allocated by the column DEFAULT; duration_days / backdated / routing are computed by
+// the service before the insert. Nullable columns are pointers.
+type CreateLeaveRequestParams struct {
+	EmployeeID       string
+	PlacementID      *string
+	CompanyID        *string
+	ServiceLineID    *string
+	LeaveTypeID      string
+	StartDate        time.Time
+	EndDate          time.Time
+	DurationDays     int
+	Reason           *string
+	Notes            *string
+	Status           dom.LeaveStatus
+	DelegateID       *string
+	DocumentFileID   *string
+	Backdated        bool
+	NoLeader         bool
+	AssignedLeaderID *string
+	CreatedBy        *string
 }
 
 // ApprovalRow carries one leave_approvals decision-trail insert.
@@ -293,4 +333,10 @@ type ScheduleImpact struct {
 type SchedulePort interface {
 	CancelScheduleEntriesForLeave(ctx context.Context, tx pgx.Tx, employeeID string, start, end time.Time) ([]ScheduleImpact, error)
 	InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error
+
+	// CountLeaveDuration is the server-authoritative F6.2 duration: the number of days
+	// in [start,end] the agent would otherwise be rostered for a shift (E4 schedule
+	// entries) MINUS public holidays (E7). Reuses the scheduling repo's schedule_entries
+	// + holidays access, so the leave service never re-implements a naive day-count.
+	CountLeaveDuration(ctx context.Context, employeeID string, start, end time.Time) (int, error)
 }

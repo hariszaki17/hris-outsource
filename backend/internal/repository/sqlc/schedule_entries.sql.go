@@ -61,6 +61,41 @@ func (q *Queries) CancelScheduleEntriesForLeave(ctx context.Context, arg CancelS
 	return items, nil
 }
 
+const countLeaveDurationDays = `-- name: CountLeaveDurationDays :one
+SELECT count(DISTINCT se.work_date)::bigint AS duration_days
+FROM schedule_entries se
+WHERE se.employee_id = $1
+  AND se.work_date BETWEEN $2::date AND $3::date
+  AND se.deleted_at IS NULL
+  AND se.is_day_off = false
+  AND se.status <> 'CANCELLED_BY_LEAVE'
+  AND NOT EXISTS (
+      SELECT 1 FROM holidays h
+      WHERE h.holiday_date = se.work_date
+        AND h.deleted_at IS NULL
+  )
+`
+
+type CountLeaveDurationDaysParams struct {
+	EmployeeID string
+	StartDate  pgtype.Date
+	EndDate    pgtype.Date
+}
+
+// E6 F6.2 server-authoritative leave duration: the count of days in
+// [start_date, end_date] the agent would otherwise be ROSTERED for a shift
+// (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not
+// CANCELLED_BY_LEAVE, not deleted) MINUS the days that fall on a public holiday
+// (E7 holidays). Mirrors the openapi rule: "days the agent would be rostered
+// (per E4 Schedule) minus E7 public holidays." DISTINCT work_date guards against
+// duplicate live rows; the NOT EXISTS holiday subquery excludes holiday dates.
+func (q *Queries) CountLeaveDurationDays(ctx context.Context, arg CountLeaveDurationDaysParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLeaveDurationDays, arg.EmployeeID, arg.StartDate, arg.EndDate)
+	var duration_days int64
+	err := row.Scan(&duration_days)
+	return duration_days, err
+}
+
 const createScheduleEntry = `-- name: CreateScheduleEntry :one
 INSERT INTO schedule_entries (
     employee_id, placement_id, service_line_id, shift_master_id,

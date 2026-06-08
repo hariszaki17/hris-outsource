@@ -255,6 +255,7 @@ type fakeLeaveRepo struct {
 	approvals  map[string][]dom.LeaveApproval
 	leaveTypes map[string]svc.LeaveTypeInfo
 	calendar   []dom.LeaveCalendarEntry
+	createSeq  int
 }
 
 func newFakeLeaveRepo() *fakeLeaveRepo {
@@ -315,6 +316,52 @@ func (r *fakeLeaveRepo) GetLeaveRequest(_ context.Context, id string) (dom.Leave
 
 func (r *fakeLeaveRepo) GetLeaveRequestForUpdate(_ context.Context, _ pgx.Tx, id string) (dom.LeaveRequest, error) {
 	return r.GetLeaveRequest(context.Background(), id)
+}
+
+// createSeq drives a deterministic SWP-LR-* id for inserted DRAFT requests.
+func (r *fakeLeaveRepo) CreateLeaveRequest(_ context.Context, _ pgx.Tx, p svc.CreateLeaveRequestParams) (dom.LeaveRequest, error) {
+	r.createSeq++
+	id := "SWP-LR-" + itoa(9000+r.createSeq)
+	req := dom.LeaveRequest{
+		ID:             id,
+		EmployeeID:     p.EmployeeID,
+		PlacementID:    p.PlacementID,
+		CompanyID:      p.CompanyID,
+		ServiceLineID:  p.ServiceLineID,
+		LeaveTypeID:    p.LeaveTypeID,
+		StartDate:      p.StartDate,
+		EndDate:        p.EndDate,
+		DurationDays:   p.DurationDays,
+		Reason:         p.Reason,
+		Notes:          p.Notes,
+		Status:         p.Status,
+		DelegateID:     p.DelegateID,
+		DocumentFileID: p.DocumentFileID,
+		Backdated:      p.Backdated,
+		Routing:        dom.LeaveRouting{NoLeader: p.NoLeader, AssignedLeaderID: p.AssignedLeaderID},
+		CreatedBy:      p.CreatedBy,
+		CreatedAt:      fixedNow,
+		UpdatedAt:      fixedNow,
+		EmployeeName:   strp("Agent " + p.EmployeeID),
+	}
+	r.requests[id] = req
+	return req, nil
+}
+
+func (r *fakeLeaveRepo) CheckOverlappingLeave(_ context.Context, employeeID string, start, end time.Time) (bool, error) {
+	for _, req := range r.requests {
+		if req.EmployeeID != employeeID {
+			continue
+		}
+		if req.Status == dom.LeaveStatusRejected || req.Status == dom.LeaveStatusCancelled {
+			continue
+		}
+		// overlap iff start <= other.end AND end >= other.start.
+		if !start.After(req.EndDate) && !end.Before(req.StartDate) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *fakeLeaveRepo) UpdateLeaveRequestStatus(_ context.Context, _ pgx.Tx, p svc.UpdateStatusParams) (dom.LeaveRequest, error) {
@@ -578,6 +625,11 @@ type fakeScheduleRepo struct {
 	cancelReturns map[string][]svc.ScheduleImpact // keyed by employee id
 	cancelCalls   []string                        // employee ids passed to Cancel
 	insertedDays  []insertedLeaveDay
+	// duration overrides the F6.2 server-computed leave duration. When >0 it is
+	// returned verbatim; when 0 the fake falls back to the inclusive calendar-day
+	// count of [start,end] (the simplest deterministic stand-in for "rostered days
+	// minus holidays" — the real query lives in the scheduling repo).
+	duration int
 }
 
 type insertedLeaveDay struct {
@@ -599,6 +651,13 @@ func (r *fakeScheduleRepo) CancelScheduleEntriesForLeave(_ context.Context, _ pg
 func (r *fakeScheduleRepo) InsertApprovedLeaveDay(_ context.Context, _ pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error {
 	r.insertedDays = append(r.insertedDays, insertedLeaveDay{employeeID, date, leaveRequestID, leaveType})
 	return nil
+}
+
+func (r *fakeScheduleRepo) CountLeaveDuration(_ context.Context, _ string, start, end time.Time) (int, error) {
+	if r.duration > 0 {
+		return r.duration, nil
+	}
+	return int(end.Sub(start).Hours()/24) + 1, nil
 }
 
 var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
@@ -939,10 +998,16 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	// Mirror server.go: reads + L1 + reject + calendar + quota-list under
 	// RequireRole(super/hr/leader); final/override + quota-writes under
 	// RequireRole(super/hr); action routes wrap the idempotency middleware.
+	// Reads: super/hr/leader/AGENT (agent self-scoped in service).
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/leave-requests", handler.ListLeaveRequests)
 		r.Get("/leave-requests/{id}", handler.GetLeaveRequest)
+		r.Get("/leave-balances/by-employee/{employee_id}", handler.GetLeaveBalanceByEmployee)
+	})
+	// Staff-only reads + L1/reject/cancel-approved: super/hr/leader.
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-l1", handler.ApproveLeaveRequestL1)
 		r.With(idem.Handler).Post("/leave-requests/{id}:reject", handler.RejectLeaveRequest)
 		r.Get("/leave-quotas", handler.ListLeaveQuotas)
@@ -950,7 +1015,14 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Get("/leave-grants", handler.ListLeaveGrants)
 		r.Get("/leave-grants/{id}", handler.GetLeaveGrant)
 		r.Get("/leave-balances", handler.ListLeaveBalances)
-		r.Get("/leave-balances/by-employee/{employee_id}", handler.GetLeaveBalanceByEmployee)
+		r.With(idem.Handler).Post("/leave-requests/{id}:cancel-approved", handler.CancelApprovedLeaveRequest)
+	})
+	// Agent file-a-request + own-request actions: agent/hr/super.
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+		r.With(idem.Handler).Post("/leave-requests", handler.CreateLeaveRequest)
+		r.With(idem.Handler).Post("/leave-requests/{id}:submit", handler.SubmitLeaveRequest)
+		r.With(idem.Handler).Post("/leave-requests/{id}:cancel", handler.CancelLeaveRequest)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
@@ -1022,6 +1094,15 @@ func (h *harness) seedRequest(id, company, employee string, status dom.LeaveStat
 // seedLeaveType registers an E2 leave-type (is_annual drives the quota gate).
 func (h *harness) seedLeaveType(id, code string, isAnnual bool) {
 	h.leave.leaveTypes[id] = svc.LeaveTypeInfo{ID: id, Code: code, Name: code, IsAnnual: isAnnual}
+}
+
+// seedLeaveTypeFull registers a leave-type with the F6.2 create-time gate flags
+// (is_document_required / allows_backdated).
+func (h *harness) seedLeaveTypeFull(id, code string, isAnnual, docRequired, allowsBackdated bool) {
+	h.leave.leaveTypes[id] = svc.LeaveTypeInfo{
+		ID: id, Code: code, Name: code, IsAnnual: isAnnual,
+		IsDocumentRequired: docRequired, AllowsBackdated: allowsBackdated,
+	}
 }
 
 // seedQuota plants a leave_quotas row (annual, calendar-year period).

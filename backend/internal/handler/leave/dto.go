@@ -14,6 +14,21 @@ import (
 
 // --- request bodies ---
 
+// leaveRequestWriteRequest is the POST /leave-requests body (openapi
+// LeaveRequestWriteRequest). employee_id is optional (an agent omits it → server fills
+// from the token); duration_days is NEVER read (server-computed). submit defaults true
+// (*bool: nil ⇒ submit) for the create-and-submit single-call path.
+type leaveRequestWriteRequest struct {
+	LeaveTypeID    string  `json:"leave_type_id"`
+	StartDate      string  `json:"start_date"`
+	EndDate        string  `json:"end_date"`
+	Reason         string  `json:"reason"`
+	EmployeeID     *string `json:"employee_id"`
+	DelegateID     *string `json:"delegate_id"`
+	DocumentFileID *string `json:"document_file_id"`
+	Submit         *bool   `json:"submit"`
+}
+
 type noteRequest struct {
 	Note string `json:"note"`
 }

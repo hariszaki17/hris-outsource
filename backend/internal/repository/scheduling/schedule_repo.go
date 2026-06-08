@@ -249,6 +249,22 @@ func (r *ScheduleRepo) CancelScheduleEntriesForLeave(ctx context.Context, tx pgx
 	return out, nil
 }
 
+// CountLeaveDuration is the server-authoritative F6.2 leave duration: rostered shift
+// days in [start,end] (live schedule_entries) minus public holidays (E7). Backs
+// leavesvc.SchedulePort so the leave Create path never re-implements a naive
+// day-count.
+func (r *ScheduleRepo) CountLeaveDuration(ctx context.Context, employeeID string, start, end time.Time) (int, error) {
+	n, err := r.q.CountLeaveDurationDays(ctx, sqlcgen.CountLeaveDurationDaysParams{
+		EmployeeID: employeeID,
+		StartDate:  timeToPgDate(start),
+		EndDate:    timeToPgDate(end),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // InsertApprovedLeaveDay upserts the INV-3 production approved-leave row (the real
 // leave_requests.id replaces the Phase-6 fixture). ON CONFLICT keeps it idempotent.
 func (r *ScheduleRepo) InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error {
