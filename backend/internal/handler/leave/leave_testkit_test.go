@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -606,13 +607,20 @@ var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
 // fakeGrantRepo — in-memory svc.GrantRepository (F6.1 grant-lot ledger).
 // ---------------------------------------------------------------------------
 
+type fakeEmp struct {
+	fullName, nik, nip string
+}
+
 type fakeGrantRepo struct {
 	lots map[string]*dom.LeaveGrant
+	emps map[string]fakeEmp // employee_id → name/nik/nip for ListLeaveBalances
 	cons []dom.LeaveConsumption
 	seq  int
 }
 
-func newFakeGrantRepo() *fakeGrantRepo { return &fakeGrantRepo{lots: map[string]*dom.LeaveGrant{}} }
+func newFakeGrantRepo() *fakeGrantRepo {
+	return &fakeGrantRepo{lots: map[string]*dom.LeaveGrant{}, emps: map[string]fakeEmp{}}
+}
 
 func (r *fakeGrantRepo) put(g dom.LeaveGrant) { gg := g; r.lots[g.ID] = &gg }
 
@@ -654,6 +662,74 @@ func (r *fakeGrantRepo) ListLeaveGrants(_ context.Context, f svc.GrantFilter, no
 	}
 	return out, nil
 }
+func (r *fakeGrantRepo) ListLeaveBalances(_ context.Context, f svc.BalanceListFilter, now time.Time) ([]dom.EmployeeLeaveBalance, error) {
+	// Aggregate active lots per employee (mirrors the SQL). Only employees with >= 1
+	// active (non-expired) lot appear.
+	agg := map[string]*dom.EmployeeLeaveBalance{}
+	for _, l := range r.lots {
+		if !l.IsActive(now) {
+			continue
+		}
+		emp, ok := r.emps[l.EmployeeID]
+		if !ok {
+			continue
+		}
+		if f.Q != nil {
+			q := strings.ToLower(*f.Q)
+			if !strings.Contains(strings.ToLower(emp.fullName), q) &&
+				!strings.Contains(strings.ToLower(emp.nik), q) &&
+				!strings.Contains(strings.ToLower(emp.nip), q) {
+				continue
+			}
+		}
+		b := agg[l.EmployeeID]
+		if b == nil {
+			b = &dom.EmployeeLeaveBalance{EmployeeID: l.EmployeeID, FullName: emp.fullName, NIK: emp.nik, NIP: emp.nip}
+			agg[l.EmployeeID] = b
+		}
+		rem := l.Remaining()
+		if l.Earmark == nil {
+			b.PoolTotal += l.Amount
+			b.PoolConsumed += l.Consumed
+			b.PoolPending += l.Pending
+			b.PoolRemaining += rem
+		} else {
+			b.EarmarkedRemaining += rem
+		}
+		b.LotCount++
+		if rem > 0 {
+			exp := l.ExpiresAt
+			if b.NextExpiry == nil || exp.Before(*b.NextExpiry) {
+				b.NextExpiry = &exp
+			}
+		}
+	}
+	out := make([]dom.EmployeeLeaveBalance, 0, len(agg))
+	for _, b := range agg {
+		out = append(out, *b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FullName != out[j].FullName {
+			return out[i].FullName < out[j].FullName
+		}
+		return out[i].EmployeeID < out[j].EmployeeID
+	})
+	// keyset cursor
+	if f.CursorFullName != nil && f.CursorID != nil {
+		var trimmed []dom.EmployeeLeaveBalance
+		for _, b := range out {
+			if b.FullName > *f.CursorFullName || (b.FullName == *f.CursorFullName && b.EmployeeID > *f.CursorID) {
+				trimmed = append(trimmed, b)
+			}
+		}
+		out = trimmed
+	}
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
+}
+
 func (r *fakeGrantRepo) PatchLeaveGrant(_ context.Context, _ pgx.Tx, p svc.PatchGrantParams) (dom.LeaveGrant, error) {
 	l := r.lots[p.ID]
 	if l == nil {
@@ -873,6 +949,7 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Get("/leave-calendar", handler.GetLeaveCalendar)
 		r.Get("/leave-grants", handler.ListLeaveGrants)
 		r.Get("/leave-grants/{id}", handler.GetLeaveGrant)
+		r.Get("/leave-balances", handler.ListLeaveBalances)
 		r.Get("/leave-balances/by-employee/{employee_id}", handler.GetLeaveBalanceByEmployee)
 	})
 	r.Group(func(r chi.Router) {
@@ -982,7 +1059,16 @@ func (h *harness) seedGrant(id, employee string, amount, consumed, pending int, 
 		CreatedAt: fixedNow, UpdatedAt: fixedNow, EmployeeName: strp("Agent " + employee),
 	}
 	h.grant.put(g)
+	if _, ok := h.grant.emps[employee]; !ok {
+		h.grant.emps[employee] = fakeEmp{fullName: "Agent " + employee, nik: "NIK-" + employee, nip: "NIP-" + employee}
+	}
 	return g
+}
+
+// seedEmp registers an employee's name/nik/nip for the ListLeaveBalances aggregate
+// (the JOIN employees source). Call before seedGrant to control the search fields.
+func (h *harness) seedEmp(employee, fullName, nik, nip string) {
+	h.grant.emps[employee] = fakeEmp{fullName: fullName, nik: nik, nip: nip}
 }
 
 // seedCalendarEntry plants a leave_calendar entry directly (status-filtered on read).

@@ -186,6 +186,23 @@ type leaveBalanceResponse struct {
 	AllLots       []leaveGrantResponse  `json:"all_lots,omitempty"`
 }
 
+// employeeLeaveBalanceResponse is one row in GET /leave-balances (openapi
+// EmployeeLeaveBalance) — the /leave/quotas screen, one aggregate row per employee.
+type employeeLeaveBalanceResponse struct {
+	ID                 string  `json:"id"`
+	EmployeeID         string  `json:"employee_id"`
+	FullName           string  `json:"full_name"`
+	NIK                string  `json:"nik"`
+	NIP                string  `json:"nip"`
+	PoolTotal          int     `json:"pool_total"`
+	PoolConsumed       int     `json:"pool_consumed"`
+	PoolPending        int     `json:"pool_pending"`
+	PoolRemaining      int     `json:"pool_remaining"`
+	EarmarkedRemaining int     `json:"earmarked_remaining"`
+	NextExpiry         *string `json:"next_expiry"`
+	LotCount           int     `json:"lot_count"`
+}
+
 // --- response: LeaveQuota ---
 
 type quotaAdjustmentResponse struct {
@@ -323,6 +340,27 @@ func toLeaveGrantResponse(g dom.LeaveGrant, now time.Time) leaveGrantResponse {
 			ID: c.ID, LeaveRequestID: c.LeaveRequestID, GrantID: c.GrantID,
 			Days: c.Days, CreatedAt: rfc3339(c.CreatedAt),
 		})
+	}
+	return out
+}
+
+func toEmployeeLeaveBalanceResponse(b dom.EmployeeLeaveBalance) employeeLeaveBalanceResponse {
+	out := employeeLeaveBalanceResponse{
+		ID:                 b.EmployeeID,
+		EmployeeID:         b.EmployeeID,
+		FullName:           b.FullName,
+		NIK:                b.NIK,
+		NIP:                b.NIP,
+		PoolTotal:          b.PoolTotal,
+		PoolConsumed:       b.PoolConsumed,
+		PoolPending:        b.PoolPending,
+		PoolRemaining:      b.PoolRemaining,
+		EarmarkedRemaining: b.EarmarkedRemaining,
+		LotCount:           b.LotCount,
+	}
+	if b.NextExpiry != nil {
+		s := dateStr(*b.NextExpiry)
+		out.NextExpiry = &s
 	}
 	return out
 }

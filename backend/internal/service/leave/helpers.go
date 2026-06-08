@@ -151,6 +151,29 @@ func DecodeGrantCursor(cursor string) (*time.Time, *string, error) {
 	return &c.ExpiresAt, &c.ID, nil
 }
 
+// --- balance-list cursor (keyset on (full_name ASC, employee_id ASC)) ---
+
+type balanceCursor struct {
+	FullName string `json:"n"`
+	ID       string `json:"i"`
+}
+
+func encodeBalanceCursor(fullName, id string) (string, error) {
+	return httpx.EncodeCursor(balanceCursor{FullName: fullName, ID: id})
+}
+
+// DecodeBalanceCursor parses an opaque balance-list cursor into (full_name, id) pointers.
+func DecodeBalanceCursor(cursor string) (*string, *string, error) {
+	if cursor == "" {
+		return nil, nil, nil
+	}
+	var c balanceCursor
+	if err := httpx.DecodeCursor(cursor, &c); err != nil {
+		return nil, nil, err
+	}
+	return &c.FullName, &c.ID, nil
+}
+
 // actorUserIDPtr resolves the acting user id as a pointer (nil if absent) — the
 // grant's created_by.
 func actorUserIDPtr(ctx context.Context) *string {

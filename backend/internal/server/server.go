@@ -422,6 +422,7 @@ func New(d Deps) http.Handler {
 				// F6.1 grant-lot ledger + balance reads (company_or_global).
 				r.Get("/leave-grants", d.Leave.ListLeaveGrants)
 				r.Get("/leave-grants/{id}", d.Leave.GetLeaveGrant)
+				r.Get("/leave-balances", d.Leave.ListLeaveBalances)
 				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
 				// HR shorten / cancel-approved of an APPROVED leave (cancel/shorten
 				// release/reverse the grant lots). Agent cancel of own request is mobile.

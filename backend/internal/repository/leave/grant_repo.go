@@ -117,6 +117,43 @@ func (r *GrantRepo) ListLeaveGrants(ctx context.Context, f svc.GrantFilter, now 
 	return out, nil
 }
 
+// ListLeaveBalances returns the per-employee aggregate balance page (one row per
+// employee over active lots) for GET /leave-balances. Keyset on (full_name, id).
+func (r *GrantRepo) ListLeaveBalances(ctx context.Context, f svc.BalanceListFilter, now time.Time) ([]dom.EmployeeLeaveBalance, error) {
+	p := sqlcgen.ListLeaveBalancesParams{
+		NowDate:        timeToPgDate(now),
+		Q:              strptr(f.Q),
+		CursorFullName: strptr(f.CursorFullName),
+		CursorID:       strptr(f.CursorID),
+		Lim:            i32(f.Limit),
+	}
+	rows, err := r.q.ListLeaveBalances(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dom.EmployeeLeaveBalance, 0, len(rows))
+	for _, row := range rows {
+		b := dom.EmployeeLeaveBalance{
+			EmployeeID:         row.EmployeeID,
+			FullName:           row.FullName,
+			NIK:                row.Nik,
+			NIP:                row.Nip,
+			PoolTotal:          int(row.PoolTotal),
+			PoolConsumed:       int(row.PoolConsumed),
+			PoolPending:        int(row.PoolPending),
+			PoolRemaining:      int(row.PoolRemaining),
+			EarmarkedRemaining: int(row.EarmarkedRemaining),
+			LotCount:           int(row.LotCount),
+		}
+		if row.NextExpiry.Valid {
+			t := row.NextExpiry.Time
+			b.NextExpiry = &t
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
+
 // --- consumptions ---
 
 func (r *GrantRepo) ListConsumptionsForGrant(ctx context.Context, grantID string) ([]dom.LeaveConsumption, error) {

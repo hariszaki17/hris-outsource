@@ -132,7 +132,7 @@ export const id = {
     schedule: 'Jadwal',
     corrections: 'Koreksi',
     leaveApprovals: 'Persetujuan',
-    leaveQuotas: 'Saldo Cuti',
+    leaveQuotas: 'Kuota Cuti',
     leaveCalendar: 'Kalender Cuti',
     shifts: 'Master Shift',
     attendance: 'Kehadiran',
@@ -2094,13 +2094,13 @@ export const id = {
     },
   },
   leaveQuotas: {
-    title: 'Saldo & Hibah Cuti',
-    subtitle:
-      'Ledger lot hibah per karyawan · setiap lot punya tanggal kedaluwarsa sendiri · tidak ada carry-over (F6.1, 2026-06-08).',
-    footerNote: 'Hibah & penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6).',
+    title: 'Kuota Cuti',
+    subtitle: 'Kuota cuti per karyawan',
+    footerNote:
+      'Penambahan & penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6).',
     actions: {
       export: 'Ekspor',
-      grantLot: 'Hibah Lot Baru',
+      grantLot: 'Tambah Kuota',
       adjust: 'Sesuaikan',
       adjustAriaLabel: 'Sesuaikan lot {{id}}',
       cancel: 'Batal',
@@ -2109,8 +2109,18 @@ export const id = {
       clearFilters: 'Reset Filter',
     },
     filters: {
-      searchPlaceholder: 'Filter per ID karyawan',
+      searchPlaceholder: 'Cari nama, NIK, atau NIP karyawan',
       allSources: 'Semua sumber',
+    },
+    // Per-employee aggregate list columns
+    list: {
+      total: 'Total kuota',
+      consumed: 'Terpakai',
+      pending: 'Pending',
+      remaining: 'Sisa',
+      earmark: 'Earmark',
+      nextExpiry: 'Kedaluwarsa berikutnya',
+      lotCount: 'Lot aktif',
     },
     // Pool summary (EmployeePoolSummary)
     pool: {
@@ -2140,22 +2150,22 @@ export const id = {
       BONUS: 'Bonus',
     },
     pagination: {
-      rangeLabel: 'Menampilkan {{count}} lot',
+      rangeLabel: 'Menampilkan {{count}} karyawan',
     },
     states: {
-      freshTitle: 'Belum ada lot hibah',
-      freshDesc: 'Buat lot hibah pertama untuk mulai mencatat saldo cuti.',
+      freshTitle: 'Belum ada kuota cuti',
+      freshDesc: 'Tambah kuota pertama untuk mulai mencatat saldo cuti.',
       filteredZeroTitle: 'Tidak ada hasil',
-      filteredZeroDesc: 'Coba ubah filter pencarian.',
+      filteredZeroDesc: 'Coba ubah kata kunci pencarian.',
       errorTitle: 'Gagal memuat data',
       noPermissionTitle: 'Akses Ditolak',
       noPermissionDesc: 'Anda tidak memiliki izin untuk melihat halaman ini.',
     },
     // Grant-lot create form (POST /leave-grants)
     grant: {
-      title: 'Hibah Lot Baru',
-      employeeLabel: 'ID Karyawan',
-      employeePlaceholder: 'mis. SWP-EMP-1042',
+      title: 'Tambah Kuota',
+      employeeLabel: 'Karyawan',
+      employeePlaceholder: 'Ketik nama, NIK, atau NIP…',
       amountLabel: 'Jumlah hari',
       expiresLabel: 'Berlaku hingga (kedaluwarsa)',
       sourceLabel: 'Sumber',
@@ -2164,16 +2174,16 @@ export const id = {
       earmarkHint:
         'Lot earmark hanya bisa ditarik oleh pengajuan dengan tujuan yang sama (LQ-10). Kosongkan untuk pool umum.',
       remarkLabel: 'Catatan (wajib)',
-      remarkPlaceholder: 'Jelaskan alasan pemberian lot ini…',
-      auditNote: 'Hibah lot wajib beralasan dan tercatat di audit log (LQ-6).',
-      saveBtn: 'Simpan Hibah',
-      successTitle: 'Lot hibah dibuat',
+      remarkPlaceholder: 'Jelaskan alasan penambahan kuota ini…',
+      auditNote: 'Penambahan kuota wajib beralasan dan tercatat di audit log (LQ-6).',
+      saveBtn: 'Simpan',
+      successTitle: 'Kuota ditambahkan',
       successDesc: 'Lot berhasil ditambahkan ke ledger karyawan.',
       errorTitle: 'Gagal menyimpan',
     },
     // Lot adjust form (PATCH /leave-grants/{id})
     adjust: {
-      title: 'Sesuaikan Lot',
+      title: 'Sesuaikan Kuota',
       amountCurrent: 'Jumlah saat ini',
       consumedCurrent: 'Terpakai',
       remainingCurrent: 'Sisa',
@@ -2182,8 +2192,8 @@ export const id = {
       remarkLabel: 'Catatan penyesuaian (wajib)',
       remarkPlaceholder: 'Jelaskan alasan penyesuaian ini...',
       auditNote: 'Penyesuaian manual wajib beralasan dan tercatat di audit log (LQ-6).',
-      saveBtn: 'Simpan Penyesuaian',
-      successTitle: 'Lot diperbarui',
+      saveBtn: 'Simpan',
+      successTitle: 'Kuota diperbarui',
       successDesc: 'Penyesuaian berhasil disimpan.',
       errorTitle: 'Gagal menyimpan',
     },

@@ -458,9 +458,6 @@ type Querier interface {
 	// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
 	// LEFT JOINs so unplaced employees still list (current_* null).
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
-	// Seed/balance helper — distinct employees that hold any active lot (not used by the
-	// live path; kept minimal). Unused queries are pruned if sqlc warns.
-	ListEmployeesWithLeaveGrants(ctx context.Context) ([]string, error)
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
 	ListExpiringPlacements(ctx context.Context, arg ListExpiringPlacementsParams) ([]ListExpiringPlacementsRow, error)
@@ -474,6 +471,17 @@ type Querier interface {
 	ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]ListHolidaysRow, error)
 	// Timeline source: all decisions for a request, chronological.
 	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
+	// The /leave/quotas screen: ONE ROW PER EMPLOYEE, aggregating ALL of the employee's
+	// ACTIVE lots (now < expires_at AND deleted_at IS NULL). JOINs employees for the
+	// name/nik/nip display + the q ILIKE filter (mirrors people/employees.sql ListEmployees:
+	// ILIKE over full_name/nik/nip ONLY). An employee appears iff they hold >= 1 ACTIVE lot
+	// regardless of remaining (an employee whose lots are all consumed still lists as long
+	// as a lot is non-expired); an employee with ONLY expired lots is excluded by the
+	// expires_at > now_date predicate. Pool fields aggregate unearmarked lots (earmark IS
+	// NULL); earmarked_remaining sums remaining across earmarked lots. next_expiry is the
+	// MIN(expires_at) over active lots that still have remaining > 0. Keyset cursor on
+	// (full_name, employee_id); deterministic ORDER BY full_name ASC, employee_id ASC.
+	ListLeaveBalances(ctx context.Context, arg ListLeaveBalancesParams) ([]ListLeaveBalancesRow, error)
 	// The ledger. Keyset cursor (expires_at ASC, id) — FIFO-aligned order. Filters
 	// (narg): employee_id, earmark ('__null' sentinel → unearmarked only), source,
 	// include_expired (default: active only), company_id (via covering placement).

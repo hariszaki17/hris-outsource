@@ -1,18 +1,21 @@
 /**
- * Unit tests for E6 leave-quotas-screen (grant-lot ledger, 2026-06-08).
+ * Unit tests for E6 leave-quotas-screen (per-employee aggregate list + lot drill-in, 2026-06-08).
  *
  * Scope: pure-logic assertions (no DOM render) — mirrors the e5 attendance test pattern.
  * Covers:
- *   1. LeaveQuotasSearch type shape — new employee_id filter field.
- *   2. remainingDays() computation (amount - consumed - pending).
+ *   1. LeaveQuotasSearch type shape — q search (not employee_id) for the list; employee_id for drill-in.
+ *   2. remainingDays() computation (amount - consumed - pending) for lot rows.
  *   3. earmarkBadgeTone() — MATERNITY → warn, other earmark → ok, null → neutral.
  *   4. Grant form: earmark field visibility (only for MATERNITY / STATUTORY sources).
  *   5. Grant form payload — employee_id + amount_days + expires_at + source + remark.
  *   6. Adjust form payload — remark required, amount / expires optional.
- *   7. Balance screen: pool summary derived from LeaveBalance (pool_remaining + next_expiry).
- *   8. Balance screen: earmarked lot line rendered per earmarked[] entry.
+ *   7. Aggregate list: pool_remaining color coding (ok / neutral / bad).
+ *   8. Aggregate list: next_expiry renders "—" when null.
+ *   9. Search wires to q param (not employee_id) for the list endpoint.
+ *  10. Employee combobox resolves employee_id from selected option value.
  *
  * F6.1 — LQ-6: remark required on every grant/adjust.
+ * useListLeaveBalances: one row per employee, q filters name/NIK/NIP.
  */
 
 import { LeaveGrantSource } from '@swp/api-client/e6';
@@ -20,24 +23,37 @@ import { describe, expect, it } from 'vitest';
 import type { LeaveQuotasSearch } from './leave-quotas-screen.ts';
 
 // ---------------------------------------------------------------------------
-// 1. Type shape — verify employee_id filter field exists at compile time
+// 1. Type shape — q filter for list + employee_id for drill-in
 // ---------------------------------------------------------------------------
 
 describe('LeaveQuotasSearch type', () => {
-  it('accepts employee_id filter', () => {
-    const search: LeaveQuotasSearch = { employee_id: 'SWP-EMP-1042', cursor: 'abc' };
+  it('accepts q search field for the aggregate list', () => {
+    const search: LeaveQuotasSearch = { q: 'Budi', cursor: 'abc' };
+    expect(search.q).toBe('Budi');
+  });
+
+  it('accepts employee_id for drill-in selection', () => {
+    const search: LeaveQuotasSearch = { employee_id: 'SWP-EMP-1042' };
     expect(search.employee_id).toBe('SWP-EMP-1042');
   });
 
   it('all fields are optional', () => {
     const search: LeaveQuotasSearch = {};
+    expect(search.q).toBeUndefined();
     expect(search.employee_id).toBeUndefined();
     expect(search.cursor).toBeUndefined();
+  });
+
+  it('list search uses q (not employee_id) for name/NIK/NIP filter', () => {
+    // q is mapped to ListLeaveBalancesParams.q, not employee_id
+    const search: LeaveQuotasSearch = { q: 'SWP-0042' };
+    expect(search.q).toBe('SWP-0042');
+    expect(search.employee_id).toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. remainingDays() — mirrors leave-quotas-screen.tsx
+// 2. remainingDays() — mirrors leave-quotas-screen.tsx (lot-level)
 // ---------------------------------------------------------------------------
 
 function remainingDays(lot: {
@@ -48,7 +64,7 @@ function remainingDays(lot: {
   return lot.amount_days - lot.consumed_days - lot.pending_days;
 }
 
-describe('remainingDays()', () => {
+describe('remainingDays() (lot level)', () => {
   it('amount=12, consumed=4, pending=0 → 8', () => {
     expect(remainingDays({ amount_days: 12, consumed_days: 4, pending_days: 0 })).toBe(8);
   });
@@ -130,13 +146,13 @@ describe('earmark field visibility (grant form)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Grant form payload shape
+// 5. Grant form payload shape (employee selected via combobox)
 // ---------------------------------------------------------------------------
 
 describe('grant form payload (POST /leave-grants)', () => {
   it('constructs the correct body for a ADJUSTMENT lot without earmark', () => {
     const values = {
-      employee_id: 'SWP-EMP-1042',
+      employee_id: 'SWP-EMP-1042', // resolved from combobox selection
       amount_days: 3,
       expires_at: '2026-12-31',
       source: LeaveGrantSource.ADJUSTMENT,
@@ -223,67 +239,108 @@ describe('adjust form payload (PATCH /leave-grants/{id})', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Balance screen: pool summary derived from LeaveBalance
+// 7. Aggregate list: pool_remaining color coding
 // ---------------------------------------------------------------------------
 
-interface MockLeaveBalance {
-  pool_remaining: number;
-  next_expiry?: string | null;
-  earmarked: { earmark: string; remaining_days: number; expires_at: string }[];
+type RemColor = 'ok' | 'neutral' | 'bad';
+
+function poolRemainingColor(remaining: number): RemColor {
+  if (remaining < 0) return 'bad';
+  if (remaining === 0) return 'neutral';
+  return 'ok';
 }
 
-/** Mirrors the rendering logic in EmployeePoolSummary. */
-function derivePoolSummary(balance: MockLeaveBalance) {
-  return {
-    poolRemaining: balance.pool_remaining,
-    hasExpiry: !!balance.next_expiry,
-    expiryDate: balance.next_expiry ?? null,
-    earmarkedCount: balance.earmarked.length,
-  };
-}
-
-describe('EmployeePoolSummary derived state', () => {
-  it('renders pool_remaining from LeaveBalance', () => {
-    const balance: MockLeaveBalance = { pool_remaining: 8, earmarked: [] };
-    const s = derivePoolSummary(balance);
-    expect(s.poolRemaining).toBe(8);
-    expect(s.hasExpiry).toBe(false);
-    expect(s.earmarkedCount).toBe(0);
+describe('pool_remaining color coding (aggregate list)', () => {
+  it('positive remaining → ok (green)', () => {
+    expect(poolRemainingColor(8)).toBe('ok');
   });
 
-  it('shows expiry hint when next_expiry is set', () => {
-    const balance: MockLeaveBalance = {
-      pool_remaining: 8,
-      next_expiry: '2026-12-31',
-      earmarked: [],
-    };
-    const s = derivePoolSummary(balance);
-    expect(s.hasExpiry).toBe(true);
-    expect(s.expiryDate).toBe('2026-12-31');
+  it('zero remaining → neutral', () => {
+    expect(poolRemainingColor(0)).toBe('neutral');
+  });
+
+  it('negative remaining → bad (red)', () => {
+    expect(poolRemainingColor(-1)).toBe('bad');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 8. Balance screen: earmarked lot line rendered per earmarked[] entry
+// 8. Aggregate list: next_expiry renders "—" when null
 // ---------------------------------------------------------------------------
 
-describe('earmarked lot lines', () => {
-  it('renders one badge per earmarked lot', () => {
-    const balance: MockLeaveBalance = {
-      pool_remaining: 5,
-      earmarked: [
-        { earmark: 'MATERNITY', remaining_days: 90, expires_at: '2027-03-31' },
-        { earmark: 'STATUTORY_HAJJ', remaining_days: 40, expires_at: '2026-12-31' },
-      ],
-    };
-    expect(balance.earmarked.length).toBe(2);
-    const earmarkCodes = balance.earmarked.map((e) => e.earmark);
-    expect(earmarkCodes).toContain('MATERNITY');
-    expect(earmarkCodes).toContain('STATUTORY_HAJJ');
+describe('next_expiry display', () => {
+  it('null next_expiry renders as dash', () => {
+    const next_expiry: string | null = null;
+    const display = next_expiry ?? '—';
+    expect(display).toBe('—');
   });
 
-  it('earmarked lot with MATERNITY earmark has warn tone', () => {
-    const earmark = 'MATERNITY';
-    expect(earmarkBadgeTone(earmark)).toBe('warn');
+  it('non-null next_expiry is forwarded to DateText', () => {
+    const next_expiry: string | null = '2026-12-31';
+    const display = next_expiry ?? '—';
+    expect(display).toBe('2026-12-31');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Search wires to q param (not employee_id) for the list endpoint
+// ---------------------------------------------------------------------------
+
+describe('search param → q (useListLeaveBalances)', () => {
+  it('q is passed to ListLeaveBalancesParams.q for ILIKE search', () => {
+    const search: LeaveQuotasSearch = { q: 'Budi' };
+    // Mirrors the screen: listParams.q = search.q
+    const listParams = {
+      limit: 50,
+      ...(search.q ? { q: search.q } : {}),
+    };
+    expect(listParams.q).toBe('Budi');
+    expect('employee_id' in listParams).toBe(false);
+  });
+
+  it('empty q omits the q param entirely', () => {
+    const search: LeaveQuotasSearch = {};
+    const listParams = {
+      limit: 50,
+      ...(search.q ? { q: search.q } : {}),
+    };
+    expect('q' in listParams).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Employee combobox: stores employee_id, displays name
+// ---------------------------------------------------------------------------
+
+describe('EmployeeCombobox option resolution', () => {
+  it('ComboboxOption.value = employee_id, label = full_name', () => {
+    // Mirrors the screen: options = employees.map(e => ({ value: e.id, label: e.full_name, ... }))
+    const employee = {
+      id: 'SWP-EMP-1042',
+      full_name: 'Budi Santoso',
+      nip: 'SWP-0042',
+      nik: '3201...',
+    };
+    const option = {
+      value: employee.id,
+      label: employee.full_name,
+      sublabel: employee.nip ?? employee.nik,
+      meta: employee.id,
+    };
+    expect(option.value).toBe('SWP-EMP-1042');
+    expect(option.label).toBe('Budi Santoso');
+    // on onChange(option.value) the form stores the employee_id
+    const storedId = option.value;
+    expect(storedId).toBe('SWP-EMP-1042');
+  });
+
+  it('selecting an option stores employee_id in the grant form', () => {
+    // onChange receives the value (employee_id), which is set via setValue('employee_id', id)
+    let storedEmployeeId = '';
+    const onChange = (id: string | null) => {
+      storedEmployeeId = id ?? '';
+    };
+    onChange('SWP-EMP-1042');
+    expect(storedEmployeeId).toBe('SWP-EMP-1042');
   });
 });

@@ -8,6 +8,7 @@ package leave
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,8 +102,11 @@ func (f *fakeLeaveRepo) ListCalendarEntries(context.Context, CalendarFilter, []s
 
 // --- fake grant repo (in-memory lot ledger) ---
 
+type fakeGrantEmp struct{ fullName, nik, nip string }
+
 type fakeGrantRepo struct {
 	lots      map[string]*dom.LeaveGrant
+	emps      map[string]fakeGrantEmp // employee_id → name/nik/nip for ListLeaveBalances
 	cons      []dom.LeaveConsumption
 	consSeq   int
 	deletedFR string
@@ -114,7 +118,7 @@ func newFakeGrantRepo(lots ...dom.LeaveGrant) *fakeGrantRepo {
 		l := lots[i]
 		m[l.ID] = &l
 	}
-	return &fakeGrantRepo{lots: m}
+	return &fakeGrantRepo{lots: m, emps: map[string]fakeGrantEmp{}}
 }
 
 func (f *fakeGrantRepo) activeMatching(employeeID, earmark string, now time.Time) []dom.LeaveGrant {
@@ -177,6 +181,71 @@ func (f *fakeGrantRepo) ListLeaveGrants(_ context.Context, fr GrantFilter, now t
 	sort.Slice(out, func(i, j int) bool { return out[i].ExpiresAt.Before(out[j].ExpiresAt) })
 	return out, nil
 }
+func (f *fakeGrantRepo) ListLeaveBalances(_ context.Context, fl BalanceListFilter, now time.Time) ([]dom.EmployeeLeaveBalance, error) {
+	agg := map[string]*dom.EmployeeLeaveBalance{}
+	for _, l := range f.lots {
+		if !l.IsActive(now) {
+			continue
+		}
+		emp, ok := f.emps[l.EmployeeID]
+		if !ok {
+			continue
+		}
+		if fl.Q != nil {
+			q := strings.ToLower(*fl.Q)
+			if !strings.Contains(strings.ToLower(emp.fullName), q) &&
+				!strings.Contains(strings.ToLower(emp.nik), q) &&
+				!strings.Contains(strings.ToLower(emp.nip), q) {
+				continue
+			}
+		}
+		b := agg[l.EmployeeID]
+		if b == nil {
+			b = &dom.EmployeeLeaveBalance{EmployeeID: l.EmployeeID, FullName: emp.fullName, NIK: emp.nik, NIP: emp.nip}
+			agg[l.EmployeeID] = b
+		}
+		rem := l.Remaining()
+		if l.Earmark == nil {
+			b.PoolTotal += l.Amount
+			b.PoolConsumed += l.Consumed
+			b.PoolPending += l.Pending
+			b.PoolRemaining += rem
+		} else {
+			b.EarmarkedRemaining += rem
+		}
+		b.LotCount++
+		if rem > 0 {
+			exp := l.ExpiresAt
+			if b.NextExpiry == nil || exp.Before(*b.NextExpiry) {
+				b.NextExpiry = &exp
+			}
+		}
+	}
+	out := make([]dom.EmployeeLeaveBalance, 0, len(agg))
+	for _, b := range agg {
+		out = append(out, *b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].FullName != out[j].FullName {
+			return out[i].FullName < out[j].FullName
+		}
+		return out[i].EmployeeID < out[j].EmployeeID
+	})
+	if fl.CursorFullName != nil && fl.CursorID != nil {
+		var trimmed []dom.EmployeeLeaveBalance
+		for _, b := range out {
+			if b.FullName > *fl.CursorFullName || (b.FullName == *fl.CursorFullName && b.EmployeeID > *fl.CursorID) {
+				trimmed = append(trimmed, b)
+			}
+		}
+		out = trimmed
+	}
+	if fl.Limit > 0 && len(out) > fl.Limit {
+		out = out[:fl.Limit]
+	}
+	return out, nil
+}
+
 func (f *fakeGrantRepo) PatchLeaveGrant(_ context.Context, _ pgx.Tx, p PatchGrantParams) (dom.LeaveGrant, error) {
 	l := f.lots[p.ID]
 	if p.Amount != nil {
@@ -667,6 +736,63 @@ func TestCreateGrant_AndBalance(t *testing.T) {
 	}
 	if len(bal.Earmarked) != 1 || bal.Earmarked[0].Earmark != "MATERNITY" || bal.Earmarked[0].Remaining != 90 {
 		t.Fatalf("earmarked line wrong: %+v", bal.Earmarked)
+	}
+}
+
+// --- aggregate per-employee balance LIST (GET /leave-balances) ---
+
+func TestListBalances_AggregateAndPaginate(t *testing.T) {
+	gr := newFakeGrantRepo()
+	gr.emps["SWP-EMP-1001"] = fakeGrantEmp{fullName: "Andi", nik: "NIK-1001", nip: "NIP-1001"}
+	gr.emps["SWP-EMP-1002"] = fakeGrantEmp{fullName: "Budi", nik: "NIK-1002", nip: "NIP-1002"}
+	gr.emps["SWP-EMP-1003"] = fakeGrantEmp{fullName: "Citra", nik: "NIK-1003", nip: "NIP-1003"}
+	put := func(id, emp string, amount, consumed, pending int, earmark string, exp time.Time) {
+		var em *string
+		if earmark != "" {
+			e := earmark
+			em = &e
+		}
+		gr.lots[id] = &dom.LeaveGrant{ID: id, EmployeeID: emp, Amount: amount, Consumed: consumed, Pending: pending, Earmark: em, ExpiresAt: exp}
+	}
+	// Andi: pool 12-4-0=8 + earmarked 90; soonest active w/ remaining = 2026-09-30.
+	put("L1", "SWP-EMP-1001", 12, 4, 0, "", time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
+	put("L2", "SWP-EMP-1001", 5, 1, 1, "", time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC))
+	put("L3", "SWP-EMP-1001", 90, 0, 0, "MATERNITY", time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC))
+	put("L4", "SWP-EMP-1002", 6, 0, 0, "", time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
+	put("L5", "SWP-EMP-1003", 7, 0, 0, "", time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
+	// expired-only employee — excluded.
+	gr.emps["SWP-EMP-1099"] = fakeGrantEmp{fullName: "Zaki", nik: "NIK-1099", nip: "NIP-1099"}
+	put("L9", "SWP-EMP-1099", 5, 0, 0, "", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	gs := NewGrantService(gr, fakeRunner{})
+	gs.SetClock(func() time.Time { return fixedNow }) // 2026-06-01
+
+	rows, next, hasMore, err := gs.ListBalances(hrCtx(), BalanceListFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(rows) != 2 || !hasMore || next == nil {
+		t.Fatalf("page1: rows=%d hasMore=%v next=%v, want 2/true/non-nil", len(rows), hasMore, next)
+	}
+	andi := rows[0]
+	if andi.FullName != "Andi" || andi.PoolTotal != 17 || andi.PoolRemaining != 11 || andi.EarmarkedRemaining != 90 || andi.LotCount != 3 {
+		t.Fatalf("andi aggregate wrong: %+v", andi)
+	}
+	if andi.NextExpiry == nil || !andi.NextExpiry.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("andi next_expiry = %v, want 2026-09-30", andi.NextExpiry)
+	}
+
+	// page 2 via cursor: Citra remains (expired-only Zaki excluded).
+	fn, id, derr := DecodeBalanceCursor(*next)
+	if derr != nil {
+		t.Fatalf("decode cursor: %v", derr)
+	}
+	rows2, _, hasMore2, err := gs.ListBalances(hrCtx(), BalanceListFilter{Limit: 2, CursorFullName: fn, CursorID: id})
+	if err != nil {
+		t.Fatalf("page2 err: %v", err)
+	}
+	if len(rows2) != 1 || hasMore2 || rows2[0].FullName != "Citra" {
+		t.Fatalf("page2 = %+v hasMore=%v, want [Citra] / false", rows2, hasMore2)
 	}
 }
 

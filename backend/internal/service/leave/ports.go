@@ -61,6 +61,16 @@ type QuotaFilter struct {
 	CursorID      *string
 }
 
+// BalanceListFilter is the decoded GET /leave-balances query (cursor-paged, one row
+// per employee). Q mirrors ListEmployees: ILIKE over full_name/nik/nip. Cursor is
+// keyset on (full_name, employee_id).
+type BalanceListFilter struct {
+	Q              *string
+	Limit          int
+	CursorFullName *string
+	CursorID       *string
+}
+
 // GrantFilter is the decoded GET /leave-grants query (cursor-paged, FIFO-ordered).
 type GrantFilter struct {
 	EmployeeID     *string
@@ -243,6 +253,7 @@ type GrantRepository interface {
 	GetLeaveGrant(ctx context.Context, id string) (dom.LeaveGrant, error)
 	GetLeaveGrantForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveGrant, error)
 	ListLeaveGrants(ctx context.Context, f GrantFilter, now time.Time) ([]dom.LeaveGrant, error)
+	ListLeaveBalances(ctx context.Context, f BalanceListFilter, now time.Time) ([]dom.EmployeeLeaveBalance, error)
 	PatchLeaveGrant(ctx context.Context, tx pgx.Tx, p PatchGrantParams) (dom.LeaveGrant, error)
 
 	ListConsumptionsForGrant(ctx context.Context, grantID string) ([]dom.LeaveConsumption, error)

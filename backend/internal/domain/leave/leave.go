@@ -235,6 +235,26 @@ type LeaveBalance struct {
 	AllLots       []LeaveGrant
 }
 
+// EmployeeLeaveBalance is one row in the aggregate per-employee balance LIST
+// (openapi EmployeeLeaveBalance — the /leave/quotas screen). It rolls up ALL of an
+// employee's ACTIVE lots into a single line: the flat pool totals (unearmarked) plus
+// the combined earmarked remaining, the soonest expiry, and the active lot count.
+// Drill-in to individual lots is GET /leave-grants?employee_id +
+// GET /leave-balances/by-employee/{id}.
+type EmployeeLeaveBalance struct {
+	EmployeeID         string
+	FullName           string
+	NIK                string
+	NIP                string
+	PoolTotal          int // Σ amount_days over active unearmarked lots
+	PoolConsumed       int // Σ consumed_days, unearmarked
+	PoolPending        int // Σ pending_days, unearmarked
+	PoolRemaining      int // PoolTotal - PoolConsumed - PoolPending
+	EarmarkedRemaining int // Σ(amount-consumed-pending) over active earmarked lots
+	NextExpiry         *time.Time
+	LotCount           int // count of active lots (earmarked + pool)
+}
+
 // LeaveBalanceEarmarkLine is one active earmarked lot in the balance view (openapi
 // LeaveBalanceEarmarkLine).
 type LeaveBalanceEarmarkLine struct {

@@ -177,6 +177,39 @@ func (s *GrantService) List(ctx context.Context, f GrantFilter) ([]dom.LeaveGran
 	return rows, next, hasMore, nil
 }
 
+// --- aggregate balance list (GET /leave-balances) ---
+
+// ListBalances returns the per-employee aggregate balance page for the /leave/quotas
+// screen — ONE ROW PER EMPLOYEE, rolling up all their ACTIVE lots. Cursor-paged on
+// (full_name, employee_id) ascending; fetches limit+1 to compute has_more. RBAC mirrors
+// the sibling listLeaveGrants (hr/super/leader); the underlying GetLeaveBalanceByEmployee
+// applies no leader company-narrowing, so neither does this aggregate list.
+func (s *GrantService) ListBalances(ctx context.Context, f BalanceListFilter) ([]dom.EmployeeLeaveBalance, *string, bool, error) {
+	if _, ok := auth.PrincipalFrom(ctx); !ok {
+		return nil, nil, false, apperr.Unauthenticated()
+	}
+	limit := clampLimit(f.Limit)
+	f.Limit = limit + 1
+	rows, err := s.repo.ListLeaveBalances(ctx, f, s.now().UTC())
+	if err != nil {
+		return nil, nil, false, apperr.Internal(err)
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	var next *string
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		c, cerr := encodeBalanceCursor(last.FullName, last.EmployeeID)
+		if cerr != nil {
+			return nil, nil, false, cerr
+		}
+		next = &c
+	}
+	return rows, next, hasMore, nil
+}
+
 // Get loads one lot with its consumptions (GET /leave-grants/{id}).
 func (s *GrantService) Get(ctx context.Context, id string, includeConsumptions bool) (dom.LeaveGrant, error) {
 	g, err := s.repo.GetLeaveGrant(ctx, id)

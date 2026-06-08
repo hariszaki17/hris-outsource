@@ -326,6 +326,46 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /leave-balances:
+    get:
+      tags: [leave-balances]
+      summary: List per-employee leave balances (aggregate — the /leave/quotas screen)
+      description: |
+        Returns **ONE ROW PER EMPLOYEE** (`EmployeeLeaveBalance`), rolling up **all** of the
+        employee's **active** grant-lots (`now < expires_at`) into a single line: the flat-pool
+        totals (`pool_total/consumed/pending/remaining` over unearmarked lots), the combined
+        `earmarked_remaining`, the soonest `next_expiry`, and the active `lot_count`. This is the
+        searchable quota directory; drill-in to individual lots uses
+        `GET /leave-grants?employee_id=…` + `GET /leave-balances/by-employee/{employee_id}`.
+
+        An employee appears iff they hold **≥ 1 active (non-expired) lot** — including employees whose
+        lots are fully consumed (a lot is still listed while non-expired). Employees whose lots are all
+        expired are omitted. `q` filters by `full_name`, `nik`, or `nip` (ILIKE), mirroring the people
+        directory. Ordered deterministically by `full_name`, then `employee_id`; keyset cursor on the
+        same pair.
+      operationId: listLeaveBalances
+      x-rbac:
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - "P6HZ7E"  # E6 · Saldo & Hibah Cuti (HR)
+      parameters:
+        - name: q
+          in: query
+          description: Free-text search over the employee's `full_name`, `nik`, or `nip` (ILIKE).
+          schema: { type: string, example: "Budi" }
+        - { $ref: '#/components/parameters/LimitQuery' }
+        - { $ref: '#/components/parameters/CursorQuery' }
+      responses:
+        '200':
+          description: Paginated list of per-employee balances.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmployeeLeaveBalanceListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ──────────────  LEAVE QUOTAS — DEPRECATED 2026-06-08 (migration only)  ──────────────
   /leave-quotas:
     get:
@@ -1703,6 +1743,62 @@ components:
         source: { $ref: '#/components/schemas/LeaveGrantSource' }
         remaining_days: { type: integer, example: 90 }
         expires_at: { type: string, format: date, example: "2027-03-31" }
+
+    EmployeeLeaveBalance:
+      type: object
+      description: |
+        One aggregate row in the per-employee balance LIST (`GET /leave-balances`, the
+        `/leave/quotas` screen). Rolls up all of the employee's **active** lots: the flat-pool
+        totals (over unearmarked lots) + the combined earmarked remaining + the soonest expiry +
+        the active lot count. `id` mirrors `employee_id` (the list row key).
+      required:
+        [id, employee_id, full_name, nik, nip, pool_total, pool_consumed, pool_pending,
+         pool_remaining, earmarked_remaining, lot_count]
+      properties:
+        id: { type: string, example: SWP-EMP-1042, description: Row key — equals `employee_id`. }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        full_name: { type: string, example: "Budi Santoso" }
+        nik: { type: string, example: "3201234567890001", description: Indonesian KTP number. }
+        nip: { type: string, example: "SWP-0042", description: SWP internal employee number. }
+        pool_total:
+          type: integer
+          description: Σ `amount_days` over active **unearmarked** lots (the flat pool grant total).
+          example: 12
+        pool_consumed:
+          type: integer
+          description: Σ `consumed_days` over active unearmarked lots.
+          example: 4
+        pool_pending:
+          type: integer
+          description: Σ `pending_days` over active unearmarked lots (open PENDING_* reservations).
+          example: 0
+        pool_remaining:
+          type: integer
+          description: "`pool_total - pool_consumed - pool_pending`."
+          example: 8
+        earmarked_remaining:
+          type: integer
+          description: Σ(`amount - consumed - pending`) over active **earmarked** lots (LQ-10).
+          example: 90
+        next_expiry:
+          type: [string, "null"]
+          format: date
+          description: Soonest `expires_at` among active lots with remaining > 0; null when none remain.
+          example: "2026-12-31"
+        lot_count:
+          type: integer
+          description: Count of active (non-expired) lots held by the employee (earmarked + pool).
+          example: 3
+
+    EmployeeLeaveBalanceListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/EmployeeLeaveBalance' }
+        next_cursor: { type: [string, "null"] }
+        has_more: { type: boolean }
 
     # ── deprecated per-type quota schemas (2026-06-08) ──
     LeaveQuota:

@@ -155,6 +155,39 @@ func (h *Handler) PatchLeaveGrant(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, toLeaveGrantResponse(g, time.Now()))
 }
 
+// ListLeaveBalances handles GET /leave-balances (aggregate, one row per employee;
+// cursor-paged on (full_name, employee_id)). Powers the /leave/quotas screen.
+func (h *Handler) ListLeaveBalances(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := svc.BalanceListFilter{
+		Q:     strPtrParam(q.Get("q")),
+		Limit: intParam(q.Get("limit")),
+	}
+	if cursor := q.Get("cursor"); cursor != "" {
+		name, id, err := svc.DecodeBalanceCursor(cursor)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		f.CursorFullName = name
+		f.CursorID = id
+	}
+	rows, next, hasMore, err := h.grant.ListBalances(r.Context(), f)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items := make([]employeeLeaveBalanceResponse, 0, len(rows))
+	for _, b := range rows {
+		items = append(items, toEmployeeLeaveBalanceResponse(b))
+	}
+	httpx.WriteJSON(w, http.StatusOK, httpx.PageResponse[employeeLeaveBalanceResponse]{
+		Data:       items,
+		NextCursor: next,
+		HasMore:    hasMore,
+	})
+}
+
 // GetLeaveBalanceByEmployee handles GET /leave-balances/by-employee/{employee_id}.
 func (h *Handler) GetLeaveBalanceByEmployee(w http.ResponseWriter, r *http.Request) {
 	employeeID := chi.URLParam(r, "employee_id")

@@ -584,27 +584,104 @@ func (q *Queries) ListConsumptionsForRequest(ctx context.Context, leaveRequestID
 	return items, nil
 }
 
-const listEmployeesWithLeaveGrants = `-- name: ListEmployeesWithLeaveGrants :many
-SELECT DISTINCT lg.employee_id
+const listLeaveBalances = `-- name: ListLeaveBalances :many
+SELECT e.id                                                         AS employee_id,
+       e.full_name                                                  AS full_name,
+       e.nik                                                        AS nik,
+       e.nip                                                        AS nip,
+       COALESCE(SUM(lg.amount_days)   FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_total,
+       COALESCE(SUM(lg.consumed_days) FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_consumed,
+       COALESCE(SUM(lg.pending_days)  FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_pending,
+       COALESCE(SUM(lg.amount_days - lg.consumed_days - lg.pending_days)
+                FILTER (WHERE lg.earmark IS NULL), 0)::bigint        AS pool_remaining,
+       COALESCE(SUM(lg.amount_days - lg.consumed_days - lg.pending_days)
+                FILTER (WHERE lg.earmark IS NOT NULL), 0)::bigint    AS earmarked_remaining,
+       MIN(lg.expires_at) FILTER (
+           WHERE (lg.amount_days - lg.consumed_days - lg.pending_days) > 0
+       )::date                                                       AS next_expiry,
+       COUNT(*)::bigint                                              AS lot_count
 FROM leave_grants lg
+JOIN employees e ON e.id = lg.employee_id AND e.deleted_at IS NULL
 WHERE lg.deleted_at IS NULL
+  AND lg.expires_at > $1::date
+  AND (
+        $2::text IS NULL
+        OR e.full_name ILIKE '%' || $2::text || '%'
+        OR e.nik       ILIKE '%' || $2::text || '%'
+        OR e.nip       ILIKE '%' || $2::text || '%'
+      )
+  AND (
+        $3::text IS NULL
+        OR (e.full_name, e.id) > ($3::text, $4::text)
+      )
+GROUP BY e.id, e.full_name, e.nik, e.nip
+ORDER BY e.full_name ASC, e.id ASC
+LIMIT $5
 `
 
-// Seed/balance helper — distinct employees that hold any active lot (not used by the
-// live path; kept minimal). Unused queries are pruned if sqlc warns.
-func (q *Queries) ListEmployeesWithLeaveGrants(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, listEmployeesWithLeaveGrants)
+type ListLeaveBalancesParams struct {
+	NowDate        pgtype.Date
+	Q              *string
+	CursorFullName *string
+	CursorID       *string
+	Lim            int32
+}
+
+type ListLeaveBalancesRow struct {
+	EmployeeID         string
+	FullName           string
+	Nik                string
+	Nip                string
+	PoolTotal          int64
+	PoolConsumed       int64
+	PoolPending        int64
+	PoolRemaining      int64
+	EarmarkedRemaining int64
+	NextExpiry         pgtype.Date
+	LotCount           int64
+}
+
+// The /leave/quotas screen: ONE ROW PER EMPLOYEE, aggregating ALL of the employee's
+// ACTIVE lots (now < expires_at AND deleted_at IS NULL). JOINs employees for the
+// name/nik/nip display + the q ILIKE filter (mirrors people/employees.sql ListEmployees:
+// ILIKE over full_name/nik/nip ONLY). An employee appears iff they hold >= 1 ACTIVE lot
+// regardless of remaining (an employee whose lots are all consumed still lists as long
+// as a lot is non-expired); an employee with ONLY expired lots is excluded by the
+// expires_at > now_date predicate. Pool fields aggregate unearmarked lots (earmark IS
+// NULL); earmarked_remaining sums remaining across earmarked lots. next_expiry is the
+// MIN(expires_at) over active lots that still have remaining > 0. Keyset cursor on
+// (full_name, employee_id); deterministic ORDER BY full_name ASC, employee_id ASC.
+func (q *Queries) ListLeaveBalances(ctx context.Context, arg ListLeaveBalancesParams) ([]ListLeaveBalancesRow, error) {
+	rows, err := q.db.Query(ctx, listLeaveBalances,
+		arg.NowDate,
+		arg.Q,
+		arg.CursorFullName,
+		arg.CursorID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []string{}
+	items := []ListLeaveBalancesRow{}
 	for rows.Next() {
-		var employee_id string
-		if err := rows.Scan(&employee_id); err != nil {
+		var i ListLeaveBalancesRow
+		if err := rows.Scan(
+			&i.EmployeeID,
+			&i.FullName,
+			&i.Nik,
+			&i.Nip,
+			&i.PoolTotal,
+			&i.PoolConsumed,
+			&i.PoolPending,
+			&i.PoolRemaining,
+			&i.EarmarkedRemaining,
+			&i.NextExpiry,
+			&i.LotCount,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, employee_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

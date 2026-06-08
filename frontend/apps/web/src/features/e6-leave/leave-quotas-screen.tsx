@@ -1,12 +1,16 @@
 /**
- * E6 · Saldo & Hibah Cuti (HR) — reframed from per-type quota to grant-lot ledger
+ * E6 · Kuota Cuti (HR) — per-employee aggregate list + lot drill-in
  *
  * .pen frames:
  *   P6HZ7E  Saldo & Hibah Cuti (HR) — main balance ledger (2026-06-08)
- *   CGCnL   Tambah Hibah / Sesuaikan Saldo (modal) — grant-lot form + adjust (LQ-6)
+ *   CGCnL   Tambah Kuota / Sesuaikan Saldo (modal) — grant-lot form + adjust (LQ-6)
  *
  * F6.1 — grant-lot ledger (resolved 2026-06-08): balance = per-employee POOL of LeaveGrant lots,
  * each with its own expires_at. earmark=null → general pool (FIFO); non-null → purpose-restricted.
+ *
+ * LIST  = one row per employee via useListLeaveBalances (GET /leave-balances, q = name/NIK/NIP).
+ * DRILL = clicking a row selects employee_id, shows EmployeePoolSummary + per-lot DataTable via
+ *         useListLeaveGrants({ employee_id }) + useGetLeaveBalanceByEmployee.
  *
  * ENGINEERING.md D1 — typed URL search params + cursor pagination.
  * ENGINEERING.md B1 — classifyError / applyFieldErrors.
@@ -16,26 +20,32 @@
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
+  type EmployeeLeaveBalance,
   type LeaveGrant,
   type LeaveGrantPatchRequest,
   LeaveGrantSource,
   type LeaveGrantWriteRequest,
+  type ListLeaveBalancesParams,
   type ListLeaveGrantsParams,
   getGetLeaveBalanceByEmployeeQueryKey,
+  getListLeaveBalancesQueryKey,
   getListLeaveGrantsQueryKey,
   useAdjustLeaveGrant,
   useCreateLeaveGrant,
   useGetLeaveBalanceByEmployee,
+  useListLeaveBalances,
   useListLeaveGrants,
 } from '@swp/api-client/e6';
+import { useListEmployees } from '@swp/api-client/e2';
 import {
   Button,
   type Column,
+  Combobox,
+  type ComboboxOption,
   CursorPagination,
   DataTable,
   DateText,
   EmptyState,
-  FilterSelect,
   FormField,
   IdChip,
   Modal,
@@ -49,7 +59,7 @@ import {
 } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { CalendarPlus, Info, PackagePlus, Settings2, Tag } from 'lucide-react';
+import { CalendarPlus, ChevronLeft, Info, PackagePlus, Settings2, Tag } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -60,7 +70,9 @@ import { z } from 'zod';
 // ---------------------------------------------------------------------------
 
 export type LeaveQuotasSearch = {
+  /** Free-text search for the employee list (name / NIK / NIP → q param). */
   q?: string;
+  /** Employee selected for drill-in (shows lot detail panel). */
   employee_id?: string;
   cursor?: string;
 };
@@ -71,6 +83,8 @@ export type LeaveQuotasSearch = {
 
 const grantSchema = z.object({
   employee_id: z.string().min(1, 'Pilih karyawan'),
+  /** Display name for the employee combobox (stored separately from id). */
+  employee_name: z.string().optional(),
   amount_days: z
     .number({ invalid_type_error: 'Wajib diisi' })
     .int('Harus bilangan bulat')
@@ -125,13 +139,72 @@ function remainingDays(lot: LeaveGrant): number {
 }
 
 // ---------------------------------------------------------------------------
+// EmployeeCombobox — typeahead that resolves employee_id from name/NIK/NIP
+// ---------------------------------------------------------------------------
+
+interface EmployeeComboboxProps {
+  value: string | null;
+  onChange: (employeeId: string | null) => void;
+  disabled?: boolean;
+  error?: string;
+  placeholder?: string;
+}
+
+function EmployeeCombobox({
+  value,
+  onChange,
+  disabled,
+  error,
+  placeholder,
+}: EmployeeComboboxProps) {
+  const [q, setQ] = useState('');
+
+  const listQuery = useListEmployees(q.length >= 1 ? { q, limit: 20 } : undefined, {
+    query: { enabled: q.length >= 1 },
+  });
+
+  type EmpListData = { data: Array<{ id: string; full_name: string; nip?: string; nik: string }> };
+  const outer = listQuery.data?.data as { data: EmpListData } | EmpListData | undefined;
+  const listData =
+    outer &&
+    typeof outer === 'object' &&
+    'data' in outer &&
+    typeof (outer as { data: unknown }).data === 'object' &&
+    !Array.isArray((outer as { data: unknown }).data)
+      ? (outer as { data: EmpListData }).data
+      : (outer as EmpListData | undefined);
+  const employees = listData?.data ?? [];
+
+  const options: ComboboxOption[] = employees.map((e) => ({
+    value: e.id,
+    label: e.full_name,
+    sublabel: e.nip ?? e.nik,
+    meta: e.id,
+  }));
+
+  return (
+    <Combobox
+      value={value}
+      onChange={onChange}
+      options={options}
+      onSearch={setQ}
+      isLoading={listQuery.isLoading}
+      placeholder={placeholder ?? 'Ketik nama, NIK, atau NIP…'}
+      disabled={disabled}
+      emptyText={q.length < 1 ? 'Ketik untuk mencari karyawan' : 'Tidak ada karyawan ditemukan'}
+      error={!!error}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // GrantLotModal (CGCnL) — create (POST /leave-grants) or adjust (PATCH)
 // ---------------------------------------------------------------------------
 
 interface GrantLotModalProps {
   /** When set, we are adjusting an existing lot (PATCH). When undefined, creating (POST). */
   adjustTarget?: LeaveGrant;
-  /** Pre-filled employee_id when known (from context). */
+  /** Pre-filled employee_id when known (from drill-in context). */
   defaultEmployeeId?: string;
   open: boolean;
   onClose: () => void;
@@ -158,12 +231,14 @@ function GrantLotModal({
     handleSubmit: handleGrantSubmit,
     reset: resetGrant,
     setError: setGrantError,
+    setValue: setGrantValue,
     watch: watchGrant,
     formState: { errors: grantErrors, isSubmitting: grantSubmitting },
   } = useForm<GrantFormValues>({
     resolver: zodResolver(grantSchema),
     defaultValues: {
       employee_id: defaultEmployeeId ?? '',
+      employee_name: '',
       amount_days: 0,
       expires_at: '',
       source: LeaveGrantSource.ADJUSTMENT,
@@ -191,6 +266,7 @@ function GrantLotModal({
   });
 
   const grantSource = watchGrant('source');
+  const grantEmployeeId = watchGrant('employee_id');
   const showEarmark = EARMARK_SOURCES.includes(grantSource as LeaveGrantSource);
 
   useEffect(() => {
@@ -205,6 +281,7 @@ function GrantLotModal({
       } else {
         resetGrant({
           employee_id: defaultEmployeeId ?? '',
+          employee_name: '',
           amount_days: 0,
           expires_at: '',
           source: LeaveGrantSource.ADJUSTMENT,
@@ -376,20 +453,28 @@ function GrantLotModal({
         <form onSubmit={handleGrantSubmit(onGrantSubmit)}>
           <ModalHeader icon={PackagePlus} tone="brand" title={t('grant.title')} onClose={onClose} />
           <ModalBody>
-            {/* Employee ID */}
+            {/* Employee search (combobox — resolves employee_id from name/NIK/NIP) */}
             <FormField
               label={t('grant.employeeLabel')}
               htmlFor="g-employee"
               required
               error={grantErrors.employee_id?.message}
             >
-              <input
-                id="g-employee"
-                type="text"
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder={t('grant.employeePlaceholder')}
-                {...registerGrant('employee_id')}
-              />
+              {defaultEmployeeId ? (
+                /* If called from drill-in context, employee is fixed — show read-only. */
+                <div className="flex items-center gap-[8px] rounded-[8px] border border-border bg-surface-2 py-[10px] px-[12px] text-[14px] text-text">
+                  <span className="font-mono text-[12px] text-text-3">{defaultEmployeeId}</span>
+                </div>
+              ) : (
+                <EmployeeCombobox
+                  value={grantEmployeeId || null}
+                  onChange={(id) => {
+                    setGrantValue('employee_id', id ?? '', { shouldValidate: true });
+                  }}
+                  error={grantErrors.employee_id?.message}
+                  placeholder={t('grant.employeePlaceholder')}
+                />
+              )}
             </FormField>
 
             {/* Amount days */}
@@ -569,24 +654,27 @@ function EmployeePoolSummary({ employeeId }: PoolSummaryProps) {
 }
 
 // ---------------------------------------------------------------------------
-// LeaveQuotasScreen
+// EmployeeLotDetail — drill-in view: pool summary + per-lot table
 // ---------------------------------------------------------------------------
 
-export function LeaveQuotasScreen() {
+interface EmployeeLotDetailProps {
+  row: EmployeeLeaveBalance;
+  onBack: () => void;
+  onAddQuota: () => void;
+  onAdjust: (lot: LeaveGrant) => void;
+  onRefetch: () => void;
+}
+
+function EmployeeLotDetail({
+  row,
+  onBack,
+  onAddQuota,
+  onAdjust,
+  onRefetch,
+}: EmployeeLotDetailProps) {
   const { t } = useTranslation('leaveQuotas');
-  const navigate = useNavigate();
-  const search = useSearch({ strict: false }) as LeaveQuotasSearch;
-  const queryClient = useQueryClient();
 
-  const [grantOpen, setGrantOpen] = useState(false);
-  const [adjustTarget, setAdjustTarget] = useState<LeaveGrant | null>(null);
-
-  const queryParams: ListLeaveGrantsParams = {
-    limit: PAGE_SIZE,
-    ...(search.employee_id ? { employee_id: search.employee_id } : {}),
-    ...(search.cursor ? { cursor: search.cursor } : {}),
-  };
-
+  const queryParams: ListLeaveGrantsParams = { limit: PAGE_SIZE, employee_id: row.employee_id };
   const grantsQuery = useListLeaveGrants(queryParams);
 
   type GrantListData = { data: LeaveGrant[]; next_cursor?: string | null; has_more: boolean };
@@ -600,55 +688,16 @@ export function LeaveQuotasScreen() {
       ? (grantsOuter as { data: GrantListData }).data
       : (grantsOuter as GrantListData | undefined);
 
-  const rows: LeaveGrant[] = grantList?.data ?? [];
-  const hasMore = grantList?.has_more ?? false;
-  const nextCursor = grantList?.next_cursor ?? null;
+  const lots: LeaveGrant[] = grantList?.data ?? [];
 
-  type NavFn = (o: { to: string; search?: Record<string, unknown> }) => void;
-  const nav = navigate as unknown as NavFn;
-
-  function setSearch(patch: Partial<LeaveQuotasSearch>) {
-    nav({ to: '/leave/quotas', search: { ...search, ...patch, cursor: undefined } });
-  }
-
-  function onRefetch() {
-    grantsQuery.refetch();
-    // Also invalidate balance query if employee filter is active
-    if (search.employee_id) {
-      queryClient.invalidateQueries({
-        queryKey: getGetLeaveBalanceByEmployeeQueryKey(search.employee_id),
-      });
-    }
-    queryClient.invalidateQueries({ queryKey: getListLeaveGrantsQueryKey() });
-  }
-
-  const error = grantsQuery.error ? classifyError(grantsQuery.error) : null;
-
-  // ---------------------------------------------------------------------------
-  // Columns
-  // ---------------------------------------------------------------------------
-
-  const columns: Column<LeaveGrant>[] = [
-    {
-      id: 'employee',
-      header: t('table.employee'),
-      width: 220,
-      cell: (row) => (
-        <div className="flex flex-col min-w-0">
-          <span className="text-[14px] font-medium text-text truncate">
-            {row.employee_name ?? row.employee_id}
-          </span>
-          <span className="text-[12px] text-text-3 font-mono">{row.employee_id}</span>
-        </div>
-      ),
-    },
+  const lotColumns: Column<LeaveGrant>[] = [
     {
       id: 'source',
       header: t('table.source'),
       width: 130,
-      cell: (row) => (
+      cell: (lot) => (
         <span className="text-[13px] text-text-2">
-          {t(sourceLabelKey(row.source as LeaveGrantSource))}
+          {t(sourceLabelKey(lot.source as LeaveGrantSource))}
         </span>
       ),
     },
@@ -656,10 +705,10 @@ export function LeaveQuotasScreen() {
       id: 'earmark',
       header: t('table.earmark'),
       width: 150,
-      cell: (row) =>
-        row.earmark ? (
-          <StatusBadge tone={earmarkBadgeTone(row.earmark)} dot={false}>
-            {row.earmark}
+      cell: (lot) =>
+        lot.earmark ? (
+          <StatusBadge tone={earmarkBadgeTone(lot.earmark)} dot={false}>
+            {lot.earmark}
           </StatusBadge>
         ) : (
           <span className="text-[12px] text-text-3">{t('table.poolGeneral')}</span>
@@ -670,25 +719,25 @@ export function LeaveQuotasScreen() {
       header: t('table.amount'),
       width: 100,
       align: 'right',
-      cell: (row) => <span className="text-[14px] font-semibold text-text">{row.amount_days}</span>,
+      cell: (lot) => <span className="text-[14px] font-semibold text-text">{lot.amount_days}</span>,
     },
     {
       id: 'consumed',
       header: t('table.consumed'),
       width: 100,
       align: 'right',
-      cell: (row) => <span className="text-[14px] text-text">{row.consumed_days}</span>,
+      cell: (lot) => <span className="text-[14px] text-text">{lot.consumed_days}</span>,
     },
     {
       id: 'pending',
       header: t('table.pending'),
       width: 100,
       align: 'right',
-      cell: (row) => (
+      cell: (lot) => (
         <span
-          className={`text-[14px] ${row.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
+          className={`text-[14px] ${lot.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
         >
-          {row.pending_days}
+          {lot.pending_days}
         </span>
       ),
     },
@@ -697,8 +746,8 @@ export function LeaveQuotasScreen() {
       header: t('table.remaining'),
       width: 110,
       align: 'right',
-      cell: (row) => {
-        const rem = remainingDays(row);
+      cell: (lot) => {
+        const rem = remainingDays(lot);
         return (
           <span
             className={`text-[14px] font-semibold ${
@@ -714,17 +763,17 @@ export function LeaveQuotasScreen() {
       id: 'expires_at',
       header: t('table.expires'),
       width: 130,
-      cell: (row) => (
-        <DateText kind="date" value={row.expires_at} className="text-[13px] text-text-2" />
+      cell: (lot) => (
+        <DateText kind="date" value={lot.expires_at} className="text-[13px] text-text-2" />
       ),
     },
     {
       id: 'remark',
       header: t('table.remark'),
       width: 200,
-      cell: (row) => (
-        <span className="text-[12px] text-text-3 truncate" title={row.remark ?? ''}>
-          {row.remark ?? '—'}
+      cell: (lot) => (
+        <span className="text-[12px] text-text-3 truncate" title={lot.remark ?? ''}>
+          {lot.remark ?? '—'}
         </span>
       ),
     },
@@ -733,13 +782,13 @@ export function LeaveQuotasScreen() {
       header: '',
       width: 110,
       align: 'right',
-      cell: (row) => (
+      cell: (lot) => (
         <Button
           type="button"
           variant="secondary"
           size="sm"
-          aria-label={t('actions.adjustAriaLabel', { id: row.id })}
-          onClick={() => setAdjustTarget(row)}
+          aria-label={t('actions.adjustAriaLabel', { id: lot.id })}
+          onClick={() => onAdjust(lot)}
         >
           {t('actions.adjust')}
         </Button>
@@ -747,19 +796,283 @@ export function LeaveQuotasScreen() {
     },
   ];
 
-  // ---------------------------------------------------------------------------
-  // Render state booleans
-  // ---------------------------------------------------------------------------
-
   const isLoading = grantsQuery.isLoading;
-  const isEmpty = !isLoading && !error && rows.length === 0;
-  const hasActiveFilter = !!(search.employee_id || search.q);
-  const isForbidden = error?.kind === 'forbidden';
+  const error = grantsQuery.error ? classifyError(grantsQuery.error) : null;
+  const isEmpty = !isLoading && !error && lots.length === 0;
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  return (
+    <div className="flex flex-col gap-[16px] w-full">
+      {/* Back + employee header */}
+      <div className="flex items-center justify-between w-full">
+        <div className="flex items-center gap-[10px]">
+          <Button type="button" variant="secondary" size="sm" onClick={onBack}>
+            <ChevronLeft aria-hidden className="h-[14px] w-[14px]" />
+            {t('actions.back')}
+          </Button>
+          <div className="flex flex-col gap-[2px]">
+            <span className="text-[16px] font-semibold text-text">{row.full_name}</span>
+            <span className="text-[12px] font-mono text-text-3">{row.employee_id}</span>
+          </div>
+        </div>
+        <Button type="button" variant="primary" onClick={onAddQuota}>
+          <PackagePlus aria-hidden className="h-[16px] w-[16px]" />
+          {t('actions.grantLot')}
+        </Button>
+      </div>
 
+      {/* Pool summary */}
+      <EmployeePoolSummary employeeId={row.employee_id} />
+
+      {/* Lot table */}
+      {error ? (
+        <StateView
+          kind="error"
+          title={t('states.errorTitle')}
+          description={error.message}
+          onRetry={onRefetch}
+          retryLabel={t('actions.retry')}
+        />
+      ) : (
+        <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
+          <DataTable
+            columns={lotColumns}
+            data={lots}
+            getRowId={(lot) => lot.id}
+            isLoading={isLoading}
+            empty={
+              isEmpty ? (
+                <EmptyState
+                  variant="fresh"
+                  title={t('states.freshTitle')}
+                  description={t('states.freshDesc')}
+                />
+              ) : undefined
+            }
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// LeaveQuotasScreen — per-employee aggregate list
+// ---------------------------------------------------------------------------
+
+export function LeaveQuotasScreen() {
+  const { t } = useTranslation('leaveQuotas');
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as LeaveQuotasSearch;
+  const queryClient = useQueryClient();
+
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [adjustTarget, setAdjustTarget] = useState<LeaveGrant | null>(null);
+
+  // ── Aggregate list (one row per employee) ──────────────────────────────
+  const listParams: ListLeaveBalancesParams = {
+    limit: PAGE_SIZE,
+    ...(search.q ? { q: search.q } : {}),
+    ...(search.cursor ? { cursor: search.cursor } : {}),
+  };
+
+  const balancesQuery = useListLeaveBalances(listParams);
+
+  type BalanceListData = {
+    data: EmployeeLeaveBalance[];
+    next_cursor?: string | null;
+    has_more: boolean;
+  };
+  const balancesOuter = balancesQuery.data?.data as
+    | { data: BalanceListData }
+    | BalanceListData
+    | undefined;
+  const balanceList =
+    balancesOuter &&
+    typeof balancesOuter === 'object' &&
+    'data' in balancesOuter &&
+    typeof (balancesOuter as { data: unknown }).data === 'object' &&
+    !Array.isArray((balancesOuter as { data: unknown }).data)
+      ? (balancesOuter as { data: BalanceListData }).data
+      : (balancesOuter as BalanceListData | undefined);
+
+  const rows: EmployeeLeaveBalance[] = balanceList?.data ?? [];
+  const hasMore = balanceList?.has_more ?? false;
+  const nextCursor = balanceList?.next_cursor ?? null;
+
+  // ── Drill-in selection ─────────────────────────────────────────────────
+  const selectedEmployee = search.employee_id
+    ? (rows.find((r) => r.employee_id === search.employee_id) ?? null)
+    : null;
+
+  type NavFn = (o: { to: string; search?: Record<string, unknown> }) => void;
+  const nav = navigate as unknown as NavFn;
+
+  function setSearch(patch: Partial<LeaveQuotasSearch>) {
+    nav({ to: '/leave/quotas', search: { ...search, ...patch, cursor: undefined } });
+  }
+
+  function selectEmployee(row: EmployeeLeaveBalance) {
+    nav({
+      to: '/leave/quotas',
+      search: { ...search, employee_id: row.employee_id, cursor: undefined },
+    });
+  }
+
+  function clearSelection() {
+    nav({
+      to: '/leave/quotas',
+      search: { q: search.q, cursor: undefined },
+    });
+  }
+
+  function onRefetch() {
+    balancesQuery.refetch();
+    if (search.employee_id) {
+      queryClient.invalidateQueries({
+        queryKey: getGetLeaveBalanceByEmployeeQueryKey(search.employee_id),
+      });
+      queryClient.invalidateQueries({ queryKey: getListLeaveGrantsQueryKey() });
+    }
+    queryClient.invalidateQueries({ queryKey: getListLeaveBalancesQueryKey() });
+  }
+
+  const listError = balancesQuery.error ? classifyError(balancesQuery.error) : null;
+
+  // ── Aggregate list columns ─────────────────────────────────────────────
+  const listColumns: Column<EmployeeLeaveBalance>[] = [
+    {
+      id: 'employee',
+      header: t('table.employee'),
+      width: 240,
+      cell: (row) => (
+        <div className="flex flex-col min-w-0">
+          <span className="text-[14px] font-medium text-text truncate">{row.full_name}</span>
+          <span className="text-[11px] font-mono text-text-3">{row.employee_id}</span>
+          <span className="text-[11px] text-text-3">
+            {row.nip ? `NIP ${row.nip}` : `NIK ${row.nik}`}
+          </span>
+        </div>
+      ),
+    },
+    {
+      id: 'pool_total',
+      header: t('list.total'),
+      width: 110,
+      align: 'right',
+      cell: (row) => <span className="text-[14px] font-semibold text-text">{row.pool_total}</span>,
+    },
+    {
+      id: 'pool_consumed',
+      header: t('list.consumed'),
+      width: 100,
+      align: 'right',
+      cell: (row) => <span className="text-[14px] text-text">{row.pool_consumed}</span>,
+    },
+    {
+      id: 'pool_pending',
+      header: t('list.pending'),
+      width: 90,
+      align: 'right',
+      cell: (row) => (
+        <span
+          className={`text-[14px] ${row.pool_pending > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
+        >
+          {row.pool_pending}
+        </span>
+      ),
+    },
+    {
+      id: 'pool_remaining',
+      header: t('list.remaining'),
+      width: 90,
+      align: 'right',
+      cell: (row) => {
+        const rem = row.pool_remaining;
+        return (
+          <span
+            className={`text-[14px] font-semibold ${
+              rem < 0 ? 'text-bad-tx' : rem === 0 ? 'text-text-3' : 'text-ok-tx'
+            }`}
+          >
+            {rem}
+          </span>
+        );
+      },
+    },
+    {
+      id: 'earmarked_remaining',
+      header: t('list.earmark'),
+      width: 90,
+      align: 'right',
+      cell: (row) =>
+        row.earmarked_remaining > 0 ? (
+          <span className="text-[14px] font-medium text-warn-tx">{row.earmarked_remaining}</span>
+        ) : (
+          <span className="text-[13px] text-text-3">—</span>
+        ),
+    },
+    {
+      id: 'next_expiry',
+      header: t('list.nextExpiry'),
+      width: 150,
+      cell: (row) =>
+        row.next_expiry ? (
+          <DateText
+            kind="date"
+            value={row.next_expiry as string}
+            className="text-[13px] text-text-2"
+          />
+        ) : (
+          <span className="text-[13px] text-text-3">—</span>
+        ),
+    },
+  ];
+
+  const isLoading = balancesQuery.isLoading;
+  const isEmpty = !isLoading && !listError && rows.length === 0;
+  const hasActiveFilter = !!search.q;
+  const isForbidden = listError?.kind === 'forbidden';
+
+  // ── If an employee is selected → show drill-in ─────────────────────────
+  if (selectedEmployee) {
+    return (
+      <div className="flex flex-col gap-[18px] p-[24px] bg-app-bg min-h-full w-full">
+        {/* Title band */}
+        <div className="flex flex-col gap-[4px]">
+          <h1 className="text-[30px] font-bold text-text leading-none">{t('title')}</h1>
+          <p className="text-[14px] text-text-3">{t('subtitle')}</p>
+        </div>
+
+        <EmployeeLotDetail
+          row={selectedEmployee}
+          onBack={clearSelection}
+          onAddQuota={() => setGrantOpen(true)}
+          onAdjust={(lot) => setAdjustTarget(lot)}
+          onRefetch={onRefetch}
+        />
+
+        {/* Grant modal (create) */}
+        <GrantLotModal
+          open={grantOpen}
+          defaultEmployeeId={selectedEmployee.employee_id}
+          onClose={() => setGrantOpen(false)}
+          onSuccess={onRefetch}
+        />
+
+        {/* Adjust modal (patch) */}
+        {adjustTarget && (
+          <GrantLotModal
+            adjustTarget={adjustTarget}
+            open
+            onClose={() => setAdjustTarget(null)}
+            onSuccess={onRefetch}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── Default: aggregate list ────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-[18px] p-[24px] bg-app-bg min-h-full w-full">
       {/* Title band */}
@@ -774,24 +1087,13 @@ export function LeaveQuotasScreen() {
         </Button>
       </div>
 
-      {/* Per-employee pool summary (when filtered to one employee) */}
-      {search.employee_id && <EmployeePoolSummary employeeId={search.employee_id} />}
-
-      {/* Filters */}
+      {/* Search — name / NIK / NIP → wires to q param */}
       <div className="flex items-center gap-[10px] w-full">
         <SearchField
-          value={search.employee_id ?? ''}
-          onChange={(e) => setSearch({ employee_id: e.target.value || undefined })}
+          value={search.q ?? ''}
+          onChange={(e) => setSearch({ q: e.target.value || undefined })}
           placeholder={t('filters.searchPlaceholder')}
         />
-        <FilterSelect value="" onChange={() => {}}>
-          <option value="">{t('filters.allSources')}</option>
-          {Object.values(LeaveGrantSource).map((s) => (
-            <option key={s} value={s}>
-              {t(sourceLabelKey(s))}
-            </option>
-          ))}
-        </FilterSelect>
       </div>
 
       {/* Table card */}
@@ -801,21 +1103,22 @@ export function LeaveQuotasScreen() {
           title={t('states.noPermissionTitle')}
           description={t('states.noPermissionDesc')}
         />
-      ) : error ? (
+      ) : listError ? (
         <StateView
           kind="error"
           title={t('states.errorTitle')}
-          description={error.message}
+          description={listError.message}
           onRetry={onRefetch}
           retryLabel={t('actions.retry')}
         />
       ) : (
         <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
           <DataTable
-            columns={columns}
+            columns={listColumns}
             data={rows}
             getRowId={(row) => row.id}
             isLoading={isLoading}
+            onRowClick={selectEmployee}
             empty={
               isEmpty && hasActiveFilter ? (
                 <EmptyState
@@ -846,7 +1149,7 @@ export function LeaveQuotasScreen() {
       )}
 
       {/* Footer note (LQ-6) */}
-      {!isLoading && !error && rows.length > 0 && (
+      {!isLoading && !listError && rows.length > 0 && (
         <p className="text-[12px] text-text-3">{t('footerNote')}</p>
       )}
 
@@ -863,15 +1166,10 @@ export function LeaveQuotasScreen() {
         />
       )}
 
-      {/* Grant-lot modal (create) */}
-      <GrantLotModal
-        open={grantOpen}
-        defaultEmployeeId={search.employee_id}
-        onClose={() => setGrantOpen(false)}
-        onSuccess={onRefetch}
-      />
+      {/* Grant modal (create) */}
+      <GrantLotModal open={grantOpen} onClose={() => setGrantOpen(false)} onSuccess={onRefetch} />
 
-      {/* Adjust modal (patch) */}
+      {/* Adjust modal (patch) — should not appear from list view but safety check */}
       {adjustTarget && (
         <GrantLotModal
           adjustTarget={adjustTarget}

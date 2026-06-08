@@ -239,9 +239,46 @@ RETURNING id, employee_id, amount_days, granted_at, effective_from, expires_at,
           source, earmark, remark, consumed_days, pending_days, created_by,
           created_at, updated_at;
 
--- name: ListEmployeesWithLeaveGrants :many
--- Seed/balance helper — distinct employees that hold any active lot (not used by the
--- live path; kept minimal). Unused queries are pruned if sqlc warns.
-SELECT DISTINCT lg.employee_id
+-- name: ListLeaveBalances :many
+-- The /leave/quotas screen: ONE ROW PER EMPLOYEE, aggregating ALL of the employee's
+-- ACTIVE lots (now < expires_at AND deleted_at IS NULL). JOINs employees for the
+-- name/nik/nip display + the q ILIKE filter (mirrors people/employees.sql ListEmployees:
+-- ILIKE over full_name/nik/nip ONLY). An employee appears iff they hold >= 1 ACTIVE lot
+-- regardless of remaining (an employee whose lots are all consumed still lists as long
+-- as a lot is non-expired); an employee with ONLY expired lots is excluded by the
+-- expires_at > now_date predicate. Pool fields aggregate unearmarked lots (earmark IS
+-- NULL); earmarked_remaining sums remaining across earmarked lots. next_expiry is the
+-- MIN(expires_at) over active lots that still have remaining > 0. Keyset cursor on
+-- (full_name, employee_id); deterministic ORDER BY full_name ASC, employee_id ASC.
+SELECT e.id                                                         AS employee_id,
+       e.full_name                                                  AS full_name,
+       e.nik                                                        AS nik,
+       e.nip                                                        AS nip,
+       COALESCE(SUM(lg.amount_days)   FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_total,
+       COALESCE(SUM(lg.consumed_days) FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_consumed,
+       COALESCE(SUM(lg.pending_days)  FILTER (WHERE lg.earmark IS NULL), 0)::bigint AS pool_pending,
+       COALESCE(SUM(lg.amount_days - lg.consumed_days - lg.pending_days)
+                FILTER (WHERE lg.earmark IS NULL), 0)::bigint        AS pool_remaining,
+       COALESCE(SUM(lg.amount_days - lg.consumed_days - lg.pending_days)
+                FILTER (WHERE lg.earmark IS NOT NULL), 0)::bigint    AS earmarked_remaining,
+       MIN(lg.expires_at) FILTER (
+           WHERE (lg.amount_days - lg.consumed_days - lg.pending_days) > 0
+       )::date                                                       AS next_expiry,
+       COUNT(*)::bigint                                              AS lot_count
 FROM leave_grants lg
-WHERE lg.deleted_at IS NULL;
+JOIN employees e ON e.id = lg.employee_id AND e.deleted_at IS NULL
+WHERE lg.deleted_at IS NULL
+  AND lg.expires_at > sqlc.arg(now_date)::date
+  AND (
+        sqlc.narg(q)::text IS NULL
+        OR e.full_name ILIKE '%' || sqlc.narg(q)::text || '%'
+        OR e.nik       ILIKE '%' || sqlc.narg(q)::text || '%'
+        OR e.nip       ILIKE '%' || sqlc.narg(q)::text || '%'
+      )
+  AND (
+        sqlc.narg(cursor_full_name)::text IS NULL
+        OR (e.full_name, e.id) > (sqlc.narg(cursor_full_name)::text, sqlc.narg(cursor_id)::text)
+      )
+GROUP BY e.id, e.full_name, e.nik, e.nip
+ORDER BY e.full_name ASC, e.id ASC
+LIMIT sqlc.arg(lim);
