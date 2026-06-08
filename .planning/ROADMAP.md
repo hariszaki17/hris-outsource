@@ -31,7 +31,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
 - [x] **Phase 16: My schedule** (SCHED-01..02) — backend OPEN-ROUTE. ✅ 2026-06-08 (impl as GET /schedule/by-agent).
   BE: open `GET /schedule` to agent self. FE: week view + shift detail + reminder hook.
   - Success: agent sees their own upcoming shifts for the week.
-- [ ] **Phase 17: Leave request** (LEAVE-01..02) — backend NEW.
+- [x] **Phase 17: Leave request** (LEAVE-01..02) — backend NEW. ✅ 2026-06-08 · attachment + doc-required types deferred.
   BE: agent `POST /leave-requests` + own list + attachment, quota/schedule validation, SL→HR routing.
   FE: leave form (type/dates/delegate/doc upload) + own-requests status.
   - Success: agent submits a leave request with a document; it enters the SL approval queue.

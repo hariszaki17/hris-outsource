@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
 status: in_progress
-stopped_at: Phase 16 complete (FE+BE); Phase 17 (leave request) next
+stopped_at: Phase 17 complete (FE+BE); Phase 18 (overtime) next
 last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — Phase 14 (clock in/out + geofence + my-attendance) COMPLETE, full-stack. FIRST rebased the mobile branch onto the parallel backend's new E5 commit (feat/backend-impl 3816b3a: attendance filters + true-absence + absence-sweep) so clock-in builds on current attendance code. BE (new agent clock path, no migration): clock.sql (4 queries) + ClockService (Haversine geofence + late/early eval) + ClockRepo + ClockHandler; POST /attendance:clock-in|:clock-out (RequireRole agent, Idempotency); opened GET /attendance + /{id} to agent self-scope (List forces caller employee_id; Get 404s others). Contract-exact: GPS_UNAVAILABLE/OUT_OF_GEOFENCE(force)/ALREADY|NOT_CLOCKED_IN, verification flag→PENDING else AUTO_APPROVED/VERIFIED. go build+vet+45 tests green, make gen idempotent. FE: expo-location GPS, clock card with geofence force-confirm flow + all variants, my-attendance history + StatusBadge + Attendance tab, i18n. tsc/biome/expo export 1780 green. CLOCK-03 (clock photo) DEFERRED. NOTE: BE edits attendance_service.go/server.go/cmd/api — conflicts with parallel backend work; coordinate merge. human_needed: live clock needs device GPS + running BE. Next: Phase 15 — attendance correction (backend NEW)."
+last_activity: "2026-06-08 — Phase 17 (leave request) COMPLETE, full-stack. Rebased onto latest backend (feat/backend-impl 97e7a6e: E6 leave grant-lot + Kuota), then built agent leave create→submit aligned with the grant-lot ledger: submitTx refactor (shared Submit/Create reserve core), CheckOverlappingLeave + CountLeaveDurationDays queries, validation order INVALID_DATE_RANGE→MISSING_REQUIRED_DOCUMENT→OVERLAPPING_LEAVE→BACKDATED_LEAVE→QUOTA_EXCEEDED, agent self-scope on List/Get/Balance, routes split (reads admit agent; agent-write group POST /leave-requests/:submit/:cancel). 427 tests green. FE: /leave list + /leave-new form (type chips, dates, reason) + More reworked into a feature menu. Also hardened my-attendance for the E5 true-absence model (check_in_at nullable). Ran pnpm gen (api-client gen is gitignored) to fix stale e6 barrel (leave-balances). Deferred: attachment upload, doc-required types, allows_backdated column. Next: Phase 18 — overtime (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 50
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 63
 ---
 
 # Project State
@@ -21,19 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–16 done (HALFWAY); Phase 17 (leave request) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–17 done; Phase 18 (overtime) next.
 
 ## Current Position
 
-Phase: 17 of 20 (Leave request) — next
-Plan: Phase 16 COMPLETE (FE 97012ff + BE f9470a5)
-Status: Phase 16 my-schedule shipped full-stack (GET /schedule/by-agent; go build + 403 tests green; FE green). Branch on current backend base d7171a5.
-Last activity: 2026-06-08 — Phase 16 complete; agent self-schedule endpoint + RN week view.
+Phase: 18 of 20 (Overtime request/confirm) — next
+Plan: Phase 17 COMPLETE (FE f77c598 + BE 81f5f8f)
+Status: Phase 17 leave shipped full-stack on the latest leave model (grant-lot); 427 tests green. 5/8 agent-MVP phases done.
+Last activity: 2026-06-08 — Phase 17 complete; agent leave create+submit + RN form + More menu.
 
-Progress: [█████     ] 50% (4/8 phases)
-
-## ⚠ Phase 17 coordination
-Phase 17 (leave request, E6) touches the SAME files the other agent is ACTIVELY editing (leave_grants/grant_service/leave service/server.go — uncommitted on feat/backend-impl). High conflict risk — coordinate/serialize before building Phase 17 backend.
+Progress: [██████    ] 63% (5/8 phases)
 
 ## Performance Metrics
 

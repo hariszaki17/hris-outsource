@@ -50,8 +50,8 @@ Three states drive per-feature effort:
 
 ### Leave request (LEAVE) — backend NEW
 
-- [ ] **LEAVE-01** (BE): Implement agent-scoped `POST /leave-requests` (+ `GET` own list, attachment upload) with quota + schedule-impact validation; routes to SL→HR approval (F6.2).
-- [ ] **LEAVE-02** (FE): Leave request form (type, dates, duration, delegate, document upload via `expo-image-picker`) + own-requests list + status.
+- [x] **LEAVE-01** (BE): Implement agent-scoped `POST /leave-requests` (+ `GET` own list, attachment upload) with quota + schedule-impact validation; routes to SL→HR approval (F6.2).
+- [x] **LEAVE-02** (FE): Leave request form (type, dates, duration, delegate, document upload via `expo-image-picker`) + own-requests list + status.
 
 ### Overtime (OT) — backend NEW
 
@@ -94,7 +94,7 @@ Three states drive per-feature effort:
 | ATTEND-01..02 | Phase 14 | Done |
 | ATTEND-03..04 | Phase 15 | Done (CODE-type correction deferred) |
 | SCHED-01..02 | Phase 16 | Done (include_company geo deferred) |
-| LEAVE-01..02 | Phase 17 | Pending |
+| LEAVE-01..02 | Phase 17 | Done (attachment + doc-required types deferred) |
 | OT-01..02 | Phase 18 | Pending |
 | PAY-01..02 | Phase 19 | Pending |
 | PROFILE-01..02 | Phase 20 | Pending |
