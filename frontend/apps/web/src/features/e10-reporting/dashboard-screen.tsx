@@ -40,6 +40,7 @@ import {
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApprovalInboxPanel } from './approval-inbox-panel.tsx';
+import { LeaderCompliancePanel } from './leader-compliance-panel.tsx';
 
 // ---------------------------------------------------------------------------
 // Narrow helpers
@@ -402,6 +403,9 @@ function LeaderDashboardView({ data }: { data: LeaderDashboard }) {
           <ApprovalInboxPanel rows={panelRows} />
         </div>
       </div>
+
+      {/* Roster-compliance (EPICS §8 D3) — this week's over-scheduling + holiday shifts */}
+      <LeaderCompliancePanel companyId={data.company.id} />
 
       {/* Attendance trend 7d */}
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-[18px]">

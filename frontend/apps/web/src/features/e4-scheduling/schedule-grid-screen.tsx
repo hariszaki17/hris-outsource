@@ -30,13 +30,25 @@ import {
   useListSchedule,
 } from '@swp/api-client/e4';
 import { type Holiday, useListHolidays } from '@swp/api-client/e7';
-import { LOCALE_ID, TZ } from '@swp/shared';
+import { LOCALE_ID } from '@swp/shared';
 import { Button, EmptyState, SkeletonTableRow, StateView } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Copy, Radio, Star, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  type AgentRow,
+  type RowCompliance,
+  addDays,
+  buildAgentRows,
+  buildHolidayMaps,
+  computeCompliance,
+  currentJakartaIso,
+  getMondayOfWeek,
+  parsePlainDate,
+  weekDays,
+} from './roster-compliance.ts';
 import type { CellTarget } from './schedule-overlays.tsx';
 import { BulkApplyModal, ShiftPickerPopover } from './schedule-overlays.tsx';
 
@@ -46,7 +58,6 @@ import { BulkApplyModal, ShiftPickerPopover } from './schedule-overlays.tsx';
 
 const DAY_ABBR_ID = ['SEN', 'SEL', 'RAB', 'KAM', 'JUM', 'SAB', 'MIN'];
 const AGENT_COL_W = 230; // px — matches .pen width:230 on AgenH/AgentCol
-const MS_PER_DAY = 86_400_000;
 
 // ---------------------------------------------------------------------------
 // Route search params
@@ -58,46 +69,8 @@ export type ScheduleGridSearch = {
 };
 
 // ---------------------------------------------------------------------------
-// Plain-Date helpers (Asia/Jakarta via TZ/LOCALE_ID from @swp/shared)
+// Display formatters (date math + compliance live in ./roster-compliance.ts)
 // ---------------------------------------------------------------------------
-
-/** Parse "YYYY-MM-DD" into a UTC midnight Date (avoids timezone shift). */
-function parsePlainDate(iso: string): Date {
-  const parts = iso.split('-');
-  const y = Number(parts[0]);
-  const m = Number(parts[1]);
-  const d = Number(parts[2]);
-  return new Date(Date.UTC(y, m - 1, d));
-}
-
-/** Format a UTC midnight Date to "YYYY-MM-DD". */
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Get current date in Asia/Jakarta as "YYYY-MM-DD". */
-function currentJakartaIso(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // "YYYY-MM-DD"
-}
-
-/** Add N days to a "YYYY-MM-DD" string. */
-function addDays(iso: string, n: number): string {
-  const d = parsePlainDate(iso);
-  return toIsoDate(new Date(d.getTime() + n * MS_PER_DAY));
-}
-
-/** Return the Monday of the week containing the given ISO date. */
-function getMondayOfWeek(iso: string): string {
-  const d = parsePlainDate(iso);
-  const dow = d.getUTCDay(); // 0=Sun..6=Sat
-  const delta = dow === 0 ? -6 : 1 - dow; // shift to Mon
-  return toIsoDate(new Date(d.getTime() + delta * MS_PER_DAY));
-}
-
-/** Build 7-element array of ISO dates starting from monday. */
-function weekDays(monday: string): string[] {
-  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-}
 
 function formatDayMonthId(iso: string): string {
   return new Intl.DateTimeFormat(LOCALE_ID, {
@@ -131,109 +104,6 @@ function shiftDotClass(entry: ScheduleEntry): string {
   if (name.includes('malam')) return 'bg-text-3';
   if (name.includes('siang')) return 'bg-accent-blue';
   return 'bg-accent-gold'; // Pagi / Cleaning / Building / default
-}
-
-// ---------------------------------------------------------------------------
-// Utility: build an agent-keyed map from schedule entries
-// ---------------------------------------------------------------------------
-
-type AgentRow = {
-  employeeId: string;
-  employeeName: string;
-  placementId: string;
-  serviceLineId?: string;
-  serviceLineName?: string;
-  cells: Record<string, ScheduleEntry | undefined>; // date string → entry
-};
-
-function buildAgentRows(entries: ScheduleEntry[]): AgentRow[] {
-  const map = new Map<string, AgentRow>();
-  for (const e of entries) {
-    const key = `${e.employee_id}::${e.placement_id}`;
-    if (!map.has(key)) {
-      map.set(key, {
-        employeeId: e.employee_id,
-        employeeName: String(e.employee_name ?? e.employee_id),
-        placementId: e.placement_id,
-        serviceLineId: e.service_line_id ?? undefined,
-        serviceLineName: String(e.company_name ?? ''),
-        cells: {},
-      });
-    }
-    const row = map.get(key)!;
-    row.cells[e.work_date] = e;
-    // Correct serviceLineName to actual service line
-    if (e.service_line_id) {
-      row.serviceLineId = e.service_line_id;
-    }
-  }
-  return Array.from(map.values());
-}
-
-// ---------------------------------------------------------------------------
-// Roster-compliance derivation (EPICS §8 D3) — pure, week-scoped.
-//   A "worked day" = a scheduled shift that is not a day-off and not cancelled
-//   by approved leave. Within the visible Mon–Sun window:
-//     • noRest   → all 7 days worked (zero weekly rest)         → violation
-//     • longRun  → ≥6 consecutive worked days (but has a rest)  → warning
-//   Cross-week consecutive runs need neighbour-week data (follow-up); v1 flags
-//   within the displayed week, which is where the leader acts.
-// ---------------------------------------------------------------------------
-
-const REST_VIOLATION_DAYS = 7; // worked all 7 visible days → no weekly rest
-const LONG_RUN_WARN_DAYS = 6; // ≥6 consecutive worked days → approaching the cap
-
-function isWorkedEntry(entry: ScheduleEntry | undefined): boolean {
-  if (!entry) return false;
-  if (entry.is_day_off) return false;
-  if (entry.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE) return false;
-  return !!entry.shift_master_name;
-}
-
-function longestWorkedRun(row: AgentRow, days: string[]): number {
-  let best = 0;
-  let cur = 0;
-  for (const d of days) {
-    if (isWorkedEntry(row.cells[d])) {
-      cur += 1;
-      if (cur > best) best = cur;
-    } else {
-      cur = 0;
-    }
-  }
-  return best;
-}
-
-type RowCompliance = {
-  workedCount: number;
-  longestRun: number;
-  noRest: boolean;
-  longRun: boolean;
-  holidayShiftCount: number;
-};
-
-function computeCompliance(
-  row: AgentRow,
-  days: string[],
-  holidaySet: Set<string>,
-): RowCompliance {
-  let workedCount = 0;
-  let holidayShiftCount = 0;
-  for (const d of days) {
-    if (isWorkedEntry(row.cells[d])) {
-      workedCount += 1;
-      if (holidaySet.has(d)) holidayShiftCount += 1;
-    }
-  }
-  const longestRun = longestWorkedRun(row, days);
-  const noRest = workedCount >= REST_VIOLATION_DAYS;
-  return {
-    workedCount,
-    longestRun,
-    noRest,
-    longRun: !noRest && longestRun >= LONG_RUN_WARN_DAYS,
-    holidayShiftCount,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -315,26 +185,15 @@ export function ScheduleGridScreen() {
       return body?.data ?? [];
     };
     const all = [...extract(holidaysA), ...(sundayYear !== mondayYear ? extract(holidaysB) : [])];
-    const slIds = new Set(
-      agentRows.map((r) => r.serviceLineId).filter((x): x is string => !!x),
-    );
-    const nameByDate = new Map<string, string>();
-    for (const h of all) {
-      if (!days.includes(h.date)) continue;
-      const applies =
-        h.applicable_service_lines.length === 0 ||
-        h.applicable_service_lines.some((id) => slIds.has(id));
-      if (!applies) continue;
-      if (!nameByDate.has(h.date)) nameByDate.set(h.date, h.name);
-    }
-    return { holidaySet: new Set(nameByDate.keys()), holidayNameByDate: nameByDate };
+    const slIds = new Set(agentRows.map((r) => r.serviceLineId).filter((x): x is string => !!x));
+    return buildHolidayMaps(all, days, slIds);
   }, [holidaysA, holidaysB, agentRows, days, mondayYear, sundayYear]);
 
   // ---- Per-agent roster compliance (EPICS §8 D3) ----
   const complianceByRow = React.useMemo(() => {
     const m = new Map<string, RowCompliance>();
     for (const row of agentRows) {
-      m.set(`${row.employeeId}::${row.placementId}`, computeCompliance(row, days, holidaySet));
+      m.set(`${row.employeeId}::${row.placementId}`, computeCompliance(row.cells, days, holidaySet));
     }
     return m;
   }, [agentRows, days, holidaySet]);

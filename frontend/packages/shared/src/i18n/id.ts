@@ -2704,6 +2704,10 @@ export const id = {
       noAlerts: 'Tidak ada peringatan',
       noAlertsSub: 'Jadwal tim Anda berjalan lancar.',
       trend7d: 'Kehadiran Tim — 7 Hari Terakhir',
+      complianceTitle: 'Kepatuhan Jadwal Minggu Ini',
+      complianceAllClear: 'Semua agen punya hari libur',
+      complianceAllClearSub: 'Tidak ada agen tanpa libur atau lewat batas hari kerja minggu ini.',
+      viewSchedule: 'Lihat jadwal',
     },
     agent: {
       title: 'Gunakan aplikasi mobile',

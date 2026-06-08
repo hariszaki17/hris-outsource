@@ -2693,6 +2693,10 @@ export const en: Messages = {
       noAlerts: 'No alerts',
       noAlertsSub: "Your team's schedule is running smoothly.",
       trend7d: 'Team Attendance — Last 7 Days',
+      complianceTitle: 'This Week’s Schedule Compliance',
+      complianceAllClear: 'Every agent has a rest day',
+      complianceAllClearSub: 'No agent is without rest or over the workday cap this week.',
+      viewSchedule: 'View schedule',
     },
     agent: {
       title: 'Use the mobile app',
