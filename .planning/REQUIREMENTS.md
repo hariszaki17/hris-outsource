@@ -45,8 +45,8 @@ Three states drive per-feature effort:
 
 ### My schedule (SCHED) — backend OPEN-ROUTE
 
-- [ ] **SCHED-01** (BE): Open `GET /schedule` to `agent` self-scope (own placement shifts, date range) (F4.3).
-- [ ] **SCHED-02** (FE): Week schedule view + shift detail; shift reminder hook (local notification).
+- [x] **SCHED-01** (BE): Open `GET /schedule` to `agent` self-scope (own placement shifts, date range) (F4.3).
+- [x] **SCHED-02** (FE): Week schedule view + shift detail; shift reminder hook (local notification).
 
 ### Leave request (LEAVE) — backend NEW
 
@@ -93,7 +93,7 @@ Three states drive per-feature effort:
 | CLOCK-03 (photo) | Phase 14 | Deferred (additive multipart; follow-up) |
 | ATTEND-01..02 | Phase 14 | Done |
 | ATTEND-03..04 | Phase 15 | Done (CODE-type correction deferred) |
-| SCHED-01..02 | Phase 16 | Pending |
+| SCHED-01..02 | Phase 16 | Done (include_company geo deferred) |
 | LEAVE-01..02 | Phase 17 | Pending |
 | OT-01..02 | Phase 18 | Pending |
 | PAY-01..02 | Phase 19 | Pending |

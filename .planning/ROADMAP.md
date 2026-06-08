@@ -28,7 +28,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
 - [x] **Phase 15: Attendance correction** (ATTEND-03..04) — backend NEW. ✅ 2026-06-08 · CODE-type deferred.
   BE: agent-scoped `POST /corrections` (7-day window, re-eval). FE: file-correction form + status.
   - Success: agent files a check-in correction on an Absent/wrong record; it appears pending for the SL.
-- [ ] **Phase 16: My schedule** (SCHED-01..02) — backend OPEN-ROUTE.
+- [x] **Phase 16: My schedule** (SCHED-01..02) — backend OPEN-ROUTE. ✅ 2026-06-08 (impl as GET /schedule/by-agent).
   BE: open `GET /schedule` to agent self. FE: week view + shift detail + reminder hook.
   - Success: agent sees their own upcoming shifts for the week.
 - [ ] **Phase 17: Leave request** (LEAVE-01..02) — backend NEW.

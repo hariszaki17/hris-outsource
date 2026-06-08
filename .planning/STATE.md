@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
 status: in_progress
-stopped_at: Phase 15 complete (FE+BE); Phase 16 (my schedule) next
+stopped_at: Phase 16 complete (FE+BE); Phase 17 (leave request) next
 last_updated: "2026-06-08T00:00:00.000Z"
 last_activity: "2026-06-08 — Phase 14 (clock in/out + geofence + my-attendance) COMPLETE, full-stack. FIRST rebased the mobile branch onto the parallel backend's new E5 commit (feat/backend-impl 3816b3a: attendance filters + true-absence + absence-sweep) so clock-in builds on current attendance code. BE (new agent clock path, no migration): clock.sql (4 queries) + ClockService (Haversine geofence + late/early eval) + ClockRepo + ClockHandler; POST /attendance:clock-in|:clock-out (RequireRole agent, Idempotency); opened GET /attendance + /{id} to agent self-scope (List forces caller employee_id; Get 404s others). Contract-exact: GPS_UNAVAILABLE/OUT_OF_GEOFENCE(force)/ALREADY|NOT_CLOCKED_IN, verification flag→PENDING else AUTO_APPROVED/VERIFIED. go build+vet+45 tests green, make gen idempotent. FE: expo-location GPS, clock card with geofence force-confirm flow + all variants, my-attendance history + StatusBadge + Attendance tab, i18n. tsc/biome/expo export 1780 green. CLOCK-03 (clock photo) DEFERRED. NOTE: BE edits attendance_service.go/server.go/cmd/api — conflicts with parallel backend work; coordinate merge. human_needed: live clock needs device GPS + running BE. Next: Phase 15 — attendance correction (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 38
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -21,16 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–15 done; Phase 16 (my schedule) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–16 done (HALFWAY); Phase 17 (leave request) next.
 
 ## Current Position
 
-Phase: 16 of 20 (My schedule) — next
-Plan: Phase 15 COMPLETE (FE fab9403 + BE 3587781)
-Status: Phase 15 attendance correction shipped full-stack (go build + 391 tests green; FE tsc/biome/bundle green). 3/8 agent-MVP phases done.
-Last activity: 2026-06-08 — Phase 15 complete; agent POST /corrections (7-day window, one-pending) + RN correction form.
+Phase: 17 of 20 (Leave request) — next
+Plan: Phase 16 COMPLETE (FE 97012ff + BE f9470a5)
+Status: Phase 16 my-schedule shipped full-stack (GET /schedule/by-agent; go build + 403 tests green; FE green). Branch on current backend base d7171a5.
+Last activity: 2026-06-08 — Phase 16 complete; agent self-schedule endpoint + RN week view.
 
-Progress: [███       ] 38% (3/8 phases)
+Progress: [█████     ] 50% (4/8 phases)
+
+## ⚠ Phase 17 coordination
+Phase 17 (leave request, E6) touches the SAME files the other agent is ACTIVELY editing (leave_grants/grant_service/leave service/server.go — uncommitted on feat/backend-impl). High conflict risk — coordinate/serialize before building Phase 17 backend.
 
 ## Performance Metrics
 
