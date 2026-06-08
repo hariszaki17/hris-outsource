@@ -39,9 +39,9 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Info, Layers, MoreVertical, Plus, Sparkles } from 'lucide-react';
+import { Info, Layers, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
@@ -51,6 +51,14 @@ import { z } from 'zod';
 
 const serviceLineSchema = z.object({
   name: z.string().min(1, 'Nama wajib diisi').max(100),
+  positions: z
+    .array(
+      z.object({
+        name: z.string().min(1, 'Nama posisi wajib diisi').max(100),
+        alias: z.string().max(100).optional(),
+      }),
+    )
+    .default([]),
 });
 type ServiceLineFormValues = z.infer<typeof serviceLineSchema>;
 
@@ -187,26 +195,35 @@ function AddEditModal({ open, onClose, onSuccess }: AddModalProps) {
     register,
     handleSubmit,
     reset,
+    control,
     setError,
     formState: { errors, isSubmitting },
   } = useForm<ServiceLineFormValues>({
     resolver: zodResolver(serviceLineSchema),
+    defaultValues: { name: '', positions: [] },
   });
+
+  const { fields, append, remove } = useFieldArray({ control, name: 'positions' });
 
   useEffect(() => {
     if (open) {
-      reset({ name: '' });
+      reset({ name: '', positions: [] });
     }
   }, [open, reset]);
 
   function handleClose() {
-    reset();
+    reset({ name: '', positions: [] });
     onClose();
   }
 
   async function onSubmit(values: ServiceLineFormValues) {
     try {
-      await createMutation.mutateAsync({ data: { name: values.name } });
+      const positions = values.positions
+        .filter((p) => p.name.trim())
+        .map((p) => ({ name: p.name, alias: p.alias?.trim() ? p.alias : undefined }));
+      await createMutation.mutateAsync({
+        data: { name: values.name, positions: positions.length ? positions : undefined },
+      });
       toast({ tone: 'success', title: t('common.save') });
       handleClose();
       onSuccess();
@@ -242,6 +259,77 @@ function AddEditModal({ open, onClose, onSuccess }: AddModalProps) {
                 aria-describedby={errors.name ? 'sl-name-error' : undefined}
               />
             </FormField>
+
+            {/* Initial positions (optional) — created atomically with the line (SP-3) */}
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface-2/40 p-3">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm font-semibold text-text">
+                  {t('serviceLines.addModal.positionsLabel')}
+                </span>
+                <span className="text-xs text-text-3">
+                  {t('serviceLines.addModal.positionsHint')}
+                </span>
+              </div>
+
+              {fields.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {fields.map((field, index) => {
+                    const nameError = errors.positions?.[index]?.name?.message;
+                    const aliasError = errors.positions?.[index]?.alias?.message;
+                    return (
+                      <div key={field.id} className="flex items-start gap-2">
+                        <div className="flex flex-1 flex-col gap-1">
+                          <Input
+                            placeholder={t('serviceLines.addModal.posNamePlaceholder')}
+                            aria-label={t('serviceLines.addModal.posNamePlaceholder')}
+                            {...register(`positions.${index}.name`)}
+                          />
+                          {nameError && (
+                            <p role="alert" className="text-xs text-bad-tx">
+                              {nameError}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-1 flex-col gap-1">
+                          <Input
+                            placeholder={t('serviceLines.addModal.posAliasPlaceholder')}
+                            aria-label={t('serviceLines.addModal.posAliasPlaceholder')}
+                            {...register(`positions.${index}.alias`)}
+                          />
+                          {aliasError && (
+                            <p role="alert" className="text-xs text-bad-tx">
+                              {aliasError}
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0 text-text-3 hover:text-bad-tx"
+                          aria-label={t('serviceLines.addModal.removePosition')}
+                          onClick={() => remove(index)}
+                        >
+                          <Trash2 className="size-4" aria-hidden />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => append({ name: '', alias: '' })}
+                >
+                  <Plus className="size-[14px]" aria-hidden />
+                  {t('serviceLines.addModal.addPositionRow')}
+                </Button>
+              </div>
+            </div>
           </div>
         </ModalBody>
         <ModalFooter className="justify-between">

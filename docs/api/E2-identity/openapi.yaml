@@ -1786,10 +1786,16 @@ paths:
     post:
       operationId: createServiceLine
       tags: [service-lines-positions]
-      summary: Create a service line (SP-1 admin-extendable)
+      summary: Create a service line, optionally with its positions (SP-1 admin-extendable)
       description: |
         Per SP-1, the 3 seeded service lines are admin-extendable but cannot
         be deleted while referenced. Names are unique.
+
+        The body MAY include an initial `positions` array. When present, the
+        service line and all its positions are created in a single atomic
+        transaction (all-or-nothing): if any position is invalid or duplicates
+        another (within the batch or an existing one), nothing is persisted.
+        Position names are unique within the line (SP-3).
       x-rbac:
         roles: [super_admin]
         scope: global
@@ -1799,11 +1805,17 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/ServiceLineWriteRequest' }
+            schema: { $ref: '#/components/schemas/ServiceLineCreateRequest' }
             examples:
               new_line:
                 value:
                   name: Security Services
+              new_line_with_positions:
+                value:
+                  name: Parking
+                  positions:
+                    - { name: Petugas Parkir, alias: Parking Attendant }
+                    - { name: Supervisor Parkir, alias: Parking Supervisor }
       responses:
         '201':
           description: Created.
@@ -1814,7 +1826,10 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Duplicate name.
+          description: |
+            Duplicate service-line name (`CONFLICT`), or a provided position
+            duplicates another within the line (`POSITION_IN_USE`). The whole
+            create is rolled back.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -3330,6 +3345,28 @@ components:
       required: [name]
       properties:
         name: { type: string, maxLength: 100 }
+
+    ServiceLineCreateRequest:
+      type: object
+      required: [name]
+      description: |
+        POST /service-lines body. Extends the rename body with an optional
+        initial `positions` array created atomically with the line (SP-3).
+      properties:
+        name: { type: string, maxLength: 100 }
+        positions:
+          type: array
+          description: |
+            Optional initial positions, created in the same transaction as the
+            line (all-or-nothing). Names must be unique within the line.
+          items: { $ref: '#/components/schemas/ServiceLinePositionInput' }
+
+    ServiceLinePositionInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 100 }
+        alias: { type: string, maxLength: 100 }
 
     Position:
       type: object

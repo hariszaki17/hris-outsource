@@ -266,13 +266,14 @@ The three service lines (Facility / Building Mgmt / Parking) and the **positions
 ```mermaid
 flowchart LR
     subgraph Admin[Super Admin / HR]
-        F1([Manage master]) --> F2[Service lines: Facility / Building / Parking]
+        F1([Manage master]) --> F2[Create service line<br/>± optional initial positions]
         F2 --> F3[Define positions under a line]
     end
     subgraph SYS[System]
-        F3 --> G1{Name unique within line?}
-        G1 -- No --> G2[Error] --> F3
-        G1 -- Yes --> G3[(Persist + audit)]
+        F2 --> G1
+        F3 --> G1{Names unique within line?<br/>incl. across the batch}
+        G1 -- No --> G2[Error: roll back whole create<br/>nothing persisted] --> F2
+        G1 -- Yes --> G3[(Persist line + positions<br/>one transaction + audit)]
         G3 --> G4[Positions selectable per placement E3]
     end
 ```
@@ -280,6 +281,8 @@ flowchart LR
 **Entities:** `ServiceLine`, `Position`. **Consumed by:** E3, E4, E5.
 
 > **UI/flow** *(2026-06-07, EPICS §8):* service-line + position maintenance is **consolidated on the detail page** (rename the line and add/update/remove its positions there); the list's "Edit" action **routes to the detail page**, not a rename-only modal.
+
+> **Atomic create-with-positions** *(2026-06-08, EPICS §8):* `POST /service-lines` accepts an **optional `positions` array** — when supplied, the line and all its positions are created in **one all-or-nothing transaction**; a duplicate/invalid position rolls back the **entire** create (no line, no positions). Per-line name uniqueness (F2.4 SP-3) is enforced across the batch. The "Tambah Lini Layanan" modal adds initial positions inline; `POST /service-lines/{id}/positions` still adds positions later from the detail page.
 
 ---
 

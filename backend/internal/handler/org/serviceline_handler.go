@@ -6,6 +6,7 @@ package org
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -101,7 +102,20 @@ func (h *ServiceLineHandler) CreateServiceLine(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	line, err := h.svc.CreateServiceLine(r.Context(), *req.Name)
+	positions := make([]svcsvc.CreatePositionParams, 0, len(req.Positions))
+	for i, p := range req.Positions {
+		if p.Name == nil || *p.Name == "" {
+			key := "positions." + strconv.Itoa(i) + ".name"
+			httpx.WriteError(w, r, apperr.Invalid(map[string]string{key: "Wajib diisi."}))
+			return
+		}
+		positions = append(positions, svcsvc.CreatePositionParams{
+			Name:  derefString(p.Name),
+			Alias: derefString(p.Alias),
+		})
+	}
+
+	line, err := h.svc.CreateServiceLine(r.Context(), *req.Name, positions)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -188,6 +188,13 @@ func (r *fakeServiceLineRepo) CreatePosition(_ context.Context, _ pgx.Tx, p orgs
 	if r.createPositionErr != nil {
 		return domain.Position{}, r.createPositionErr
 	}
+	// Enforce (service_line, name) uniqueness like the real DB index (SP-3),
+	// so a duplicate within a batch surfaces as a unique violation → rollback.
+	for _, existing := range r.positions {
+		if existing.ServiceLineID == p.ServiceLineID && existing.Name == p.Name {
+			return domain.Position{}, errUnique{}
+		}
+	}
 	posCounter++
 	now := time.Now().UTC()
 	id := "SWP-POS-T" + itoa(posCounter)
@@ -239,6 +246,31 @@ func (r *fakeServiceLineRepo) SoftDeletePosition(_ context.Context, _ pgx.Tx, id
 // Compile-time interface check.
 var _ orgsvc.ServiceLineRepository = (*fakeServiceLineRepo)(nil)
 
+// snapshotTxRunner gives the in-memory repo real rollback semantics: it
+// snapshots the maps before the closure and restores them if the closure
+// errors. This lets the atomic create-with-positions tests assert that a
+// failed position insert rolls back the service line too.
+type snapshotTxRunner struct {
+	repo *fakeServiceLineRepo
+}
+
+func (t *snapshotTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error {
+	lines := make(map[string]domain.ServiceLine, len(t.repo.lines))
+	for k, v := range t.repo.lines {
+		lines[k] = v
+	}
+	positions := make(map[string]domain.Position, len(t.repo.positions))
+	for k, v := range t.repo.positions {
+		positions[k] = v
+	}
+	if err := fn(&fakeTx{}); err != nil {
+		t.repo.lines = lines
+		t.repo.positions = positions
+		return err
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Test harness for service lines + positions
 // ---------------------------------------------------------------------------
@@ -252,7 +284,7 @@ type serviceLineHarness struct {
 func newServiceLineHarness(t *testing.T) *serviceLineHarness {
 	t.Helper()
 	repo := newFakeServiceLineRepo()
-	svc := orgsvc.NewServiceLineService(repo, &fakeTxRunner{})
+	svc := orgsvc.NewServiceLineService(repo, &snapshotTxRunner{repo: repo})
 	h := orghandler.NewServiceLineHandler(svc)
 
 	fh := &serviceLineHarness{
@@ -440,6 +472,90 @@ func TestCreateServiceLine_409_Conflict(t *testing.T) {
 	errObj, _ := body["error"].(map[string]any)
 	if errObj["code"] != "CONFLICT" {
 		t.Errorf("error.code = %v, want CONFLICT", errObj["code"])
+	}
+}
+
+func TestCreateServiceLine_201_WithPositions(t *testing.T) {
+	h := newServiceLineHarness(t)
+
+	rr := h.do("POST", "/service-lines", map[string]any{
+		"name": "Facility Services",
+		"positions": []map[string]any{
+			{"name": "Cleaning Staff", "alias": "Cleaner"},
+			{"name": "Security Guard"},
+		},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	lineID, _ := body["id"].(string)
+	if lineID == "" {
+		t.Fatal("missing line id in response")
+	}
+
+	// Both positions must have been created under the new line.
+	rr = h.do("GET", "/service-lines/"+lineID+"/positions", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list positions: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	listed := decodeBody(t, rr)
+	data, _ := listed["data"].([]any)
+	if len(data) != 2 {
+		t.Fatalf("expected 2 positions created, got %d", len(data))
+	}
+}
+
+func TestCreateServiceLine_DuplicatePosition_RollsBack(t *testing.T) {
+	h := newServiceLineHarness(t)
+
+	rr := h.do("POST", "/service-lines", map[string]any{
+		"name": "Parking",
+		"positions": []map[string]any{
+			{"name": "Attendant"},
+			{"name": "Attendant"}, // duplicate name within the line → POSITION_IN_USE
+		},
+	})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 POSITION_IN_USE, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "POSITION_IN_USE" {
+		t.Errorf("error.code = %v, want POSITION_IN_USE", errObj["code"])
+	}
+
+	// Whole tx must have rolled back: no service line should exist.
+	rr = h.do("GET", "/service-lines", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list lines: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	listed := decodeBody(t, rr)
+	data, _ := listed["data"].([]any)
+	if len(data) != 0 {
+		t.Fatalf("expected 0 service lines after rollback, got %d", len(data))
+	}
+}
+
+func TestCreateServiceLine_BlankPositionName_400(t *testing.T) {
+	h := newServiceLineHarness(t)
+
+	rr := h.do("POST", "/service-lines", map[string]any{
+		"name": "Building Management",
+		"positions": []map[string]any{
+			{"name": ""},
+		},
+	})
+	if rr.Code != http.StatusBadRequest && rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected validation error (400/422), got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Nothing should have been created.
+	rr = h.do("GET", "/service-lines", nil)
+	listed := decodeBody(t, rr)
+	data, _ := listed["data"].([]any)
+	if len(data) != 0 {
+		t.Fatalf("expected 0 service lines after rejected create, got %d", len(data))
 	}
 }
 

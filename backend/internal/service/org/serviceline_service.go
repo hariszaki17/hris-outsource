@@ -7,6 +7,7 @@ package org
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -107,11 +108,21 @@ func (s *ServiceLineService) GetServiceLine(ctx context.Context, id string) (dom
 	return line, nil
 }
 
-// CreateServiceLine creates a new service line (super_admin only — route-enforced).
-// Unique name violation → 409 CONFLICT.
-func (s *ServiceLineService) CreateServiceLine(ctx context.Context, name string) (domain.ServiceLine, error) {
+// CreateServiceLine creates a new service line, optionally with seed positions,
+// in one atomic transaction (super_admin only — route-enforced).
+// Unique line-name violation → 409 CONFLICT; duplicate position name → 409 POSITION_IN_USE.
+// On any position failure the whole tx rolls back (the line is NOT created).
+func (s *ServiceLineService) CreateServiceLine(ctx context.Context, name string, positions []CreatePositionParams) (domain.ServiceLine, error) {
 	if strings.TrimSpace(name) == "" {
 		return domain.ServiceLine{}, apperr.Invalid(map[string]string{"name": "Wajib diisi."})
+	}
+
+	// Validate each position name BEFORE opening the tx (indexed field keys).
+	for i, p := range positions {
+		if strings.TrimSpace(p.Name) == "" {
+			key := "positions." + strconv.Itoa(i) + ".name"
+			return domain.ServiceLine{}, apperr.Invalid(map[string]string{key: "Wajib diisi."})
+		}
 	}
 
 	var created domain.ServiceLine
@@ -121,13 +132,41 @@ func (s *ServiceLineService) CreateServiceLine(ctx context.Context, name string)
 		if inErr != nil {
 			return inErr
 		}
-		return audit.Record(ctx, tx, audit.Entry{
+		if inErr = audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionCreate,
 			EntityType: "service_line",
 			EntityID:   created.ID,
 			Before:     nil,
 			After:      map[string]any{"name": created.Name, "status": created.Status},
-		})
+		}); inErr != nil {
+			return inErr
+		}
+
+		// Seed positions atomically — a dup name rolls the whole tx back.
+		for _, p := range positions {
+			p.ServiceLineID = created.ID
+			var pos domain.Position
+			pos, inErr = s.repo.CreatePosition(ctx, tx, p)
+			if inErr != nil {
+				// Map here so the outer error stays POSITION_IN_USE (mapSLConflict
+				// passes apperr values through unchanged).
+				return mapPosConflict(inErr)
+			}
+			if inErr = audit.Record(ctx, tx, audit.Entry{
+				Action:     audit.ActionCreate,
+				EntityType: "position",
+				EntityID:   pos.ID,
+				Before:     nil,
+				After: map[string]any{
+					"name":            pos.Name,
+					"alias":           pos.Alias,
+					"service_line_id": pos.ServiceLineID,
+				},
+			}); inErr != nil {
+				return inErr
+			}
+		}
+		return nil
 	}); err != nil {
 		return domain.ServiceLine{}, mapSLConflict(err)
 	}

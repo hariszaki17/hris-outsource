@@ -26,7 +26,7 @@ Super Admin (primary), HR Admin (positions), System (validate, audit). Read cons
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | Super Admin / HR | CRUD service lines & positions. Maintenance is consolidated on the service-line **detail page**: renaming the line **and** adding/updating/removing its **positions** all happen there. The list's "Edit" action **navigates to the detail page** (not a rename-only modal). |
+| **Web console** | Super Admin / HR | CRUD service lines & positions. The "Tambah Lini Layanan" modal lets the admin **add initial positions inline** when creating a line (SP-7). Subsequent maintenance is consolidated on the service-line **detail page**: renaming the line **and** adding/updating/removing its **positions** all happen there. The list's "Edit" action **navigates to the detail page** (not a rename-only modal). |
 | **Mobile app** | Agent / Shift Leader | Read-only (a position label shown on their placement/schedule). |
 
 ## 5. Business rules
@@ -39,11 +39,14 @@ Super Admin (primary), HR Admin (positions), System (validate, audit). Read cons
 | SP-4 | Positions are deactivated, not hard-deleted, when referenced by placements/history. |
 | SP-5 | The active position list, filtered by a placement's service line, is what E3 offers at placement time. |
 | SP-6 | All actions audited (E1). |
+| SP-7 | **Service-line creation may include an optional initial `positions` array.** When provided, the service line and all its positions are created in a **single atomic transaction (all-or-nothing)**: if any position is invalid or duplicates another within the line, **nothing is persisted** (neither the line nor any position). Per-line name uniqueness (SP-3) is enforced **across the submitted batch**, not only against already-stored positions. The dedicated `POST /service-lines/{id}/positions` endpoint remains for adding positions later. *(resolved 2026-06-08, EPICS §8)* |
 
 ## 6. Data model
 
 `ServiceLine`: `id, name (unique), status`.
 `Position`: `id, service_line_id (FK), name, alias, status` — unique `(service_line_id, name)`.
+
+**Create request** — `POST /service-lines` body carries the line fields plus an **optional `positions` array** (each `{ name, alias? }`). When present, line + positions persist atomically (SP-7); when omitted, only the line is created (positions added later via `POST /service-lines/{id}/positions`).
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -68,6 +71,18 @@ Feature: Service lines & positions
     When I add "Parking Attendant" under "Parking" again
     Then it is blocked with a uniqueness error
 
+  Scenario: Create service line with initial positions (success)
+    Given I am a super admin
+    When I create the service line "Logistics" with positions "Loader" and "Dispatcher"
+    Then the service line "Logistics" exists with both positions
+    And all are persisted in a single transaction (SP-7)
+
+  Scenario: Duplicate position name rolls back the whole create (no line created)
+    Given I am a super admin
+    When I create the service line "Logistics" with positions "Loader" and "Loader"
+    Then the create is blocked with a uniqueness error (SP-3)
+    And no service line "Logistics" is created and no positions are persisted (SP-7)
+
   Scenario: Cannot delete a referenced service line
     Given placements reference the "Parking" line
     When I try to delete "Parking"
@@ -86,6 +101,7 @@ Feature: Service lines & positions
 | C-2 | Deactivate a position still used by active placements | Allowed for *new* selection only; existing placements keep it. |
 | C-3 | Migration: `recruitment_roles` → positions with no service line | Imported with `service_line_id` pending; classified manually (DATA-MAPPING G-3). |
 | C-4 | Reassign a position to a different service line | Discouraged/blocked if referenced; create a new position instead. |
+| C-5 | Create a line with an invalid/duplicate position in the initial `positions` batch | Whole create rolls back — no line, no positions persisted (SP-7); admin fixes the batch and resubmits. |
 
 ## 9. Dependencies
 
@@ -95,4 +111,5 @@ E1 (RBAC/audit), E3 (placement position selection), E4/E5 (service-line-driven r
 
 - ✅ Position scoped by service line; service lines seeded (3), admin-extendable.
 - ✅ **UI/flow** *(resolved 2026-06-07, EPICS §8)* — service-line + position maintenance is **consolidated on the detail page** (rename the line and add/update/remove its positions there); the list's "Edit" action **routes to the detail page** instead of opening a rename-only modal.
+- ✅ **Atomic create-with-positions** *(resolved 2026-06-08, EPICS §8)* — `POST /service-lines` accepts an **optional `positions` array** and creates the line + positions **all-or-nothing** in one transaction; the "Tambah Lini Layanan" modal supports inline initial positions; per-line name uniqueness (SP-3) is enforced across the batch (SP-7).
 - **Open:** confirm the initial position catalog per line with SWP (drives the manual classification of migrated `recruitment_roles`).

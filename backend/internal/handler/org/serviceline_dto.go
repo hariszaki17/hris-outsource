@@ -9,9 +9,18 @@ import (
 
 // --- Request structs ---
 
-// createServiceLineRequest is the POST /service-lines body (ServiceLineWriteRequest).
+// serviceLinePositionInput is one position in the POST /service-lines body
+// (ServiceLineCreateRequest.positions[]). Created atomically with the line.
+type serviceLinePositionInput struct {
+	Name  *string `json:"name"`
+	Alias *string `json:"alias"`
+}
+
+// createServiceLineRequest is the POST /service-lines body (ServiceLineCreateRequest).
+// When positions is present, the line and its positions are created in one tx.
 type createServiceLineRequest struct {
-	Name *string `json:"name"`
+	Name      *string                    `json:"name"`
+	Positions []serviceLinePositionInput `json:"positions"`
 }
 
 // updateServiceLineRequest is the PATCH /service-lines/{id} body (ServiceLineWriteRequest).
