@@ -38,7 +38,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
 - [x] **Phase 18: Overtime request/confirm** (OT-01..02) — backend NEW. ✅ 2026-06-08.
   BE: agent `POST /overtime` + `:confirm`. FE: request + confirm-auto-detected + detail.
   - Success: agent requests OT (or confirms auto-detected); it routes to approval.
-- [ ] **Phase 19: Payslip history** (PAY-01..02) — backend OPEN-ROUTE.
+- [x] **Phase 19: Payslip history** (PAY-01..02) — backend OPEN-ROUTE. ✅ 2026-06-08.
   BE: open `GET /payslips` to agent self. FE: payslip history + summary (read-only).
   - Success: agent views their own payslip summaries (take-home/gross/paid date).
 - [ ] **Phase 20: Profile self-service** (PROFILE-01..02) — read OPEN-ROUTE + change-request NEW.

@@ -60,8 +60,8 @@ Three states drive per-feature effort:
 
 ### Payslip (PAY) — backend OPEN-ROUTE
 
-- [ ] **PAY-01** (BE): Open `GET /payslips` (+ `{id}`) to `agent` self-scope (F8.1).
-- [ ] **PAY-02** (FE): Payslip history list + summary (take-home, gross, paid date); read-only.
+- [x] **PAY-01** (BE): Open `GET /payslips` (+ `{id}`) to `agent` self-scope (F8.1).
+- [x] **PAY-02** (FE): Payslip history list + summary (take-home, gross, paid date); read-only.
 
 ### Profile self-service (PROFILE) — read OPEN-ROUTE, change-request NEW
 
@@ -96,5 +96,5 @@ Three states drive per-feature effort:
 | SCHED-01..02 | Phase 16 | Done (include_company geo deferred) |
 | LEAVE-01..02 | Phase 17 | Done (attachment + doc-required types deferred) |
 | OT-01..02 | Phase 18 | Done |
-| PAY-01..02 | Phase 19 | Pending |
+| PAY-01..02 | Phase 19 | Done |
 | PROFILE-01..02 | Phase 20 | Pending |
