@@ -21,7 +21,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
   Secure-storage session, tab nav + force-update gate hook, role-shaped `dashboards/me`,
   notifications list/mark-read. Foundation every other screen sits on.
   - Success: agent logs in on a device, session survives restart, Beranda + notifications render off the real BE.
-- [ ] **Phase 14: Clock in/out + geofence + my-attendance** (CLOCK-01..03, ATTEND-01..02) — backend NEW + OPEN-ROUTE. The killer loop.
+- [x] **Phase 14: Clock in/out + geofence + my-attendance** (CLOCK-01..02, ATTEND-01..02) — backend NEW + OPEN-ROUTE. The killer loop. ✅ 2026-06-08 · CLOCK-03 (clock photo) deferred.
   BE: `POST /attendance:clock-in|:clock-out|:photo` + server geofence; open `GET /attendance` to agent self.
   FE: GPS clock screen (all variants) + my-attendance history/detail.
   - Success: agent clocks in inside/outside the site geofence (flagged, not blocked) and sees the record in history.

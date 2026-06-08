@@ -32,14 +32,14 @@ Three states drive per-feature effort:
 
 ### Clock in/out + geofence (CLOCK) — backend NEW
 
-- [ ] **CLOCK-01** (BE): Implement `POST /attendance:clock-in` / `:clock-out` (+ photo upload) with server-side geofence validation against the placement's site (`lat/lng/radius_m`); out-of-fence is allowed + flagged, not blocked (F5.1).
-- [ ] **CLOCK-02** (FE): Clock screen captures GPS (`expo-location`), shows in/out-of-geofence state, submits clock-in/out, handles all variants (success, out-of-fence flagged, no-GPS, already-clocked, network error).
+- [x] **CLOCK-01** (BE): Implement `POST /attendance:clock-in` / `:clock-out` (+ photo upload) with server-side geofence validation against the placement's site (`lat/lng/radius_m`); out-of-fence is allowed + flagged, not blocked (F5.1).
+- [x] **CLOCK-02** (FE): Clock screen captures GPS (`expo-location`), shows in/out-of-geofence state, submits clock-in/out, handles all variants (success, out-of-fence flagged, no-GPS, already-clocked, network error).
 - [ ] **CLOCK-03** (FE): Optional clock photo via `expo-image-picker`/camera wired to the photo-upload endpoint.
 
 ### My attendance + correction (ATTEND) — read OPEN-ROUTE, correction NEW
 
-- [ ] **ATTEND-01** (BE): Open `GET /attendance` to `agent` self-scope (own records only) (F5.5).
-- [ ] **ATTEND-02** (FE): My-attendance history + detail screen (status, late minutes, geofence flag).
+- [x] **ATTEND-01** (BE): Open `GET /attendance` to `agent` self-scope (own records only) (F5.5).
+- [x] **ATTEND-02** (FE): My-attendance history + detail screen (status, late minutes, geofence flag).
 - [ ] **ATTEND-03** (BE): Implement agent-scoped `POST /corrections` (type check_in/check_out/code, proposed time, reason; 7-day self window) (F5.4).
 - [ ] **ATTEND-04** (FE): File-correction form from an attendance record + correction status view.
 
@@ -89,8 +89,9 @@ Three states drive per-feature effort:
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | SHELL-01..04 | Phase 13 | Done (FE verified; live needs BE+device) |
-| CLOCK-01..03 | Phase 14 | Pending |
-| ATTEND-01..02 | Phase 14 | Pending |
+| CLOCK-01..02 | Phase 14 | Done (FE+BE; live needs device GPS) |
+| CLOCK-03 (photo) | Phase 14 | Deferred (additive multipart; follow-up) |
+| ATTEND-01..02 | Phase 14 | Done |
 | ATTEND-03..04 | Phase 15 | Pending |
 | SCHED-01..02 | Phase 16 | Pending |
 | LEAVE-01..02 | Phase 17 | Pending |

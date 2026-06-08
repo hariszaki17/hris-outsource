@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
 status: in_progress
-stopped_at: Phase 13 complete (13-01-PLAN.md); Phase 14 next
+stopped_at: Phase 14 complete (FE+BE); Phase 15 (attendance correction) next
 last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — Phase 13 (app shell + auth + Beranda + notifications) COMPLETE in worktree feat/mobile-scaffold. RN-only (backend was READY). expo-secure-store token store (access in memory, refresh in keychain); configureApiClient wired; RN session restore via body-based /auth/refresh + /auth/me (no cookies); expo-router auth gate ((auth)/login vs (app) tabs) + force-update hook on launch; login, Beranda (useGetMyDashboard agent role-shaped), notifications (list + mark-read/all), More (logout + change-pw stub); i18next reusing @swp/shared catalogs + mobile 'm' namespace, all copy via t(), no raw hex. Deps: expo-secure-store, @tanstack/react-query, i18next, react-i18next. Verified tsc/biome/expo-doctor 21-21/expo export 1680 modules. Live login/dashboard/notifications need running Go BE + device (human_needed). Next: Phase 14 — clock in/out + geofence (backend NEW)."
+last_activity: "2026-06-08 — Phase 14 (clock in/out + geofence + my-attendance) COMPLETE, full-stack. FIRST rebased the mobile branch onto the parallel backend's new E5 commit (feat/backend-impl 3816b3a: attendance filters + true-absence + absence-sweep) so clock-in builds on current attendance code. BE (new agent clock path, no migration): clock.sql (4 queries) + ClockService (Haversine geofence + late/early eval) + ClockRepo + ClockHandler; POST /attendance:clock-in|:clock-out (RequireRole agent, Idempotency); opened GET /attendance + /{id} to agent self-scope (List forces caller employee_id; Get 404s others). Contract-exact: GPS_UNAVAILABLE/OUT_OF_GEOFENCE(force)/ALREADY|NOT_CLOCKED_IN, verification flag→PENDING else AUTO_APPROVED/VERIFIED. go build+vet+45 tests green, make gen idempotent. FE: expo-location GPS, clock card with geofence force-confirm flow + all variants, my-attendance history + StatusBadge + Attendance tab, i18n. tsc/biome/expo export 1780 green. CLOCK-03 (clock photo) DEFERRED. NOTE: BE edits attendance_service.go/server.go/cmd/api — conflicts with parallel backend work; coordinate merge. human_needed: live clock needs device GPS + running BE. Next: Phase 15 — attendance correction (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 13
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phase 13 (app shell + auth) done; Phase 14 (clock in/out + geofence) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–14 done; Phase 15 (attendance correction) next.
 
 ## Current Position
 
-Phase: 14 of 20 (Clock in/out + geofence) — next
-Plan: Phase 13 COMPLETE (13-01)
-Status: Phase 13 shipped (FE verified; live needs BE+device). Ready to plan/execute Phase 14.
-Last activity: 2026-06-08 — Phase 13 app shell + auth + Beranda + notifications complete; verified tsc/biome/expo-doctor/bundle.
+Phase: 15 of 20 (Attendance correction) — next
+Plan: Phase 14 COMPLETE (FE ad6d5c4 + BE 5f1f968)
+Status: Phase 14 clock in/out + geofence shipped full-stack (build/tests green; live needs device GPS). Branch rebased onto current backend.
+Last activity: 2026-06-08 — Phase 14 complete; clock-in/out endpoints + RN screen, geofence + my-attendance.
 
-Progress: [█         ] 13% (1/8 phases)
+Progress: [██        ] 25% (2/8 phases)
 
 ## Performance Metrics
 
