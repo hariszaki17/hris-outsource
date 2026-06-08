@@ -69,9 +69,31 @@ type OvertimeRepository interface {
 	GetOvertime(ctx context.Context, id string) (dom.Overtime, error)
 	GetOvertimeForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.Overtime, error)
 	UpdateOvertimeStatus(ctx context.Context, tx pgx.Tx, id string, status dom.OvertimeStatus) (dom.Overtime, error)
+	// InsertOvertime persists a new OT record (F7.2 agent/leader request path).
+	InsertOvertime(ctx context.Context, tx pgx.Tx, p OvertimeInsertParams) (dom.Overtime, error)
 
 	InsertOvertimeApproval(ctx context.Context, tx pgx.Tx, p ApprovalRow) (dom.OvertimeApproval, error)
 	ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]dom.OvertimeApproval, error)
+}
+
+// OvertimeInsertParams carries one overtime INSERT for the F7.2 request path. The
+// service denormalizes placement/company/service_line from the resolved active
+// placement; id is allocated by the column DEFAULT (nil).
+type OvertimeInsertParams struct {
+	EmployeeID       string
+	CompanyID        *string
+	PlacementID      string
+	ServiceLineID    *string
+	WorkDate         time.Time
+	PlannedStartTime *string
+	PlannedEndTime   *string
+	CrossMidnight    bool
+	Source           dom.OvertimeSource
+	Status           dom.OvertimeStatus
+	DayType          dom.OvertimeTier
+	HolidayID        *string
+	Reason           *string
+	CreatedBy        *string
 }
 
 // ApprovalRow carries one overtime_approvals decision-trail insert.
@@ -146,4 +168,11 @@ type RuleRepository interface {
 // holiday calendar; TierPrecedence (HOLIDAY>RESTDAY>WORKDAY) resolves overlaps.
 type SchedulePort interface {
 	FindLiveEntryForAgentDate(ctx context.Context, employeeID string, date time.Time) (schedulingsvc.LiveEntry, error)
+	// FindActivePlacementForAgentDate resolves the ACTIVE placement covering
+	// work_date (OC-6 placement resolution for the F7.2 request path).
+	// domain.ErrNotFound when none.
+	FindActivePlacementForAgentDate(ctx context.Context, employeeID string, date time.Time) (schedulingsvc.PlacementCover, error)
+	// FindApprovedLeaveForAgentDate returns the approved-leave row covering
+	// work_date (OT_OVERLAPS_LEAVE). domain.ErrNotFound when none.
+	FindApprovedLeaveForAgentDate(ctx context.Context, employeeID string, date time.Time) (schedulingsvc.ApprovedLeave, error)
 }

@@ -18,6 +18,16 @@ type noteRequest struct {
 	Note string `json:"note"`
 }
 
+// overtimeWriteRequest is the createOvertimeRequest body (OvertimeWriteRequest).
+// employee_id is optional for an agent caller (server fills from token).
+type overtimeWriteRequest struct {
+	EmployeeID       string `json:"employee_id"`
+	WorkDate         string `json:"work_date"`
+	PlannedStartTime string `json:"planned_start_time"`
+	PlannedEndTime   string `json:"planned_end_time"`
+	Reason           string `json:"reason"`
+}
+
 type approveFinalRequest struct {
 	Note       string `json:"note"`
 	IsOverride bool   `json:"is_override"`

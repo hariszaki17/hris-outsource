@@ -125,6 +125,142 @@ func (s *OvertimeService) tierMultiplier(ctx context.Context, ot dom.Overtime) f
 	return 0
 }
 
+// --- create (F7.2 agent/leader request path) ---
+
+// CreateOvertimeInput is the decoded createOvertimeRequest body (OvertimeWriteRequest).
+type CreateOvertimeInput struct {
+	EmployeeID       string // empty for an agent caller (server fills from token)
+	WorkDate         time.Time
+	PlannedStartTime string // "HH:MM"
+	PlannedEndTime   string // "HH:MM"
+	Reason           string
+}
+
+// Create persists an agent/leader OT request (F7.2 / OC-1). The record starts at
+// PENDING_L1 (the requester IS the agent, so PENDING_AGENT_CONFIRM is skipped) with
+// source REQUESTED. Scope: an agent caller may only request for themselves (403 if a
+// different employee_id is supplied). The work_date must fall within an ACTIVE
+// placement (OC-6) and must NOT overlap an APPROVED leave (OT_OVERLAPS_LEAVE / 409).
+// Placement/company/service_line are denormalized from the resolved placement.
+func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (dom.Overtime, Calculation, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return dom.Overtime{}, Calculation{}, apperr.Unauthenticated()
+	}
+	// Resolve the subject employee. Agent → forced to self (403 on a mismatch).
+	employeeID := in.EmployeeID
+	if p.Role == auth.RoleAgent {
+		if p.EmployeeID == "" {
+			return dom.Overtime{}, Calculation{}, apperr.Forbidden()
+		}
+		if employeeID != "" && employeeID != p.EmployeeID {
+			return dom.Overtime{}, Calculation{}, apperr.Forbidden()
+		}
+		employeeID = p.EmployeeID
+	}
+	if employeeID == "" {
+		return dom.Overtime{}, Calculation{}, apperr.Invalid(map[string]string{"employee_id": "Wajib diisi."})
+	}
+	// reason ≥5 (openapi minLength).
+	if len([]rune(in.Reason)) < 5 {
+		return dom.Overtime{}, Calculation{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
+	}
+	// Validate planned times (HH:MM). end < start ⇒ cross-midnight.
+	startMin, serr := parseHHMM(in.PlannedStartTime)
+	if serr != nil {
+		return dom.Overtime{}, Calculation{}, apperr.Invalid(map[string]string{"planned_start_time": "Format jam tidak valid (HH:MM)."})
+	}
+	endMin, eerr := parseHHMM(in.PlannedEndTime)
+	if eerr != nil {
+		return dom.Overtime{}, Calculation{}, apperr.Invalid(map[string]string{"planned_end_time": "Format jam tidak valid (HH:MM)."})
+	}
+	crossMidnight := endMin < startMin
+
+	// OC-6: work_date must fall within an ACTIVE placement.
+	cover, perr := s.schedule.FindActivePlacementForAgentDate(ctx, employeeID, in.WorkDate)
+	if errors.Is(perr, domain.ErrNotFound) {
+		return dom.Overtime{}, Calculation{}, &apperr.Error{
+			HTTPStatus: 422,
+			Code:       "OT_NO_SCHEDULED_SHIFT",
+			Message:    "Tidak ada penempatan aktif pada tanggal lembur.",
+			Fields:     map[string]string{"work_date": in.WorkDate.Format("2006-01-02")},
+		}
+	}
+	if perr != nil {
+		return dom.Overtime{}, Calculation{}, apperr.Internal(perr)
+	}
+	// Leader scope: a shift leader may only request for an agent at their company.
+	if p.Role == auth.RoleShiftLeader && cover.CompanyID != p.CompanyID {
+		return dom.Overtime{}, Calculation{}, apperr.OutOfScope()
+	}
+
+	// OT_OVERLAPS_LEAVE (409): the work_date may not overlap an APPROVED leave.
+	if _, lerr := s.schedule.FindApprovedLeaveForAgentDate(ctx, employeeID, in.WorkDate); lerr == nil {
+		return dom.Overtime{}, Calculation{}, &apperr.Error{
+			HTTPStatus: 409,
+			Code:       "OT_OVERLAPS_LEAVE",
+			Message:    "Tanggal lembur bertabrakan dengan cuti yang disetujui.",
+			Fields:     map[string]string{"work_date": in.WorkDate.Format("2006-01-02")},
+		}
+	} else if !errors.Is(lerr, domain.ErrNotFound) {
+		return dom.Overtime{}, Calculation{}, apperr.Internal(lerr)
+	}
+
+	// Resolve the day_type tier (HOLIDAY/RESTDAY/WORKDAY) for the record.
+	serviceLineID := &cover.ServiceLineID
+	if cover.ServiceLineID == "" {
+		serviceLineID = nil
+	}
+	tier, holidayID := s.ClassifyDayType(ctx, employeeID, in.WorkDate, serviceLineID)
+
+	companyID := &cover.CompanyID
+	if cover.CompanyID == "" {
+		companyID = nil
+	}
+	pst := in.PlannedStartTime
+	pet := in.PlannedEndTime
+	reason := in.Reason
+
+	var created dom.Overtime
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, ierr := s.repo.InsertOvertime(ctx, tx, OvertimeInsertParams{
+			EmployeeID:       employeeID,
+			CompanyID:        companyID,
+			PlacementID:      cover.PlacementID,
+			ServiceLineID:    serviceLineID,
+			WorkDate:         in.WorkDate,
+			PlannedStartTime: &pst,
+			PlannedEndTime:   &pet,
+			CrossMidnight:    crossMidnight,
+			Source:           dom.OvertimeSourceRequested,
+			Status:           dom.OvertimeStatusPendingL1,
+			DayType:          tier,
+			HolidayID:        holidayID,
+			Reason:           &reason,
+			CreatedBy:        actorUserIDPtr(ctx),
+		})
+		if ierr != nil {
+			return ierr
+		}
+		created = rec
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionCreate,
+			EntityType: "overtime",
+			EntityID:   rec.ID,
+			After:      map[string]any{"status": string(rec.Status), "employee_id": employeeID, "work_date": in.WorkDate.Format("2006-01-02")},
+		})
+	})
+	if err != nil {
+		return dom.Overtime{}, Calculation{}, asAppErr(err)
+	}
+	// Re-read for the full denormalized record + calculation.
+	full, calc, gerr := s.Get(ctx, created.ID)
+	if gerr != nil {
+		return created, s.computeCalculation(ctx, created), nil
+	}
+	return full, calc, nil
+}
+
 // --- list / get ---
 
 // List returns the OT page. Leader scope is forced to their led company (explicit
@@ -184,7 +320,13 @@ func (s *OvertimeService) Get(ctx context.Context, id string) (dom.Overtime, Cal
 	if err != nil {
 		return dom.Overtime{}, Calculation{}, apperr.Internal(err)
 	}
-	if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
+	// Agent self-scope: an agent may only read their OWN OT; a cross-employee read
+	// is hidden as 404 (no existence leak). Staff (HR/super/leader) use GuardCompany.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if p.EmployeeID == "" || p.EmployeeID != rec.EmployeeID {
+			return dom.Overtime{}, Calculation{}, apperr.NotFound()
+		}
+	} else if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 		return dom.Overtime{}, Calculation{}, apperr.NotFound()
 	}
 	if approvals, aerr := s.repo.ListOvertimeApprovals(ctx, id); aerr == nil {

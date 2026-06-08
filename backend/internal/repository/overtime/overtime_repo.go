@@ -93,6 +93,34 @@ func (r *OvertimeRepo) UpdateOvertimeStatus(ctx context.Context, tx pgx.Tx, id s
 	return mapOvertimeFromUpdate(row), nil
 }
 
+// --- create (F7.2 agent/leader request path) ---
+
+// InsertOvertime persists a new OT record via the 09-01 InsertOvertime query
+// (id allocated by the column DEFAULT). worked/counted minutes are 0 at request
+// time (the OT is pre-approval; actuals are filled later from attendance).
+func (r *OvertimeRepo) InsertOvertime(ctx context.Context, tx pgx.Tx, p svc.OvertimeInsertParams) (dom.Overtime, error) {
+	row, err := r.q.WithTx(tx).InsertOvertime(ctx, sqlcgen.InsertOvertimeParams{
+		EmployeeID:       p.EmployeeID,
+		CompanyID:        p.CompanyID,
+		PlacementID:      p.PlacementID,
+		ServiceLineID:    p.ServiceLineID,
+		WorkDate:         timeToPgDate(p.WorkDate),
+		PlannedStartTime: p.PlannedStartTime,
+		PlannedEndTime:   p.PlannedEndTime,
+		CrossMidnight:    p.CrossMidnight,
+		Source:           string(p.Source),
+		Status:           string(p.Status),
+		DayType:          string(p.DayType),
+		HolidayID:        p.HolidayID,
+		Reason:           p.Reason,
+		CreatedBy:        p.CreatedBy,
+	})
+	if err != nil {
+		return dom.Overtime{}, mapErr(err)
+	}
+	return mapOvertimeFromInsert(row), nil
+}
+
 // --- approvals (decision trail) ---
 
 func (r *OvertimeRepo) InsertOvertimeApproval(ctx context.Context, tx pgx.Tx, p svc.ApprovalRow) (dom.OvertimeApproval, error) {

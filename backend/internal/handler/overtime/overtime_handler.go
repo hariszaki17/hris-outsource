@@ -54,6 +54,36 @@ func (h *Handler) ListOvertime(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CreateOvertime handles POST /overtime (F7.2 / createOvertimeRequest). Decodes the
+// OvertimeWriteRequest, resolves placement/leave/day-type in the service, and writes
+// 201 {data: Overtime} with a Location header. Agent callers omit employee_id (filled
+// from the token); a mismatched employee_id → 403 in the service.
+func (h *Handler) CreateOvertime(w http.ResponseWriter, r *http.Request) {
+	var req overtimeWriteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	workDate := parseDateParam(req.WorkDate)
+	if workDate == nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"work_date": "Wajib diisi (format YYYY-MM-DD)."}))
+		return
+	}
+	rec, calc, err := h.overtime.Create(r.Context(), svc.CreateOvertimeInput{
+		EmployeeID:       req.EmployeeID,
+		WorkDate:         *workDate,
+		PlannedStartTime: req.PlannedStartTime,
+		PlannedEndTime:   req.PlannedEndTime,
+		Reason:           req.Reason,
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/overtime/"+rec.ID)
+	httpx.WriteJSON(w, http.StatusCreated, dataResponse[overtimeResponse]{Data: toOvertimeResponse(rec, calc, true)})
+}
+
 // GetOvertime handles GET /overtime/{id} — wraps the single object in {data} (the FE
 // detail unwraps {data}); includes the approval timeline + recomputed calculation.
 func (h *Handler) GetOvertime(w http.ResponseWriter, r *http.Request) {

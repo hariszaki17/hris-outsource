@@ -71,6 +71,26 @@ func deref(p *string) string {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
+// actorUserIDPtr resolves the acting user id as a pointer (nil if absent) — the
+// created_by audit attribution for a new OT request.
+func actorUserIDPtr(ctx context.Context) *string {
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.UserID != "" {
+		id := p.UserID
+		return &id
+	}
+	return nil
+}
+
+// parseHHMM parses an "HH:MM" 24-hour clock string into minutes-since-midnight.
+// Returns an error on any malformed/out-of-range input.
+func parseHHMM(s string) (int, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, err
+	}
+	return t.Hour()*60 + t.Minute(), nil
+}
+
 // asAppErr passes *apperr.Error through, wrapping anything else as 500.
 func asAppErr(err error) error {
 	if err == nil {

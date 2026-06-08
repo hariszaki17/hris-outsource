@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -254,6 +255,7 @@ type fakeOvertimeRepo struct {
 	records   map[string]dom.Overtime
 	approvals map[string][]dom.OvertimeApproval
 	rules     map[string]svc.OvertimeRule // keyed by service_line id; "" = global default
+	seq       int                         // InsertOvertime id allocator
 }
 
 func newFakeOvertimeRepo() *fakeOvertimeRepo {
@@ -329,6 +331,32 @@ func (r *fakeOvertimeRepo) UpdateOvertimeStatus(_ context.Context, _ pgx.Tx, id 
 	}
 	rec.Status = status
 	rec.UpdatedAt = fixedNow
+	r.records[id] = rec
+	return rec, nil
+}
+
+func (r *fakeOvertimeRepo) InsertOvertime(_ context.Context, _ pgx.Tx, p svc.OvertimeInsertParams) (dom.Overtime, error) {
+	r.seq++
+	id := fmt.Sprintf("SWP-OT-9%04d", r.seq)
+	rec := dom.Overtime{
+		ID:               id,
+		EmployeeID:       p.EmployeeID,
+		CompanyID:        p.CompanyID,
+		PlacementID:      p.PlacementID,
+		ServiceLineID:    p.ServiceLineID,
+		WorkDate:         p.WorkDate,
+		PlannedStartTime: p.PlannedStartTime,
+		PlannedEndTime:   p.PlannedEndTime,
+		CrossMidnight:    p.CrossMidnight,
+		Source:           p.Source,
+		Status:           p.Status,
+		DayType:          p.DayType,
+		HolidayID:        p.HolidayID,
+		Reason:           p.Reason,
+		CreatedBy:        p.CreatedBy,
+		CreatedAt:        fixedNow,
+		UpdatedAt:        fixedNow,
+	}
 	r.records[id] = rec
 	return rec, nil
 }
@@ -516,11 +544,17 @@ var _ svc.HolidayRepository = (*fakeHolidayRepo)(nil)
 // ---------------------------------------------------------------------------
 
 type fakeScheduleRepo struct {
-	live map[string]schedulingsvc.LiveEntry
+	live       map[string]schedulingsvc.LiveEntry
+	placements map[string]schedulingsvc.PlacementCover // active placement covering (employee|date)
+	leaves     map[string]schedulingsvc.ApprovedLeave  // approved leave covering (employee|date)
 }
 
 func newFakeScheduleRepo() *fakeScheduleRepo {
-	return &fakeScheduleRepo{live: map[string]schedulingsvc.LiveEntry{}}
+	return &fakeScheduleRepo{
+		live:       map[string]schedulingsvc.LiveEntry{},
+		placements: map[string]schedulingsvc.PlacementCover{},
+		leaves:     map[string]schedulingsvc.ApprovedLeave{},
+	}
 }
 
 func liveKey(employeeID string, date time.Time) string {
@@ -532,6 +566,20 @@ func (r *fakeScheduleRepo) FindLiveEntryForAgentDate(_ context.Context, employee
 		return e, nil
 	}
 	return schedulingsvc.LiveEntry{}, domain.ErrNotFound
+}
+
+func (r *fakeScheduleRepo) FindActivePlacementForAgentDate(_ context.Context, employeeID string, date time.Time) (schedulingsvc.PlacementCover, error) {
+	if c, ok := r.placements[liveKey(employeeID, date)]; ok {
+		return c, nil
+	}
+	return schedulingsvc.PlacementCover{}, domain.ErrNotFound
+}
+
+func (r *fakeScheduleRepo) FindApprovedLeaveForAgentDate(_ context.Context, employeeID string, date time.Time) (schedulingsvc.ApprovedLeave, error) {
+	if l, ok := r.leaves[liveKey(employeeID, date)]; ok {
+		return l, nil
+	}
+	return schedulingsvc.ApprovedLeave{}, domain.ErrNotFound
 }
 
 var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
@@ -594,14 +642,24 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	// reads under RequireRole(super/hr/leader); final + holiday writes under
 	// RequireRole(super/hr); action routes wrap the idempotency middleware.
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/overtime", handler.ListOvertime)
 		r.Get("/overtime/{id}", handler.GetOvertime)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.Get("/holidays", handler.ListHolidays)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+		r.With(idem.Handler).Post("/overtime", handler.CreateOvertime)
 		r.With(idem.Handler).Post("/overtime/{id}:confirm", handler.Confirm)
+		r.With(idem.Handler).Post("/overtime/{id}:withdraw", handler.Withdraw)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.With(idem.Handler).Post("/overtime/{id}:approve-l1", handler.ApproveL1)
 		r.With(idem.Handler).Post("/overtime/{id}:reject", handler.Reject)
-		r.With(idem.Handler).Post("/overtime/{id}:withdraw", handler.Withdraw)
 		r.With(idem.Handler).Post("/overtime:bulk-approve", handler.BulkApprove)
 		r.With(idem.Handler).Post("/overtime:bulk-reject", handler.BulkReject)
 	})

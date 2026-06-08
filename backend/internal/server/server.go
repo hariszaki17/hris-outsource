@@ -506,19 +506,37 @@ func New(d Deps) http.Handler {
 			// COORDINATION POINT: future Phase-9 slices append AFTER this block.
 			// ---------------------------------------------------------------
 
-			// Reads + L1 approve + reject + confirm + withdraw + bulk + holiday
-			// reads: super_admin, hr_admin, shift_leader (company_or_global).
-			// (agent reads/confirm are mobile — web scope is these three; the
-			// confirm agent-only check is enforced in-service.)
+			// Reads: super_admin, hr_admin, shift_leader, agent. Agent reads are
+			// self-scoped in the service (cross-employee → 404); staff use
+			// GuardCompany. Holiday reads stay staff-only.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 				r.Get("/overtime", d.Overtime.ListOvertime)
 				r.Get("/overtime/{id}", d.Overtime.GetOvertime)
+			})
+
+			// Holiday reads: super_admin, hr_admin, shift_leader.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.Get("/holidays", d.Overtime.ListHolidays)
+			})
+
+			// Agent-write group: POST /overtime (create / F7.2), :confirm, :withdraw.
+			// Roles agent, shift_leader, hr_admin, super_admin (x-rbac scope:self);
+			// the agent self-check + leader company scope are enforced in-service.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/overtime", d.Overtime.CreateOvertime)
 				r.With(d.Idempotency.Handler).Post("/overtime/{id}:confirm", d.Overtime.Confirm)
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:withdraw", d.Overtime.Withdraw)
+			})
+
+			// Approval group: L1 approve + reject + bulk — super_admin, hr_admin,
+			// shift_leader (company_or_global). SELF_APPROVAL_FORBIDDEN + scope in-service.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-l1", d.Overtime.ApproveL1)
 				r.With(d.Idempotency.Handler).Post("/overtime/{id}:reject", d.Overtime.Reject)
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:withdraw", d.Overtime.Withdraw)
 				r.With(d.Idempotency.Handler).Post("/overtime:bulk-approve", d.Overtime.BulkApprove)
 				r.With(d.Idempotency.Handler).Post("/overtime:bulk-reject", d.Overtime.BulkReject)
 			})

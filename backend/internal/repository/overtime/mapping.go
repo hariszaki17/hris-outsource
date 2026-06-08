@@ -167,6 +167,38 @@ func mapOvertimeFromForUpdate(r sqlcgen.GetOvertimeForUpdateRow) dom.Overtime {
 	}
 }
 
+func mapOvertimeFromInsert(r sqlcgen.InsertOvertimeRow) dom.Overtime {
+	return dom.Overtime{
+		ID:                   r.ID,
+		EmployeeID:           r.EmployeeID,
+		CompanyID:            r.CompanyID,
+		PlacementID:          r.PlacementID,
+		AttendanceID:         r.AttendanceID,
+		ServiceLineID:        r.ServiceLineID,
+		WorkDate:             pgDateToTime(r.WorkDate),
+		PlannedStartTime:     r.PlannedStartTime,
+		PlannedEndTime:       r.PlannedEndTime,
+		ActualStartTime:      r.ActualStartTime,
+		ActualEndTime:        r.ActualEndTime,
+		CrossMidnight:        r.CrossMidnight,
+		Source:               dom.OvertimeSource(r.Source),
+		Status:               dom.OvertimeStatus(r.Status),
+		DayType:              dom.OvertimeTier(r.DayType),
+		WorkedMinutes:        int(r.WorkedMinutes),
+		CountedMinutes:       int(r.CountedMinutes),
+		MinMinutesThreshold:  int(r.MinMinutesThreshold),
+		SkippedTooShort:      r.SkippedTooShort,
+		ReferenceMultiplier:  numericToFloatPtr(r.ReferenceMultiplier),
+		OvertimeRuleID:       r.OvertimeRuleID,
+		HolidayID:            r.HolidayID,
+		FlaggedNoPreapproval: r.FlaggedNoPreapproval,
+		Reason:               r.Reason,
+		CreatedBy:            r.CreatedBy,
+		CreatedAt:            r.CreatedAt,
+		UpdatedAt:            r.UpdatedAt,
+	}
+}
+
 func mapOvertimeFromUpdate(r sqlcgen.UpdateOvertimeStatusRow) dom.Overtime {
 	return dom.Overtime{
 		ID:                   r.ID,
