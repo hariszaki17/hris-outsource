@@ -8,9 +8,10 @@ import {
 } from '@swp/api-client/e5';
 import { formatInstant } from '@swp/shared/datetime';
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Alert, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
 import { getCurrentCoords } from '../../src/lib/location';
 import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
@@ -26,6 +27,7 @@ function dateOf(iso: string): string {
 
 function HistoryRow({ item }: { item: Attendance }) {
   const { t } = useTranslation();
+  const router = useRouter();
   return (
     <Card>
       <View className="flex-row items-center justify-between">
@@ -43,6 +45,17 @@ function HistoryRow({ item }: { item: Attendance }) {
           {item.flags.map((f) => t(`m:attendance.flag.${f}`)).join(' · ')}
         </Text>
       ) : null}
+      <Pressable
+        className="mt-3 self-start"
+        onPress={() =>
+          router.push({
+            pathname: '/correction',
+            params: { attendanceId: item.id, date: item.check_in_at },
+          })
+        }
+      >
+        <Text className="text-primary font-semibold">{t('m:correction.fileBtn')}</Text>
+      </Pressable>
     </Card>
   );
 }
