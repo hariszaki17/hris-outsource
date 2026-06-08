@@ -417,15 +417,28 @@ func New(d Deps) http.Handler {
 				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-l1", d.Leave.ApproveLeaveRequestL1)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:reject", d.Leave.RejectLeaveRequest)
-				r.Get("/leave-quotas", d.Leave.ListLeaveQuotas)
+				r.Get("/leave-quotas", d.Leave.ListLeaveQuotas) // DEPRECATED 2026-06-08
 				r.Get("/leave-calendar", d.Leave.GetLeaveCalendar)
+				// F6.1 grant-lot ledger + balance reads (company_or_global).
+				r.Get("/leave-grants", d.Leave.ListLeaveGrants)
+				r.Get("/leave-grants/{id}", d.Leave.GetLeaveGrant)
+				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
+				// HR shorten / cancel-approved of an APPROVED leave (cancel/shorten
+				// release/reverse the grant lots). Agent cancel of own request is mobile.
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel", d.Leave.CancelLeaveRequest)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel-approved", d.Leave.CancelApprovedLeaveRequest)
 			})
 
-			// Final/override approval + quota writes: super_admin, hr_admin (global).
+			// Final/override approval + grant/quota writes: super_admin, hr_admin (global).
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-final", d.Leave.ApproveLeaveRequestFinal)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-override", d.Leave.ApproveLeaveRequestOverride)
+				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:shorten", d.Leave.ShortenLeaveRequest)
+				// F6.1 grant-lot writes (global).
+				r.With(d.Idempotency.Handler).Post("/leave-grants", d.Leave.CreateLeaveGrant)
+				r.With(d.Idempotency.Handler).Patch("/leave-grants/{id}", d.Leave.PatchLeaveGrant)
+				// DEPRECATED 2026-06-08 — migration-only.
 				r.With(d.Idempotency.Handler).Post("/leave-quotas/{id}:adjust", d.Leave.AdjustLeaveQuota)
 				r.With(d.Idempotency.Handler).Post("/leave-quotas:bulk-grant", d.Leave.BulkGrantLeaveQuotas)
 			})

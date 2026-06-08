@@ -47,7 +47,8 @@ type RequestFilter struct {
 	CursorID      *string
 }
 
-// QuotaFilter is the decoded GET /leave-quotas query (cursor-paged).
+// QuotaFilter is the decoded GET /leave-quotas query (cursor-paged) — DEPRECATED
+// 2026-06-08; the live path is GrantFilter / leave-grants.
 type QuotaFilter struct {
 	EmployeeID    *string
 	LeaveTypeID   *string
@@ -58,6 +59,18 @@ type QuotaFilter struct {
 	Limit         int
 	CursorCreated *time.Time
 	CursorID      *string
+}
+
+// GrantFilter is the decoded GET /leave-grants query (cursor-paged, FIFO-ordered).
+type GrantFilter struct {
+	EmployeeID     *string
+	Earmark        *string // "__null" sentinel = unearmarked only (openapi `earmark=__null`)
+	Source         *string
+	CompanyID      *string
+	IncludeExpired bool
+	Limit          int
+	CursorExpires  *time.Time
+	CursorID       *string
 }
 
 // CalendarFilter is the decoded GET /leave-calendar query.
@@ -77,7 +90,8 @@ type LeaveTypeInfo struct {
 	ID       string
 	Code     string
 	Name     string
-	IsAnnual bool // the quota-tracked gate (the real leave_types.is_annual column)
+	IsAnnual bool   // the quota-tracked gate (the real leave_types.is_annual column)
+	Earmark  string // purpose code for earmarked allocation (LQ-10); "" = flat pool
 }
 
 // --- leave-request repository port ---
@@ -88,16 +102,35 @@ type LeaveRepository interface {
 	GetLeaveRequest(ctx context.Context, id string) (dom.LeaveRequest, error)
 	GetLeaveRequestForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveRequest, error)
 	UpdateLeaveRequestStatus(ctx context.Context, tx pgx.Tx, p UpdateStatusParams) (dom.LeaveRequest, error)
+	UpdateLeaveRequestDates(ctx context.Context, tx pgx.Tx, id string, start, end time.Time, durationDays int) (dom.LeaveRequest, error)
 
 	InsertLeaveApproval(ctx context.Context, tx pgx.Tx, p ApprovalRow) (dom.LeaveApproval, error)
 	ListLeaveApprovalsForRequest(ctx context.Context, id string) ([]dom.LeaveApproval, error)
 
 	GetLeaveType(ctx context.Context, id string) (LeaveTypeInfo, error)
 
+	// SetBalanceSnapshot persists the FIFO reservation snapshot (openapi BalanceCheck)
+	// at reserve/commit; clearing passes a zero BalanceSnapshot.
+	SetBalanceSnapshot(ctx context.Context, tx pgx.Tx, p BalanceSnapshotParams) error
+
 	ListCalendarEntries(ctx context.Context, f CalendarFilter, statusIn []string, from, to time.Time) ([]dom.LeaveCalendarEntry, error)
 }
 
+// BalanceSnapshotParams writes the openapi BalanceCheck snapshot columns. allocation
+// is the marshalled jsonb FIFO split (nil clears).
+type BalanceSnapshotParams struct {
+	ID               string
+	RequestedDays    *int
+	RemainingAtCheck *int
+	RequiresOverride *bool
+	Earmark          *string
+	Allocation       []byte
+}
+
 // UpdateStatusParams carries the state transition + routing/balance snapshot write.
+// BalanceQuotaID is retained as a nullable column (always nil under the grant-lot
+// ledger) for migration/rollback compatibility; the live snapshot is requested/
+// remaining/requires_override + the leave_consumptions rows (the allocation).
 type UpdateStatusParams struct {
 	ID                      string
 	Status                  dom.LeaveStatus
@@ -159,6 +192,77 @@ type GrantCandidate struct {
 	EmployeeID     string
 	EmployeeName   *string
 	PlacementStart time.Time
+}
+
+// --- grant-lot ledger repository port (F6.1, the live balance path) ---
+
+// CreateGrantParams carries one HR grant-lot insert (POST /leave-grants).
+type CreateGrantParams struct {
+	EmployeeID    string
+	Amount        int
+	Source        dom.LeaveGrantSource
+	Earmark       *string
+	Remark        *string
+	EffectiveFrom time.Time
+	ExpiresAt     time.Time
+	CreatedBy     *string
+}
+
+// PatchGrantParams carries one HR lot adjustment (PATCH /leave-grants/{id}). nil
+// scalar fields leave the column unchanged; SetEarmark distinguishes "set earmark to
+// null" from "leave earmark unchanged".
+type PatchGrantParams struct {
+	ID         string
+	Amount     *int
+	ExpiresAt  *time.Time
+	SetEarmark bool
+	Earmark    *string
+	Remark     string
+}
+
+// EarmarkBalanceGroup is one (earmark, remaining, pending, next_expiry) aggregate from
+// the balance query. Earmark==nil ⇒ the flat pool group.
+type EarmarkBalanceGroup struct {
+	Earmark    *string
+	Remaining  int
+	Pending    int
+	NextExpiry *time.Time
+}
+
+// ExpiredLot is one expired lot still holding dangling pending_days (expiry sweep).
+type ExpiredLot struct {
+	ID          string
+	EmployeeID  string
+	ExpiresAt   time.Time
+	PendingDays int
+}
+
+// GrantRepository is the data dependency for the grant/balance/allocation service.
+type GrantRepository interface {
+	CreateLeaveGrant(ctx context.Context, tx pgx.Tx, p CreateGrantParams) (dom.LeaveGrant, error)
+	GetLeaveGrant(ctx context.Context, id string) (dom.LeaveGrant, error)
+	GetLeaveGrantForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveGrant, error)
+	ListLeaveGrants(ctx context.Context, f GrantFilter, now time.Time) ([]dom.LeaveGrant, error)
+	PatchLeaveGrant(ctx context.Context, tx pgx.Tx, p PatchGrantParams) (dom.LeaveGrant, error)
+
+	ListConsumptionsForGrant(ctx context.Context, grantID string) ([]dom.LeaveConsumption, error)
+	ListConsumptionsForRequest(ctx context.Context, requestID string) ([]dom.LeaveConsumption, error)
+
+	// Allocation lifecycle (all in-tx, FOR UPDATE on the lots).
+	GetActiveLotsForAllocation(ctx context.Context, tx pgx.Tx, employeeID, earmarkMatch string, now time.Time) ([]dom.LeaveGrant, error)
+	ReservePending(ctx context.Context, tx pgx.Tx, grantID string, days int) error
+	CommitReservation(ctx context.Context, tx pgx.Tx, grantID string, days int) error
+	ReleasePending(ctx context.Context, tx pgx.Tx, grantID string, days int) error
+	ReverseConsumption(ctx context.Context, tx pgx.Tx, grantID string, days int) error
+	ApplyConsumption(ctx context.Context, tx pgx.Tx, requestID, grantID string, days int) (dom.LeaveConsumption, error)
+	DeleteConsumptionsForRequest(ctx context.Context, tx pgx.Tx, requestID string) error
+
+	// Balance read model.
+	SumActiveBalanceByEarmark(ctx context.Context, employeeID string, now time.Time) ([]EarmarkBalanceGroup, error)
+
+	// Expiry sweep.
+	FindExpiredLotsWithPending(ctx context.Context, today time.Time, limit int) ([]ExpiredLot, error)
+	ZeroLotPending(ctx context.Context, tx pgx.Tx, grantID string) error
 }
 
 // --- scheduling INV-3 port (satisfied by the existing scheduling repo) ---

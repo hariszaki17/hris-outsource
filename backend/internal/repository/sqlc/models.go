@@ -286,6 +286,32 @@ type LeaveApproval struct {
 	OccurredAt     time.Time
 }
 
+type LeaveConsumption struct {
+	ID             string
+	LeaveRequestID string
+	GrantID        string
+	Days           int32
+	CreatedAt      time.Time
+}
+
+type LeaveGrant struct {
+	ID            string
+	EmployeeID    string
+	AmountDays    int32
+	GrantedAt     time.Time
+	EffectiveFrom pgtype.Date
+	ExpiresAt     pgtype.Date
+	Source        string
+	Earmark       *string
+	Remark        *string
+	ConsumedDays  int32
+	PendingDays   int32
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
+}
+
 type LeaveQuota struct {
 	ID             string
 	EmployeeID     string
@@ -332,6 +358,8 @@ type LeaveRequest struct {
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 	DeletedAt               *time.Time
+	BalanceEarmark          *string
+	BalanceAllocation       []byte
 }
 
 type LeaveType struct {

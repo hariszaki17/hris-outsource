@@ -2,8 +2,13 @@
  * E6 Leave — public hook surface (`@swp/api-client/e6`). Hand-authored barrel over the Orval
  * `tags-split` output (no root barrel emitted), outside `src/gen` so regen does not wipe it.
  * (E6 generates typed react-query hooks only; MSW + Zod deferred — WEB-STACK §4.)
+ *
+ * Grant-lot ledger (2026-06-08):
+ *   useListLeaveGrants, useCreateLeaveGrant, useGetLeaveGrant, useAdjustLeaveGrant
+ *   useGetLeaveBalanceByEmployee
  */
 export * from './gen/e6/leave-types/leave-types.ts';
+export * from './gen/e6/leave-balances/leave-balances.ts';
 export * from './gen/e6/leave-quotas/leave-quotas.ts';
 export * from './gen/e6/leave-requests/leave-requests.ts';
 export * from './gen/e6/leave-calendar/leave-calendar.ts';

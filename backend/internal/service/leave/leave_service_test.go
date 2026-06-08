@@ -1,11 +1,13 @@
-// Package leave — unit tests for the two-level approval state machine, the quota
-// guard, and the INV-3 loop-closer. Uses in-memory fake repos + a fakeTx so the
-// audit-in-tx + side-effect writes run without Postgres. Mirrors the Phase-7
-// attendance testkit shape (fakeTx Exec no-op, dynamic principal via auth.WithPrincipal).
+// Package leave — unit tests for the two-level approval state machine + the F6.1
+// grant-lot ledger: FIFO allocation across lots, earmark isolation (LQ-10), the
+// reserve-on-submit / commit-on-approve / release-on-reject lifecycle, exact-row
+// reversal on cancel-approved, and the never-negative guard. Uses in-memory fake repos
+// + a fakeTx so the audit-in-tx + side-effect writes run without Postgres.
 package leave
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -28,10 +30,8 @@ func (fakeTx) Rollback(context.Context) error        { return nil }
 func (fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
 }
-func (fakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	panic("Query unused")
-}
-func (fakeTx) QueryRow(context.Context, string, ...any) pgx.Row { panic("QueryRow unused") }
+func (fakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) { panic("Query unused") }
+func (fakeTx) QueryRow(context.Context, string, ...any) pgx.Row        { panic("QueryRow unused") }
 func (fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	panic("CopyFrom unused")
 }
@@ -44,9 +44,7 @@ func (fakeTx) Conn() *pgx.Conn { panic("Conn unused") }
 
 type fakeRunner struct{}
 
-func (fakeRunner) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
-	return fn(fakeTx{})
-}
+func (fakeRunner) InTx(ctx context.Context, fn func(tx pgx.Tx) error) error { return fn(fakeTx{}) }
 
 // --- fake leave repo ---
 
@@ -55,6 +53,7 @@ type fakeLeaveRepo struct {
 	leaveType LeaveTypeInfo
 	approvals []dom.LeaveApproval
 	updated   *UpdateStatusParams
+	snapshot  *BalanceSnapshotParams
 }
 
 func (f *fakeLeaveRepo) ListLeaveRequests(context.Context, RequestFilter) ([]dom.LeaveRequest, error) {
@@ -77,6 +76,10 @@ func (f *fakeLeaveRepo) UpdateLeaveRequestStatus(_ context.Context, _ pgx.Tx, p 
 	f.req.Status = p.Status
 	return f.req, nil
 }
+func (f *fakeLeaveRepo) UpdateLeaveRequestDates(_ context.Context, _ pgx.Tx, id string, start, end time.Time, days int) (dom.LeaveRequest, error) {
+	f.req.StartDate, f.req.EndDate, f.req.DurationDays = start, end, days
+	return f.req, nil
+}
 func (f *fakeLeaveRepo) InsertLeaveApproval(_ context.Context, _ pgx.Tx, p ApprovalRow) (dom.LeaveApproval, error) {
 	a := dom.LeaveApproval{LeaveRequestID: p.LeaveRequestID, Stage: p.Stage, Decision: p.Decision, IsOverride: p.IsOverride, OccurredAt: time.Now()}
 	f.approvals = append(f.approvals, a)
@@ -88,59 +91,216 @@ func (f *fakeLeaveRepo) ListLeaveApprovalsForRequest(context.Context, string) ([
 func (f *fakeLeaveRepo) GetLeaveType(context.Context, string) (LeaveTypeInfo, error) {
 	return f.leaveType, nil
 }
+func (f *fakeLeaveRepo) SetBalanceSnapshot(_ context.Context, _ pgx.Tx, p BalanceSnapshotParams) error {
+	f.snapshot = &p
+	return nil
+}
 func (f *fakeLeaveRepo) ListCalendarEntries(context.Context, CalendarFilter, []string, time.Time, time.Time) ([]dom.LeaveCalendarEntry, error) {
 	return nil, nil
 }
 
-// --- fake quota repo ---
+// --- fake grant repo (in-memory lot ledger) ---
 
-type fakeQuotaRepo struct {
-	quota       dom.LeaveQuota
-	pending     int
-	deducted    int
-	overrideSet bool
+type fakeGrantRepo struct {
+	lots      map[string]*dom.LeaveGrant
+	cons      []dom.LeaveConsumption
+	consSeq   int
+	deletedFR string
 }
 
-func (f *fakeQuotaRepo) ListLeaveQuotas(context.Context, QuotaFilter) ([]dom.LeaveQuota, error) {
-	return []dom.LeaveQuota{f.quota}, nil
-}
-func (f *fakeQuotaRepo) GetLeaveQuota(context.Context, string) (dom.LeaveQuota, error) {
-	return f.quota, nil
-}
-func (f *fakeQuotaRepo) GetLeaveQuotaForUpdate(context.Context, pgx.Tx, string) (dom.LeaveQuota, error) {
-	return f.quota, nil
-}
-func (f *fakeQuotaRepo) FindQuotaForEmployeeTypePeriod(context.Context, string, string, int) (dom.LeaveQuota, error) {
-	if f.quota.ID == "" {
-		return dom.LeaveQuota{}, domain.ErrNotFound
+func newFakeGrantRepo(lots ...dom.LeaveGrant) *fakeGrantRepo {
+	m := map[string]*dom.LeaveGrant{}
+	for i := range lots {
+		l := lots[i]
+		m[l.ID] = &l
 	}
-	return f.quota, nil
+	return &fakeGrantRepo{lots: m}
 }
-func (f *fakeQuotaRepo) UpsertLeaveQuota(_ context.Context, _ pgx.Tx, p UpsertQuotaParams) (dom.LeaveQuota, error) {
-	return dom.LeaveQuota{ID: "SWP-LQ-X", EmployeeID: p.EmployeeID, Total: p.Total, Used: f.quota.Used, IsProrated: p.IsProrated, ProrateMonths: p.ProrateMonths}, nil
+
+func (f *fakeGrantRepo) activeMatching(employeeID, earmark string, now time.Time) []dom.LeaveGrant {
+	var out []dom.LeaveGrant
+	for _, l := range f.lots {
+		if l.EmployeeID != employeeID || !l.IsActive(now) {
+			continue
+		}
+		if earmark == earmarkPoolSentinel {
+			if l.Earmark != nil {
+				continue
+			}
+		} else {
+			if l.Earmark == nil || *l.Earmark != earmark {
+				continue
+			}
+		}
+		out = append(out, *l)
+	}
+	// FIFO: soonest expires_at, then granted_at, then id.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ExpiresAt.Equal(out[j].ExpiresAt) {
+			return out[i].ExpiresAt.Before(out[j].ExpiresAt)
+		}
+		if !out[i].GrantedAt.Equal(out[j].GrantedAt) {
+			return out[i].GrantedAt.Before(out[j].GrantedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
 }
-func (f *fakeQuotaRepo) AdjustLeaveQuotaTotal(_ context.Context, _ pgx.Tx, id string, delta int, _ dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error) {
-	f.quota.Total += delta
-	return f.quota, nil
+
+func (f *fakeGrantRepo) CreateLeaveGrant(_ context.Context, _ pgx.Tx, p CreateGrantParams) (dom.LeaveGrant, error) {
+	f.consSeq++
+	id := "SWP-LG-NEW-" + itoa(f.consSeq)
+	g := dom.LeaveGrant{ID: id, EmployeeID: p.EmployeeID, Amount: p.Amount, Source: p.Source, Earmark: p.Earmark, Remark: p.Remark, EffectiveFrom: p.EffectiveFrom, ExpiresAt: p.ExpiresAt}
+	f.lots[id] = &g
+	return g, nil
 }
-func (f *fakeQuotaRepo) DeductLeaveQuota(_ context.Context, _ pgx.Tx, _ string, delta int) (dom.LeaveQuota, error) {
-	f.deducted += delta
-	f.quota.Used += delta
-	return f.quota, nil
+func (f *fakeGrantRepo) GetLeaveGrant(_ context.Context, id string) (dom.LeaveGrant, error) {
+	if l, ok := f.lots[id]; ok {
+		return *l, nil
+	}
+	return dom.LeaveGrant{}, domain.ErrNotFound
 }
-func (f *fakeQuotaRepo) RestoreLeaveQuota(_ context.Context, _ pgx.Tx, _ string, delta int) (dom.LeaveQuota, error) {
-	f.quota.Used -= delta
-	return f.quota, nil
+func (f *fakeGrantRepo) GetLeaveGrantForUpdate(_ context.Context, _ pgx.Tx, id string) (dom.LeaveGrant, error) {
+	return f.GetLeaveGrant(context.Background(), id)
 }
-func (f *fakeQuotaRepo) SetLeaveQuotaOverride(_ context.Context, _ pgx.Tx, _ string, _ dom.LeaveQuotaOverride) (dom.LeaveQuota, error) {
-	f.overrideSet = true
-	return f.quota, nil
+func (f *fakeGrantRepo) ListLeaveGrants(_ context.Context, fr GrantFilter, now time.Time) ([]dom.LeaveGrant, error) {
+	var out []dom.LeaveGrant
+	for _, l := range f.lots {
+		if fr.EmployeeID != nil && l.EmployeeID != *fr.EmployeeID {
+			continue
+		}
+		if !fr.IncludeExpired && !l.IsActive(now) {
+			continue
+		}
+		out = append(out, *l)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ExpiresAt.Before(out[j].ExpiresAt) })
+	return out, nil
 }
-func (f *fakeQuotaRepo) CountPendingLeaveDaysForQuota(context.Context, string, string, time.Time, time.Time) (int, error) {
-	return f.pending, nil
+func (f *fakeGrantRepo) PatchLeaveGrant(_ context.Context, _ pgx.Tx, p PatchGrantParams) (dom.LeaveGrant, error) {
+	l := f.lots[p.ID]
+	if p.Amount != nil {
+		l.Amount = *p.Amount
+	}
+	if p.ExpiresAt != nil {
+		l.ExpiresAt = *p.ExpiresAt
+	}
+	if p.SetEarmark {
+		l.Earmark = p.Earmark
+	}
+	return *l, nil
 }
-func (f *fakeQuotaRepo) ListActivePlacedEmployeesForGrant(context.Context, time.Time, time.Time) ([]GrantCandidate, error) {
-	return []GrantCandidate{{EmployeeID: "SWP-EMP-3001", PlacementStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}, nil
+func (f *fakeGrantRepo) ListConsumptionsForGrant(_ context.Context, grantID string) ([]dom.LeaveConsumption, error) {
+	var out []dom.LeaveConsumption
+	for _, c := range f.cons {
+		if c.GrantID == grantID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (f *fakeGrantRepo) ListConsumptionsForRequest(_ context.Context, requestID string) ([]dom.LeaveConsumption, error) {
+	var out []dom.LeaveConsumption
+	for _, c := range f.cons {
+		if c.LeaveRequestID == requestID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+func (f *fakeGrantRepo) GetActiveLotsForAllocation(_ context.Context, _ pgx.Tx, employeeID, earmarkMatch string, now time.Time) ([]dom.LeaveGrant, error) {
+	return f.activeMatching(employeeID, earmarkMatch, now), nil
+}
+func (f *fakeGrantRepo) ReservePending(_ context.Context, _ pgx.Tx, grantID string, days int) error {
+	f.lots[grantID].Pending += days
+	return nil
+}
+func (f *fakeGrantRepo) CommitReservation(_ context.Context, _ pgx.Tx, grantID string, days int) error {
+	l := f.lots[grantID]
+	l.Pending -= days
+	if l.Pending < 0 {
+		l.Pending = 0
+	}
+	l.Consumed += days
+	return nil
+}
+func (f *fakeGrantRepo) ReleasePending(_ context.Context, _ pgx.Tx, grantID string, days int) error {
+	l := f.lots[grantID]
+	l.Pending -= days
+	if l.Pending < 0 {
+		l.Pending = 0
+	}
+	return nil
+}
+func (f *fakeGrantRepo) ReverseConsumption(_ context.Context, _ pgx.Tx, grantID string, days int) error {
+	l := f.lots[grantID]
+	l.Consumed -= days
+	if l.Consumed < 0 {
+		l.Consumed = 0
+	}
+	return nil
+}
+func (f *fakeGrantRepo) ApplyConsumption(_ context.Context, _ pgx.Tx, requestID, grantID string, days int) (dom.LeaveConsumption, error) {
+	f.consSeq++
+	c := dom.LeaveConsumption{ID: "SWP-LC-" + itoa(f.consSeq), LeaveRequestID: requestID, GrantID: grantID, Days: days, CreatedAt: time.Now()}
+	f.cons = append(f.cons, c)
+	return c, nil
+}
+func (f *fakeGrantRepo) DeleteConsumptionsForRequest(_ context.Context, _ pgx.Tx, requestID string) error {
+	f.deletedFR = requestID
+	var keep []dom.LeaveConsumption
+	for _, c := range f.cons {
+		if c.LeaveRequestID != requestID {
+			keep = append(keep, c)
+		}
+	}
+	f.cons = keep
+	return nil
+}
+func (f *fakeGrantRepo) SumActiveBalanceByEarmark(_ context.Context, employeeID string, now time.Time) ([]EarmarkBalanceGroup, error) {
+	groups := map[string]*EarmarkBalanceGroup{}
+	for _, l := range f.lots {
+		if l.EmployeeID != employeeID || !l.IsActive(now) {
+			continue
+		}
+		key := ""
+		if l.Earmark != nil {
+			key = *l.Earmark
+		}
+		g := groups[key]
+		if g == nil {
+			g = &EarmarkBalanceGroup{}
+			if l.Earmark != nil {
+				e := *l.Earmark
+				g.Earmark = &e
+			}
+			groups[key] = g
+		}
+		g.Remaining += l.Remaining()
+		g.Pending += l.Pending
+		exp := l.ExpiresAt
+		if g.NextExpiry == nil || exp.Before(*g.NextExpiry) {
+			g.NextExpiry = &exp
+		}
+	}
+	var out []EarmarkBalanceGroup
+	for _, g := range groups {
+		out = append(out, *g)
+	}
+	return out, nil
+}
+func (f *fakeGrantRepo) FindExpiredLotsWithPending(_ context.Context, today time.Time, _ int) ([]ExpiredLot, error) {
+	var out []ExpiredLot
+	for _, l := range f.lots {
+		if l.ExpiresAt.Before(today) && l.Pending > 0 {
+			out = append(out, ExpiredLot{ID: l.ID, EmployeeID: l.EmployeeID, ExpiresAt: l.ExpiresAt, PendingDays: l.Pending})
+		}
+	}
+	return out, nil
+}
+func (f *fakeGrantRepo) ZeroLotPending(_ context.Context, _ pgx.Tx, grantID string) error {
+	f.lots[grantID].Pending = 0
+	return nil
 }
 
 // --- fake schedule port ---
@@ -162,11 +322,16 @@ func (f *fakeSchedule) InsertApprovedLeaveDay(context.Context, pgx.Tx, string, t
 
 // --- helpers ---
 
+var fixedNow = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
 func hrCtx() context.Context {
 	return auth.WithPrincipal(context.Background(), auth.Principal{UserID: "SWP-USR-HR", EmployeeID: "SWP-EMP-HR", Role: auth.RoleHRAdmin})
 }
 func leaderCtx(company, emp string) context.Context {
 	return auth.WithPrincipal(context.Background(), auth.Principal{UserID: "SWP-USR-LD", EmployeeID: emp, Role: auth.RoleShiftLeader, CompanyID: company})
+}
+func agentCtx(emp string) context.Context {
+	return auth.WithPrincipal(context.Background(), auth.Principal{UserID: "SWP-USR-AG", EmployeeID: emp, Role: auth.RoleAgent})
 }
 
 func newReq(status dom.LeaveStatus, company, employee string, days int) dom.LeaveRequest {
@@ -183,13 +348,26 @@ func newReq(status dom.LeaveStatus, company, employee string, days int) dom.Leav
 	}
 }
 
-func newSvc(lr *fakeLeaveRepo, qr *fakeQuotaRepo, sp *fakeSchedule) *LeaveService {
-	return NewLeaveService(lr, qr, sp, fakeRunner{})
+func lot(id, emp string, amount int, expires time.Time, earmark *string) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: id, EmployeeID: emp, Amount: amount, Source: dom.GrantSourceAnnual,
+		Earmark: earmark, GrantedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		EffectiveFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), ExpiresAt: expires,
+	}
 }
 
-func annualQuota(total, used int) dom.LeaveQuota {
-	return dom.LeaveQuota{ID: "SWP-LQ-1", EmployeeID: "SWP-EMP-3001", LeaveTypeID: "SWP-LT-001", Period: 2026, Total: total, Used: used,
-		PeriodStart: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)}
+func ptr(s string) *string { return &s }
+
+func newSvc(lr *fakeLeaveRepo, gr *fakeGrantRepo, sp *fakeSchedule) *LeaveService {
+	gs := NewGrantService(gr, fakeRunner{})
+	gs.SetClock(func() time.Time { return fixedNow })
+	s := NewLeaveService(lr, gs, sp, fakeRunner{})
+	s.SetClock(func() time.Time { return fixedNow })
+	return s
+}
+
+func annualType() LeaveTypeInfo {
+	return LeaveTypeInfo{ID: "SWP-LT-001", Code: "ANNUAL", IsAnnual: true}
 }
 
 func codeOf(t *testing.T, err error) string {
@@ -201,12 +379,12 @@ func codeOf(t *testing.T, err error) string {
 	return ae.Code
 }
 
-// --- approve-l1 ---
+// --- approve-l1 (state machine unchanged) ---
 
 func TestApproveL1_LeaderForwardsToHR(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingL1, "SWP-CMP-0021", "SWP-EMP-3001", 1), leaveType: LeaveTypeInfo{ID: "SWP-LT-001", IsAnnual: true}}
-	qr := &fakeQuotaRepo{quota: annualQuota(12, 4)}
-	s := newSvc(lr, qr, &fakeSchedule{})
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingL1, "SWP-CMP-0021", "SWP-EMP-3001", 1), leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil))
+	s := newSvc(lr, gr, &fakeSchedule{})
 	out, err := s.ApproveL1(leaderCtx("SWP-CMP-0021", "SWP-EMP-2003"), "SWP-LR-8001", "")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -214,26 +392,14 @@ func TestApproveL1_LeaderForwardsToHR(t *testing.T) {
 	if out.Status != dom.LeaveStatusPendingHR {
 		t.Fatalf("status = %s, want PENDING_HR", out.Status)
 	}
-	if qr.deducted != 0 {
-		t.Fatalf("quota deducted at L1: %d", qr.deducted)
-	}
-	if len(lr.approvals) != 1 || lr.approvals[0].Stage != dom.StageL1 {
-		t.Fatalf("expected one L1 approval row")
-	}
-}
-
-func TestApproveL1_WrongState409(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 1)}
-	s := newSvc(lr, &fakeQuotaRepo{}, &fakeSchedule{})
-	_, err := s.ApproveL1(leaderCtx("SWP-CMP-0021", "SWP-EMP-2003"), "SWP-LR-8001", "")
-	if got := codeOf(t, err); got != "CONFLICT" {
-		t.Fatalf("code = %s, want CONFLICT", got)
+	if gr.lots["SWP-LG-1"].Consumed != 0 {
+		t.Fatalf("lot consumed at L1: %d", gr.lots["SWP-LG-1"].Consumed)
 	}
 }
 
 func TestApproveL1_CrossCompany403(t *testing.T) {
 	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingL1, "SWP-CMP-0022", "SWP-EMP-3001", 1)}
-	s := newSvc(lr, &fakeQuotaRepo{}, &fakeSchedule{})
+	s := newSvc(lr, newFakeGrantRepo(), &fakeSchedule{})
 	_, err := s.ApproveL1(leaderCtx("SWP-CMP-0021", "SWP-EMP-2003"), "SWP-LR-8001", "")
 	if got := codeOf(t, err); got != "OUT_OF_SCOPE" {
 		t.Fatalf("code = %s, want OUT_OF_SCOPE", got)
@@ -242,20 +408,24 @@ func TestApproveL1_CrossCompany403(t *testing.T) {
 
 func TestApproveL1_SelfApprove403(t *testing.T) {
 	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingL1, "SWP-CMP-0021", "SWP-EMP-2003", 1)}
-	s := newSvc(lr, &fakeQuotaRepo{}, &fakeSchedule{})
+	s := newSvc(lr, newFakeGrantRepo(), &fakeSchedule{})
 	_, err := s.ApproveL1(leaderCtx("SWP-CMP-0021", "SWP-EMP-2003"), "SWP-LR-8001", "")
 	if got := codeOf(t, err); got != "FORBIDDEN" {
 		t.Fatalf("code = %s, want FORBIDDEN", got)
 	}
 }
 
-// --- approve-final ---
+// --- FIFO allocation across two lots (soonest expiry first) ---
 
-func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 1), leaveType: LeaveTypeInfo{ID: "SWP-LT-001", Code: "ANNUAL", IsAnnual: true}}
-	qr := &fakeQuotaRepo{quota: annualQuota(12, 4)}
-	sp := &fakeSchedule{}
-	s := newSvc(lr, qr, sp)
+func TestApproveFinal_FIFOAcrossTwoLots(t *testing.T) {
+	soon := time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 5), leaveType: annualType()}
+	gr := newFakeGrantRepo(
+		lot("SWP-LG-LATER", "SWP-EMP-3001", 10, later, nil),
+		lot("SWP-LG-SOON", "SWP-EMP-3001", 3, soon, nil), // 3 days, expires first
+	)
+	s := newSvc(lr, gr, &fakeSchedule{})
 	out, err := s.ApproveFinal(hrCtx(), "SWP-LR-8001", "")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -263,76 +433,248 @@ func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	if out.Status != dom.LeaveStatusApproved {
 		t.Fatalf("status = %s, want APPROVED", out.Status)
 	}
-	if qr.deducted != 1 {
-		t.Fatalf("deducted = %d, want 1", qr.deducted)
+	// 5 days: 3 from SOON (exhausted), 2 from LATER.
+	if gr.lots["SWP-LG-SOON"].Consumed != 3 {
+		t.Fatalf("SOON lot consumed = %d, want 3 (FIFO drains soonest expiry first)", gr.lots["SWP-LG-SOON"].Consumed)
 	}
-	if sp.inserted != 1 {
-		t.Fatalf("approved_leave_days inserts = %d, want 1", sp.inserted)
+	if gr.lots["SWP-LG-LATER"].Consumed != 2 {
+		t.Fatalf("LATER lot consumed = %d, want 2", gr.lots["SWP-LG-LATER"].Consumed)
 	}
-	if len(out.ScheduleImpact) != 1 || out.ScheduleImpact[0].NewStatus != "LEAVE" {
-		t.Fatalf("schedule_impact new_status not mapped to LEAVE: %+v", out.ScheduleImpact)
+	cons, _ := gr.ListConsumptionsForRequest(context.Background(), "SWP-LR-8001")
+	if len(cons) != 2 {
+		t.Fatalf("consumption rows = %d, want 2 (one per lot)", len(cons))
 	}
 }
 
-func TestApproveFinal_OverBalance422(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0022", "SWP-EMP-2891", 3), leaveType: LeaveTypeInfo{ID: "SWP-LT-001", IsAnnual: true}}
-	qr := &fakeQuotaRepo{quota: annualQuota(12, 11)} // remaining 1 < 3
-	s := newSvc(lr, qr, &fakeSchedule{})
+// --- earmark isolation (LQ-10) ---
+
+func TestEarmarkIsolation_OrdinaryCannotDrawMaternityLot(t *testing.T) {
+	// Only a MATERNITY-earmarked lot exists; an ordinary (pool) annual request must
+	// NOT see it → insufficient → BALANCE_RECHECK_FAILED.
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 2), leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-MAT", "SWP-EMP-3001", 90, time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), ptr("MATERNITY")))
+	s := newSvc(lr, gr, &fakeSchedule{})
 	_, err := s.ApproveFinal(hrCtx(), "SWP-LR-8001", "")
-	ae, ok := apperr.As(err)
-	if !ok || ae.Code != "BALANCE_RECHECK_FAILED" {
-		t.Fatalf("code = %v, want BALANCE_RECHECK_FAILED", err)
+	if got := codeOf(t, err); got != "BALANCE_RECHECK_FAILED" {
+		t.Fatalf("code = %s, want BALANCE_RECHECK_FAILED (ordinary request hidden from earmarked lot)", got)
 	}
-	if ae.HTTPStatus != 422 {
-		t.Fatalf("status = %d, want 422", ae.HTTPStatus)
-	}
-	if qr.deducted != 0 {
-		t.Fatalf("quota deducted on a blocked approval")
+	if gr.lots["SWP-LG-MAT"].Consumed != 0 {
+		t.Fatalf("earmarked lot drawn by ordinary request: consumed=%d", gr.lots["SWP-LG-MAT"].Consumed)
 	}
 }
 
-func TestApproveOverride_ForceApproves(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0022", "SWP-EMP-2891", 3), leaveType: LeaveTypeInfo{ID: "SWP-LT-001", IsAnnual: true}}
-	qr := &fakeQuotaRepo{quota: annualQuota(12, 11)}
-	sp := &fakeSchedule{}
-	s := newSvc(lr, qr, sp)
-	out, err := s.ApproveOverride(hrCtx(), "SWP-LR-8001", "Disetujui direktur operasional retroaktif.")
+func TestEarmarkIsolation_MaternityRequestDrawsMaternityLot(t *testing.T) {
+	mat := lr_maternity()
+	lr := &fakeLeaveRepo{req: mat, leaveType: LeaveTypeInfo{ID: "SWP-LT-MAT", Code: "MATERNITY", IsAnnual: true, Earmark: "MATERNITY"}}
+	gr := newFakeGrantRepo(
+		lot("SWP-LG-POOL", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil),
+		lot("SWP-LG-MAT", "SWP-EMP-3001", 90, time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), ptr("MATERNITY")),
+	)
+	s := newSvc(lr, gr, &fakeSchedule{})
+	if _, err := s.ApproveFinal(hrCtx(), "SWP-LR-MAT", ""); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if gr.lots["SWP-LG-MAT"].Consumed != 30 {
+		t.Fatalf("maternity lot consumed = %d, want 30", gr.lots["SWP-LG-MAT"].Consumed)
+	}
+	if gr.lots["SWP-LG-POOL"].Consumed != 0 {
+		t.Fatalf("pool lot drawn by maternity request: %d", gr.lots["SWP-LG-POOL"].Consumed)
+	}
+}
+
+func lr_maternity() dom.LeaveRequest {
+	c := "SWP-CMP-0021"
+	return dom.LeaveRequest{ID: "SWP-LR-MAT", EmployeeID: "SWP-EMP-3001", CompanyID: &c, LeaveTypeID: "SWP-LT-MAT",
+		StartDate: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndDate: time.Date(2026, 7, 9, 0, 0, 0, 0, time.UTC),
+		DurationDays: 30, Status: dom.LeaveStatusPendingHR}
+}
+
+// --- reserve-on-submit / commit-on-approve / release-on-reject ---
+
+func TestSubmit_ReservesPending(t *testing.T) {
+	req := newReq(dom.LeaveStatusDraft, "SWP-CMP-0021", "SWP-EMP-3001", 3)
+	lr := &fakeLeaveRepo{req: req, leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil))
+	s := newSvc(lr, gr, &fakeSchedule{})
+	out, err := s.Submit(hrCtx(), "SWP-LR-8001")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if out.Status != dom.LeaveStatusApproved {
-		t.Fatalf("status = %s, want APPROVED", out.Status)
+	if out.Status != dom.LeaveStatusPendingL1 {
+		t.Fatalf("status = %s, want PENDING_L1", out.Status)
 	}
-	if qr.deducted != 3 {
-		t.Fatalf("deducted = %d, want 3", qr.deducted)
+	if gr.lots["SWP-LG-1"].Pending != 3 {
+		t.Fatalf("pending = %d, want 3 (reserved at submit)", gr.lots["SWP-LG-1"].Pending)
 	}
-	if !qr.overrideSet {
-		t.Fatalf("last_override not recorded")
+	if lr.snapshot == nil || len(lr.snapshot.Allocation) == 0 {
+		t.Fatalf("allocation snapshot not persisted at submit")
+	}
+}
+
+func TestReject_ReleasesPending(t *testing.T) {
+	req := newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 3)
+	req.BalanceCheck.Allocation = []dom.AllocationLine{{GrantID: "SWP-LG-1", Days: 3}}
+	lr := &fakeLeaveRepo{req: req}
+	g := lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil)
+	g.Pending = 3
+	gr := newFakeGrantRepo(g)
+	s := newSvc(lr, gr, &fakeSchedule{})
+	if _, err := s.Reject(hrCtx(), "SWP-LR-8001", "Coverage tidak cukup."); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if gr.lots["SWP-LG-1"].Pending != 0 {
+		t.Fatalf("pending = %d, want 0 (released on reject)", gr.lots["SWP-LG-1"].Pending)
+	}
+	if gr.lots["SWP-LG-1"].Consumed != 0 {
+		t.Fatalf("consumed grew on reject: %d", gr.lots["SWP-LG-1"].Consumed)
+	}
+}
+
+func TestApproveFinal_CommitsReservedAllocation(t *testing.T) {
+	req := newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 3)
+	req.BalanceCheck.Allocation = []dom.AllocationLine{{GrantID: "SWP-LG-1", Days: 3}}
+	lr := &fakeLeaveRepo{req: req, leaveType: annualType()}
+	g := lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil)
+	g.Pending = 3
+	gr := newFakeGrantRepo(g)
+	sp := &fakeSchedule{}
+	s := newSvc(lr, gr, sp)
+	if _, err := s.ApproveFinal(hrCtx(), "SWP-LR-8001", ""); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if gr.lots["SWP-LG-1"].Pending != 0 || gr.lots["SWP-LG-1"].Consumed != 3 {
+		t.Fatalf("commit pending=%d consumed=%d, want 0/3", gr.lots["SWP-LG-1"].Pending, gr.lots["SWP-LG-1"].Consumed)
 	}
 	if sp.inserted != 1 {
-		t.Fatalf("INV-3 not fired on override")
+		t.Fatalf("INV-3 not fired: inserts=%d", sp.inserted)
 	}
 }
 
-// --- reject ---
+// --- no-negative guard ---
 
-func TestReject_Terminal(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 1)}
-	s := newSvc(lr, &fakeQuotaRepo{}, &fakeSchedule{})
-	out, err := s.Reject(hrCtx(), "SWP-LR-8001", "Coverage tidak mencukupi.")
+func TestApproveFinal_InsufficientBlocks(t *testing.T) {
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 5), leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-1", "SWP-EMP-3001", 3, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil)) // only 3
+	s := newSvc(lr, gr, &fakeSchedule{})
+	_, err := s.ApproveFinal(hrCtx(), "SWP-LR-8001", "")
+	if got := codeOf(t, err); got != "BALANCE_RECHECK_FAILED" {
+		t.Fatalf("code = %s, want BALANCE_RECHECK_FAILED", got)
+	}
+	if gr.lots["SWP-LG-1"].Consumed != 0 {
+		t.Fatalf("lot consumed on a blocked approval: %d (never negative)", gr.lots["SWP-LG-1"].Consumed)
+	}
+}
+
+// --- cancel-approved reverses the exact consumption rows ---
+
+func TestCancelApproved_ReversesExactConsumptions(t *testing.T) {
+	req := newReq(dom.LeaveStatusApproved, "SWP-CMP-0021", "SWP-EMP-3001", 3)
+	req.StartDate = time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC) // future
+	req.EndDate = time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)
+	lr := &fakeLeaveRepo{req: req}
+	g := lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil)
+	g.Consumed = 3
+	gr := newFakeGrantRepo(g)
+	gr.cons = []dom.LeaveConsumption{{ID: "SWP-LC-1", LeaveRequestID: "SWP-LR-8001", GrantID: "SWP-LG-1", Days: 3}}
+	s := newSvc(lr, gr, &fakeSchedule{})
+	out, err := s.CancelApproved(hrCtx(), "SWP-LR-8001", "Klien minta agen kembali.")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if out.Status != dom.LeaveStatusRejected {
-		t.Fatalf("status = %s, want REJECTED", out.Status)
+	if out.Status != dom.LeaveStatusCancelled {
+		t.Fatalf("status = %s, want CANCELLED", out.Status)
+	}
+	if gr.lots["SWP-LG-1"].Consumed != 0 {
+		t.Fatalf("consumed = %d, want 0 (reversed)", gr.lots["SWP-LG-1"].Consumed)
+	}
+	if gr.deletedFR != "SWP-LR-8001" {
+		t.Fatalf("consumption rows not deleted for the request")
 	}
 }
+
+func TestCancelApproved_AgentPastLeaveBlocked(t *testing.T) {
+	req := newReq(dom.LeaveStatusApproved, "SWP-CMP-0021", "SWP-EMP-3001", 1)
+	req.StartDate = time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC) // past (before fixedNow)
+	lr := &fakeLeaveRepo{req: req}
+	gr := newFakeGrantRepo()
+	s := newSvc(lr, gr, &fakeSchedule{})
+	_, err := s.CancelApproved(agentCtx("SWP-EMP-3001"), "SWP-LR-8001", "Berubah pikiran.")
+	if got := codeOf(t, err); got != "RULE_VIOLATION" {
+		t.Fatalf("code = %s, want RULE_VIOLATION (agent cannot cancel started leave)", got)
+	}
+}
+
+// --- reject already-terminal 409 ---
 
 func TestReject_AlreadyTerminal409(t *testing.T) {
 	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusApproved, "SWP-CMP-0021", "SWP-EMP-3001", 1)}
-	s := newSvc(lr, &fakeQuotaRepo{}, &fakeSchedule{})
+	s := newSvc(lr, newFakeGrantRepo(), &fakeSchedule{})
 	_, err := s.Reject(hrCtx(), "SWP-LR-8001", "terlambat")
 	if got := codeOf(t, err); got != "CONFLICT" {
 		t.Fatalf("code = %s, want CONFLICT", got)
+	}
+}
+
+// --- expiry sweep ---
+
+func TestExpirySweep_ReleasesDanglingPending(t *testing.T) {
+	g := lot("SWP-LG-EXP", "SWP-EMP-3001", 12, time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), nil) // expired (before fixedNow 2026-06-01)
+	g.Pending = 2                                                                                // dangling
+	gr := newFakeGrantRepo(g)
+	sweep := NewLeaveExpirySweepService(gr, fakeRunner{}, 0)
+	sweep.SetClock(func() time.Time { return fixedNow })
+	n, err := sweep.Sweep(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("swept = %d, want 1", n)
+	}
+	if gr.lots["SWP-LG-EXP"].Pending != 0 {
+		t.Fatalf("dangling pending not released: %d", gr.lots["SWP-LG-EXP"].Pending)
+	}
+}
+
+// --- HR grant create + balance shape ---
+
+func TestCreateGrant_AndBalance(t *testing.T) {
+	gr := newFakeGrantRepo()
+	gs := NewGrantService(gr, fakeRunner{})
+	gs.SetClock(func() time.Time { return fixedNow })
+	g, err := gs.Create(hrCtx(), CreateGrantParams{
+		EmployeeID: "SWP-EMP-3001", Amount: 12, Source: dom.GrantSourceAnnual,
+		Remark: ptr("Hibah kuota tahunan 2026."), ExpiresAt: time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if g.Amount != 12 || g.Remaining() != 12 {
+		t.Fatalf("grant amount/remaining = %d/%d, want 12/12", g.Amount, g.Remaining())
+	}
+	// add a maternity earmarked lot then check balance shape.
+	if _, err := gs.Create(hrCtx(), CreateGrantParams{
+		EmployeeID: "SWP-EMP-3001", Amount: 90, Source: dom.GrantSourceMaternity, Earmark: ptr("MATERNITY"),
+		Remark: ptr("Pre-fund cuti melahirkan."), ExpiresAt: time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("unexpected err on maternity grant: %v", err)
+	}
+	bal, err := gs.Balance(hrCtx(), "SWP-EMP-3001", false)
+	if err != nil {
+		t.Fatalf("balance err: %v", err)
+	}
+	if bal.PoolRemaining != 12 {
+		t.Fatalf("pool_remaining = %d, want 12 (earmarked lot excluded)", bal.PoolRemaining)
+	}
+	if len(bal.Earmarked) != 1 || bal.Earmarked[0].Earmark != "MATERNITY" || bal.Earmarked[0].Remaining != 90 {
+		t.Fatalf("earmarked line wrong: %+v", bal.Earmarked)
+	}
+}
+
+func TestCreateGrant_NegativeAmountRejected(t *testing.T) {
+	gs := NewGrantService(newFakeGrantRepo(), fakeRunner{})
+	gs.SetClock(func() time.Time { return fixedNow })
+	_, err := gs.Create(hrCtx(), CreateGrantParams{EmployeeID: "SWP-EMP-3001", Amount: -1, Source: dom.GrantSourceAdjustment, Remark: ptr("salah"), ExpiresAt: time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)})
+	if got := codeOf(t, err); got != "INVALID_REQUEST" {
+		t.Fatalf("code = %s, want INVALID_REQUEST", got)
 	}
 }

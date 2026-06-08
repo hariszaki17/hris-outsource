@@ -34,6 +34,12 @@ type Cron struct {
 	// AbsenceGrace is how long after a shift's end a scheduled, un-clocked-in shift
 	// must remain before it is marked ABSENT (the cutoff is now - grace).
 	AbsenceGrace time.Duration `env:"ABSENCE_GRACE" envDefault:"30m"`
+
+	// LeaveExpirySweepEnabled toggles the E6 leave-expiry sweep (default on). It
+	// releases dangling pending on lapsed grant-lots (F6.1).
+	LeaveExpirySweepEnabled bool `env:"LEAVE_EXPIRY_SWEEP_ENABLED" envDefault:"true"`
+	// LeaveExpiryInterval is the tick period for the leave-expiry sweep.
+	LeaveExpiryInterval time.Duration `env:"LEAVE_EXPIRY_INTERVAL" envDefault:"1h"`
 }
 
 type HTTP struct {

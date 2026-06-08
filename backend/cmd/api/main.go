@@ -228,11 +228,18 @@ func run() error {
 	// entries + populating approved_leave_days in the approval tx.
 	leaveRepo := leaverepo.NewLeaveRepo(pool)
 	quotaRepo := leaverepo.NewQuotaRepo(pool)
-	leaveSvc := leavesvc.NewLeaveService(leaveRepo, quotaRepo, scheduleRepo, txm)
+	grantRepo := leaverepo.NewGrantRepo(pool)
+	grantSvc := leavesvc.NewGrantService(grantRepo, txm) // F6.1 grant-lot ledger + FIFO allocator
+	leaveSvc := leavesvc.NewLeaveService(leaveRepo, grantSvc, scheduleRepo, txm)
 	leaveSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on approve-final/reject
-	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm)
+	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm) // DEPRECATED 2026-06-08 — kept for /leave-quotas*
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
-	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc)
+	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, grantSvc, calendarSvc)
+
+	// Leave-expiry sweep (F6.1): in-process cron that releases dangling pending on
+	// lapsed grant-lots (remaining is already 0 for an inactive lot at the read
+	// boundary). Mirrors the absence-sweep wiring.
+	leaveExpirySvc := leavesvc.NewLeaveExpirySweepService(grantRepo, txm, 0)
 
 	// Overtime slice (09-02): E7 two-level OT approval + holiday calendar
 	// (F7.1/F7.3/F7.4). The OT service reuses the EXISTING scheduling repo
@@ -317,6 +324,16 @@ func run() error {
 		go runner.Start(ctx)
 		slog.Info("absence-sweep cron started",
 			"interval", cfg.Cron.AbsenceSweepInterval.String(), "grace", cfg.Cron.AbsenceGrace.String())
+	}
+
+	// Leave-expiry sweep cron (F6.1): releases dangling pending on lapsed grant-lots.
+	if cfg.Cron.LeaveExpirySweepEnabled {
+		runner := cron.NewRunner("leave-expiry-sweep", cfg.Cron.LeaveExpiryInterval, func(ctx context.Context) error {
+			_, err := leaveExpirySvc.Sweep(ctx)
+			return err
+		})
+		go runner.Start(ctx)
+		slog.Info("leave-expiry-sweep cron started", "interval", cfg.Cron.LeaveExpiryInterval.String())
 	}
 
 	// Serve until signal, then graceful shutdown.

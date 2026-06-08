@@ -102,6 +102,30 @@ func (r *LeaveRepo) UpdateLeaveRequestStatus(ctx context.Context, tx pgx.Tx, p s
 	return mapRequestFromUpdate(row), nil
 }
 
+func (r *LeaveRepo) UpdateLeaveRequestDates(ctx context.Context, tx pgx.Tx, id string, start, end time.Time, durationDays int) (dom.LeaveRequest, error) {
+	row, err := r.q.WithTx(tx).UpdateLeaveRequestDates(ctx, sqlcgen.UpdateLeaveRequestDatesParams{
+		StartDate:    timeToPgDate(start),
+		EndDate:      timeToPgDate(end),
+		DurationDays: i32(durationDays),
+		ID:           id,
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, mapErr(err)
+	}
+	return mapRequestFromDates(row), nil
+}
+
+func (r *LeaveRepo) SetBalanceSnapshot(ctx context.Context, tx pgx.Tx, p svc.BalanceSnapshotParams) error {
+	return r.q.WithTx(tx).SetLeaveBalanceSnapshot(ctx, sqlcgen.SetLeaveBalanceSnapshotParams{
+		ID:               p.ID,
+		RequestedDays:    i32ptr(p.RequestedDays),
+		RemainingAtCheck: i32ptr(p.RemainingAtCheck),
+		RequiresOverride: p.RequiresOverride,
+		Earmark:          p.Earmark,
+		Allocation:       p.Allocation,
+	})
+}
+
 // --- approvals (decision trail) ---
 
 func (r *LeaveRepo) InsertLeaveApproval(ctx context.Context, tx pgx.Tx, p svc.ApprovalRow) (dom.LeaveApproval, error) {
@@ -146,7 +170,21 @@ func (r *LeaveRepo) GetLeaveType(ctx context.Context, id string) (svc.LeaveTypeI
 		Code:     row.Code,
 		Name:     row.Name,
 		IsAnnual: row.IsAnnual,
+		Earmark:  earmarkForCode(row.Code),
 	}, nil
+}
+
+// earmarkForCode maps a leave-type code to its grant-lot earmark purpose (LQ-10). An
+// earmarked type draws ONLY matching earmarked lots; all other types draw the flat
+// pool (earmark ""). The set mirrors the LeaveGrantSource earmark values HR pre-funds
+// via POST /leave-grants (MATERNITY / STATUTORY).
+func earmarkForCode(code string) string {
+	switch code {
+	case "MATERNITY", "STATUTORY":
+		return code
+	default:
+		return ""
+	}
 }
 
 // --- calendar ---

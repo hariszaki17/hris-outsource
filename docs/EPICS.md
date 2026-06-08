@@ -219,11 +219,21 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 
 **E6 — Leave**
 - ✅ Duration = **working days excluding public holidays** (working day = a day the agent would otherwise be rostered — exact shift-worker nuance to confirm)
-- ✅ Period basis = **calendar year**
+- ✅ Period basis = **calendar year** *(superseded 2026-06-08 — period is now per-lot; an ANNUAL lot's `expires_at` = the entitlement period end, but balance is no longer keyed on a global calendar-year period. See the grant-lot decision below.)*
 - ✅ Probation: **pro-rated** annual leave in the first year (also pro-rate mid-year joiners)
-- ✅ Non-annual types (sick/maternity/unpaid): **per-type quotas** → `LeaveQuota` generalizes to one per (employee, leave_type, period)
+- ✅ Non-annual types (sick/maternity/unpaid): **per-type quotas** → `LeaveQuota` generalizes to one per (employee, leave_type, period) *(superseded 2026-06-08 — leave_type is no longer a balance axis; there is ONE pool per employee held as grant-lots. Long/statutory types = HR pre-funds an earmarked lot. See the grant-lot decision below.)*
 - ✅ Half-day leave: **not in v1** (full days only)
 - Delegate = informational/notified (no enforced coverage); no-leader → HR sole approver; team calendar shows approved + a pending toggle *(default)*
+- ✅ **Leave balance = per-employee grant-lot ledger** *(resolved 2026-06-08 — supersedes the per-type-quota / calendar-year-expiry model above and E6 FEATURE INV-1/INV-4)* — replaces "one `LeaveQuota` row per (employee, leave_type, calendar-year) expiring at year-end" with a single **per-employee pool held as grant-lots**:
+  1. **One pool per employee.** `leave_type` stays only as a **label + document gate (`requires_document`) + calendar color** — it is **no longer a balance axis**. All ordinary types draw the one pool.
+  2. **Grants are lots** (`leave_grants`, prefix `SWP-LG-*`): one row per insert, each with its own `expires_at`. Columns: `id, employee_id, amount_days, granted_at, effective_from, expires_at, source (ANNUAL|ADJUSTMENT|MATERNITY|STATUTORY|MIGRATION|BONUS), earmark (nullable — null = general pool; non-null = purpose code restricting consumption), remark, consumed_days, pending_days, created_by, created_at/updated_at`. Remaining-per-lot = `amount − consumed − pending` (derived).
+  3. **Hard per-lot expiry, no carryover.** A lot expires at its own `expires_at` (an expiry sweep zeroes it). No year-end global expiry, no carryover minting.
+  4. **Consumption = FIFO by soonest `expires_at`**, across lots, recorded per-lot in `leave_consumptions` (prefix `SWP-LC-*`): `id, leave_request_id (FK), grant_id (FK), days, created_at`. This replaces the single `balance_quota_id` snapshot on leave_requests. Cancel/restore reverses the exact consumption rows.
+  5. **No negative balance.** A request consumes only available (unexpired, matching-earmark) lots. Over-quota → HR adds a lot (pre-fund), never a negative balance. (LQ-5 kept, enforced at allocation.)
+  6. **Long / statutory leave = HR pre-funds a lot.** e.g. maternity: HR inserts an earmarked lot (`source=MATERNITY, earmark=MATERNITY, remark, expires_at`); the employee then requests against it. No bypass flag, no separate table.
+  7. **Optional earmark.** Unearmarked lots = the flat pool, drawn FIFO by ordinary requests. Earmarked lots are consumed **only** by a request of that purpose and are invisible to ordinary FIFO. Balance UI shows: total pool (unearmarked) + a separate line per earmarked lot with its expiry. Balance = Σ(`amount − consumed − pending`) over lots where `now < expires_at`, split unearmarked-vs-earmarked.
+  - **Invariant changes:** LQ-1 (per-type yearly grant) **replaced** — entitlement is granted as lots; the annual auto-grant still sources `employment_agreements.annual_leave_entitlement_days` but writes a single `ANNUAL` lot with `expires_at` = period end. LQ-4 (year-end expire / no carryover) **replaced** by per-lot hard expiry. LQ-5 (never negative) **kept**, enforced at allocation. LQ-7 (one quota per type/period) **dropped** (lots, not per-type rows). LQ-2/LQ-3 (deduct/restore on approve/cancel) **restated** as FIFO consumption rows (reserve `pending_days` at submit, commit to `consumed_days` on approve, release on reject/cancel). LQ-6 (HR manual adjust w/ reason, audited) **becomes** "HR grants/adjusts a lot (amount, `expires_at`, earmark, remark), audited."
+  - See [E6 FEATURE §4 + §7](epics/E6-leave/FEATURE.md), [leave-quota-balances PRD](epics/E6-leave/prds/leave-quota-balances.md), [E6 openapi](api/E6-leave/openapi.yaml).
 
 **E7 — Overtime**
 - ✅ Public-holiday calendar: **HR-maintained in-app** master (recurring + one-off); shared with E6 duration counting

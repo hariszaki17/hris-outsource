@@ -64,7 +64,9 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-ATT` | Attendance record | E5 |
 | `SWP-COR` | Attendance correction request | E5 |
 | `SWP-LR` | Leave Request | E6 |
-| `SWP-LQ` | Leave Quota (employee × leave_type × period) | E6 |
+| `SWP-LG` | Leave Grant (one grant-lot in the per-employee leave ledger) | E6 |
+| `SWP-LC` | Leave Consumption (one lot drawn-down row, links a request to a grant) | E6 |
+| `SWP-LQ` | Leave Quota — **deprecated 2026-06-08**, superseded by `SWP-LG`/`SWP-LC` grant-lot ledger | E6 |
 | `SWP-OT` | Overtime request | E7 |
 | `SWP-HOL` | Public Holiday | E7 |
 | `SWP-PS` | Payslip | E8 |

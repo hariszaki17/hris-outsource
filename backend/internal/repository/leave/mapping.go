@@ -112,7 +112,7 @@ func mapRequestFromList(r sqlcgen.ListLeaveRequestsRow) dom.LeaveRequest {
 		LeaveTypeCode:   r.LeaveTypeCode,
 	}
 	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
-	lr.BalanceCheck = mapBalanceCheck(r.BalanceQuotaID, r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
 	return lr
 }
 
@@ -143,7 +143,7 @@ func mapRequestFromGet(r sqlcgen.GetLeaveRequestRow) dom.LeaveRequest {
 		LeaveTypeCode:   r.LeaveTypeCode,
 	}
 	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
-	lr.BalanceCheck = mapBalanceCheck(r.BalanceQuotaID, r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
 	return lr
 }
 
@@ -170,7 +170,7 @@ func mapRequestFromForUpdate(r sqlcgen.GetLeaveRequestForUpdateRow) dom.LeaveReq
 		UpdatedAt:       r.UpdatedAt,
 	}
 	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
-	lr.BalanceCheck = mapBalanceCheck(r.BalanceQuotaID, r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
 	return lr
 }
 
@@ -197,12 +197,39 @@ func mapRequestFromUpdate(r sqlcgen.UpdateLeaveRequestStatusRow) dom.LeaveReques
 		UpdatedAt:       r.UpdatedAt,
 	}
 	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
-	lr.BalanceCheck = mapBalanceCheck(r.BalanceQuotaID, r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
 	return lr
 }
 
-func mapBalanceCheck(quotaID *string, requested, remaining *int32, requiresOverride *bool) dom.BalanceCheck {
-	bc := dom.BalanceCheck{LeaveQuotaID: quotaID}
+func mapRequestFromDates(r sqlcgen.UpdateLeaveRequestDatesRow) dom.LeaveRequest {
+	lr := dom.LeaveRequest{
+		ID:              r.ID,
+		EmployeeID:      r.EmployeeID,
+		PlacementID:     r.PlacementID,
+		CompanyID:       r.CompanyID,
+		ServiceLineID:   r.ServiceLineID,
+		LeaveTypeID:     r.LeaveTypeID,
+		StartDate:       pgDateToTime(r.StartDate),
+		EndDate:         pgDateToTime(r.EndDate),
+		DurationDays:    int(r.DurationDays),
+		Reason:          r.Reason,
+		Notes:           r.Notes,
+		Status:          dom.LeaveStatus(r.Status),
+		DelegateID:      r.DelegateID,
+		DocumentFileID:  r.DocumentFileID,
+		Backdated:       r.Backdated,
+		ClockInConflict: r.ClockInConflict,
+		CreatedBy:       r.CreatedBy,
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+	}
+	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride, r.BalanceEarmark, r.BalanceAllocation)
+	return lr
+}
+
+func mapBalanceCheck(requested, remaining *int32, requiresOverride *bool, earmark *string, allocation []byte) dom.BalanceCheck {
+	bc := dom.BalanceCheck{Earmark: earmark}
 	if requested != nil {
 		v := int(*requested)
 		bc.RequestedDays = &v
@@ -214,7 +241,43 @@ func mapBalanceCheck(quotaID *string, requested, remaining *int32, requiresOverr
 	if requiresOverride != nil {
 		bc.RequiresOverride = *requiresOverride
 	}
+	bc.Allocation = unmarshalAllocation(allocation)
 	return bc
+}
+
+// allocLine is the jsonb shape persisted in leave_requests.balance_allocation.
+type allocLine struct {
+	GrantID   string `json:"grant_id"`
+	Days      int    `json:"days"`
+	ExpiresAt string `json:"expires_at"` // YYYY-MM-DD
+}
+
+// MarshalAllocation serializes the FIFO split for the balance_allocation column.
+func MarshalAllocation(alloc []dom.AllocationLine) ([]byte, error) {
+	if len(alloc) == 0 {
+		return nil, nil
+	}
+	lines := make([]allocLine, 0, len(alloc))
+	for _, a := range alloc {
+		lines = append(lines, allocLine{GrantID: a.GrantID, Days: a.Days, ExpiresAt: a.ExpiresAt.Format("2006-01-02")})
+	}
+	return json.Marshal(lines)
+}
+
+func unmarshalAllocation(b []byte) []dom.AllocationLine {
+	if len(b) == 0 {
+		return nil
+	}
+	var lines []allocLine
+	if err := json.Unmarshal(b, &lines); err != nil {
+		return nil
+	}
+	out := make([]dom.AllocationLine, 0, len(lines))
+	for _, l := range lines {
+		t, _ := time.Parse("2006-01-02", l.ExpiresAt)
+		out = append(out, dom.AllocationLine{GrantID: l.GrantID, Days: l.Days, ExpiresAt: t})
+	}
+	return out
 }
 
 // --- leave-approval mappers ---
@@ -306,6 +369,83 @@ func mapQuotaFromModel(r sqlcgen.LeaveQuota) dom.LeaveQuota {
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,
 	}
+}
+
+// --- leave-grant / consumption mappers (F6.1 grant-lot ledger) ---
+
+func grantFromCreate(r sqlcgen.CreateLeaveGrantRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func grantFromPatch(r sqlcgen.PatchLeaveGrantRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func grantFromGet(r sqlcgen.GetLeaveGrantRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, EmployeeName: r.EmployeeName,
+	}
+}
+
+func grantFromForUpdate(r sqlcgen.GetLeaveGrantForUpdateRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func grantFromList(r sqlcgen.ListLeaveGrantsRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, EmployeeName: r.EmployeeName,
+	}
+}
+
+func grantFromAlloc(r sqlcgen.GetActiveLotsForAllocationRow) dom.LeaveGrant {
+	return dom.LeaveGrant{
+		ID: r.ID, EmployeeID: r.EmployeeID, Amount: int(r.AmountDays),
+		Source: dom.LeaveGrantSource(r.Source), Earmark: r.Earmark, Remark: r.Remark,
+		GrantedAt: r.GrantedAt, EffectiveFrom: pgDateToTime(r.EffectiveFrom), ExpiresAt: pgDateToTime(r.ExpiresAt),
+		Consumed: int(r.ConsumedDays), Pending: int(r.PendingDays), CreatedBy: r.CreatedBy,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func consumption(r sqlcgen.LeaveConsumption) dom.LeaveConsumption {
+	return dom.LeaveConsumption{
+		ID: r.ID, LeaveRequestID: r.LeaveRequestID, GrantID: r.GrantID,
+		Days: int(r.Days), CreatedAt: r.CreatedAt,
+	}
+}
+
+func consumptions(rows []sqlcgen.LeaveConsumption) []dom.LeaveConsumption {
+	out := make([]dom.LeaveConsumption, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, consumption(r))
+	}
+	return out
 }
 
 // --- calendar mappers ---

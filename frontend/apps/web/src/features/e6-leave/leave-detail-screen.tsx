@@ -62,9 +62,7 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   // The E6 openapi declares the bare LeaveRequest (no envelope), so the generated
   // type narrows `query.data.data` to LeaveRequest; we unwrap the BE's extra `data`
   // layer when present and fall back to the bare shape so both contracts work.
-  const outer = query.data?.data as
-    | (LeaveRequest & { data?: LeaveRequest })
-    | undefined;
+  const outer = query.data?.data as (LeaveRequest & { data?: LeaveRequest }) | undefined;
   const raw: unknown =
     outer && typeof outer === 'object' && 'data' in outer && outer.data ? outer.data : outer;
   // The Orval response union includes error types; narrow to LeaveRequest.
@@ -416,7 +414,7 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
 
         {/* Right col — quota + timeline */}
         <div className="flex flex-1 flex-col gap-4">
-          {/* Balance check */}
+          {/* Balance check — grant-lot pool (2026-06-08) */}
           {lr.balance_check && (
             <Section title={t('detail.sectionBalance')}>
               <div className="flex flex-col gap-1.5">
@@ -425,8 +423,13 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
                   value={lr.balance_check.requested_days ?? 0}
                   t={t}
                 />
+                {/* Pool remaining (unearmarked) or earmarked lot remaining */}
                 <BalanceStat
-                  label={t('detail.balanceRemaining')}
+                  label={
+                    lr.balance_check.earmark
+                      ? t('detail.balanceEarmarked', { earmark: lr.balance_check.earmark })
+                      : t('detail.balancePool')
+                  }
                   value={lr.balance_check.remaining_days_at_check ?? 0}
                   t={t}
                   negative={Boolean(lr.balance_check.requires_override)}

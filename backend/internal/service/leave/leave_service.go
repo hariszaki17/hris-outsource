@@ -27,21 +27,42 @@ import (
 // LeaveService implements the leave-request approval business logic.
 type LeaveService struct {
 	repo     LeaveRepository
-	quota    QuotaRepository
+	grants   *GrantService
+	gr       GrantRepository
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
 	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
-// NewLeaveService wires the leave service. The schedule port is the INV-3
-// loop-closer surface (the scheduling repo).
-func NewLeaveService(repo LeaveRepository, quota QuotaRepository, schedule SchedulePort, txm TxRunner) *LeaveService {
-	return &LeaveService{repo: repo, quota: quota, schedule: schedule, txm: txm, now: time.Now}
+// NewLeaveService wires the leave service. grants is the grant-lot allocator (FIFO
+// reserve/commit/release/reverse); the schedule port is the INV-3 loop-closer surface.
+func NewLeaveService(repo LeaveRepository, grants *GrantService, schedule SchedulePort, txm TxRunner) *LeaveService {
+	return &LeaveService{repo: repo, grants: grants, gr: grants.repo, schedule: schedule, txm: txm, now: time.Now}
 }
 
-// SetClock overrides the time source (tests only).
-func (s *LeaveService) SetClock(c Clock) { s.now = c }
+// SetClock overrides the time source (tests only). Propagates to the allocator so FIFO
+// active-lot selection uses the same clock.
+func (s *LeaveService) SetClock(c Clock) {
+	s.now = c
+	if s.grants != nil {
+		s.grants.SetClock(c)
+	}
+}
+
+// LeaveTypeInfo gained an Earmark field (the purpose code) so the allocator can filter
+// to matching lots. earmarkForType maps a leave type to its earmark purpose: an
+// earmarked type (MATERNITY / STATUTORY) draws ONLY matching lots (LQ-10); an ordinary
+// type draws the flat pool (earmark nil).
+func earmarkForType(lt LeaveTypeInfo) *string {
+	switch lt.Earmark {
+	case "":
+		return nil
+	default:
+		e := lt.Earmark
+		return &e
+	}
+}
 
 // SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe:
 // notify.Dispatch no-ops when the notifier is nil, so existing unit tests that
@@ -197,45 +218,53 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			return serr
 		}
 
-		// 1. resolve the quota-tracked flag (real leave_types.is_annual).
+		// 1. resolve the leave type (quota-tracked gate + earmark purpose).
 		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
 		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
 			return lterr
 		}
 		quotaTracked := lt.IsAnnual
+		earmark := earmarkForType(lt)
 
-		// 2. balance re-check + deduct (quota-tracked only).
-		var quotaID *string
+		// 2. grant-lot allocation: commit the SUBMIT-time reservation, or allocate
+		// fresh at approve when no reservation was held (seeded / HR-on-behalf).
 		var remainingAtCheck *int
+		var committed []dom.AllocationLine
 		if quotaTracked {
-			q, qerr := s.quota.FindQuotaForEmployeeTypePeriod(ctx, rec.EmployeeID, rec.LeaveTypeID, rec.StartDate.Year())
-			if qerr != nil && !errors.Is(qerr, domain.ErrNotFound) {
-				return qerr
-			}
-			if qerr == nil {
-				qid := q.ID
-				quotaID = &qid
-				rem := q.Remaining()
+			alloc := rec.BalanceCheck.Allocation
+			if len(alloc) > 0 {
+				// Commit the reserved lots (pending→consumed + LeaveConsumption rows).
+				if cerr := s.grants.commit(ctx, tx, id, alloc); cerr != nil {
+					return cerr
+				}
+				committed = alloc
+			} else {
+				// No prior reservation — FIFO allocate fresh at approve time.
+				fresh, available, aerr := s.grants.allocate(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
+				if aerr != nil {
+					return aerr
+				}
+				rem := available
 				remainingAtCheck = &rem
-				if !override && rec.DurationDays > rem {
-					return balanceRecheckFailed(rec.DurationDays, rem)
+				if !override && rec.DurationDays > available {
+					return balanceRecheckFailed(rec.DurationDays, available)
 				}
-				if _, derr := s.quota.DeductLeaveQuota(ctx, tx, q.ID, rec.DurationDays); derr != nil {
-					return derr
-				}
-				if override {
-					ov := dom.LeaveQuotaOverride{
-						LeaveRequestID: id,
-						OverrideReason: overrideReason,
-						OverriddenBy:   deref(actor),
-						OverriddenAt:   s.now().UTC(),
-					}
-					if _, oerr := s.quota.SetLeaveQuotaOverride(ctx, tx, q.ID, ov); oerr != nil {
-						return oerr
+				// Reserve then commit each freshly-allocated lot (keeps the lot's
+				// pending/consumed bookkeeping consistent). Over-balance overrides commit
+				// only the available split — lots never go negative (LQ-5); the shortfall
+				// is HR's to pre-fund via POST /leave-grants.
+				for _, a := range fresh {
+					if rerr := s.gr.ReservePending(ctx, tx, a.GrantID, a.Days); rerr != nil {
+						return rerr
 					}
 				}
+				if cerr := s.grants.commit(ctx, tx, id, fresh); cerr != nil {
+					return cerr
+				}
+				committed = fresh
 			}
 		}
+		_ = remainingAtCheck
 
 		// 3. INV-3 loop-closer: cancel overlapping schedule entries (DB
 		// CANCELLED_BY_LEAVE) + INSERT approved_leave_days for each leave date.
@@ -262,7 +291,7 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			}
 		}
 
-		// 4. transition + snapshot.
+		// 4. transition + commit the BalanceCheck snapshot (committed allocation).
 		req := int(rec.DurationDays)
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 			ID:                      id,
@@ -270,7 +299,6 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			NoLeader:                rec.Routing.NoLeader,
 			AssignedLeaderID:        rec.Routing.AssignedLeaderID,
 			ClockInConflict:         rec.ClockInConflict,
-			BalanceQuotaID:          quotaID,
 			BalanceRequestedDays:    &req,
 			BalanceRemainingAtCheck: remainingAtCheck,
 			BalanceRequiresOverride: boolPtr(override),
@@ -279,6 +307,9 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			return uerr
 		}
 		out = updated
+		if serr := s.writeSnapshot(ctx, tx, id, &req, remainingAtCheck, boolPtr(override), earmark, committed); serr != nil {
+			return serr
+		}
 
 		// 5. decision row + audit.
 		decision := dom.DecisionApproved
@@ -355,6 +386,10 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 		if rec.Status == dom.LeaveStatusPendingL1 {
 			stage = dom.StageL1
 		}
+		// Release the SUBMIT-time pending reservation (the request never consumed).
+		if rerr := s.grants.release(ctx, tx, rec.BalanceCheck.Allocation); rerr != nil {
+			return rerr
+		}
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 			ID:               id,
 			Status:           dom.LeaveStatusRejected,
@@ -366,6 +401,9 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 			return uerr
 		}
 		out = updated
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+			return serr
+		}
 		rsn := reason
 		if _, aerr := s.repo.InsertLeaveApproval(ctx, tx, ApprovalRow{
 			LeaveRequestID: id, Stage: stage, Decision: dom.DecisionRejected,
@@ -393,6 +431,267 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 		return dom.LeaveRequest{}, asAppErr(err)
 	}
 	return s.reread(ctx, out)
+}
+
+// --- submit (reserve) ---
+
+// Submit transitions DRAFT → PENDING_L1 (or PENDING_HR when no leader) and FIFO-
+// reserves the duration across the employee's active matching-earmark lots, persisting
+// the BalanceCheck allocation snapshot. Insufficient balance → QUOTA_EXCEEDED (HR
+// pre-funds a lot instead of going negative). Quota-untracked types skip reservation.
+func (s *LeaveService) Submit(ctx context.Context, id string) (dom.LeaveRequest, error) {
+	actor := actorEmployeeID(ctx)
+	role := actorRole(ctx)
+	var out dom.LeaveRequest
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, lerr := s.lockRequest(ctx, tx, id)
+		if lerr != nil {
+			return lerr
+		}
+		if rec.Status != dom.LeaveStatusDraft {
+			return stateConflict(rec.Status)
+		}
+		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
+		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
+			return lterr
+		}
+		earmark := earmarkForType(lt)
+
+		var alloc []dom.AllocationLine
+		var availPtr *int
+		if lt.IsAnnual {
+			a, available, rerr := s.grants.reserve(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
+			if rerr != nil {
+				return rerr
+			}
+			alloc = a
+			availPtr = &available
+		}
+
+		next := dom.LeaveStatusPendingL1
+		if rec.Routing.NoLeader {
+			next = dom.LeaveStatusPendingHR
+		}
+		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+			ID:               id,
+			Status:           next,
+			NoLeader:         rec.Routing.NoLeader,
+			AssignedLeaderID: rec.Routing.AssignedLeaderID,
+			ClockInConflict:  rec.ClockInConflict,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		out = updated
+		req := rec.DurationDays
+		if serr := s.writeSnapshot(ctx, tx, id, &req, availPtr, boolPtr(false), earmark, alloc); serr != nil {
+			return serr
+		}
+		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(next), actor, "SUBMIT"))
+	})
+	_ = role
+	if err != nil {
+		return dom.LeaveRequest{}, asAppErr(err)
+	}
+	return s.reread(ctx, out)
+}
+
+// --- cancel (withdraw a not-yet-approved request) ---
+
+// Cancel withdraws a DRAFT/PENDING_* request (LR-7). Releases any pending reservation;
+// no schedule effect (the request never reached APPROVED).
+func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.LeaveRequest, error) {
+	actor := actorEmployeeID(ctx)
+	var out dom.LeaveRequest
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, lerr := s.lockRequest(ctx, tx, id)
+		if lerr != nil {
+			return lerr
+		}
+		switch rec.Status {
+		case dom.LeaveStatusDraft, dom.LeaveStatusPendingL1, dom.LeaveStatusPendingHR:
+		default:
+			return stateConflict(rec.Status)
+		}
+		if serr := guardSelfOwn(ctx, rec); serr != nil {
+			return serr
+		}
+		if rerr := s.grants.release(ctx, tx, rec.BalanceCheck.Allocation); rerr != nil {
+			return rerr
+		}
+		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+			ID:               id,
+			Status:           dom.LeaveStatusCancelled,
+			NoLeader:         rec.Routing.NoLeader,
+			AssignedLeaderID: rec.Routing.AssignedLeaderID,
+			ClockInConflict:  rec.ClockInConflict,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		out = updated
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+			return serr
+		}
+		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "CANCELLED", actor, "CANCEL"))
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, asAppErr(err)
+	}
+	return s.reread(ctx, out)
+}
+
+// --- cancel-approved (LI-4 full restore) ---
+
+// CancelApproved cancels an APPROVED leave and reverses the EXACT consumption rows it
+// drew (consumed -= days on each lot + delete the rows). Agents may cancel only their
+// own future leave (start_date > today); HR may cancel any. Schedule restore is the
+// leader's E4 re-roster (out of v1 scope here).
+func (s *LeaveService) CancelApproved(ctx context.Context, id, reason string) (dom.LeaveRequest, error) {
+	if len([]rune(reason)) < 5 {
+		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
+	}
+	actor := actorEmployeeID(ctx)
+	var out dom.LeaveRequest
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, lerr := s.lockRequest(ctx, tx, id)
+		if lerr != nil {
+			return lerr
+		}
+		if rec.Status != dom.LeaveStatusApproved {
+			return stateConflict(rec.Status)
+		}
+		if perr := s.guardCancelApprovedActor(ctx, rec); perr != nil {
+			return perr
+		}
+		if _, rerr := s.grants.reverseConsumptions(ctx, tx, id); rerr != nil {
+			return rerr
+		}
+		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+			ID:               id,
+			Status:           dom.LeaveStatusCancelled,
+			NoLeader:         rec.Routing.NoLeader,
+			AssignedLeaderID: rec.Routing.AssignedLeaderID,
+			ClockInConflict:  rec.ClockInConflict,
+		})
+		if uerr != nil {
+			return uerr
+		}
+		out = updated
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+			return serr
+		}
+		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", "APPROVED", "CANCELLED", actor, "CANCEL_APPROVED"))
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, asAppErr(err)
+	}
+	return s.reread(ctx, out)
+}
+
+// --- shorten (LI-4 partial restore) ---
+
+// Shorten sets a new (earlier) end_date on an APPROVED leave and reverses the days
+// between new_end_date+1 and the original end_date. Implemented as a reverse-then-
+// re-commit of the shortened duration against the original lots (FIFO), so the lot
+// consumed bookkeeping stays exact. Cannot shorten past start_date (use CancelApproved).
+func (s *LeaveService) Shorten(ctx context.Context, id string, newEnd time.Time, reason string) (dom.LeaveRequest, error) {
+	if len([]rune(reason)) < 5 {
+		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
+	}
+	actor := actorEmployeeID(ctx)
+	var out dom.LeaveRequest
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, lerr := s.lockRequest(ctx, tx, id)
+		if lerr != nil {
+			return lerr
+		}
+		if rec.Status != dom.LeaveStatusApproved {
+			return stateConflict(rec.Status)
+		}
+		if newEnd.Before(rec.StartDate) || !newEnd.Before(rec.EndDate) {
+			return apperr.Rule("RULE_VIOLATION", map[string]string{"new_end_date": "Harus >= tanggal mulai dan < tanggal selesai."})
+		}
+		// New duration = whole-day count [start, newEnd] inclusive (server-authoritative
+		// roster-minus-holiday recomputation is the E4/E7 concern; here we proportionally
+		// reduce by calendar days as the v1 approximation).
+		newDays := int(newEnd.Sub(rec.StartDate).Hours()/24) + 1
+		if newDays < 1 {
+			newDays = 1
+		}
+		// Reverse the full consumption, then re-commit newDays FIFO from the same lots.
+		if _, rerr := s.grants.reverseConsumptions(ctx, tx, id); rerr != nil {
+			return rerr
+		}
+		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
+		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
+			return lterr
+		}
+		earmark := earmarkForType(lt)
+		var committed []dom.AllocationLine
+		if lt.IsAnnual && newDays > 0 {
+			fresh, _, aerr := s.grants.allocate(ctx, tx, rec.EmployeeID, earmark, newDays)
+			if aerr != nil {
+				return aerr
+			}
+			for _, a := range fresh {
+				if perr := s.gr.ReservePending(ctx, tx, a.GrantID, a.Days); perr != nil {
+					return perr
+				}
+			}
+			if cerr := s.grants.commit(ctx, tx, id, fresh); cerr != nil {
+				return cerr
+			}
+			committed = fresh
+		}
+		updated, uerr := s.repo.UpdateLeaveRequestDates(ctx, tx, id, rec.StartDate, newEnd, newDays)
+		if uerr != nil {
+			return uerr
+		}
+		out = updated
+		req := newDays
+		if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(false), earmark, committed); serr != nil {
+			return serr
+		}
+		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", "APPROVED", "APPROVED", actor, "SHORTEN"))
+	})
+	if err != nil {
+		return dom.LeaveRequest{}, asAppErr(err)
+	}
+	return s.reread(ctx, out)
+}
+
+// guardCancelApprovedActor enforces the cancel-approved permission split (openapi):
+// an agent may cancel ONLY own future leave (start_date > today); HR/super may cancel
+// any. Other roles are blocked.
+func (s *LeaveService) guardCancelApprovedActor(ctx context.Context, rec dom.LeaveRequest) error {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return apperr.Unauthenticated()
+	}
+	switch p.Role {
+	case auth.RoleHRAdmin, auth.RoleSuperAdmin:
+		return nil
+	case auth.RoleAgent:
+		if p.EmployeeID != rec.EmployeeID {
+			return apperr.Forbidden()
+		}
+		today := s.now().UTC().Truncate(24 * time.Hour)
+		if !rec.StartDate.After(today) {
+			return apperr.Rule("RULE_VIOLATION", map[string]string{"start_date": "Cuti sudah dimulai; hubungi HR."})
+		}
+		return nil
+	default:
+		return apperr.Forbidden()
+	}
+}
+
+// guardSelfOwn enforces that an agent acts only on their own request (cancel/withdraw).
+func guardSelfOwn(ctx context.Context, rec dom.LeaveRequest) error {
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent && p.EmployeeID != rec.EmployeeID {
+		return apperr.Forbidden()
+	}
+	return nil
 }
 
 // --- helpers ---
@@ -568,3 +867,20 @@ func deref(p *string) string {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// writeSnapshot persists the openapi BalanceCheck snapshot (requested/remaining/
+// requires_override/earmark + the marshalled FIFO allocation) on the request.
+func (s *LeaveService) writeSnapshot(ctx context.Context, tx pgx.Tx, id string, requested, remaining *int, requiresOverride *bool, earmark *string, alloc []dom.AllocationLine) error {
+	raw, merr := marshalAllocation(alloc)
+	if merr != nil {
+		return merr
+	}
+	return s.repo.SetBalanceSnapshot(ctx, tx, BalanceSnapshotParams{
+		ID:               id,
+		RequestedDays:    requested,
+		RemainingAtCheck: remaining,
+		RequiresOverride: requiresOverride,
+		Earmark:          earmark,
+		Allocation:       raw,
+	})
+}

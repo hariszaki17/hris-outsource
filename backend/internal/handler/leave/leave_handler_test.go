@@ -260,7 +260,8 @@ func TestApproveL1_SelfApprove403(t *testing.T) {
 func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	h.seedQuota("SWP-LQ-8001", empAgent, leaveAnn, 2026, 12, 4, 0) // remaining 8 >= 3
+	// F6.1 grant-lot: 12 amount, 4 consumed → remaining 8 >= 3 (FIFO commit target).
+	h.seedGrant("SWP-LG-8001", empAgent, 12, 4, 0, "", ymd(2026, time.December, 31))
 	h.seedRequest("SWP-LR-8002", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 	// the loop-closer returns one cancelled schedule entry → schedule_impact[].
 	h.schedule.cancelReturns[empAgent] = []svc.ScheduleImpact{
@@ -275,9 +276,9 @@ func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	if d["status"] != "APPROVED" {
 		t.Errorf("status = %v, want APPROVED (ApprovedFinalExample)", d["status"])
 	}
-	// quota deducted by the duration.
-	if q := h.quota.byID["SWP-LQ-8001"]; q.Used != 7 {
-		t.Errorf("quota used = %d, want 7 (4+3)", q.Used)
+	// grant-lot consumed by the duration (4 + 3).
+	if g := h.grant.lots["SWP-LG-8001"]; g.Consumed != 7 {
+		t.Errorf("lot consumed = %d, want 7 (4+3)", g.Consumed)
 	}
 	// INV-3 fired: Cancel called once + 3 approved_leave_days inserted (one per day).
 	if len(h.schedule.cancelCalls) != 1 {
@@ -303,7 +304,8 @@ func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 func TestApproveFinal_OverBalance422BalanceRecheck(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	h.seedQuota("SWP-LQ-8002", empAgent, leaveAnn, 2026, 12, 11, 0) // remaining 1 < 3
+	// F6.1 grant-lot: 12 amount, 11 consumed → remaining 1 < 3 (block target).
+	h.seedGrant("SWP-LG-8002", empAgent, 12, 11, 0, "", ymd(2026, time.December, 31))
 	h.seedRequest("SWP-LR-8003", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 
 	rr := h.do("POST", "/leave-requests/SWP-LR-8003:approve-final", nil)
@@ -317,9 +319,9 @@ func TestApproveFinal_OverBalance422BalanceRecheck(t *testing.T) {
 	if f["requires_override"] != "true" {
 		t.Errorf("fields.requires_override = %v, want \"true\"", f["requires_override"])
 	}
-	// no state change, no deduct on a blocked approval.
-	if q := h.quota.byID["SWP-LQ-8002"]; q.Used != 11 {
-		t.Errorf("quota used = %d, want 11 (no deduct on block)", q.Used)
+	// no state change, no consume on a blocked approval (never negative).
+	if g := h.grant.lots["SWP-LG-8002"]; g.Consumed != 11 {
+		t.Errorf("lot consumed = %d, want 11 (no consume on block)", g.Consumed)
 	}
 	if req := h.leave.requests["SWP-LR-8003"]; req.Status != dom.LeaveStatusPendingHR {
 		t.Errorf("status = %s, want PENDING_HR (unchanged)", req.Status)
@@ -336,7 +338,8 @@ func TestApproveFinal_OverBalance422BalanceRecheck(t *testing.T) {
 func TestApproveOverride_ForceApprovesOverBalance(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	h.seedQuota("SWP-LQ-8002", empAgent, leaveAnn, 2026, 12, 11, 0) // remaining 1 < 3
+	// F6.1 grant-lot: 12 amount, 11 consumed → remaining 1 < 3 (override target).
+	h.seedGrant("SWP-LG-8002", empAgent, 12, 11, 0, "", ymd(2026, time.December, 31))
 	h.seedRequest("SWP-LR-8003", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 	h.schedule.cancelReturns[empAgent] = []svc.ScheduleImpact{
 		{ScheduleID: "SWP-SCH-6002", Date: leaveStart, NewStatus: "CANCELLED_BY_LEAVE"},
@@ -367,12 +370,10 @@ func TestApproveOverride_ForceApprovesOverBalance(t *testing.T) {
 	if !sawOverride {
 		t.Errorf("timeline has no HR/OVERRIDE_APPROVED entry: %v", tl)
 	}
-	// over-balance deduct still happens + last_override recorded + INV-3 fired.
-	if q := h.quota.byID["SWP-LQ-8002"]; q.Used != 14 {
-		t.Errorf("quota used = %d, want 14 (11+3, may go negative remaining)", q.Used)
-	}
-	if q := h.quota.byID["SWP-LQ-8002"]; q.LastOverride == nil {
-		t.Errorf("last_override not recorded on the quota")
+	// Over-balance override force-approves; the grant-lot draws only the available
+	// 1 day (never negative — LQ-5; the shortfall is HR pre-funding a new lot).
+	if g := h.grant.lots["SWP-LG-8002"]; g.Consumed != 12 {
+		t.Errorf("lot consumed = %d, want 12 (11+1 available; never negative)", g.Consumed)
 	}
 	if len(h.schedule.insertedDays) != 3 {
 		t.Errorf("INV-3 approved_leave_days inserts = %d, want 3", len(h.schedule.insertedDays))

@@ -432,7 +432,9 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                 <div className="flex items-center gap-2">
                   <MapPin className="size-4 text-text-3" aria-hidden />
                   <span className="font-mono text-[12px] text-text">
-                    {record.lat_in.toFixed(6)}, {record.lng_in.toFixed(6)}
+                    {record.lat_in != null && record.lng_in != null
+                      ? `${record.lat_in.toFixed(6)}, ${record.lng_in.toFixed(6)}`
+                      : '—'}
                   </span>
                 </div>
                 {record.geofence_in && (

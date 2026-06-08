@@ -70,13 +70,16 @@ type LeaveRouting struct {
 }
 
 // BalanceCheck is the openapi LeaveRequest.balance_check snapshot taken at
-// submit/transition. All fields are the recorded-at-check values.
+// submit-reserve or final-approve-commit. RequestedDays / RemainingDaysAtCheck are the
+// recorded-at-check values; Allocation is the per-lot FIFO split that was reserved /
+// committed (LQ-9). Earmark is the earmark the request draws against (nil = pool).
 type BalanceCheck struct {
-	LeaveQuotaID         *string `json:"leave_quota_id,omitempty"`
-	Period               *int    `json:"period,omitempty"`
-	RequestedDays        *int    `json:"requested_days,omitempty"`
-	RemainingDaysAtCheck *int    `json:"remaining_days_at_check,omitempty"`
-	RequiresOverride     bool    `json:"requires_override"`
+	RequestedDays        *int             `json:"requested_days,omitempty"`
+	RemainingDaysAtCheck *int             `json:"remaining_days_at_check,omitempty"`
+	Earmark              *string          `json:"earmark,omitempty"`
+	Allocation           []AllocationLine `json:"allocation,omitempty"`
+	CheckedAt            *time.Time       `json:"checked_at,omitempty"`
+	RequiresOverride     bool             `json:"requires_override"`
 }
 
 // LeaveTimelineEntry is one decision in the request's approval timeline (openapi
@@ -147,6 +150,107 @@ type LeaveRequest struct {
 	// Assembled read-time aggregates (08-02).
 	Timeline       []LeaveTimelineEntry
 	ScheduleImpact []ScheduleImpactEntry
+}
+
+// --- grant-lot ledger (F6.1, resolved 2026-06-08) ---
+
+// LeaveGrantSource is the provenance of a grant-lot (openapi LeaveGrantSource).
+type LeaveGrantSource string
+
+const (
+	GrantSourceAnnual     LeaveGrantSource = "ANNUAL"
+	GrantSourceAdjustment LeaveGrantSource = "ADJUSTMENT"
+	GrantSourceMaternity  LeaveGrantSource = "MATERNITY"
+	GrantSourceStatutory  LeaveGrantSource = "STATUTORY"
+	GrantSourceMigration  LeaveGrantSource = "MIGRATION"
+	GrantSourceBonus      LeaveGrantSource = "BONUS"
+)
+
+// ValidGrantSource reports whether s is one of the openapi LeaveGrantSource values.
+func ValidGrantSource(s string) bool {
+	switch LeaveGrantSource(s) {
+	case GrantSourceAnnual, GrantSourceAdjustment, GrantSourceMaternity,
+		GrantSourceStatutory, GrantSourceMigration, GrantSourceBonus:
+		return true
+	}
+	return false
+}
+
+// LeaveGrant is one grant-lot in the per-employee leave-balance ledger (openapi
+// LeaveGrant). One row per insert, each with its own hard ExpiresAt (no carryover).
+// Remaining() = Amount - Consumed - Pending is DERIVED, never a stored column. A lot
+// is ACTIVE while now < ExpiresAt. Earmark==nil ⇒ the flat pool (ordinary FIFO); a
+// non-nil Earmark restricts the lot to a request of that purpose (LQ-10).
+type LeaveGrant struct {
+	ID            string
+	EmployeeID    string
+	Amount        int
+	Source        LeaveGrantSource
+	Earmark       *string
+	Remark        *string
+	GrantedAt     time.Time
+	EffectiveFrom time.Time
+	ExpiresAt     time.Time
+	Consumed      int
+	Pending       int
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+
+	// Denormalized for display.
+	EmployeeName *string
+
+	// Assembled read-time (GET /leave-grants/{id} with include_consumptions).
+	Consumptions []LeaveConsumption
+}
+
+// Remaining is the derived per-lot balance: Amount - Consumed - Pending. Never driven
+// negative by allocation (LQ-5).
+func (g LeaveGrant) Remaining() int { return g.Amount - g.Consumed - g.Pending }
+
+// IsActive reports whether the lot is still drawable at t (now < ExpiresAt).
+func (g LeaveGrant) IsActive(t time.Time) bool { return t.Before(g.ExpiresAt) }
+
+// LeaveConsumption is one lot-drawdown row linking a LeaveRequest to the LeaveGrant it
+// drew from (openapi LeaveConsumption). A request that FIFO-spans multiple lots
+// produces one row per lot; reversed exactly on cancel/shorten (LQ-3).
+type LeaveConsumption struct {
+	ID             string
+	LeaveRequestID string
+	GrantID        string
+	Days           int
+	CreatedAt      time.Time
+}
+
+// LeaveBalance is the computed per-employee balance over ACTIVE lots (openapi
+// LeaveBalance). PoolRemaining is the flat (unearmarked) pool; Earmarked is one line
+// per active earmarked lot.
+type LeaveBalance struct {
+	EmployeeID    string
+	EmployeeName  *string
+	PoolRemaining int
+	PendingTotal  int
+	NextExpiry    *time.Time
+	Earmarked     []LeaveBalanceEarmarkLine
+	AllLots       []LeaveGrant
+}
+
+// LeaveBalanceEarmarkLine is one active earmarked lot in the balance view (openapi
+// LeaveBalanceEarmarkLine).
+type LeaveBalanceEarmarkLine struct {
+	GrantID   string
+	Earmark   string
+	Source    LeaveGrantSource
+	Remaining int
+	ExpiresAt time.Time
+}
+
+// AllocationLine is one per-lot FIFO split entry in a BalanceCheck snapshot (openapi
+// BalanceCheck.allocation[]).
+type AllocationLine struct {
+	GrantID   string
+	Days      int
+	ExpiresAt time.Time
 }
 
 // LeaveQuotaAdjustment is the openapi LeaveQuota.last_adjustment embedded object.

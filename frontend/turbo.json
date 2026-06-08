@@ -4,7 +4,8 @@
   "tasks": {
     "gen": {
       "inputs": ["../docs/api/**/openapi.yaml", "orval.config.ts"],
-      "outputs": ["src/gen/**"]
+      "outputs": ["src/gen/**"],
+      "cache": false
     },
     "build": {
       "dependsOn": ["^build", "gen"],
