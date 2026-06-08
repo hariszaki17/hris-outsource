@@ -372,18 +372,17 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
                     {shiftLeader.employee_name ?? shiftLeader.employee_id}
                   </span>
                 </div>
-                {/* Reassign — hidden for SL (o5Txgg enabled:false pattern) */}
+                {/* Reassign — hidden for SL. Links to the company's Pemimpin Shift
+                    tab, the single entry point for leader assignment. */}
                 {!isShiftLeader && (
-                  <button
-                    type="button"
+                  <Link
+                    to="/client-companies/$clientCompanyId"
+                    params={{ clientCompanyId }}
                     className="ml-[4px] flex items-center gap-[6px] rounded-md px-[10px] py-[6px] text-[12px] font-medium text-text-2 hover:bg-surface-2"
-                    onClick={() => {
-                      toast({ tone: 'info', title: t('reassignNotImplemented') });
-                    }}
                   >
                     <RefreshCw className="size-3" aria-hidden />
                     {t('reassign')}
-                  </button>
+                  </Link>
                 )}
               </>
             ) : (

@@ -1235,6 +1235,15 @@ export const en: Messages = {
         pemimpin: 'Shift Leader',
         riwayat: 'History',
       },
+      sl: {
+        currentLeaderLabel: 'Current Shift Leader',
+        since: 'Since',
+        assignBtn: 'Assign Leader',
+        replaceBtn: 'Replace',
+        revokeBtn: 'Revoke',
+        noLeader: 'No shift leader',
+        noLeaderHint: 'Assign an actively-placed agent as this company’s shift leader.',
+      },
     },
     form: {
       backLink: 'Back to Client Companies',
@@ -1475,6 +1484,7 @@ export const en: Messages = {
       otherAgent: 'Shift leader at this company',
       vacated: 'Shift leader position vacated',
       viewProfile: 'View profile',
+      manageOnCompany: 'Manage on Client page',
       assignTitle: 'Assign Shift Leader',
       assignSuccessTitle: 'Shift leader assigned',
       assignConfirmBtn: 'Assign',

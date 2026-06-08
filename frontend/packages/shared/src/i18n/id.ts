@@ -1309,6 +1309,15 @@ export const id = {
         pemimpin: 'Pemimpin Shift',
         riwayat: 'Riwayat',
       },
+      sl: {
+        currentLeaderLabel: 'Pemimpin Shift Saat Ini',
+        since: 'Sejak',
+        assignBtn: 'Tetapkan Pemimpin',
+        replaceBtn: 'Ganti',
+        revokeBtn: 'Cabut',
+        noLeader: 'Tanpa pemimpin shift',
+        noLeaderHint: 'Tetapkan seorang agen aktif sebagai pemimpin shift perusahaan ini.',
+      },
     },
     form: {
       backLink: 'Kembali ke Perusahaan Klien',
@@ -1486,6 +1495,7 @@ export const id = {
       otherAgent: 'Shift leader di perusahaan ini',
       vacated: 'Posisi shift leader telah dikosongkan',
       viewProfile: 'Lihat profil',
+      manageOnCompany: 'Kelola di halaman Klien',
       assignTitle: 'Tetapkan Shift Leader',
       assignSuccessTitle: 'Shift leader berhasil ditetapkan',
       assignConfirmBtn: 'Tetapkan',

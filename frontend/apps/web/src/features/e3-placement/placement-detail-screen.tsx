@@ -65,8 +65,6 @@ import {
   FileText,
   RefreshCw,
   SquareX,
-  UserMinus,
-  UserPlus,
   Users,
 } from 'lucide-react';
 import { useState } from 'react';
@@ -75,9 +73,6 @@ import {
   EndConfirm,
   RenewModal,
   ResignModal,
-  ShiftLeaderAssignModal,
-  ShiftLeaderEndConfirm,
-  ShiftLeaderReplaceModal,
   TerminateConfirm,
   TransferModal,
 } from './placement-overlays.tsx';
@@ -230,9 +225,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
   const [showEnd, setShowEnd] = useState(false);
   const [showTerminate, setShowTerminate] = useState(false);
   const [showResign, setShowResign] = useState(false);
-  const [showSlAssign, setShowSlAssign] = useState(false);
-  const [showSlReplace, setShowSlReplace] = useState(false);
-  const [showSlEnd, setShowSlEnd] = useState(false);
 
   // Data — `query.data?.data` is `PlacementDetailResponse`
   const placementQuery = useGetPlacement(placementId);
@@ -553,15 +545,14 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
             </div>
           </DetailCard>
 
-          {/* Shift-leader card (.pen g3pGV) — INV-2/3/4 */}
+          {/* Shift-leader card (.pen g3pGV) — INV-2/3/4. Read-only here: leader
+              assignment is managed on the company's Pemimpin Shift tab (single
+              entry point). */}
           <ShiftLeaderCard
             placement={placement}
             leader={currentLeader ?? null}
             noLeaderWarning={noLeaderWarning}
             terminal={terminal}
-            onAssign={() => setShowSlAssign(true)}
-            onReplace={() => setShowSlReplace(true)}
-            onEnd={() => setShowSlEnd(true)}
           />
         </div>
       </div>
@@ -584,32 +575,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
         onClose={() => setShowResign(false)}
         placement={placementInfo}
       />
-
-      <ShiftLeaderAssignModal
-        open={showSlAssign}
-        onClose={() => setShowSlAssign(false)}
-        companyId={placement.client_company_id}
-        companyName={placement.client_company_name ?? placement.client_company_id}
-      />
-
-      {currentLeader != null && (
-        <>
-          <ShiftLeaderReplaceModal
-            open={showSlReplace}
-            onClose={() => setShowSlReplace(false)}
-            assignmentId={currentLeader.id}
-            companyName={placement.client_company_name ?? placement.client_company_id}
-            currentLeaderName={currentLeader.employee_name ?? currentLeader.employee_id}
-          />
-          <ShiftLeaderEndConfirm
-            open={showSlEnd}
-            onClose={() => setShowSlEnd(false)}
-            assignmentId={currentLeader.id}
-            companyName={placement.client_company_name ?? placement.client_company_id}
-            leaderName={currentLeader.employee_name ?? currentLeader.employee_id}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -685,54 +650,21 @@ interface ShiftLeaderCardProps {
   leader: ShiftLeaderAssignmentSummary | null;
   noLeaderWarning: boolean;
   terminal: boolean;
-  onAssign: () => void;
-  onReplace: () => void;
-  onEnd: () => void;
 }
 
-function ShiftLeaderCard({
-  placement,
-  leader,
-  noLeaderWarning,
-  terminal,
-  onAssign,
-  onReplace,
-  onEnd,
-}: ShiftLeaderCardProps) {
+function ShiftLeaderCard({ placement, leader, noLeaderWarning, terminal }: ShiftLeaderCardProps) {
   const { t } = useTranslation('placementDetail');
 
+  // Read-only on placement detail: the leader is ASSIGNED/REPLACED/REVOKED from the
+  // company's "Pemimpin Shift" tab (single entry point). Here we only link there.
   const actionArea = !terminal ? (
-    <div className="flex items-center gap-2">
-      {leader != null ? (
-        <>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onReplace}
-            aria-label={t('sl.replaceAriaLabel')}
-          >
-            <ArrowLeftRight className="mr-1 size-3.5" aria-hidden="true" />
-            {t('sl.replace')}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onEnd}
-            aria-label={t('sl.endAriaLabel')}
-          >
-            <UserMinus className="mr-1 size-3.5" aria-hidden="true" />
-            {t('sl.end')}
-          </Button>
-        </>
-      ) : (
-        <Button type="button" variant="primary" size="sm" onClick={onAssign}>
-          <UserPlus className="mr-1 size-3.5" aria-hidden="true" />
-          {t('sl.assign')}
-        </Button>
-      )}
-    </div>
+    <a
+      href={`/client-companies/${placement.client_company_id}`}
+      className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
+    >
+      {t('sl.manageOnCompany')}
+      <ArrowUpRight className="size-3" aria-hidden="true" />
+    </a>
   ) : null;
 
   return (

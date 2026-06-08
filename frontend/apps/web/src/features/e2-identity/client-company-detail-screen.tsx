@@ -20,6 +20,11 @@ import { ArrowLeft, Building2, Edit2, Info } from 'lucide-react';
 import type * as React from 'react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  PemimpinShiftPanel,
+  PenempatanAktifPanel,
+  RiwayatPanel,
+} from './client-company-tab-panels.tsx';
 import { SitesPanel } from './site-form.tsx';
 
 type DetailTab = 'profil' | 'lokasi' | 'penempatan' | 'pemimpin' | 'riwayat';
@@ -175,12 +180,16 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
       {/* Lokasi & Site tab — full sites panel */}
       {activeTab === 'lokasi' && <SitesPanel clientCompanyId={clientCompanyId} />}
 
-      {/* Placeholder tabs */}
-      {(activeTab === 'penempatan' || activeTab === 'pemimpin' || activeTab === 'riwayat') && (
-        <div className="flex items-center justify-center py-16 text-text-3 text-[14px]">
-          {t('detail.tabComingSoon')}
-        </div>
+      {/* Penempatan Aktif — active agent roster at this company */}
+      {activeTab === 'penempatan' && <PenempatanAktifPanel clientCompanyId={clientCompanyId} />}
+
+      {/* Pemimpin Shift — current leader + assign/replace/revoke (single entry point) */}
+      {activeTab === 'pemimpin' && (
+        <PemimpinShiftPanel clientCompanyId={clientCompanyId} companyName={company.name} />
       )}
+
+      {/* Riwayat — historical placements at this company */}
+      {activeTab === 'riwayat' && <RiwayatPanel clientCompanyId={clientCompanyId} />}
 
       {/* Role note */}
       <div className="flex items-center gap-[9px] rounded-lg bg-surface border border-border border-l-[3px] border-l-border px-[14px] py-[10px]">
