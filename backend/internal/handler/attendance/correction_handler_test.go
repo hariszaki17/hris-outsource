@@ -186,6 +186,69 @@ func TestApproveCorrection_AppliesAndApplied(t *testing.T) {
 	}
 }
 
+// seedAbsentWithCheckInCorrection plants a TRUE ABSENT attendance (no clock-in,
+// scheduled shift) plus a PENDING CHECK_IN correction proposing a clock-in at
+// proposedCheckIn — the BR CR-9 re-eval target.
+func seedAbsentWithCheckInCorrection(h *harness, attID, corID string, shiftStart, proposedCheckIn time.Time) {
+	rec := h.seedAttendance(attID, cmpLed, empOther, att.VerificationPending, shiftStart, att.FlagAbsent)
+	rec.CheckInAt = nil
+	rec.LatIn = nil
+	rec.LngIn = nil
+	rec.Status = att.StatusAbsent
+	ss := shiftStart
+	rec.ShiftStartAt = &ss
+	rec.IsLate = false
+	rec.LateMinutes = 0
+	h.attendance.records[attID] = rec
+
+	c := h.seedCorrection(corID, attID, cmpLed, att.CorrectionStatusPending, shiftRecent, att.CorrectionTypeCheckIn)
+	pin := proposedCheckIn
+	c.ProposedCheckInAt = &pin
+	c.OriginalSnapshot = map[string]any{"check_in_at": nil, "status": "ABSENT"}
+	h.correction.records[corID] = c
+}
+
+func TestApproveCorrection_CheckIn_FlipsAbsentToPresent_OnTime(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	shiftStart := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC) // 07:00 WIB
+	// Proposed clock-in within the 15-min grace → on-time.
+	seedAbsentWithCheckInCorrection(h, "SWP-ATT-9009", "SWP-COR-8009", shiftStart, shiftStart.Add(10*time.Minute))
+
+	rr := h.do("POST", "/corrections/SWP-COR-8009:approve", map[string]any{"note": "bukti absen diterima"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	attn := decodeBody(t, rr)["attendance"].(map[string]any)
+	if attn["status"] != "PRESENT" {
+		t.Errorf("status = %v, want PRESENT (ABSENT resolved on-time)", attn["status"])
+	}
+	if lm, _ := attn["late_minutes"].(float64); lm != 0 {
+		t.Errorf("late_minutes = %v, want 0", attn["late_minutes"])
+	}
+	if ci := attn["check_in_at"]; ci == nil {
+		t.Errorf("check_in_at still null after CHECK_IN correction applied")
+	}
+}
+
+func TestApproveCorrection_CheckIn_FlipsAbsentToLate(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	shiftStart := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC) // 07:00 WIB
+	// Proposed clock-in 30 min after start → past grace → LATE, late_minutes=30.
+	seedAbsentWithCheckInCorrection(h, "SWP-ATT-9009", "SWP-COR-8009", shiftStart, shiftStart.Add(30*time.Minute))
+
+	rr := h.do("POST", "/corrections/SWP-COR-8009:approve", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	attn := decodeBody(t, rr)["attendance"].(map[string]any)
+	if attn["status"] != "LATE" {
+		t.Errorf("status = %v, want LATE (clock-in past grace)", attn["status"])
+	}
+	if lm, _ := attn["late_minutes"].(float64); lm != 30 {
+		t.Errorf("late_minutes = %v, want 30", attn["late_minutes"])
+	}
+}
+
 func TestApproveCorrection_NonPending_Conflict_409(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	h.seedAttendance("SWP-ATT-9004", cmpLed, empOther, att.VerificationVerified, ymd(2026, 6, 3))

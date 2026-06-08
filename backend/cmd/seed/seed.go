@@ -1637,6 +1637,9 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 	entries := []entry{
 		{"SWP-SCH-6001", "SWP-EMP-1108", "SWP-PL-5001", "SWP-SVC-003", rudiDate},
 		{"SWP-SCH-6002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-SVC-003", dewiDate},
+		// SWP-SCH-6003 — scheduled shift for the E5 true-ABSENT fixture (SWP-ATT-9009):
+		// the agent was scheduled but never clocked in.
+		{"SWP-SCH-6003", "SWP-EMP-1042", "SWP-PL-5003", "SWP-SVC-002", rudiDate},
 	}
 	for _, e := range entries {
 		if _, err := pool.Pool.Exec(ctx, schQ, e.id, e.employeeID, e.placementID, e.serviceLineID, e.date); err != nil {
@@ -1675,21 +1678,28 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 //   - SWP-ATT-9005  Budi  @ CMP-0022/PL-5002  PENDING, flags={LATE}  → cross-company OUT_OF_SCOPE target
 //   - SWP-ATT-9006  Rudi  @ CMP-0021/PL-5001  ESCALATED, flags={LATE,ESCALATED}  → VERIFY_OWN_RECORD target
 func seedAttendance(ctx context.Context, pool *db.Pool) error {
+	// site_id/position_id are denormalized from the row's placement (subqueries —
+	// keeps the positional param list stable). schedule_id is now per-row ($4) so the
+	// ABSENT fixture can carry a scheduled shift; check_in_at/lat_in/lng_in are nullable
+	// (a true ABSENT row has none).
 	const attQ = `
 		INSERT INTO attendance
 			(id, employee_id, placement_id, schedule_id, company_id, service_line,
+			 site_id, position_id,
 			 shift_start_at, shift_end_at, check_in_at, check_out_at,
 			 lat_in, lng_in, lat_out, lng_out, wfo,
 			 is_late, late_minutes, worked_minutes, auto_closed,
 			 in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
 			 status, verification_status, flags)
 		VALUES
-			($1, $2, $3, NULL, $4, $5,
-			 $6, $7, $8, $9,
-			 $10, $11, $12, $13, true,
-			 $14, $15, $16, $17,
-			 $18, $19, $20, $21, 100,
-			 $22, $23, $24)
+			($1, $2, $3, $4, $5, $6,
+			 (SELECT site_id FROM placements WHERE id = $3),
+			 (SELECT position_id FROM placements WHERE id = $3),
+			 $7, $8, $9, $10,
+			 $11, $12, $13, $14, true,
+			 $15, $16, $17, $18,
+			 $19, $20, $21, $22, 100,
+			 $23, $24, $25)
 		ON CONFLICT (id) DO NOTHING`
 
 	// Site centroid (Plaza Senayan-ish) — in-geofence captures sit near it.
@@ -1712,8 +1722,10 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 
 	type att struct {
 		id, employeeID, placementID, companyID, serviceLine string
-		checkIn                                             time.Time
+		scheduleID                                          *string
+		checkIn                                             *time.Time // nil = true ABSENT (no clock-in)
 		checkOut                                            *time.Time
+		latIn, lngIn                                        *float64 // nil = true ABSENT (no clock-in GPS)
 		latOut, lngOut                                      *float64
 		isLate                                              bool
 		lateMinutes                                         int32
@@ -1728,19 +1740,24 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 	}
 
 	out := normalOut
+	latInP := latC
+	lngInP := lngC
 	latOut := latC
 	lngOut := lngC
+	onTimeInP := onTimeIn
+	lateInP := lateIn
 	inTrue := true
 	inFalse := false
 	d32 := int32(32)
 	dFar := int32(420)
+	schAbsent := "SWP-SCH-6003" // scheduled shift backing the true-ABSENT fixture
 
 	rows := []att{
 		// 9001 — clean AUTO_APPROVED (complete, on-time, in-geofence). NOT in queue.
 		{
 			id: "SWP-ATT-9001", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021", serviceLine: "parking",
-			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "AUTO_APPROVED", flags: "{}",
@@ -1749,7 +1766,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9002", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021", serviceLine: "parking",
-			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "PENDING", flags: "{LATE}",
@@ -1758,7 +1775,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9003", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
 			companyID: "SWP-CMP-0021", serviceLine: "building_management",
-			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inFalse, inDistanceM: &dFar, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "PENDING", flags: "{OUTSIDE_GEOFENCE}",
@@ -1767,7 +1784,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9004", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021", serviceLine: "parking",
-			checkIn: onTimeIn, checkOut: nil, latOut: nil, lngOut: nil,
+			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: nil, latOut: nil, lngOut: nil,
 			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: true,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: nil, outDistanceM: nil,
 			status: "INCOMPLETE", verification: "PENDING", flags: "{AUTO_CLOSED}",
@@ -1776,7 +1793,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9005", employeeID: "SWP-EMP-2891", placementID: "SWP-PL-5002",
 			companyID: "SWP-CMP-0022", serviceLine: "parking",
-			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "PENDING", flags: "{LATE}",
@@ -1785,7 +1802,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9006", employeeID: "SWP-EMP-1108", placementID: "SWP-PL-5001",
 			companyID: "SWP-CMP-0021", serviceLine: "parking",
-			checkIn: lateIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "ESCALATED", flags: "{LATE,ESCALATED}",
@@ -1796,7 +1813,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9007", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021", serviceLine: "parking",
-			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",
@@ -1804,18 +1821,30 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9008", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
 			companyID: "SWP-CMP-0021", serviceLine: "building_management",
-			checkIn: onTimeIn, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",
+		},
+		// 9009 — TRUE ABSENT (CR / F5.2 INV-5): scheduled shift (SWP-SCH-6003), NO
+		// clock-in (check_in_at NULL), NO clock-in GPS (lat_in/lng_in NULL), PENDING.
+		// The CHECK_IN-correction re-eval (BR CR-9) target: approving a clock-in flips
+		// ABSENT → PRESENT/LATE.
+		{
+			id: "SWP-ATT-9009", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
+			companyID: "SWP-CMP-0021", serviceLine: "building_management", scheduleID: &schAbsent,
+			checkIn: nil, latIn: nil, lngIn: nil, checkOut: nil, latOut: nil, lngOut: nil,
+			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: false,
+			inGeofence: nil, inDistanceM: nil, outGeofence: nil, outDistanceM: nil,
+			status: "ABSENT", verification: "PENDING", flags: "{ABSENT}",
 		},
 	}
 
 	for _, a := range rows {
 		if _, err := pool.Pool.Exec(ctx, attQ,
-			a.id, a.employeeID, a.placementID, a.companyID, a.serviceLine,
-			ss, se, a.checkIn.Format(time.RFC3339), nullableTime(a.checkOut),
-			latC, lngC, a.latOut, a.lngOut,
+			a.id, a.employeeID, a.placementID, a.scheduleID, a.companyID, a.serviceLine,
+			ss, se, nullableTime(a.checkIn), nullableTime(a.checkOut),
+			a.latIn, a.lngIn, a.latOut, a.lngOut,
 			a.isLate, a.lateMinutes, a.workedMinutes, a.autoClosed,
 			a.inGeofence, a.inDistanceM, a.outGeofence, a.outDistanceM,
 			a.status, a.verification, a.flags,

@@ -39,7 +39,11 @@ erDiagram
         bigint schedule_id FK "null if unscheduled"
         bigint placement_id FK
         bigint attendance_code_id FK
-        datetime check_in_at
+        bigint company_id FK "denormalized from placement (scope/filter)"
+        bigint site_id FK "denormalized from placement (scope/filter)"
+        bigint position_id FK "denormalized from placement (filter)"
+        string service_line "denormalized from placement (filter)"
+        datetime check_in_at "nullable (null when Absent)"
         datetime check_out_at "nullable"
         decimal lat_in
         decimal lng_in
@@ -73,6 +77,9 @@ erDiagram
 - **INV-2:** geofence is evaluated against the **placement's client-company location + radius** (radius is a ClientCompany config — see §6b).
 - **INV-3:** **exceptions-only verification** — a record needs leader verification iff `is_late` OR out-of-geofence OR `auto_closed` OR missing clock-in/out OR its attendance code `needs_verification`; otherwise `AutoApproved`.
 - **INV-4:** if no clock-out by the scheduled shift end, the system **auto-clocks-out** at shift end, sets `auto_closed`, and marks the record `Pending` verification.
+- **INV-5:** **`Absent` is set only for a scheduled shift with no clock-in by shift end** — the record carries `check_in_at = null` (and no clock-in geofence). An `Absent` record is **resolvable via a `check_in` correction (F5.4)**, whose approval re-evaluates `status` (`Absent → Present/Late` per `shift_start_at` + grace). An approved leave suppresses `Absent` → `On Leave` (F5.2, E6).
+
+**Denormalization:** `company_id`, `site_id`, `service_line`, and `position_id` are **denormalized onto `Attendance`** (resolved from the agent's placement → site/position) so the high-volume records list (F5.5) can **filter and scope by company · site · service line · position** without a JOIN — the same pattern as `company_id`/`service_line` carried for leader scope.
 
 ## 5. Features
 
@@ -214,7 +221,7 @@ flowchart LR
         R1([My attendance]) --> R2[History + status + corrections]
     end
     subgraph LH[Leader / HR - web]
-        R3([Team attendance]) --> R4[Filter by date, status, exceptions]
+        R3([Team attendance]) --> R4[Filter by company, site, service line, position, date, status, exceptions]
         R4 --> R5{Export?}
         R5 -- Yes --> R6[Billable/payable rollup -> E10]
     end
@@ -246,3 +253,8 @@ flowchart LR
 - ✅ **Leaders' own exceptions** → escalate to HR (no self-verify).
 - ✅ **Self-correction window** = 7 days (older = HR only).
 - ✅ **Anti-spoofing** = post-v1; early clock-out flagged if >15 min early.
+
+**Resolved (2026-06-08):**
+- ✅ **Site & position denormalized onto `Attendance`** (alongside company / service line) so the records list (F5.5) filters and scopes by **company · site · service line · position**.
+- ✅ **`check_in_at` nullable** — a true `Absent` record (scheduled shift, no clock-in) carries `check_in_at = null` (INV-5).
+- ✅ **Correction re-evaluates status** — an approved `check_in` correction on an `Absent` record re-runs F5.2 (`Absent → Present/Late` by `shift_start_at` + grace) and recomputes `is_late` / `late_minutes`.

@@ -17,14 +17,17 @@ UPDATE attendance
 SET check_in_at        = COALESCE($1::timestamptz, check_in_at),
     check_out_at       = COALESCE($2::timestamptz, check_out_at),
     attendance_code_id = COALESCE($3::text, attendance_code_id),
+    status             = COALESCE($4::text, status),
+    is_late            = COALESCE($5::boolean, is_late),
+    late_minutes       = COALESCE($6::integer, late_minutes),
     flags              = array_remove(flags, 'CORRECTED') || ARRAY['CORRECTED'],
-    last_correction_id = $4,
+    last_correction_id = $7,
     updated_at         = now()
-WHERE id = $5
+WHERE id = $8
   AND deleted_at IS NULL
 RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          attendance_code_id, shift_start_at, shift_end_at, check_in_at,
-          check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
@@ -36,6 +39,9 @@ type ApplyCorrectionToAttendanceParams struct {
 	CheckInAt        *time.Time
 	CheckOutAt       *time.Time
 	AttendanceCodeID *string
+	Status           *string
+	IsLate           *bool
+	LateMinutes      *int32
 	LastCorrectionID *string
 	ID               string
 }
@@ -47,13 +53,15 @@ type ApplyCorrectionToAttendanceRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -83,12 +91,17 @@ type ApplyCorrectionToAttendanceRow struct {
 
 // Apply an approved correction's whitelisted proposed_* fields to the target row:
 // COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
-// (de-duped via array_remove first); sets last_correction_id.
+// (de-duped via array_remove first); sets last_correction_id. status/is_late/
+// late_minutes are RE-EVALUATED in Go (BR CR-9: a CHECK_IN correction that resolves
+// an absence flips ABSENT→PRESENT/LATE) and passed in as nargs (NULL = leave as-is).
 func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorrectionToAttendanceParams) (ApplyCorrectionToAttendanceRow, error) {
 	row := q.db.QueryRow(ctx, applyCorrectionToAttendance,
 		arg.CheckInAt,
 		arg.CheckOutAt,
 		arg.AttendanceCodeID,
+		arg.Status,
+		arg.IsLate,
+		arg.LateMinutes,
 		arg.LastCorrectionID,
 		arg.ID,
 	)
@@ -100,6 +113,8 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 		&i.ScheduleID,
 		&i.CompanyID,
 		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -138,7 +153,8 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 
 const getAttendance = `-- name: GetAttendance :one
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.attendance_code_id, a.shift_start_at, a.shift_end_at,
+       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
        a.worked_minutes, a.auto_closed, a.in_geofence, a.in_distance_m,
@@ -147,10 +163,14 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
-       c.name      AS company_name
+       c.name      AS company_name,
+       s.name      AS site_name,
+       pos.name    AS position_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
+LEFT JOIN client_sites s     ON s.id = a.site_id
+LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.id = $1
   AND a.deleted_at IS NULL
 `
@@ -162,13 +182,15 @@ type GetAttendanceRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -196,6 +218,8 @@ type GetAttendanceRow struct {
 	UpdatedAt          time.Time
 	EmployeeName       *string
 	CompanyName        *string
+	SiteName           *string
+	PositionName       *string
 }
 
 // Single record with denormalized names.
@@ -209,6 +233,8 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.ScheduleID,
 		&i.CompanyID,
 		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -243,13 +269,16 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.UpdatedAt,
 		&i.EmployeeName,
 		&i.CompanyName,
+		&i.SiteName,
+		&i.PositionName,
 	)
 	return i, err
 }
 
 const getAttendanceForUpdate = `-- name: GetAttendanceForUpdate :one
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.attendance_code_id, a.shift_start_at, a.shift_end_at,
+       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
        a.worked_minutes, a.auto_closed, a.in_geofence, a.in_distance_m,
@@ -270,13 +299,15 @@ type GetAttendanceForUpdateRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -316,6 +347,8 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 		&i.ScheduleID,
 		&i.CompanyID,
 		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -355,7 +388,8 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 const listAttendance = `-- name: ListAttendance :many
 
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.attendance_code_id, a.shift_start_at, a.shift_end_at,
+       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
        a.worked_minutes, a.auto_closed, a.in_geofence, a.in_distance_m,
@@ -364,32 +398,40 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
-       c.name      AS company_name
+       c.name      AS company_name,
+       s.name      AS site_name,
+       pos.name    AS position_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
+LEFT JOIN client_sites s     ON s.id = a.site_id
+LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.deleted_at IS NULL
   AND ($1::text IS NULL OR a.company_id = $1::text)
   AND ($2::text IS NULL OR a.employee_id = $2::text)
   AND ($3::text IS NULL OR a.service_line = $3::text)
-  AND ($4::text[] IS NULL OR a.verification_status = ANY($4::text[]))
-  AND ($5::text[] IS NULL OR a.status = ANY($5::text[]))
-  AND ($6::date IS NULL OR a.check_in_at::date >= $6::date)
-  AND ($7::date IS NULL OR a.check_in_at::date <= $7::date)
-  AND ($8::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
+  AND ($4::text IS NULL OR a.site_id = $4::text)
+  AND ($5::text IS NULL OR a.position_id = $5::text)
+  AND ($6::text[] IS NULL OR a.verification_status = ANY($6::text[]))
+  AND ($7::text[] IS NULL OR a.status = ANY($7::text[]))
+  AND ($8::date IS NULL OR a.check_in_at::date >= $8::date)
+  AND ($9::date IS NULL OR a.check_in_at::date <= $9::date)
+  AND ($10::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
   AND (
-        $9::timestamptz IS NULL
-        OR a.check_in_at < $9::timestamptz
-        OR (a.check_in_at = $9::timestamptz AND a.id < $10::text)
+        $11::timestamptz IS NULL
+        OR a.check_in_at < $11::timestamptz
+        OR (a.check_in_at = $11::timestamptz AND a.id < $12::text)
       )
 ORDER BY a.check_in_at DESC, a.id DESC
-LIMIT $11
+LIMIT $13
 `
 
 type ListAttendanceParams struct {
 	CompanyID            *string
 	EmployeeID           *string
 	ServiceLine          *string
+	SiteID               *string
+	PositionID           *string
 	VerificationStatusIn []string
 	StatusIn             []string
 	DateFrom             pgtype.Date
@@ -407,13 +449,15 @@ type ListAttendanceRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -441,17 +485,21 @@ type ListAttendanceRow struct {
 	UpdatedAt          time.Time
 	EmployeeName       *string
 	CompanyName        *string
+	SiteName           *string
+	PositionName       *string
 }
 
 // E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
-// employee_name and client_companies for company_name. Cursor lists keyset on
-// (check_in_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
-// Geofence/lateness/auto-close are STORED columns (07-01 decision); no runtime compute.
+// employee_name, client_companies for company_name, client_sites for site_name,
+// and positions for position_name. Cursor lists keyset on (check_in_at DESC, id).
+// `make gen` writes internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/
+// auto-close are STORED columns (07-01 decision); no runtime compute.
 // Verification queue / history for a company over filters, newest first.
 // Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
 // (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
 //
 //	verification_status_in / status_in: text[] = ANY membership.
+//	site_id / position_id: narrow within the (leader-pinned) company scope.
 //	date_from/date_to: bound on the shift-date basis (check_in_at::date).
 //	exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error) {
@@ -459,6 +507,8 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 		arg.CompanyID,
 		arg.EmployeeID,
 		arg.ServiceLine,
+		arg.SiteID,
+		arg.PositionID,
 		arg.VerificationStatusIn,
 		arg.StatusIn,
 		arg.DateFrom,
@@ -482,6 +532,8 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.ScheduleID,
 			&i.CompanyID,
 			&i.ServiceLine,
+			&i.SiteID,
+			&i.PositionID,
 			&i.AttendanceCodeID,
 			&i.ShiftStartAt,
 			&i.ShiftEndAt,
@@ -516,6 +568,8 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.UpdatedAt,
 			&i.EmployeeName,
 			&i.CompanyName,
+			&i.SiteName,
+			&i.PositionName,
 		); err != nil {
 			return nil, err
 		}
@@ -538,8 +592,8 @@ WHERE id = $3
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
 RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          attendance_code_id, shift_start_at, shift_end_at, check_in_at,
-          check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
@@ -560,13 +614,15 @@ type RejectAttendanceRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -605,6 +661,8 @@ func (q *Queries) RejectAttendance(ctx context.Context, arg RejectAttendancePara
 		&i.ScheduleID,
 		&i.CompanyID,
 		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -651,8 +709,8 @@ WHERE id = $2
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
 RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          attendance_code_id, shift_start_at, shift_end_at, check_in_at,
-          check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
@@ -672,13 +730,15 @@ type VerifyAttendanceRow struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -718,6 +778,8 @@ func (q *Queries) VerifyAttendance(ctx context.Context, arg VerifyAttendancePara
 		&i.ScheduleID,
 		&i.CompanyID,
 		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,

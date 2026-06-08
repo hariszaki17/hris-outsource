@@ -18,7 +18,9 @@ type Querier interface {
 	AgentRecentAttendance(ctx context.Context, arg AgentRecentAttendanceParams) (AgentRecentAttendanceRow, error)
 	// Apply an approved correction's whitelisted proposed_* fields to the target row:
 	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
-	// (de-duped via array_remove first); sets last_correction_id.
+	// (de-duped via array_remove first); sets last_correction_id. status/is_late/
+	// late_minutes are RE-EVALUATED in Go (BR CR-9: a CHECK_IN correction that resolves
+	// an absence flips ABSENT→PRESENT/LATE) and passed in as nargs (NULL = leave as-is).
 	ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorrectionToAttendanceParams) (ApplyCorrectionToAttendanceRow, error)
 	// Mark a PENDING correction APPLIED (the proposed change is applied to the target
 	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
@@ -126,6 +128,15 @@ type Querier interface {
 	CountPendingRequestsForEmployee(ctx context.Context, employeeID string) (CountPendingRequestsForEmployeeRow, error)
 	// Unread badge + AgentDashboard.recent_notifications_unread.
 	CountUnreadNotifications(ctx context.Context, recipientID string) (int64, error)
+	// Insert ONE true-ABSENT row: no clock-in (check_in_at/lat_in/lng_in NULL), status
+	// ABSENT, verification PENDING (enters the leader verification queue naturally). id
+	// fires via the column DEFAULT (omitted). geofence_radius_m / flags / wfo / is_late
+	// fall to their column defaults. ON CONFLICT (the partial schedule_id unique index)
+	// DO NOTHING makes a concurrent/duplicate insert a no-op — RETURNING then yields NO
+	// row (pgx.ErrNoRows), which the repo maps to created=false so the sweep counts only
+	// real inserts. Annotation is :one RETURNING id (not :execrows) so the created row's
+	// SWP-ATT id is available for the audit EntityID.
+	CreateAbsentAttendance(ctx context.Context, arg CreateAbsentAttendanceParams) (string, error)
 	// Allocates the SWP-AG id inline from the per-prefix sequence.
 	CreateAgreement(ctx context.Context, arg CreateAgreementParams) (CreateAgreementRow, error)
 	// Allocates the SWP-FILE id inline from the per-prefix sequence.
@@ -190,6 +201,22 @@ type Querier interface {
 	FindLiveEntryForAgentDate(ctx context.Context, arg FindLiveEntryForAgentDateParams) (FindLiveEntryForAgentDateRow, error)
 	// INV-1 quota guard lookup by (employee_id, leave_type_id, period).
 	FindQuotaForEmployeeTypePeriod(ctx context.Context, arg FindQuotaForEmployeeTypePeriodParams) (LeaveQuota, error)
+	// E5 absence-sweep queries (F5.2 true-ABSENT / SWP-ATT-*). The in-process cron
+	// (cmd/api, single binary) periodically marks scheduled shifts that ended past a
+	// grace with NO clock-in as ABSENT. schedule_entries carries NO stored shift
+	// timestamptz — the window is computed from work_date + start_time/end_time (HH:MM,
+	// Asia/Jakarta wall-clock) via `... AT TIME ZONE 'Asia/Jakarta'` (CLAUDE.md TZ layer:
+	// 07:00 WIB → 00:00 UTC). cross_midnight adds a day to the end. service_line is the
+	// attendance text enum (facility_services|building_management|parking) derived from the
+	// placement's service_lines row as lower(replace(name,' ','_')) — there is no slug
+	// column, the three seeded names map 1:1 ("Facility Services"→facility_services, etc).
+	// `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// Candidate scheduled shifts that ended before :cutoff (now - grace) and have no
+	// attendance row yet. Joins placements for the denormalized company/site/position/
+	// service_line the ABSENT row must carry. Deterministic order (work_date, id) so
+	// batching is stable across ticks. is_day_off and CANCELLED_BY_LEAVE entries are
+	// never absences; only live (deleted_at IS NULL) entries with both times present.
+	FindUnreportedAbsences(ctx context.Context, arg FindUnreportedAbsencesParams) ([]FindUnreportedAbsencesRow, error)
 	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
 	// INV-3 lock: the employee's active leadership assignment, row-locked.
@@ -352,13 +379,15 @@ type Querier interface {
 	// LEFT JOIN employees to surface the employee full name on each row.
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
 	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
-	// employee_name and client_companies for company_name. Cursor lists keyset on
-	// (check_in_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
-	// Geofence/lateness/auto-close are STORED columns (07-01 decision); no runtime compute.
+	// employee_name, client_companies for company_name, client_sites for site_name,
+	// and positions for position_name. Cursor lists keyset on (check_in_at DESC, id).
+	// `make gen` writes internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/
+	// auto-close are STORED columns (07-01 decision); no runtime compute.
 	// Verification queue / history for a company over filters, newest first.
 	// Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
 	// (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
 	//   verification_status_in / status_in: text[] = ANY membership.
+	//   site_id / position_id: narrow within the (leader-pinned) company scope.
 	//   date_from/date_to: bound on the shift-date basis (check_in_at::date).
 	//   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 	ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error)

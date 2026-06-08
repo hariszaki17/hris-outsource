@@ -794,14 +794,18 @@ func dayFloor(t time.Time) time.Time {
 func seedDemoAttendance(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const attQ = `
 		INSERT INTO attendance
-			(id, employee_id, placement_id, schedule_id, company_id, service_line, attendance_code_id,
+			(id, employee_id, placement_id, schedule_id, company_id, service_line,
+			 site_id, position_id, attendance_code_id,
 			 shift_start_at, shift_end_at, check_in_at, check_out_at,
 			 lat_in, lng_in, lat_out, lng_out, wfo,
 			 is_late, late_minutes, worked_minutes, auto_closed,
 			 in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
 			 status, verification_status, flags)
 		VALUES
-			($1, $2, $3, NULL, $4, $5, $6,
+			($1, $2, $3, NULL, $4, $5,
+			 (SELECT site_id FROM placements WHERE id = $3),
+			 (SELECT position_id FROM placements WHERE id = $3),
+			 $6,
 			 $7, $8, $9, $10,
 			 $11, $12, $13, $14, true,
 			 $15, $16, $17, $18,

@@ -482,7 +482,15 @@ paths:
         - { in: query, name: q,            schema: { type: string }, description: "Free-text across employee name/ID and company name." }
         - { in: query, name: employee_id,  schema: { type: string, pattern: '^SWP-EMP-[A-Za-z0-9]+$' } }
         - { in: query, name: company_id,   schema: { type: string, pattern: '^SWP-CMP-[A-Za-z0-9]+$' } }
+        - in: query
+          name: site_id
+          schema: { type: string, pattern: '^SWP-SITE-[A-Za-z0-9]+$' }
+          description: "Filter by the agent's placement **site** (E2 F2.6, denormalized onto the record). For `shift_leader` the company scope is server-pinned; `site_id` only narrows within the led company."
         - { in: query, name: service_line, schema: { type: string, enum: [facility_services, building_management, parking] } }
+        - in: query
+          name: position_id
+          schema: { type: string, pattern: '^SWP-POS-[A-Za-z0-9]+$' }
+          description: "Filter by the agent's placement **position** (E2, denormalized onto the record)."
         - in: query
           name: date_from
           schema: { type: string, format: date }
@@ -540,7 +548,11 @@ paths:
                         schedule_id: SWP-SCH-22042
                         company_id: SWP-CMP-014
                         company_name: Plaza Senayan
+                        site_id: SWP-SITE-031
+                        site_name: Plaza Senayan — Lobby Utama
                         service_line: facility_services
+                        position_id: SWP-POS-009
+                        position_name: Petugas Kebersihan
                         shift_start_at: '2026-06-03T07:00:00Z'
                         shift_end_at: '2026-06-03T15:00:00Z'
                         check_in_at: '2026-06-03T07:18:00Z'
@@ -1307,10 +1319,9 @@ components:
         - employee_id
         - placement_id
         - company_id
+        - site_id
         - service_line
-        - check_in_at
-        - lat_in
-        - lng_in
+        - position_id
         - status
         - verification_status
         - flags
@@ -1344,10 +1355,26 @@ components:
         company_name:
           type: string
           example: Plaza Senayan
+        site_id:
+          type: string
+          pattern: '^SWP-SITE-[A-Za-z0-9]+$'
+          description: "Denormalized from `placement` → site (E2 F2.6, E3 INV-5). Drives the `site_id` filter and leader scope; never separately editable."
+        site_name:
+          type: string
+          description: "Server-denormalized for list rendering (avoids client JOIN)."
+          example: Plaza Senayan — Lobby Utama
         service_line:
           type: string
           enum: [facility_services, building_management, parking]
           description: "Derived from placement → service line (no separate JOIN endpoint)."
+        position_id:
+          type: string
+          pattern: '^SWP-POS-[A-Za-z0-9]+$'
+          description: "Denormalized from `placement` → position (E2). Drives the `position_id` filter; never separately editable."
+        position_name:
+          type: string
+          description: "Server-denormalized for list rendering (avoids client JOIN)."
+          example: Petugas Kebersihan
         attendance_code_id:
           type: [string, "null"]
           pattern: '^SWP-AC-[A-Za-z0-9]+$'
@@ -1359,23 +1386,29 @@ components:
           type: [string, "null"]
           format: date-time
         check_in_at:
-          type: string
+          type: [string, "null"]
           format: date-time
+          description: |
+            Clock-in timestamp. **Null for a true `ABSENT` record** (a scheduled shift with no
+            clock-in by shift end — F5.2 / INV-5). A `CHECK_IN` correction (F5.4) that resolves an
+            absence sets this and re-evaluates `status` (ABSENT → PRESENT/LATE per `shift_start_at` + grace).
           example: '2026-06-03T06:58:12Z'
         check_out_at:
           type: [string, "null"]
           format: date-time
           description: "Null while still open. Set by clock-out OR by auto-close at shift end."
         lat_in:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: -90
           maximum: 90
+          description: "Clock-in latitude. **Null for a true `ABSENT` record** (no clock-in → no GPS), mirroring `check_in_at`."
         lng_in:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: -180
           maximum: 180
+          description: "Clock-in longitude. Null for a true `ABSENT` record (mirrors `check_in_at`)."
         lat_out:
           type: [number, "null"]
           format: double

@@ -77,15 +77,17 @@ type Attendance struct {
 	ScheduleID       *string // nil = unscheduled
 	CompanyID        string
 	ServiceLine      string
+	SiteID           string // denormalized from placement → site (E2 F2.6 / INV-5)
+	PositionID       string // denormalized from placement → position (E2)
 	AttendanceCodeID *string
 
 	ShiftStartAt *time.Time
 	ShiftEndAt   *time.Time
 
-	CheckInAt  time.Time
+	CheckInAt  *time.Time // nil for a true ABSENT record (no clock-in by shift end)
 	CheckOutAt *time.Time // nil while open / until auto-close
-	LatIn      float64
-	LngIn      float64
+	LatIn      *float64   // nil for a true ABSENT record (no clock-in GPS)
+	LngIn      *float64
 	LatOut     *float64
 	LngOut     *float64
 	PhotoInID  *string
@@ -118,4 +120,6 @@ type Attendance struct {
 	// Denormalized for display (server-authoritative; filled via JOINs).
 	EmployeeName *string
 	CompanyName  *string
+	SiteName     *string
+	PositionName *string
 }

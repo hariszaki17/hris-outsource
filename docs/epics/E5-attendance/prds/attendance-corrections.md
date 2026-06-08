@@ -41,6 +41,7 @@ Agent (requester, mobile), Shift Leader / HR (approver), System (apply, re-evalu
 | CR-6 | A record may have **multiple** corrections over time; each is independently audited. |
 | CR-7 | Corrections to **migrated/historical** records are allowed by HR only (data integrity), within policy. |
 | CR-8 | All actions audited; requester notified of the decision. |
+| CR-9 | **A `check_in` correction re-evaluates status.** Approving (applying) a `check_in` correction that resolves an **`Absent`** record — or corrects a wrong clock-in time — re-runs F5.2 over the new `check_in_at`: `status` recomputes `Absent → Present` or `Late` against `shift_start_at` + the 15-min grace, and `is_late` / `late_minutes` are recomputed. Specializes CR-4 for the absence-resolution case (an `Absent` record carries `check_in_at = null`; the correction populates it). |
 
 ## 6. Data model
 

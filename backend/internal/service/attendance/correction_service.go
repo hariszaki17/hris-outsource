@@ -24,6 +24,31 @@ import (
 // caller may not act on a correction whose shift date is older than this.
 const correctionWindowDays = 7
 
+// lateGraceMinutes is the lateness grace (EPICS §8 / 2026-05-29): a clock-in
+// strictly after shift_start + grace is LATE; within grace is on-time.
+const lateGraceMinutes = 15
+
+// reevalCheckIn recomputes (status, is_late, late_minutes) for a check-in that
+// resolves an absence (BR CR-9). Within grace (≤ shift_start + 15m) → PRESENT,
+// not late, 0 minutes. Strictly after → LATE with late_minutes = ceil(delay from
+// shift_start) (matches the openapi Attendance.late_minutes + the seed convention).
+// Unscheduled (nil shiftStart) stays PRESENT.
+func reevalCheckIn(checkIn time.Time, shiftStart *time.Time) (status string, isLate bool, lateMinutes int) {
+	if shiftStart == nil {
+		return string(att.StatusPresent), false, 0
+	}
+	graceEnd := shiftStart.Add(lateGraceMinutes * time.Minute)
+	if !checkIn.After(graceEnd) {
+		return string(att.StatusPresent), false, 0
+	}
+	delay := checkIn.Sub(*shiftStart)
+	mins := int(delay / time.Minute)
+	if delay%time.Minute != 0 {
+		mins++ // ceil
+	}
+	return string(att.StatusLate), true, mins
+}
+
 // CorrectionService implements the correction-queue business logic.
 type CorrectionService struct {
 	repo    CorrectionRepository
@@ -126,13 +151,34 @@ func (s *CorrectionService) Approve(ctx context.Context, id string, note string)
 			return werr
 		}
 
-		applied, aerr := s.attRepo.ApplyCorrectionToAttendance(ctx, tx, ApplyCorrectionParams{
+		// Read the target attendance (locked) for the BR CR-9 re-eval inputs:
+		// shift_start_at + the pre-correction status / check_in.
+		attRec, arerr := s.attRepo.GetAttendanceForUpdate(ctx, tx, cor.AttendanceID)
+		if arerr != nil {
+			if errors.Is(arerr, domain.ErrNotFound) {
+				return apperr.NotFound()
+			}
+			return arerr
+		}
+
+		params := ApplyCorrectionParams{
 			ID:               cor.AttendanceID,
 			CheckInAt:        cor.ProposedCheckInAt,
 			CheckOutAt:       cor.ProposedCheckOutAt,
 			AttendanceCodeID: cor.ProposedAttendanceCodeID,
 			LastCorrectionID: &cor.ID,
-		})
+		}
+		// BR CR-9: a CHECK_IN correction that resolves an absence (record was ABSENT
+		// or had no clock-in) re-evaluates status/is_late/late_minutes from
+		// shift_start_at + the 15-min grace. Recomputed in Go and applied in the same tx.
+		if cor.ProposedCheckInAt != nil && (attRec.Status == att.StatusAbsent || attRec.CheckInAt == nil) {
+			status, isLate, lateMin := reevalCheckIn(*cor.ProposedCheckInAt, attRec.ShiftStartAt)
+			params.Status = &status
+			params.IsLate = &isLate
+			params.LateMinutes = &lateMin
+		}
+
+		applied, aerr := s.attRepo.ApplyCorrectionToAttendance(ctx, tx, params)
 		if aerr != nil {
 			if errors.Is(aerr, domain.ErrNotFound) {
 				return apperr.NotFound()

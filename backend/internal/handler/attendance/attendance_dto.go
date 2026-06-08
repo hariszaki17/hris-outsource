@@ -50,16 +50,22 @@ type attendanceResponse struct {
 	ScheduleID       *string `json:"schedule_id"`
 	CompanyID        string  `json:"company_id"`
 	CompanyName      *string `json:"company_name,omitempty"`
+	SiteID           string  `json:"site_id"`
+	SiteName         *string `json:"site_name,omitempty"`
 	ServiceLine      string  `json:"service_line"`
+	PositionID       string  `json:"position_id"`
+	PositionName     *string `json:"position_name,omitempty"`
 	AttendanceCodeID *string `json:"attendance_code_id"`
 
 	ShiftStartAt *string `json:"shift_start_at"`
 	ShiftEndAt   *string `json:"shift_end_at"`
 
-	CheckInAt  string   `json:"check_in_at"`
+	// check_in_at / lat_in / lng_in are nullable: a true ABSENT record has no
+	// clock-in (null) — pointer WITHOUT omitempty so they serialize as `null`.
+	CheckInAt  *string  `json:"check_in_at"`
 	CheckOutAt *string  `json:"check_out_at"`
-	LatIn      float64  `json:"lat_in"`
-	LngIn      float64  `json:"lng_in"`
+	LatIn      *float64 `json:"lat_in"`
+	LngIn      *float64 `json:"lng_in"`
 	LatOut     *float64 `json:"lat_out"`
 	LngOut     *float64 `json:"lng_out"`
 	PhotoInID  *string  `json:"photo_in_id"`
@@ -141,11 +147,15 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		ScheduleID:         a.ScheduleID,
 		CompanyID:          a.CompanyID,
 		CompanyName:        a.CompanyName,
+		SiteID:             a.SiteID,
+		SiteName:           a.SiteName,
 		ServiceLine:        a.ServiceLine,
+		PositionID:         a.PositionID,
+		PositionName:       a.PositionName,
 		AttendanceCodeID:   a.AttendanceCodeID,
 		ShiftStartAt:       rfc3339Ptr(a.ShiftStartAt),
 		ShiftEndAt:         rfc3339Ptr(a.ShiftEndAt),
-		CheckInAt:          rfc3339(a.CheckInAt),
+		CheckInAt:          rfc3339Ptr(a.CheckInAt),
 		CheckOutAt:         rfc3339Ptr(a.CheckOutAt),
 		LatIn:              a.LatIn,
 		LngIn:              a.LngIn,

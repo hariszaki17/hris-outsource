@@ -14,11 +14,13 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useListClientCompanies } from '@swp/api-client/e2';
 import {
   type Attendance,
   type AttendancePage,
   AttendanceStatus,
   type ListAttendanceParams,
+  ListAttendanceServiceLine,
   VerificationStatus,
   useListAttendance,
 } from '@swp/api-client/e5';
@@ -35,7 +37,7 @@ import {
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { CircleCheck, ClockAlert, TriangleAlert, Users } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,10 @@ export type AttendanceDashboardSearch = {
   status?: AttendanceStatus;
   tab?: 'all' | 'present' | 'late' | 'absent';
   cursor?: string;
+  company_id?: string;
+  site_id?: string;
+  service_line?: ListAttendanceServiceLine;
+  position_id?: string;
 };
 
 function attendanceStatusTone(status: AttendanceStatus): StatusTone {
@@ -138,10 +144,18 @@ export function AttendanceDashboardScreen() {
     absent: AttendanceStatus.ABSENT,
   };
 
+  // For SL the company filter is server-pinned to currentUser.companyId; client reflects it.
+  const slCompanyId = isShiftLeader ? (currentUser?.companyId ?? undefined) : undefined;
+
   const queryParams: ListAttendanceParams = {
     limit: PAGE_SIZE,
     cursor: search.cursor,
     q: search.q,
+    // SL: always pass their company id (server would enforce it anyway; this keeps the cache key stable).
+    company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
+    site_id: search.site_id || undefined,
+    service_line: search.service_line || undefined,
+    position_id: search.position_id || undefined,
     status: search.status
       ? [search.status]
       : tabStatusMap[activeTab]
@@ -153,7 +167,56 @@ export function AttendanceDashboardScreen() {
   const page = query.data?.data as AttendancePage | undefined;
   const rows: Attendance[] = page?.data ?? [];
 
-  const hasFilters = Boolean(search.q || search.status);
+  // ---------------------------------------------------------------------------
+  // Filter option lists
+  // ---------------------------------------------------------------------------
+
+  // Company options — HR/admin only (SL filter is locked to their company, no list needed).
+  // Uses useListClientCompanies which is available from E2 (reuse existing hook).
+  const companiesQuery = useListClientCompanies(
+    { limit: 200 },
+    { query: { enabled: !isShiftLeader, staleTime: 60_000 } },
+  );
+  const companyOptions = useMemo(() => {
+    if (isShiftLeader) return [];
+    const cc =
+      (companiesQuery.data?.data as { data?: { id: string; name: string }[] } | undefined)?.data ??
+      [];
+    return cc.map((c) => ({ value: c.id, label: c.name }));
+  }, [isShiftLeader, companiesQuery.data]);
+
+  // Site & position options — pragmatic v1: derive distinct values from the current page rows.
+  // TODO: replace with a proper useListSites(company_id) + useListPositions hook when available
+  //       (E2 useListSites requires a company_id path param; a flat lookup endpoint is not yet
+  //       spec'd — ENGINEERING.md E3 "reuse before building").
+  const siteOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of rows) {
+      if (r.site_id && !seen.has(r.site_id)) {
+        seen.set(r.site_id, r.site_name ?? r.site_id);
+      }
+    }
+    return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+  }, [rows]);
+
+  const positionOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of rows) {
+      if (r.position_id && !seen.has(r.position_id)) {
+        seen.set(r.position_id, r.position_name ?? r.position_id);
+      }
+    }
+    return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+  }, [rows]);
+
+  const hasFilters = Boolean(
+    search.q ||
+      search.status ||
+      search.company_id ||
+      search.site_id ||
+      search.service_line ||
+      search.position_id,
+  );
 
   function setSearch(partial: Partial<AttendanceDashboardSearch>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -241,11 +304,13 @@ export function AttendanceDashboardScreen() {
       width: 130,
       cell: (row) => (
         <span className="text-[13px] text-text">
-          {new Date(row.check_in_at).toLocaleTimeString('id-ID', {
-            timeZone: 'Asia/Jakarta',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
+          {row.check_in_at
+            ? new Date(row.check_in_at).toLocaleTimeString('id-ID', {
+                timeZone: 'Asia/Jakarta',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : t('colCheckInEmpty')}
         </span>
       ),
     },
@@ -368,13 +433,100 @@ export function AttendanceDashboardScreen() {
         <StatusTabs tabs={tabs} />
 
         {/* Filter row */}
-        <div className="flex items-center gap-[10px] border-b border-border-soft px-[18px] py-[14px]">
+        <div className="flex flex-wrap items-center gap-[10px] border-b border-border-soft px-[18px] py-[14px]">
           <SearchField
             placeholder={t('searchPlaceholder')}
             defaultValue={search.q ?? ''}
-            containerClassName="w-[260px]"
+            containerClassName="w-[220px]"
             onChange={(e) => setSearch({ q: e.target.value || undefined })}
           />
+
+          {/* Company filter — locked (disabled) for shift_leader; free for HR/super_admin */}
+          {isShiftLeader ? (
+            <span className="inline-flex items-center gap-[6px] rounded-lg border border-border bg-surface-2 px-[10px] py-[9px] text-[13px] text-text-2 opacity-70">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <title>lock</title>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              {currentUser?.companyName ?? currentUser?.companyId ?? t('filterCompany')}
+            </span>
+          ) : (
+            <FilterSelect
+              aria-label={t('filterCompany')}
+              value={search.company_id ?? ''}
+              onChange={(e) =>
+                setSearch({ company_id: e.target.value || undefined, site_id: undefined })
+              }
+            >
+              <option value="">{t('filterCompanyAll')}</option>
+              {companyOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </FilterSelect>
+          )}
+
+          {/* Site filter */}
+          <FilterSelect
+            aria-label={t('filterSite')}
+            value={search.site_id ?? ''}
+            onChange={(e) => setSearch({ site_id: e.target.value || undefined })}
+          >
+            <option value="">{t('filterSiteAll')}</option>
+            {siteOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </FilterSelect>
+
+          {/* Service line filter */}
+          <FilterSelect
+            aria-label={t('filterServiceLine')}
+            value={search.service_line ?? ''}
+            onChange={(e) =>
+              setSearch({
+                service_line: (e.target.value as ListAttendanceServiceLine) || undefined,
+              })
+            }
+          >
+            <option value="">{t('filterServiceLineAll')}</option>
+            <option value={ListAttendanceServiceLine.facility_services}>
+              {t(`serviceLine.${ListAttendanceServiceLine.facility_services}`)}
+            </option>
+            <option value={ListAttendanceServiceLine.building_management}>
+              {t(`serviceLine.${ListAttendanceServiceLine.building_management}`)}
+            </option>
+            <option value={ListAttendanceServiceLine.parking}>
+              {t(`serviceLine.${ListAttendanceServiceLine.parking}`)}
+            </option>
+          </FilterSelect>
+
+          {/* Position filter */}
+          <FilterSelect
+            aria-label={t('filterPosition')}
+            value={search.position_id ?? ''}
+            onChange={(e) => setSearch({ position_id: e.target.value || undefined })}
+          >
+            <option value="">{t('filterPositionAll')}</option>
+            {positionOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </FilterSelect>
+
+          {/* Status filter */}
           <FilterSelect
             aria-label={t('filterStatus')}
             value={search.status ?? ''}
@@ -397,12 +549,22 @@ export function AttendanceDashboardScreen() {
               {t(`status.${AttendanceStatus.ON_LEAVE}`)}
             </option>
           </FilterSelect>
+
           <div className="flex-1" />
           {hasFilters && (
             <button
               type="button"
               className="flex items-center gap-2 rounded-lg border border-border bg-surface px-[14px] py-[9px] text-[13px] font-medium text-text-2 hover:bg-surface-2"
-              onClick={() => setSearch({ q: undefined, status: undefined })}
+              onClick={() =>
+                setSearch({
+                  q: undefined,
+                  status: undefined,
+                  company_id: undefined,
+                  site_id: undefined,
+                  service_line: undefined,
+                  position_id: undefined,
+                })
+              }
             >
               {t('resetFilters')}
             </button>

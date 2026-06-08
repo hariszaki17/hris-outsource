@@ -305,11 +305,13 @@ export function AttendanceVerificationScreen() {
       width: 130,
       cell: (row) => (
         <span className="text-[13px] text-text">
-          {new Date(row.check_in_at).toLocaleString('id-ID', {
-            timeZone: 'Asia/Jakarta',
-            dateStyle: 'short',
-            timeStyle: 'short',
-          })}
+          {row.check_in_at
+            ? new Date(row.check_in_at).toLocaleString('id-ID', {
+                timeZone: 'Asia/Jakarta',
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })
+            : t('colCheckInEmpty')}
         </span>
       ),
     },

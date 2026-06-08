@@ -43,6 +43,8 @@ type AttendanceFilter struct {
 	CompanyID          *string
 	EmployeeID         *string
 	ServiceLine        *string
+	SiteID             *string
+	PositionID         *string
 	VerificationStatus []string
 	Status             []string
 	DateFrom           *time.Time
@@ -77,11 +79,16 @@ type AttendanceRepository interface {
 }
 
 // ApplyCorrectionParams carries the whitelisted COALESCE update for apply-on-approve.
+// Status/IsLate/LateMinutes are the BR CR-9 re-evaluation outputs (nil = leave as-is);
+// they are set only when a CHECK_IN correction resolves an absence.
 type ApplyCorrectionParams struct {
 	ID               string
 	CheckInAt        *time.Time
 	CheckOutAt       *time.Time
 	AttendanceCodeID *string
+	Status           *string
+	IsLate           *bool
+	LateMinutes      *int
 	LastCorrectionID *string
 }
 
@@ -137,7 +144,11 @@ func (s *AttendanceService) List(ctx context.Context, f AttendanceFilter) ([]att
 	var next *string
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
-		c, cerr := encodeAttendanceCursor(last.CheckInAt, last.ID)
+		var lastCheckIn time.Time
+		if last.CheckInAt != nil {
+			lastCheckIn = *last.CheckInAt
+		}
+		c, cerr := encodeAttendanceCursor(lastCheckIn, last.ID)
 		if cerr != nil {
 			return nil, nil, false, cerr
 		}

@@ -135,6 +135,112 @@ func TestListAttendance_LeaderCrossCompany_OutOfScope(t *testing.T) {
 	}
 }
 
+// withSitePosition pins site_id/position_id on a just-seeded record and re-stores it.
+func (h *harness) withSitePosition(rec att.Attendance, siteID, positionID string) {
+	rec.SiteID = siteID
+	rec.PositionID = positionID
+	h.attendance.records[rec.ID] = rec
+}
+
+func TestListAttendance_SitePositionFilterNarrows(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	a := h.seedAttendance("SWP-ATT-9002", cmpLed, empOther, att.VerificationPending, checkInA, att.FlagLate)
+	h.withSitePosition(a, "SWP-SITE-031", "SWP-POS-009")
+	b := h.seedAttendance("SWP-ATT-9003", cmpLed, empOther, att.VerificationPending, checkInB, att.FlagLate)
+	h.withSitePosition(b, "SWP-SITE-099", "SWP-POS-077")
+
+	// site_id narrows to the matching record only.
+	rr := h.do("GET", "/attendance?company_id="+cmpLed+"&site_id=SWP-SITE-031", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeBody(t, rr)["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("site_id filter returned %d rows, want 1", len(data))
+	}
+	row := data[0].(map[string]any)
+	if row["id"] != "SWP-ATT-9002" {
+		t.Errorf("row id = %v, want SWP-ATT-9002", row["id"])
+	}
+	if row["site_id"] != "SWP-SITE-031" {
+		t.Errorf("row site_id = %v, want SWP-SITE-031", row["site_id"])
+	}
+	if _, ok := row["position_id"]; !ok {
+		t.Errorf("row missing position_id")
+	}
+
+	// position_id narrows independently.
+	rr2 := h.do("GET", "/attendance?company_id="+cmpLed+"&position_id=SWP-POS-077", nil)
+	data2 := decodeBody(t, rr2)["data"].([]any)
+	if len(data2) != 1 || data2[0].(map[string]any)["id"] != "SWP-ATT-9003" {
+		t.Fatalf("position_id filter wrong result: %v", data2)
+	}
+}
+
+func TestListAttendance_LeaderScope_SiteCannotWiden(t *testing.T) {
+	// A leader is pinned to their led company; site_id only narrows WITHIN it and
+	// can never surface another company's record.
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	led := h.seedAttendance("SWP-ATT-9002", cmpLed, empOther, att.VerificationPending, checkInA, att.FlagLate)
+	h.withSitePosition(led, "SWP-SITE-031", "SWP-POS-009")
+	// A record at ANOTHER company that happens to share the same site_id value.
+	other := h.seedAttendance("SWP-ATT-9005", cmpOther, empOther, att.VerificationPending, checkInB, att.FlagLate)
+	h.withSitePosition(other, "SWP-SITE-031", "SWP-POS-009")
+
+	rr := h.do("GET", "/attendance?site_id=SWP-SITE-031", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeBody(t, rr)["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("leader saw %d rows, want 1 (site must not widen beyond led company)", len(data))
+	}
+	if got := data[0].(map[string]any)["company_id"]; got != cmpLed {
+		t.Errorf("row company_id = %v, want %s (led company)", got, cmpLed)
+	}
+
+	// Supplying another company explicitly is still OUT_OF_SCOPE even with site_id.
+	rr2 := h.do("GET", "/attendance?company_id="+cmpOther+"&site_id=SWP-SITE-031", nil)
+	if rr2.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	if code := errCode(t, rr2); code != "OUT_OF_SCOPE" {
+		t.Errorf("error.code = %q, want OUT_OF_SCOPE", code)
+	}
+}
+
+func TestListAttendance_AbsentRow_NullCheckInAt(t *testing.T) {
+	// A true ABSENT record (no clock-in) serializes check_in_at as JSON null
+	// (present key, null value) — not absent, not a zero timestamp.
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	rec := h.seedAttendance("SWP-ATT-9009", cmpLed, empOther, att.VerificationPending, checkInA, att.FlagAbsent)
+	rec.CheckInAt = nil
+	rec.LatIn = nil
+	rec.LngIn = nil
+	rec.Status = att.StatusAbsent
+	h.attendance.records[rec.ID] = rec
+
+	rr := h.do("GET", "/attendance?company_id="+cmpLed, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeBody(t, rr)["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("data length = %d, want 1", len(data))
+	}
+	row := data[0].(map[string]any)
+	ci, present := row["check_in_at"]
+	if !present {
+		t.Fatalf("check_in_at key absent; must be present and null for an ABSENT row")
+	}
+	if ci != nil {
+		t.Errorf("check_in_at = %v, want null", ci)
+	}
+	if row["status"] != "ABSENT" {
+		t.Errorf("status = %v, want ABSENT", row["status"])
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GET /attendance/{id} — 200 {data} + cross-scope 404
 // ---------------------------------------------------------------------------

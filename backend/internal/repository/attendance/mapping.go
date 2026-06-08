@@ -98,13 +98,15 @@ type attendanceCols struct {
 	ScheduleID         *string
 	CompanyID          string
 	ServiceLine        string
+	SiteID             string
+	PositionID         string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -132,6 +134,8 @@ type attendanceCols struct {
 	UpdatedAt          time.Time
 	EmployeeName       *string // only present on list/get (LEFT JOIN); nil otherwise
 	CompanyName        *string
+	SiteName           *string
+	PositionName       *string
 }
 
 func mapAttendance(c attendanceCols) att.Attendance {
@@ -142,6 +146,8 @@ func mapAttendance(c attendanceCols) att.Attendance {
 		ScheduleID:         c.ScheduleID,
 		CompanyID:          c.CompanyID,
 		ServiceLine:        c.ServiceLine,
+		SiteID:             c.SiteID,
+		PositionID:         c.PositionID,
 		AttendanceCodeID:   c.AttendanceCodeID,
 		ShiftStartAt:       c.ShiftStartAt,
 		ShiftEndAt:         c.ShiftEndAt,
@@ -173,6 +179,8 @@ func mapAttendance(c attendanceCols) att.Attendance {
 		UpdatedAt:          c.UpdatedAt,
 		EmployeeName:       c.EmployeeName,
 		CompanyName:        c.CompanyName,
+		SiteName:           c.SiteName,
+		PositionName:       c.PositionName,
 	}
 	return a
 }
@@ -180,7 +188,7 @@ func mapAttendance(c attendanceCols) att.Attendance {
 func mapAttendanceFromList(r sqlcgen.ListAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
@@ -188,14 +196,14 @@ func mapAttendanceFromList(r sqlcgen.ListAttendanceRow) att.Attendance {
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
 		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName,
+		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName, SiteName: r.SiteName, PositionName: r.PositionName,
 	})
 }
 
 func mapAttendanceFromGet(r sqlcgen.GetAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
@@ -203,14 +211,14 @@ func mapAttendanceFromGet(r sqlcgen.GetAttendanceRow) att.Attendance {
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
 		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName,
+		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName, SiteName: r.SiteName, PositionName: r.PositionName,
 	})
 }
 
 func mapAttendanceFromForUpdate(r sqlcgen.GetAttendanceForUpdateRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
@@ -224,7 +232,7 @@ func mapAttendanceFromForUpdate(r sqlcgen.GetAttendanceForUpdateRow) att.Attenda
 func mapAttendanceFromVerify(r sqlcgen.VerifyAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
@@ -238,7 +246,7 @@ func mapAttendanceFromVerify(r sqlcgen.VerifyAttendanceRow) att.Attendance {
 func mapAttendanceFromReject(r sqlcgen.RejectAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
@@ -252,7 +260,7 @@ func mapAttendanceFromReject(r sqlcgen.RejectAttendanceRow) att.Attendance {
 func mapAttendanceFromApply(r sqlcgen.ApplyCorrectionToAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
-		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, AttendanceCodeID: r.AttendanceCodeID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
 		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,

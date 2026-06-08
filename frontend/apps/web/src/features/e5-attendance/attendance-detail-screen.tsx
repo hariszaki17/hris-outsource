@@ -358,11 +358,17 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                 </span>
                 <div className="flex items-center gap-2">
                   <Clock className="size-4 text-text-3" aria-hidden />
-                  <DateText
-                    value={record.check_in_at}
-                    kind="instant"
-                    className="text-[14px] font-medium text-text"
-                  />
+                  {record.check_in_at ? (
+                    <DateText
+                      value={record.check_in_at}
+                      kind="instant"
+                      className="text-[14px] font-medium text-text"
+                    />
+                  ) : (
+                    <span className="text-[14px] font-medium text-text-3">
+                      {t('colCheckInEmpty')}
+                    </span>
+                  )}
                 </div>
                 {record.shift_start_at && (
                   <span className="text-[11px] text-text-3">

@@ -42,10 +42,10 @@ type Attendance struct {
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
-	CheckInAt          time.Time
+	CheckInAt          *time.Time
 	CheckOutAt         *time.Time
-	LatIn              float64
-	LngIn              float64
+	LatIn              *float64
+	LngIn              *float64
 	LatOut             *float64
 	LngOut             *float64
 	PhotoInID          *string
@@ -72,6 +72,8 @@ type Attendance struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
+	SiteID             string
+	PositionID         string
 }
 
 type AttendanceCode struct {

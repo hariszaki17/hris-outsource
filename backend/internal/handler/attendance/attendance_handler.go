@@ -20,6 +20,8 @@ func (h *Handler) ListAttendance(w http.ResponseWriter, r *http.Request) {
 		CompanyID:          strPtrParam(q.Get("company_id")),
 		EmployeeID:         strPtrParam(q.Get("employee_id")),
 		ServiceLine:        strPtrParam(q.Get("service_line")),
+		SiteID:             strPtrParam(q.Get("site_id")),
+		PositionID:         strPtrParam(q.Get("position_id")),
 		VerificationStatus: csvParam(q.Get("verification_status")),
 		Status:             csvParam(q.Get("status")),
 		DateFrom:           parseDateParam(q.Get("date_from")),

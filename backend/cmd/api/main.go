@@ -27,6 +27,7 @@ import (
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/cron"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/crypto"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -215,6 +216,12 @@ func run() error {
 	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
 	attendanceHandler := attendancehttp.NewHandler(attendanceSvc, correctionSvc)
 
+	// Absence-sweep cron (07-xx / F5.2): in-process, single-binary job that writes
+	// ABSENT rows for scheduled shifts that ended past the grace with no clock-in.
+	// The partial unique index on attendance(schedule_id) is the idempotency guard.
+	absenceSweepRepo := attendancerepo.NewAbsenceSweepRepo(pool)
+	absenceSweepSvc := attendancesvc.NewAbsenceSweepService(absenceSweepRepo, txm, cfg.Cron.AbsenceGrace, 0)
+
 	// Leave slice (08-02): E6 two-level approval + quotas + calendar (F6.1/F6.2/F6.3).
 	// The leave service's INV-3 loop-closer reuses the EXISTING scheduling repo
 	// (scheduleRepo above) as its SchedulePort — cancelling overlapping schedule
@@ -298,6 +305,18 @@ func run() error {
 		Handler:      handler,
 		ReadTimeout:  cfg.HTTP.ReadTimeout,
 		WriteTimeout: cfg.HTTP.WriteTimeout,
+	}
+
+	// In-process cron (single binary): start the absence-sweep runner before serving.
+	// It stops on ctx.Done() (the same signal that drives graceful shutdown).
+	if cfg.Cron.AbsenceSweepEnabled {
+		runner := cron.NewRunner("absence-sweep", cfg.Cron.AbsenceSweepInterval, func(ctx context.Context) error {
+			_, err := absenceSweepSvc.Sweep(ctx)
+			return err
+		})
+		go runner.Start(ctx)
+		slog.Info("absence-sweep cron started",
+			"interval", cfg.Cron.AbsenceSweepInterval.String(), "grace", cfg.Cron.AbsenceGrace.String())
 	}
 
 	// Serve until signal, then graceful shutdown.

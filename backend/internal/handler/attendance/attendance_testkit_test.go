@@ -254,23 +254,31 @@ func (r *fakeAttendanceRepo) ListAttendance(_ context.Context, f svc.AttendanceF
 		if f.EmployeeID != nil && a.EmployeeID != *f.EmployeeID {
 			continue
 		}
+		if f.SiteID != nil && a.SiteID != *f.SiteID {
+			continue
+		}
+		if f.PositionID != nil && a.PositionID != *f.PositionID {
+			continue
+		}
 		if len(f.VerificationStatus) > 0 && !contains(f.VerificationStatus, string(a.VerificationStatus)) {
 			continue
 		}
 		out = append(out, a)
 	}
-	// (check_in_at DESC, id) keyset — newest first.
+	// (check_in_at DESC, id) keyset — newest first. check_in_at is nullable (ABSENT).
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].CheckInAt.Equal(out[j].CheckInAt) {
+		ci, cj := ciOf(out[i]), ciOf(out[j])
+		if ci.Equal(cj) {
 			return out[i].ID > out[j].ID
 		}
-		return out[i].CheckInAt.After(out[j].CheckInAt)
+		return ci.After(cj)
 	})
 	if f.CursorCheckInAt != nil && f.CursorID != nil {
 		var trimmed []att.Attendance
 		for _, a := range out {
-			if a.CheckInAt.Before(*f.CursorCheckInAt) ||
-				(a.CheckInAt.Equal(*f.CursorCheckInAt) && a.ID < *f.CursorID) {
+			ci := ciOf(a)
+			if ci.Before(*f.CursorCheckInAt) ||
+				(ci.Equal(*f.CursorCheckInAt) && a.ID < *f.CursorID) {
 				trimmed = append(trimmed, a)
 			}
 		}
@@ -339,13 +347,23 @@ func (r *fakeAttendanceRepo) ApplyCorrectionToAttendance(_ context.Context, _ pg
 		return att.Attendance{}, domain.ErrNotFound
 	}
 	if p.CheckInAt != nil {
-		a.CheckInAt = *p.CheckInAt
+		a.CheckInAt = p.CheckInAt
 	}
 	if p.CheckOutAt != nil {
 		a.CheckOutAt = p.CheckOutAt
 	}
 	if p.AttendanceCodeID != nil {
 		a.AttendanceCodeID = p.AttendanceCodeID
+	}
+	// BR CR-9 re-eval outputs (nil = leave as-is).
+	if p.Status != nil {
+		a.Status = att.AttendanceStatus(*p.Status)
+	}
+	if p.IsLate != nil {
+		a.IsLate = *p.IsLate
+	}
+	if p.LateMinutes != nil {
+		a.LateMinutes = *p.LateMinutes
 	}
 	a.LastCorrectionID = p.LastCorrectionID
 	if !hasFlag(a.Flags, att.FlagCorrected) {
@@ -568,13 +586,16 @@ func (h *harness) doWithHeaders(method, path string, body any, headers map[strin
 // seedAttendance plants an attendance record directly (bypasses any create path)
 // so tests can pin id/company/employee/verification-status/flags.
 func (h *harness) seedAttendance(id, company, employee string, vstatus att.VerificationStatus, checkIn time.Time, flags ...att.Flag) att.Attendance {
+	ci := checkIn
 	a := att.Attendance{
 		ID:                 id,
 		EmployeeID:         employee,
 		PlacementID:        "SWP-PL-5001",
 		CompanyID:          company,
 		ServiceLine:        att.ServiceLineFacilityServices,
-		CheckInAt:          checkIn,
+		SiteID:             "SWP-SITE-001",
+		PositionID:         "SWP-POS-001",
+		CheckInAt:          &ci,
 		WFO:                true,
 		Status:             att.StatusLate,
 		VerificationStatus: vstatus,
@@ -583,9 +604,19 @@ func (h *harness) seedAttendance(id, company, employee string, vstatus att.Verif
 		UpdatedAt:          checkIn,
 		EmployeeName:       strp("Agent " + employee),
 		CompanyName:        strp("Company " + company),
+		SiteName:           strp("Site of " + company),
+		PositionName:       strp("Position of " + employee),
 	}
 	h.attendance.records[id] = a
 	return a
+}
+
+// ciOf derefs the nullable check_in_at (zero time for a true ABSENT record).
+func ciOf(a att.Attendance) time.Time {
+	if a.CheckInAt == nil {
+		return time.Time{}
+	}
+	return *a.CheckInAt
 }
 
 // seedCorrection plants a correction record directly. shiftDate is the

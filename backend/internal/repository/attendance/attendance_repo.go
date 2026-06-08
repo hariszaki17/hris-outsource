@@ -38,6 +38,15 @@ func timePtrToPgDate(t *time.Time) pgtype.Date {
 	return pgtype.Date{Time: *t, Valid: true}
 }
 
+// intPtrToI32Ptr narrows a *int to *int32 for sqlc nullable integer params.
+func intPtrToI32Ptr(v *int) *int32 {
+	if v == nil {
+		return nil
+	}
+	n := int32(*v)
+	return &n
+}
+
 func (r *AttendanceRepo) ListAttendance(ctx context.Context, f svc.AttendanceFilter) ([]att.Attendance, error) {
 	var exceptions *bool
 	if f.ExceptionsOnly {
@@ -48,6 +57,8 @@ func (r *AttendanceRepo) ListAttendance(ctx context.Context, f svc.AttendanceFil
 		CompanyID:            f.CompanyID,
 		EmployeeID:           f.EmployeeID,
 		ServiceLine:          f.ServiceLine,
+		SiteID:               f.SiteID,
+		PositionID:           f.PositionID,
 		VerificationStatusIn: f.VerificationStatus,
 		StatusIn:             f.Status,
 		DateFrom:             timePtrToPgDate(f.DateFrom),
@@ -118,6 +129,9 @@ func (r *AttendanceRepo) ApplyCorrectionToAttendance(ctx context.Context, tx pgx
 		CheckInAt:        p.CheckInAt,
 		CheckOutAt:       p.CheckOutAt,
 		AttendanceCodeID: p.AttendanceCodeID,
+		Status:           p.Status,
+		IsLate:           p.IsLate,
+		LateMinutes:      intPtrToI32Ptr(p.LateMinutes),
 		LastCorrectionID: p.LastCorrectionID,
 		ID:               p.ID,
 	})

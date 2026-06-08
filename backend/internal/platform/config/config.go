@@ -21,6 +21,19 @@ type Config struct {
 	Crypto Crypto
 	OTel   OTel
 	Rate   Rate
+	Cron   Cron
+}
+
+// Cron configures the in-process single-binary cron jobs (E5 absence-sweep). A
+// later phase may graduate these to River; for now they run inside the API binary.
+type Cron struct {
+	// AbsenceSweepEnabled toggles the absence-sweep cron (default on).
+	AbsenceSweepEnabled bool `env:"ABSENCE_SWEEP_ENABLED" envDefault:"true"`
+	// AbsenceSweepInterval is the tick period for the sweep.
+	AbsenceSweepInterval time.Duration `env:"ABSENCE_SWEEP_INTERVAL" envDefault:"15m"`
+	// AbsenceGrace is how long after a shift's end a scheduled, un-clocked-in shift
+	// must remain before it is marked ABSENT (the cutoff is now - grace).
+	AbsenceGrace time.Duration `env:"ABSENCE_GRACE" envDefault:"30m"`
 }
 
 type HTTP struct {
