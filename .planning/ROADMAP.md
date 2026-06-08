@@ -3,17 +3,17 @@
 ## Milestones
 
 - ✅ **v1.0 — Backend + Full-Stack E2E** — Phases 1–11 (shipped 2026-06-05)
-- 🔨 **v1.1 — Mobile Foundation (Expo Scaffold)** — Phase 12 (started 2026-06-08)
+- ✅ **v1.1 — Mobile Foundation (Expo Scaffold)** — Phase 12 (shipped 2026-06-08)
 
 ## Phases
 
-### 🔨 v1.1 — Mobile Foundation (Expo Scaffold)
+### ✅ v1.1 — Mobile Foundation (Expo Scaffold)
 
 Scaffold-only milestone: a real, buildable Expo app in `frontend/apps/mobile` consuming the
 shared contract/tokens packages, with all MVP-required native capabilities installed. No
 feature screens. Built in worktree `feat/mobile-scaffold`.
 
-- [ ] **Phase 12: Expo Scaffold** (0/1) — Replace the `apps/mobile` placeholder with a real
+- [x] **Phase 12: Expo Scaffold** (1/1) — Replace the `apps/mobile` placeholder with a real
   Expo app (latest SDK, managed + dev-client, Expo Router) wired into the pnpm/Turborepo
   monorepo (Metro workspace resolution), consuming `@swp/api-client` + `@swp/shared` +
   `@swp/design-tokens`; NativeWind driven by the shared tokens; `expo-location` /

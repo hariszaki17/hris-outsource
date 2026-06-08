@@ -12,33 +12,33 @@ Scaffold-only. Feature screens are explicitly deferred (see Out of Scope).
 
 ### Scaffold (SCAF)
 
-- [ ] **SCAF-01**: The `frontend/apps/mobile` placeholder is replaced by a real Expo app (managed workflow + dev-client) on the latest stable SDK that boots via Expo for iOS and Android.
-- [ ] **SCAF-02**: Navigation uses Expo Router (file-based, typed routes) with at least one route group and a root layout.
-- [ ] **SCAF-03**: A minimal smoke screen renders that imports and exercises all three shared packages (proves the wiring, not a feature).
+- [x] **SCAF-01**: The `frontend/apps/mobile` placeholder is replaced by a real Expo app (managed workflow + dev-client) on the latest stable SDK that boots via Expo for iOS and Android.
+- [x] **SCAF-02**: Navigation uses Expo Router (file-based, typed routes) with at least one route group and a root layout.
+- [x] **SCAF-03**: A minimal smoke screen renders that imports and exercises all three shared packages (proves the wiring, not a feature).
 
 ### Monorepo wiring (MONO)
 
-- [ ] **MONO-01**: The mobile package declares `@swp/api-client`, `@swp/shared`, `@swp/design-tokens` as `workspace:*` dependencies and resolves them through pnpm.
-- [ ] **MONO-02**: Metro is configured for the pnpm monorepo (watchFolders to the workspace root + nodeModulesPaths / symlink resolution) so workspace packages resolve at bundle time.
-- [ ] **MONO-03**: The web-only `@swp/ui` (DOM/shadcn/Tailwind) is NOT imported; a thin RN primitive layer lives inside `apps/mobile` instead, backed by the shared tokens.
+- [x] **MONO-01**: The mobile package declares `@swp/api-client`, `@swp/shared`, `@swp/design-tokens` as `workspace:*` dependencies and resolves them through pnpm.
+- [x] **MONO-02**: Metro is configured for the pnpm monorepo (watchFolders to the workspace root + nodeModulesPaths / symlink resolution) so workspace packages resolve at bundle time.
+- [x] **MONO-03**: The web-only `@swp/ui` (DOM/shadcn/Tailwind) is NOT imported; a thin RN primitive layer lives inside `apps/mobile` instead, backed by the shared tokens.
 
 ### Styling (STYLE)
 
-- [ ] **STYLE-01**: NativeWind is wired and renders Tailwind classes in RN.
-- [ ] **STYLE-02**: NativeWind theme is driven by the `@swp/design-tokens` TS export (color/type/space) — no raw hex in app code (mirrors web ENGINEERING.md token rule).
+- [x] **STYLE-01**: NativeWind is wired and renders Tailwind classes in RN.
+- [x] **STYLE-02**: NativeWind theme is driven by the `@swp/design-tokens` TS export (color/type/space) — no raw hex in app code (mirrors web ENGINEERING.md token rule).
 
 ### Native capabilities (NATIVE)
 
-- [ ] **NATIVE-01**: `expo-location` installed + config-plugged (foundation for E5 F5.1 GPS geofence). Permission strings declared.
-- [ ] **NATIVE-02**: `expo-notifications` installed + config-plugged (foundation for E10 F10.1 push).
-- [ ] **NATIVE-03**: `expo-image-picker` installed + config-plugged (foundation for E6 F6.2 leave-doc upload).
-- [ ] **NATIVE-04**: `expo-updates` installed + config-plugged for EAS Update (OTA), with a documented force-update-on-launch gate stub.
+- [x] **NATIVE-01**: `expo-location` installed + config-plugged (foundation for E5 F5.1 GPS geofence). Permission strings declared.
+- [x] **NATIVE-02**: `expo-notifications` installed + config-plugged (foundation for E10 F10.1 push).
+- [x] **NATIVE-03**: `expo-image-picker` installed + config-plugged (foundation for E6 F6.2 leave-doc upload).
+- [x] **NATIVE-04**: `expo-updates` installed + config-plugged for EAS Update (OTA), with a documented force-update-on-launch gate stub.
 
 ### Tooling parity (TOOL)
 
-- [ ] **TOOL-01**: TypeScript strict; `turbo run typecheck` includes mobile and passes.
-- [ ] **TOOL-02**: Biome lint includes mobile and passes (web Biome config reused/extended).
-- [ ] **TOOL-03**: A documented stub/TODO records the FOLLOW-UP backend `min_supported_version` version-gate contract (no backend change this milestone).
+- [x] **TOOL-01**: TypeScript strict; `turbo run typecheck` includes mobile and passes.
+- [x] **TOOL-02**: Biome lint includes mobile and passes (web Biome config reused/extended).
+- [x] **TOOL-03**: A documented stub/TODO records the FOLLOW-UP backend `min_supported_version` version-gate contract (no backend change this milestone).
 
 ## Future Requirements (deferred to later milestones)
 

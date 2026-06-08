@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Mobile Foundation (Expo Scaffold)
-status: planning
-stopped_at: Phase 12 planned (12-01-PLAN.md)
+status: completed
+stopped_at: Phase 12 complete (12-01-PLAN.md)
 last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — Milestone v1.1 (Mobile Foundation) opened in worktree feat/mobile-scaffold. Scaffold-only scope: replace the apps/mobile placeholder with a real Expo app (latest SDK, managed + dev-client, Expo Router) wired into the pnpm/Turborepo monorepo, consuming @swp/api-client + @swp/shared + @swp/design-tokens; NativeWind on shared tokens; expo-location/notifications/image-picker/updates installed + config-plugged; TS strict + Biome + turbo typecheck/lint green. Phase 12 planned; executing autonomously."
+last_activity: "2026-06-08 — Phase 12 (Expo Scaffold) COMPLETE in worktree feat/mobile-scaffold. apps/mobile is a real Expo app (SDK 56, managed + dev-client, Expo Router) wired into the pnpm/Turborepo monorepo: Metro workspace resolution, @swp/api-client + @swp/shared + @swp/design-tokens consumed by a smoke screen, NativeWind theme generated from the shared tokens, web @swp/ui NOT reused (thin RN primitive layer in src/ui). Native deps installed + config-plugged: expo-location/notifications/image-picker/updates (+ force-update gate stub; backend min_supported_version is a documented follow-up). react/react-dom deduped to 19.2.3 via pnpm override; node-linker=hoisted. Verified: tsc clean, biome clean, expo-doctor 21/21, expo export bundles 1499 modules. v1.1 milestone CLOSED."
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 1
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-08)
 
 ## Current Position
 
-Phase: 12 of 12 (Expo Scaffold) — executing
-Plan: 12-01 (1 of 1)
-Status: Executing autonomously in worktree feat/mobile-scaffold
-Last activity: 2026-06-08 — Milestone v1.1 opened; Phase 12 planned; building the Expo scaffold.
+Phase: 12 of 12 (Expo Scaffold) — COMPLETE
+Plan: 12-01 COMPLETE (1 of 1)
+Status: Milestone v1.1 complete — Expo scaffold shipped on branch feat/mobile-scaffold
+Last activity: 2026-06-08 — Phase 12 complete; Expo app scaffolded, wired, and verified (tsc/biome/expo-doctor/expo export all green).
 
-Progress: [          ] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
