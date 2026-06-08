@@ -701,6 +701,13 @@ export const id = {
       updateSuccess: 'Aturan lembur berhasil diperbarui.',
       deleteSuccess: 'Aturan lembur berhasil dinonaktifkan.',
       deleteBody: 'Aturan "{{name}}" akan dinonaktifkan. OT yang sudah terhitung tetap utuh.',
+      seedButton: 'Pakai default PP 35/2021',
+      seedName: 'Aturan Lembur Standar (PP 35/2021)',
+      seedHint:
+        'Buat aturan default sesuai PP 35/2021: hari kerja ×1,5, hari libur ×2, hari besar ×3, min 30 menit. Dapat disesuaikan setelah dibuat.',
+      seedSuccess: 'Aturan lembur standar PP 35/2021 dibuat.',
+      seedExists: 'Aturan lembur standar sudah ada.',
+      seedFailed: 'Gagal membuat aturan standar.',
     },
   },
   employees: {

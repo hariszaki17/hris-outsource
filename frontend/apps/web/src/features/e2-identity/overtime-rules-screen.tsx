@@ -30,7 +30,7 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, Check, Info, MoreVertical, Plus, Timer, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, Info, MoreVertical, Plus, Sparkles, Timer, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -390,8 +390,40 @@ export function OvertimeRulesScreen() {
 
   const query = useListOvertimeRules(params);
   const deleteMut = useSoftDeleteOvertimeRule();
+  const seedMut = useCreateOvertimeRule();
 
   const hasFilters = Boolean(statusFilter);
+
+  // EPICS §5 (E7 build item) — PP 35/2021 statutory default OT multipliers, stored as
+  // reference (no monetary calc in v1). Mirrors the dev-seed SWP-OTR-001 so dev and a
+  // fresh prod install (OT rules are net-new per E9 G-5) converge on one canonical rule.
+  async function handleSeedDefault() {
+    try {
+      await seedMut.mutateAsync({
+        data: {
+          name: t('masterData.overtimeRules.seedName'),
+          service_line_id: null,
+          weekday_rate: 1.5,
+          restday_rate: 2,
+          holiday_rate: 3,
+          min_minutes: 30,
+          max_minutes_per_day: 240,
+          pre_approval_required: true,
+        },
+      });
+      toast({ tone: 'success', title: t('masterData.overtimeRules.seedSuccess') });
+      void query.refetch();
+    } catch (err) {
+      const { kind } = classifyError(err);
+      toast({
+        tone: kind === 'conflict' ? 'warn' : 'error',
+        title:
+          kind === 'conflict'
+            ? t('masterData.overtimeRules.seedExists')
+            : t('masterData.overtimeRules.seedFailed'),
+      });
+    }
+  }
 
   function openAdd() {
     setEditingItem(null);
@@ -556,10 +588,23 @@ export function OvertimeRulesScreen() {
           </h1>
           <p className="text-[13px] text-text-2">{t('masterData.overtimeRules.subtitle')}</p>
         </div>
-        <Button type="button" onClick={openAdd}>
-          <Plus aria-hidden />
-          {t('masterData.overtimeRules.add')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {rows.length === 0 && !hasFilters && !query.isLoading && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleSeedDefault}
+              disabled={seedMut.isPending}
+            >
+              <Sparkles aria-hidden />
+              {t('masterData.overtimeRules.seedButton')}
+            </Button>
+          )}
+          <Button type="button" onClick={openAdd}>
+            <Plus aria-hidden />
+            {t('masterData.overtimeRules.add')}
+          </Button>
+        </div>
       </div>
 
       {/* Shared-with-E7 note */}
@@ -600,7 +645,17 @@ export function OvertimeRulesScreen() {
               <EmptyState
                 variant="fresh"
                 title={t('masterData.overtimeRules.emptyTitle')}
-                description={t('masterData.overtimeRules.emptyBody')}
+                description={t('masterData.overtimeRules.seedHint')}
+                action={
+                  <Button
+                    type="button"
+                    onClick={handleSeedDefault}
+                    disabled={seedMut.isPending}
+                  >
+                    <Sparkles aria-hidden />
+                    {t('masterData.overtimeRules.seedButton')}
+                  </Button>
+                }
               />
             )
           }

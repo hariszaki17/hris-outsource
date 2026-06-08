@@ -636,6 +636,13 @@ export const en: Messages = {
       updateSuccess: 'Overtime rule updated successfully.',
       deleteSuccess: 'Overtime rule deactivated successfully.',
       deleteBody: 'Rule "{{name}}" will be deactivated. Already-calculated OT remains intact.',
+      seedButton: 'Use PP 35/2021 defaults',
+      seedName: 'Standard Overtime Rule (PP 35/2021)',
+      seedHint:
+        'Creates the PP 35/2021 default rule: workday ×1.5, rest day ×2, public holiday ×3, min 30 minutes. Adjustable after creation.',
+      seedSuccess: 'Standard PP 35/2021 overtime rule created.',
+      seedExists: 'A standard overtime rule already exists.',
+      seedFailed: 'Failed to create the standard rule.',
     },
   },
   employees: {
