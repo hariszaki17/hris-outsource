@@ -171,6 +171,14 @@ const mobileCopy = {
         WITHDRAWN: 'Ditarik',
       },
     },
+    payslip: {
+      title: 'Slip gaji',
+      empty: 'Belum ada slip gaji.',
+      takeHome: 'Gaji bersih',
+      gross: 'Pendapatan kotor',
+      paid: 'Dibayar',
+      notPaid: 'Belum dibayar',
+    },
   },
   en: {
     common: {
@@ -336,6 +344,14 @@ const mobileCopy = {
         REJECTED: 'Rejected',
         WITHDRAWN: 'Withdrawn',
       },
+    },
+    payslip: {
+      title: 'Payslip',
+      empty: 'No payslips yet.',
+      takeHome: 'Take-home',
+      gross: 'Gross earnings',
+      paid: 'Paid',
+      notPaid: 'Not paid yet',
     },
   },
 } as const;
