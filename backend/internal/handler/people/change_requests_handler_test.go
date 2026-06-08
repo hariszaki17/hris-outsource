@@ -137,6 +137,20 @@ func (r *fakeChangeRequestRepo) ResolveChangeRequest(_ context.Context, _ pgx.Tx
 	return cr, nil
 }
 
+func (r *fakeChangeRequestRepo) CreateChangeRequest(_ context.Context, _ pgx.Tx, p peoplesvc.CreateChangeRequestParams) (domain.ChangeRequest, error) {
+	cr := domain.ChangeRequest{
+		ID:          "SWP-CHG-" + p.EmployeeID,
+		EmployeeID:  p.EmployeeID,
+		Status:      "pending",
+		RequestType: p.RequestType,
+		Changes:     p.Changes,
+		Note:        p.Note,
+		SubmittedAt: time.Now().UTC(),
+	}
+	r.changeRequests[cr.ID] = cr
+	return cr, nil
+}
+
 // Compile-time interface check.
 var _ peoplesvc.ChangeRequestRepository = (*fakeChangeRequestRepo)(nil)
 
@@ -177,6 +191,12 @@ func newChangeRequestHarness(t *testing.T) *changeRequestHarness {
 		r.Get("/change-requests/{change_request_id}", handler.GetChangeRequest)
 		r.Post("/change-requests/{change_request_id}:approve", handler.ApproveChangeRequest)
 		r.Post("/change-requests/{change_request_id}:reject", handler.RejectChangeRequest)
+	})
+
+	// Agent-inclusive create group matching server.go (agent/hr/super).
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+		r.Post("/employees/{employee_id}/change-requests", handler.CreateChangeRequest)
 	})
 
 	fh.router = r
@@ -572,5 +592,88 @@ func TestChangeRequestRBAC_Agent_403(t *testing.T) {
 	rr := h.doJSON("GET", "/change-requests", nil)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("agent GET /change-requests: expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: CreateChangeRequest (agent self-service, EP-5)
+// ---------------------------------------------------------------------------
+
+func TestCreateChangeRequest_AgentOwn_201(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	seedCREmployee(h, "SWP-EMP-CR-OWN", "+628111", "Jl. Lama 1")
+	h.principal = auth.Principal{UserID: "SWP-USR-A", EmployeeID: "SWP-EMP-CR-OWN", Role: auth.RoleAgent}
+
+	rr := h.doJSON("POST", "/employees/SWP-EMP-CR-OWN/change-requests", map[string]any{
+		"changes": map[string]any{
+			"phone": "+628999888777",
+			"bank_account": map[string]any{
+				"bank_name":           "BCA",
+				"account_number":      "9999000011",
+				"account_holder_name": "CR Employee SWP-EMP-CR-OWN",
+			},
+		},
+		"note": "Ganti nomor & rekening",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if body["status"] != "PENDING" {
+		t.Errorf("status = %v, want PENDING", body["status"])
+	}
+	if body["request_type"] != "MULTIPLE" {
+		t.Errorf("request_type = %v, want MULTIPLE (phone+bank)", body["request_type"])
+	}
+	if body["employee_id"] != "SWP-EMP-CR-OWN" {
+		t.Errorf("employee_id = %v, want SWP-EMP-CR-OWN", body["employee_id"])
+	}
+	if loc := rr.Header().Get("Location"); loc == "" {
+		t.Errorf("missing Location header")
+	}
+}
+
+func TestCreateChangeRequest_AgentAnother_404(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	seedCREmployee(h, "SWP-EMP-CR-OTHER", "+628111", "Jl. Lama 2")
+	// Agent caller is a different employee.
+	h.principal = auth.Principal{UserID: "SWP-USR-B", EmployeeID: "SWP-EMP-CR-SELF", Role: auth.RoleAgent}
+
+	newPhone := "+628000111222"
+	rr := h.doJSON("POST", "/employees/SWP-EMP-CR-OTHER/change-requests", map[string]any{
+		"changes": map[string]any{"phone": newPhone},
+	})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("agent filing for another employee: expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestCreateChangeRequest_SinglePhone_DerivesType(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	seedCREmployee(h, "SWP-EMP-CR-PH", "+628111", "Jl. Lama 3")
+	h.principal = auth.Principal{UserID: "SWP-USR-C", EmployeeID: "SWP-EMP-CR-PH", Role: auth.RoleAgent}
+
+	rr := h.doJSON("POST", "/employees/SWP-EMP-CR-PH/change-requests", map[string]any{
+		"changes": map[string]any{"phone": "+628777666555"},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if body["request_type"] != "PHONE" {
+		t.Errorf("request_type = %v, want PHONE", body["request_type"])
+	}
+}
+
+func TestCreateChangeRequest_EmptyChanges_400(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	seedCREmployee(h, "SWP-EMP-CR-EMPTY", "+628111", "Jl. Lama 4")
+	h.principal = auth.Principal{UserID: "SWP-USR-D", EmployeeID: "SWP-EMP-CR-EMPTY", Role: auth.RoleAgent}
+
+	rr := h.doJSON("POST", "/employees/SWP-EMP-CR-EMPTY/change-requests", map[string]any{
+		"changes": map[string]any{},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("empty changes: expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

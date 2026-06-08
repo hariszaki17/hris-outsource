@@ -240,14 +240,20 @@ func New(d Deps) http.Handler {
 			// below. Do NOT modify this group.
 			// ---------------------------------------------------------------
 
-			// Employee reads: super_admin, hr_admin, shift_leader.
-			// NOTE: OpenAPI x-rbac for GET /employees/{id} also lists agent, but
-			// the FE web app never calls the detail endpoint as an agent (agent
-			// self-service is mobile-only in this phase). Web roles only here.
-			// See 04-02-SUMMARY.md for the rationale.
+			// Employee list: super_admin, hr_admin, shift_leader (no agent — agents
+			// have no roster view). The detail endpoint is split out below so agents
+			// can self-read.
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.Get("/employees", d.People.ListEmployees)
+			})
+
+			// Employee detail: super_admin, hr_admin, shift_leader AND agent.
+			// OpenAPI x-rbac for GET /employees/{id} lists agent with scope:self;
+			// the service hides anyone but the agent's own record as 404 (no leak).
+			// Split from the list group so the agent role applies to the detail only.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 				r.Get("/employees/{employee_id}", d.People.GetEmployee)
 			})
 
@@ -306,6 +312,15 @@ func New(d Deps) http.Handler {
 				// Approve / reject actions.
 				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:approve", d.PeopleChangeRequests.ApproveChangeRequest)
 				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:reject", d.PeopleChangeRequests.RejectChangeRequest)
+			})
+
+			// Agent self-service: file a profile-change request (E2 F2.1 EP-5,
+			// createChangeRequest). x-rbac scope:self — the service enforces that an
+			// agent files only for their own employee_id (else 404). hr_admin/
+			// super_admin admitted so staff can file on behalf. Idempotency-wrapped.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}/change-requests", d.PeopleChangeRequests.CreateChangeRequest)
 			})
 			// PEOPLE change-requests slice end (04-04). Phase 5+ appends after this line.
 

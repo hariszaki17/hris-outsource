@@ -126,6 +126,28 @@ func (r *ChangeRequestRepo) ResolveChangeRequest(ctx context.Context, tx pgx.Tx,
 	return mapChangeRequest(row)
 }
 
+// CreateChangeRequest inserts a new PENDING change request (in tx). The changes
+// value object is marshalled to the jsonb `changes` column; request_type is the
+// caller-derived PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE. The SWP-CHG id and
+// status=pending default are allocated by the query.
+func (r *ChangeRequestRepo) CreateChangeRequest(ctx context.Context, tx pgx.Tx, p svc.CreateChangeRequestParams) (domain.ChangeRequest, error) {
+	changesJSON, err := json.Marshal(p.Changes)
+	if err != nil {
+		return domain.ChangeRequest{}, err
+	}
+
+	row, err := r.q.WithTx(tx).CreateChangeRequest(ctx, sqlcgen.CreateChangeRequestParams{
+		EmployeeID:  p.EmployeeID,
+		Changes:     changesJSON,
+		RequestType: p.RequestType,
+		Note:        p.Note,
+	})
+	if err != nil {
+		return domain.ChangeRequest{}, mapErr(err)
+	}
+	return mapChangeRequest(row)
+}
+
 // --- mapping helpers ---
 
 // mapChangeRequest converts a sqlcgen.ChangeRequest to domain.ChangeRequest.

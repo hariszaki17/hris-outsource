@@ -61,23 +61,23 @@ type ProvisionLoginRepoParams struct {
 
 // CreateEmployeeParams carries the fields for inserting a new employee.
 type CreateEmployeeParams struct {
-	FullName             string
-	NIK                  string
-	NIP                  string
-	JoinAt               time.Time
-	Gender               string
-	BirthDate            *time.Time
-	BirthPlace           string
-	Phone                string
-	EmailPersonal        string
-	Address              string
-	NPWP                 string
-	BPJSKesehatan        string
-	BPJSKetenagakerjaan  string
-	BankName             string
-	BankAccountNumber    string
+	FullName              string
+	NIK                   string
+	NIP                   string
+	JoinAt                time.Time
+	Gender                string
+	BirthDate             *time.Time
+	BirthPlace            string
+	Phone                 string
+	EmailPersonal         string
+	Address               string
+	NPWP                  string
+	BPJSKesehatan         string
+	BPJSKetenagakerjaan   string
+	BankName              string
+	BankAccountNumber     string
 	BankAccountHolderName string
-	CreatedBy            string
+	CreatedBy             string
 	// Login provisioning is AUTOMATIC at create (D1): a linked agent User is always
 	// created in the same tx with a temporary password (show-once). The login
 	// identifier is the employee Phone (required, D2); LoginEmail is an optional
@@ -168,7 +168,18 @@ func (s *Service) ListEmployees(ctx context.Context, f domain.EmployeeFilter) ([
 }
 
 // GetEmployee returns a single employee by id.
+//
+// Agent self-scope (E2 F2.1, scope:self): an agent may read ONLY their own
+// employee record. Reading anyone else is hidden as 404 (no existence leak),
+// mirroring the attendance/leave/overtime/payslip self-scope rule. Staff roles
+// (super_admin, hr_admin, shift_leader) keep their existing read scope.
 func (s *Service) GetEmployee(ctx context.Context, id string) (domain.Employee, error) {
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if p.EmployeeID == "" || p.EmployeeID != id {
+			return domain.Employee{}, apperr.NotFound()
+		}
+	}
+
 	emp, err := s.repo.GetEmployeeByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.Employee{}, apperr.NotFound()
@@ -461,10 +472,10 @@ func (s *Service) UpdateEmployee(ctx context.Context, p UpdateEmployeeParams) (d
 // OffboardReason is the required offboard reason enum (F2.7 OB-1). It maps 1:1 to
 // agreement.closed_reason and is translated to the placement terminal pair.
 const (
-	offboardReasonResigned  = "RESIGNED"
+	offboardReasonResigned   = "RESIGNED"
 	offboardReasonTerminated = "TERMINATED"
-	offboardReasonEndOfTerm = "END_OF_TERM"
-	offboardReasonOther     = "OTHER"
+	offboardReasonEndOfTerm  = "END_OF_TERM"
+	offboardReasonOther      = "OTHER"
 )
 
 // placementTerminalFor maps an offboard reason to the placement terminal pair
@@ -585,10 +596,10 @@ func (s *Service) DeactivateEmployee(ctx context.Context, id, reason, note strin
 
 		// Parent offboard entry: lists what the cascade closed/ended.
 		afterSnap := map[string]any{
-			"status":                  "inactive",
-			"reason":                  reason,
-			"cascaded_agreement_id":   cascadedAgreementID,
-			"cascaded_placement_ids":  placementIDs,
+			"status":                 "inactive",
+			"reason":                 reason,
+			"cascaded_agreement_id":  cascadedAgreementID,
+			"cascaded_placement_ids": placementIDs,
 		}
 		if note != "" {
 			afterSnap["note"] = note

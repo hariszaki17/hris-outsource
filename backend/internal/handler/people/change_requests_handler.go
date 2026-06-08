@@ -33,6 +33,30 @@ type crHandlerCursor struct {
 	ID          string    `json:"i"`
 }
 
+// CreateChangeRequest handles POST /employees/{employee_id}/change-requests.
+// Body: ChangeRequestCreate ({changes:{phone?,address?,bank_account?}, note?}).
+// Agent self-scope: the path employee_id must be the caller's own (else 404).
+// Returns 201 with the created PENDING ChangeRequest and a Location header.
+func (h *ChangeRequestHandler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
+	employeeID := chi.URLParam(r, "employee_id")
+
+	var body createChangeRequestBody
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&body); err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(nil).WithCause(err))
+		return
+	}
+
+	cr, err := h.svc.CreateChangeRequest(r.Context(), employeeID, body.toDomainChanges(), body.Note)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Location", "/change-requests/"+cr.ID)
+	httpx.WriteJSON(w, http.StatusCreated, toChangeRequestResponse(cr))
+}
+
 // ListPendingChangeRequests handles GET /change-requests.
 // Supports filters: status, employee_id, request_type, q (reserved/pass-through).
 // Default queue view uses status=PENDING from the FE; endpoint supports all statuses.

@@ -19,6 +19,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 )
 
@@ -32,6 +33,17 @@ type ChangeRequestRepository interface {
 	// Writes in tx.
 	UpdateEmployee(ctx context.Context, tx pgx.Tx, p UpdateEmployeeParams) (domain.Employee, error)
 	ResolveChangeRequest(ctx context.Context, tx pgx.Tx, p ResolveChangeRequestParams) (domain.ChangeRequest, error)
+	CreateChangeRequest(ctx context.Context, tx pgx.Tx, p CreateChangeRequestParams) (domain.ChangeRequest, error)
+}
+
+// CreateChangeRequestParams carries fields for the CreateChangeRequest repo call.
+// Changes is the already-validated, whitelisted set of proposed field changes;
+// RequestType is derived (PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE).
+type CreateChangeRequestParams struct {
+	EmployeeID  string
+	Changes     domain.ChangeRequestChanges
+	RequestType string
+	Note        *string
 }
 
 // ResolveChangeRequestParams carries fields for the ResolveChangeRequest repo call.
@@ -277,6 +289,109 @@ func (s *ChangeRequestService) RejectChangeRequest(ctx context.Context, id, reas
 	return resolved, nil
 }
 
+// CreateChangeRequest files a new PENDING change request for an employee's
+// non-statutory profile fields (phone/address/bank_account — E2 §8 lock).
+//
+// Self-scope (E2 F2.1): an agent may file ONLY for their own employee_id. If the
+// path employee_id differs from the caller's, the existence of the employee is
+// hidden as 404 (no leak), matching GetEmployee. Staff (hr_admin/super_admin) may
+// file on behalf of any employee — the route admits them but they pass the path id
+// directly.
+//
+//   - Requires at least one whitelisted field in changes (else 422 EMPTY_CHANGES).
+//   - Derives request_type: a single field → PHONE|ADDRESS|BANK_ACCOUNT; 2+ → MULTIPLE.
+//   - InTx: inserts the PENDING request + audit.
+//   - Returns the created ChangeRequest (status=pending).
+func (s *ChangeRequestService) CreateChangeRequest(ctx context.Context, employeeID string, changes domain.ChangeRequestChanges, note *string) (domain.ChangeRequest, error) {
+	// Self-scope: an agent may only file for their own record.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if p.EmployeeID == "" || p.EmployeeID != employeeID {
+			return domain.ChangeRequest{}, apperr.NotFound()
+		}
+	}
+
+	// Derive request_type from the present fields; reject an empty change set.
+	requestType, err := deriveRequestType(changes)
+	if err != nil {
+		return domain.ChangeRequest{}, err
+	}
+
+	// Normalize the note (trim; empty → nil; enforce max length).
+	if note != nil {
+		trimmed := strings.TrimSpace(*note)
+		if len(trimmed) > 500 {
+			return domain.ChangeRequest{}, apperr.Invalid(map[string]string{
+				"note": "Catatan maksimal 500 karakter.",
+			})
+		}
+		if trimmed == "" {
+			note = nil
+		} else {
+			note = &trimmed
+		}
+	}
+
+	var created domain.ChangeRequest
+	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		var inErr error
+		created, inErr = s.repo.CreateChangeRequest(ctx, tx, CreateChangeRequestParams{
+			EmployeeID:  employeeID,
+			Changes:     changes,
+			RequestType: requestType,
+			Note:        note,
+		})
+		if inErr != nil {
+			return inErr
+		}
+
+		if err := audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.Action("change_request.create"),
+			EntityType: "change_request",
+			EntityID:   created.ID,
+			Before:     nil,
+			After: map[string]any{
+				"employee_id":  created.EmployeeID,
+				"request_type": created.RequestType,
+				"status":       created.Status,
+			},
+		}); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return domain.ChangeRequest{}, apperr.Internal(err)
+	}
+
+	return created, nil
+}
+
+// deriveRequestType inspects the whitelisted change fields and returns the DB
+// request_type (PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE). Returns a 422 INVALID if
+// no field is present (the DTO's additionalProperties:false already blocks
+// statutory fields, so unknown fields never reach here).
+func deriveRequestType(c domain.ChangeRequestChanges) (string, error) {
+	var present []string
+	if c.Phone != nil {
+		present = append(present, "PHONE")
+	}
+	if c.Address != nil {
+		present = append(present, "ADDRESS")
+	}
+	if c.BankAccount != nil {
+		present = append(present, "BANK_ACCOUNT")
+	}
+	switch len(present) {
+	case 0:
+		return "", apperr.Invalid(map[string]string{
+			"changes": "Minimal satu field perubahan wajib diisi.",
+		})
+	case 1:
+		return present[0], nil
+	default:
+		return "MULTIPLE", nil
+	}
+}
+
 // --- private helpers ---
 
 // buildDiff constructs the per-field old→new diff map for the detail response.
@@ -286,7 +401,7 @@ func buildDiff(changes domain.ChangeRequestChanges, emp domain.Employee) map[str
 
 	if changes.Phone != nil {
 		diff["phone"] = domain.ChangeRequestFieldDiff{
-			Old: emp.Phone,    // *string (nil if not set)
+			Old: emp.Phone, // *string (nil if not set)
 			New: changes.Phone,
 		}
 	}
@@ -360,9 +475,9 @@ func buildBeforeSnap(changes domain.ChangeRequestChanges, emp domain.Employee) m
 	}
 	if changes.BankAccount != nil {
 		snap["bank_account"] = map[string]any{
-			"bank_name":       emp.BankAccount.BankName,
-			"account_number":  emp.BankAccount.AccountNumber,
-			"account_holder":  emp.BankAccount.AccountHolderName,
+			"bank_name":      emp.BankAccount.BankName,
+			"account_number": emp.BankAccount.AccountNumber,
+			"account_holder": emp.BankAccount.AccountHolderName,
 		}
 	}
 	return snap
@@ -379,9 +494,9 @@ func buildAfterSnap(changes domain.ChangeRequestChanges) map[string]any {
 	}
 	if changes.BankAccount != nil {
 		snap["bank_account"] = map[string]any{
-			"bank_name":       changes.BankAccount.BankName,
-			"account_number":  changes.BankAccount.AccountNumber,
-			"account_holder":  changes.BankAccount.AccountHolderName,
+			"bank_name":      changes.BankAccount.BankName,
+			"account_number": changes.BankAccount.AccountNumber,
+			"account_holder": changes.BankAccount.AccountHolderName,
 		}
 	}
 	return snap

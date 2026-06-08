@@ -15,6 +15,34 @@ type rejectRequest struct {
 	Reason string `json:"reason"`
 }
 
+// createChangeRequestBody is the POST /employees/{employee_id}/change-requests
+// body (ChangeRequestCreate schema). Only the whitelisted non-statutory fields
+// are accepted; statutory fields are absent from the schema and ignored.
+type createChangeRequestBody struct {
+	Changes struct {
+		Phone       *string                       `json:"phone"`
+		Address     *string                       `json:"address"`
+		BankAccount *changeRequestBankAccountResp `json:"bank_account"`
+	} `json:"changes"`
+	Note *string `json:"note"`
+}
+
+// toDomainChanges converts the create body's changes into the domain value object.
+func (b createChangeRequestBody) toDomainChanges() domain.ChangeRequestChanges {
+	c := domain.ChangeRequestChanges{
+		Phone:   b.Changes.Phone,
+		Address: b.Changes.Address,
+	}
+	if b.Changes.BankAccount != nil {
+		c.BankAccount = &domain.BankAccount{
+			BankName:          b.Changes.BankAccount.BankName,
+			AccountNumber:     b.Changes.BankAccount.AccountNumber,
+			AccountHolderName: b.Changes.BankAccount.AccountHolderName,
+		}
+	}
+	return c
+}
+
 // --- Response structs ---
 
 // changeRequestBankAccountResp is the bank_account object in changeRequestChangesResp.
@@ -26,24 +54,24 @@ type changeRequestBankAccountResp struct {
 
 // changeRequestChangesResp is the changes object in changeRequestResponse.
 type changeRequestChangesResp struct {
-	Phone       *string                        `json:"phone,omitempty"`
-	Address     *string                        `json:"address,omitempty"`
-	BankAccount *changeRequestBankAccountResp  `json:"bank_account,omitempty"`
+	Phone       *string                       `json:"phone,omitempty"`
+	Address     *string                       `json:"address,omitempty"`
+	BankAccount *changeRequestBankAccountResp `json:"bank_account,omitempty"`
 }
 
 // changeRequestResponse is the ChangeRequest object per the E2 OpenAPI spec (lines 2893-2926).
 // Status is emitted uppercase (PENDING|APPROVED|REJECTED).
 type changeRequestResponse struct {
-	ID              string                    `json:"id"`
-	EmployeeID      string                    `json:"employee_id"`
-	Status          string                    `json:"status"`          // PENDING | APPROVED | REJECTED
-	RequestType     string                    `json:"request_type"`    // PHONE | ADDRESS | BANK_ACCOUNT | MULTIPLE
-	Note            *string                   `json:"note"`
-	Changes         changeRequestChangesResp  `json:"changes"`
-	SubmittedAt     string                    `json:"submitted_at"`    // RFC3339
-	ResolvedAt      *string                   `json:"resolved_at"`     // RFC3339 or null
-	ResolvedBy      *string                   `json:"resolved_by"`
-	RejectionReason *string                   `json:"rejection_reason"`
+	ID              string                   `json:"id"`
+	EmployeeID      string                   `json:"employee_id"`
+	Status          string                   `json:"status"`       // PENDING | APPROVED | REJECTED
+	RequestType     string                   `json:"request_type"` // PHONE | ADDRESS | BANK_ACCOUNT | MULTIPLE
+	Note            *string                  `json:"note"`
+	Changes         changeRequestChangesResp `json:"changes"`
+	SubmittedAt     string                   `json:"submitted_at"` // RFC3339
+	ResolvedAt      *string                  `json:"resolved_at"`  // RFC3339 or null
+	ResolvedBy      *string                  `json:"resolved_by"`
+	RejectionReason *string                  `json:"rejection_reason"`
 }
 
 // employeeRefResp is the compact employee object in changeRequestDetailResponse.

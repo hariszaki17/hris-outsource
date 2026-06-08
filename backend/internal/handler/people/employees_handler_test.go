@@ -110,14 +110,14 @@ type fakeEmployeeRepo struct {
 	loginPhones map[string]bool   // phones already taken by a seeded login (D2)
 
 	// offboard cascade (OB-1) fixtures + capture
-	activeAgreements map[string]string // employee_id → active agreement id
+	activeAgreements map[string]string   // employee_id → active agreement id
 	placements       map[string][]string // employee_id → non-terminal placement ids
 
-	closedAgreementID    string // last agreement closed via CloseAgreement
+	closedAgreementID     string // last agreement closed via CloseAgreement
 	closedAgreementReason string
-	endedPlacementIDs    []string
-	endLifecycleStatus   string
-	endReason            string
+	endedPlacementIDs     []string
+	endLifecycleStatus    string
+	endReason             string
 
 	// error overrides (set per-test to trigger error paths)
 	createErr error
@@ -340,6 +340,10 @@ func newEmployeeHarness(t *testing.T) *employeeHarness {
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.Get("/employees", h.ListEmployees)
+	})
+	// Detail split out — agent admitted (self-scoped in service), matching server.go.
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/employees/{employee_id}", h.GetEmployee)
 	})
 	r.Group(func(r chi.Router) {
@@ -526,6 +530,41 @@ func TestGetEmployee_404(t *testing.T) {
 	rr := h.do("GET", "/employees/SWP-EMP-NONEXIST", nil)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "NOT_FOUND" {
+		t.Errorf("error.code = %v, want NOT_FOUND", errObj["code"])
+	}
+}
+
+// TestGetEmployee_AgentSelf_200 — an agent reading their OWN record succeeds.
+func TestGetEmployee_AgentSelf_200(t *testing.T) {
+	h := newEmployeeHarness(t)
+	emps := h.seedEmployee(1)
+	id := emps[0].ID
+	h.principal = auth.Principal{UserID: "SWP-USR-AG", EmployeeID: id, Role: auth.RoleAgent}
+
+	rr := h.do("GET", "/employees/"+id, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("agent self-read: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if body["id"] != id {
+		t.Errorf("id = %v, want %s", body["id"], id)
+	}
+}
+
+// TestGetEmployee_AgentAnother_404 — an agent reading ANOTHER employee is hidden as 404.
+func TestGetEmployee_AgentAnother_404(t *testing.T) {
+	h := newEmployeeHarness(t)
+	emps := h.seedEmployee(1)
+	otherID := emps[0].ID
+	h.principal = auth.Principal{UserID: "SWP-USR-AG", EmployeeID: "SWP-EMP-OTHER-SELF", Role: auth.RoleAgent}
+
+	rr := h.do("GET", "/employees/"+otherID, nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("agent cross-read: expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
 	body := decodeBody(t, rr)
 	errObj, _ := body["error"].(map[string]any)
