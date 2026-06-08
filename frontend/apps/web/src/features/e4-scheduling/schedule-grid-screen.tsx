@@ -347,7 +347,7 @@ export function ScheduleGridScreen() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
+    <div className="flex min-h-full flex-col gap-4 p-6">
       {/* Page header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
