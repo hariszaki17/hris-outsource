@@ -18,11 +18,12 @@ import { Card } from '../../src/ui/Card';
 import { StatusBadge } from '../../src/ui/StatusBadge';
 import { Text } from '../../src/ui/Text';
 
-function timeOf(iso: string): string {
-  return formatInstant(iso, { timeStyle: 'short' });
+// check_in_at is null on a true-ABSENT row (E5 true-absence model) — guard the formatters.
+function timeOf(iso?: string | null): string {
+  return iso ? formatInstant(iso, { timeStyle: 'short' }) : '—';
 }
-function dateOf(iso: string): string {
-  return formatInstant(iso, { dateStyle: 'medium' });
+function dateOf(iso?: string | null): string {
+  return iso ? formatInstant(iso, { dateStyle: 'medium' }) : '—';
 }
 
 function HistoryRow({ item }: { item: Attendance }) {
@@ -50,7 +51,7 @@ function HistoryRow({ item }: { item: Attendance }) {
         onPress={() =>
           router.push({
             pathname: '/correction',
-            params: { attendanceId: item.id, date: item.check_in_at },
+            params: { attendanceId: item.id, date: item.check_in_at ?? item.shift_start_at ?? '' },
           })
         }
       >
@@ -70,7 +71,9 @@ export default function AttendanceScreen() {
 
   const body = list.data?.data as AttendancePage | undefined;
   const items: Attendance[] = body?.data ?? [];
-  const open = items.find((a) => !a.check_out_at);
+  // "open" = actually clocked in (has check-in) and not yet clocked out. An ABSENT row
+  // also has no check_out_at but no check_in_at — it must NOT count as open.
+  const open = items.find((a) => a.check_in_at && !a.check_out_at);
 
   async function refresh() {
     await qc.invalidateQueries({ queryKey: ['/attendance'] });

@@ -1,12 +1,17 @@
+import { type Href, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Alert, View } from 'react-native';
+import { Alert, Pressable, View } from 'react-native';
 import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
 
+// Feature sections reachable from More (added per phase: leave=17, OT=18, payslip=19, profile=20).
+const MENU: { key: 'leave'; href: Href }[] = [{ key: 'leave', href: '/leave' }];
+
 export default function More() {
   const { t } = useTranslation();
+  const router = useRouter();
   const { user, signOut } = useSession();
 
   return (
@@ -17,6 +22,18 @@ export default function More() {
           {user?.phone ?? ''}
         </Text>
       </Card>
+
+      <View className="gap-2">
+        {MENU.map((m) => (
+          <Pressable key={m.key} onPress={() => router.push(m.href)}>
+            <Card>
+              <Text variant="body" className="font-semibold">
+                {t(`m:menu.${m.key}`)}
+              </Text>
+            </Card>
+          </Pressable>
+        ))}
+      </View>
 
       <Button
         variant="secondary"
