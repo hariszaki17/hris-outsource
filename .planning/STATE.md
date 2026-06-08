@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Mobile Foundation (Expo Scaffold)
-status: completed
-stopped_at: Phase 12 complete (12-01-PLAN.md)
+milestone: v1.2
+milestone_name: Mobile MVP (Agent App)
+status: planning
+stopped_at: v1.2 roadmap created (Phases 13–20); Phase 13 not started
 last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — Phase 12 (Expo Scaffold) COMPLETE in worktree feat/mobile-scaffold. apps/mobile is a real Expo app (SDK 56, managed + dev-client, Expo Router) wired into the pnpm/Turborepo monorepo: Metro workspace resolution, @swp/api-client + @swp/shared + @swp/design-tokens consumed by a smoke screen, NativeWind theme generated from the shared tokens, web @swp/ui NOT reused (thin RN primitive layer in src/ui). Native deps installed + config-plugged: expo-location/notifications/image-picker/updates (+ force-update gate stub; backend min_supported_version is a documented follow-up). react/react-dom deduped to 19.2.3 via pnpm override; node-linker=hoisted. Verified: tsc clean, biome clean, expo-doctor 21/21, expo export bundles 1499 modules. v1.1 milestone CLOSED."
+last_activity: "2026-06-08 — v1.1 (Expo scaffold) shipped; opened v1.2 Mobile MVP (Agent App). Full-stack vertical-slice roadmap, Phases 13–20: 13 shell+auth+Beranda+notifications (BE READY), 14 clock-in/out+geofence+my-attendance (BE NEW), 15 correction (NEW), 16 schedule (open-route), 17 leave+upload (NEW), 18 OT (NEW), 19 payslip (open-route), 20 profile+change-request (open-route+NEW). Backend audit: auth/notifications/dashboard + all shift-leader endpoints already done; agent gap = clock-in/out (missing) + open-agent-route reads + new agent POST flows. SL app deferred to a later milestone. Awaiting go to plan/execute Phase 13."
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 100
+  total_phases: 8
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -20,17 +20,17 @@ progress:
 
 See: .planning/PROJECT.md (updated 2026-06-08)
 
-**Core value:** A real, buildable Expo app exists in the monorepo, consuming the shared contract/tokens packages, with all MVP-required native capabilities installed.
-**Current focus:** Milestone v1.1 — Phase 12 (Expo Scaffold). Scaffold only; no feature screens.
+**Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Roadmap created (Phases 13–20); Phase 13 (app shell + auth) is next up.
 
 ## Current Position
 
-Phase: 12 of 12 (Expo Scaffold) — COMPLETE
-Plan: 12-01 COMPLETE (1 of 1)
-Status: Milestone v1.1 complete — Expo scaffold shipped on branch feat/mobile-scaffold
-Last activity: 2026-06-08 — Phase 12 complete; Expo app scaffolded, wired, and verified (tsc/biome/expo-doctor/expo export all green).
+Phase: 13 of 20 (App shell + auth + Beranda) — not started
+Plan: —
+Status: v1.2 roadmap created; ready to plan/execute Phase 13
+Last activity: 2026-06-08 — v1.1 scaffold shipped; v1.2 Mobile MVP roadmap (8 full-stack phases) created.
 
-Progress: [██████████] 100%
+Progress: [          ] 0% (0/8 phases)
 
 ## Performance Metrics
 

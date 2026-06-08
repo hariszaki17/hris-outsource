@@ -13,23 +13,35 @@ API** by implementing the endpoints the FE actually calls, and proving each work
 Every screen the web app shows today works end-to-end against the real backend — provable
 by a Playwright test that exercises the real FE against the real Go API.
 
-## Current Milestone: v1.1 Mobile Foundation (Expo Scaffold)
+## Current Milestone: v1.2 Mobile MVP (Agent App)
 
-**Goal:** Stand up a real, buildable Expo app in `frontend/apps/mobile` (replacing the
-placeholder) that boots, resolves through the pnpm/Turborepo monorepo, consumes the three
-surface-agnostic shared packages, and ships with every MVP-required native capability
-installed — so agent/shift-leader feature screens can be built later on a proven foundation.
+**Goal:** An agent can run their full daily work loop from the phone — clock in/out at the
+right site, view their schedule, fix mistakes, request leave/OT, and see their pay — against
+the real Go backend. Full agent persona; shift-leader app is a later milestone.
 
-**Target features (scaffold only — NO feature screens this milestone):**
-- Expo (managed + dev-client, latest SDK) + Expo Router; boots iOS/Android.
-- Monorepo wiring: Metro for pnpm workspace; `@swp/api-client` + `@swp/shared` + `@swp/design-tokens` consumed; web `@swp/ui` deliberately not reused (thin RN primitive layer instead).
-- NativeWind driven by `@swp/design-tokens` (tokens, no raw hex).
-- Native deps locked now (minimizes future forced store reinstalls): `expo-location` (F5.1 geofence), `expo-notifications` (F10.1 push), `expo-image-picker` (F6.2 docs), `expo-updates` (OTA + force-update gate stub).
-- Tooling parity: TS strict, Biome, turbo typecheck/lint include mobile.
+**Build model:** Full-stack vertical slices. Each phase ships the needed Go endpoint(s) + the
+RN screen(s) together, proven end-to-end. Builds on the v1.1 Expo scaffold (`feat/mobile-scaffold`).
 
-**Key context:** Greenfield Expo app added to an existing committed monorepo. Built in an
-isolated git worktree on branch `feat/mobile-scaffold`. The `min_supported_version`
-version-gate is a documented FOLLOW-UP backend contract, not implemented here.
+**Phases (13–20):**
+- 13 App shell + auth + Beranda + notifications (backend READY)
+- 14 Clock in/out + geofence + my-attendance (backend NEW + open-route) — the killer loop
+- 15 Attendance correction (backend NEW)
+- 16 My schedule (backend open-route)
+- 17 Leave request + doc upload (backend NEW)
+- 18 Overtime request/confirm (backend NEW)
+- 19 Payslip history (backend open-route)
+- 20 Profile self-service + change-request (backend open-route + NEW)
+
+**Key context (backend coverage audit 2026-06-08):** auth, notifications, dashboard, and ALL
+shift-leader endpoints are already implemented. The agent gap is (a) clock-in/out + photo —
+genuinely missing, the biggest build; (b) several agent reads (attendance, schedule, payslip,
+profile) exist but the route guard excludes `agent` (spec x-rbac already allows agent self-scope)
+— work is "open an agent-scoped route + self-filter"; (c) agent create flows (correction, leave,
+OT, change-request) need new POST routes. Planned in worktree `feat/mobile-scaffold` (pre-merge).
+NOTE: backend changes here may conflict with parallel backend work on `main` — coordinate merges.
+
+**Previous milestone:** v1.1 Mobile Foundation (Expo scaffold) shipped 2026-06-08 —
+`milestones/v1.1-REQUIREMENTS.md`.
 
 ## Requirements
 

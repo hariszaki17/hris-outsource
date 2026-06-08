@@ -1,68 +1,99 @@
-# Requirements: SWP HRIS — Mobile Foundation (Expo Scaffold)
+# Requirements: SWP HRIS — Mobile MVP (Agent App)
 
 **Defined:** 2026-06-08
-**Milestone:** v1.1 — Mobile Foundation
-**Core Value:** A real, buildable Expo app exists in the monorepo, consuming the shared
-contract/tokens packages, with all MVP-required native capabilities installed — so feature
-screens can be built on a proven foundation without re-litigating tooling or forcing reinstalls.
+**Milestone:** v1.2 — Mobile MVP (Agent App)
+**Core Value:** An agent can run their entire daily work loop from the phone — clock in/out at
+the right site, see their schedule, fix mistakes, request leave/OT, and see their pay — against
+the real Go backend.
 
-## v1.1 Requirements
+**Build model:** Full-stack vertical slices. Each feature phase delivers the needed Go
+endpoint(s) AND the React Native screen(s) together, proven end-to-end. Builds on the v1.1 Expo
+scaffold (branch `feat/mobile-scaffold`). Shift-leader app is a **later milestone** (its
+backend endpoints already exist — verify/approve-L1 routes are live).
 
-Scaffold-only. Feature screens are explicitly deferred (see Out of Scope).
+## Backend reality (from coverage audit 2026-06-08)
 
-### Scaffold (SCAF)
+Three states drive per-feature effort:
+- **READY** — endpoint exists, implemented, agent-callable. (auth, notifications, dashboard)
+- **OPEN-ROUTE** — endpoint exists + implemented, but the route guard excludes `agent`; spec
+  x-rbac already allows agent self-scope. Work = open an agent-scoped route + self-filter.
+  (my-attendance, my-schedule, payslip, profile self-read)
+- **NEW** — no handler yet; build it. (clock-in/out + photo, agent correction POST, agent leave
+  POST + attachment, agent OT POST + confirm, change-request POST)
 
-- [x] **SCAF-01**: The `frontend/apps/mobile` placeholder is replaced by a real Expo app (managed workflow + dev-client) on the latest stable SDK that boots via Expo for iOS and Android.
-- [x] **SCAF-02**: Navigation uses Expo Router (file-based, typed routes) with at least one route group and a root layout.
-- [x] **SCAF-03**: A minimal smoke screen renders that imports and exercises all three shared packages (proves the wiring, not a feature).
+## v1.2 Requirements (Agent)
 
-### Monorepo wiring (MONO)
+### Shell & session (SHELL) — backend READY
 
-- [x] **MONO-01**: The mobile package declares `@swp/api-client`, `@swp/shared`, `@swp/design-tokens` as `workspace:*` dependencies and resolves them through pnpm.
-- [x] **MONO-02**: Metro is configured for the pnpm monorepo (watchFolders to the workspace root + nodeModulesPaths / symlink resolution) so workspace packages resolve at bundle time.
-- [x] **MONO-03**: The web-only `@swp/ui` (DOM/shadcn/Tailwind) is NOT imported; a thin RN primitive layer lives inside `apps/mobile` instead, backed by the shared tokens.
+- [ ] **SHELL-01**: Agent logs in on mobile (E1) and the session/token persists across app restarts (secure storage).
+- [ ] **SHELL-02**: Authenticated tab navigation (Beranda · Attendance · Schedule · More) with a force-update gate hook (from `update-gate.ts`).
+- [ ] **SHELL-03**: Beranda/home dashboard renders the agent's role-shaped `GET /dashboards/me`.
+- [ ] **SHELL-04**: Notifications list + mark-read / mark-all (`GET /notifications`), with empty/loading/error states.
 
-### Styling (STYLE)
+### Clock in/out + geofence (CLOCK) — backend NEW
 
-- [x] **STYLE-01**: NativeWind is wired and renders Tailwind classes in RN.
-- [x] **STYLE-02**: NativeWind theme is driven by the `@swp/design-tokens` TS export (color/type/space) — no raw hex in app code (mirrors web ENGINEERING.md token rule).
+- [ ] **CLOCK-01** (BE): Implement `POST /attendance:clock-in` / `:clock-out` (+ photo upload) with server-side geofence validation against the placement's site (`lat/lng/radius_m`); out-of-fence is allowed + flagged, not blocked (F5.1).
+- [ ] **CLOCK-02** (FE): Clock screen captures GPS (`expo-location`), shows in/out-of-geofence state, submits clock-in/out, handles all variants (success, out-of-fence flagged, no-GPS, already-clocked, network error).
+- [ ] **CLOCK-03** (FE): Optional clock photo via `expo-image-picker`/camera wired to the photo-upload endpoint.
 
-### Native capabilities (NATIVE)
+### My attendance + correction (ATTEND) — read OPEN-ROUTE, correction NEW
 
-- [x] **NATIVE-01**: `expo-location` installed + config-plugged (foundation for E5 F5.1 GPS geofence). Permission strings declared.
-- [x] **NATIVE-02**: `expo-notifications` installed + config-plugged (foundation for E10 F10.1 push).
-- [x] **NATIVE-03**: `expo-image-picker` installed + config-plugged (foundation for E6 F6.2 leave-doc upload).
-- [x] **NATIVE-04**: `expo-updates` installed + config-plugged for EAS Update (OTA), with a documented force-update-on-launch gate stub.
+- [ ] **ATTEND-01** (BE): Open `GET /attendance` to `agent` self-scope (own records only) (F5.5).
+- [ ] **ATTEND-02** (FE): My-attendance history + detail screen (status, late minutes, geofence flag).
+- [ ] **ATTEND-03** (BE): Implement agent-scoped `POST /corrections` (type check_in/check_out/code, proposed time, reason; 7-day self window) (F5.4).
+- [ ] **ATTEND-04** (FE): File-correction form from an attendance record + correction status view.
 
-### Tooling parity (TOOL)
+### My schedule (SCHED) — backend OPEN-ROUTE
 
-- [x] **TOOL-01**: TypeScript strict; `turbo run typecheck` includes mobile and passes.
-- [x] **TOOL-02**: Biome lint includes mobile and passes (web Biome config reused/extended).
-- [x] **TOOL-03**: A documented stub/TODO records the FOLLOW-UP backend `min_supported_version` version-gate contract (no backend change this milestone).
+- [ ] **SCHED-01** (BE): Open `GET /schedule` to `agent` self-scope (own placement shifts, date range) (F4.3).
+- [ ] **SCHED-02** (FE): Week schedule view + shift detail; shift reminder hook (local notification).
 
-## Future Requirements (deferred to later milestones)
+### Leave request (LEAVE) — backend NEW
 
-### Feature screens
+- [ ] **LEAVE-01** (BE): Implement agent-scoped `POST /leave-requests` (+ `GET` own list, attachment upload) with quota + schedule-impact validation; routes to SL→HR approval (F6.2).
+- [ ] **LEAVE-02** (FE): Leave request form (type, dates, duration, delegate, document upload via `expo-image-picker`) + own-requests list + status.
 
-- **MOB-AGENT**: Clock in/out + geofence (F5.1), my schedule (F4.3), leave request (F6.2), OT request/confirm (F7.2), payslip history (F8.1), attendance correction (F5.4), profile self-service (F2.1), Beranda + notifications (F10.x).
-- **MOB-LEADER**: Attendance verification queue (F5.3/F5.4), leave approval L1 (F6), OT approval L1 (F7), SL team dashboard + combined inbox (F10).
+### Overtime (OT) — backend NEW
 
-## Out of Scope
+- [ ] **OT-01** (BE): Implement agent-scoped `POST /overtime` (request) and `POST /overtime/{id}:confirm` (confirm auto-detected); own list (F7.2).
+- [ ] **OT-02** (FE): OT request + confirm-auto-detected screens + OT detail.
+
+### Payslip (PAY) — backend OPEN-ROUTE
+
+- [ ] **PAY-01** (BE): Open `GET /payslips` (+ `{id}`) to `agent` self-scope (F8.1).
+- [ ] **PAY-02** (FE): Payslip history list + summary (take-home, gross, paid date); read-only.
+
+### Profile self-service (PROFILE) — read OPEN-ROUTE, change-request NEW
+
+- [ ] **PROFILE-01** (BE): Open `GET /employees/{id}` self-read to `agent`; implement `POST /change-requests` (phone/address/bank → HR approval) (F2.1).
+- [ ] **PROFILE-02** (FE): Profile view + limited-edit (phone/address/bank) submitting a change-request; Pengaturan (change password, logout).
+
+## Future (next milestone)
+
+### Shift-leader app (MOB-LEADER) — backend READY (no BE work)
+
+- Attendance verification queue + detail (F5.3), leave approval L1 (F6), OT approval L1 (F7), SL team dashboard + combined inbox (F10). All SL endpoints already live.
+
+## Out of Scope (v1.2)
 
 | Feature | Reason |
 |---------|--------|
-| Any feature screen / business flow | This milestone is foundation only; screens come once the scaffold is proven. |
-| Backend `min_supported_version` endpoint | Follow-up backend contract; mobile leaves a documented stub. |
-| EAS build/release pipeline + app store config | Infra milestone; scaffold only proves local boot + bundle. |
-| Promoting RN primitives to `@swp/ui` | Premature; promote on 2nd domain-agnostic reuse per ENGINEERING.md. |
-| Bare React Native / ejecting | Expo managed chosen; native deps are first-party Expo modules. |
+| Shift-leader app | Separate milestone; its backend is already done, so it ships fast on its own. |
+| EAS build/release pipeline + real OTA URL | Infra milestone; scaffold stub stands. |
+| Offline queue for clock-in | Post-MVP; MVP assumes connectivity (flag + retry only). |
+| Background geofence / auto clock-out on mobile | Server already auto-closes; mobile MVP is foreground clock only. |
+| PDF payslip | Backend still Excel-only; mobile shows summary fields. |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCAF-01..03 | Phase 12 | Pending |
-| MONO-01..03 | Phase 12 | Pending |
-| STYLE-01..02 | Phase 12 | Pending |
-| NATIVE-01..04 | Phase 12 | Pending |
-| TOOL-01..03 | Phase 12 | Pending |
+| SHELL-01..04 | Phase 13 | Pending |
+| CLOCK-01..03 | Phase 14 | Pending |
+| ATTEND-01..02 | Phase 14 | Pending |
+| ATTEND-03..04 | Phase 15 | Pending |
+| SCHED-01..02 | Phase 16 | Pending |
+| LEAVE-01..02 | Phase 17 | Pending |
+| OT-01..02 | Phase 18 | Pending |
+| PAY-01..02 | Phase 19 | Pending |
+| PROFILE-01..02 | Phase 20 | Pending |
