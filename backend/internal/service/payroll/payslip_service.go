@@ -19,6 +19,7 @@ import (
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/payroll"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/crypto"
 )
 
@@ -43,6 +44,17 @@ func NewPayslipService(repo PayslipRepository, txm TxRunner, cipher *crypto.Ciph
 // rows are NEVER filtered out and NEVER cause a non-200. The returned
 // missingHistory flag is true on zero rows (→ meta.code MISSING_PAYROLL_HISTORY).
 func (s *PayslipService) List(ctx context.Context, f PayslipFilter) (rows []dom.Payslip, next *string, hasMore, missingHistory bool, err error) {
+	// Agent (mobile, scope:self / PAY-01): force employee_id to the caller; reject
+	// an explicit employee_id that is not their own. Staff (hr/super) keep the
+	// global archive (route RBAC already gates non-self roles out).
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if f.EmployeeID != nil && *f.EmployeeID != p.EmployeeID {
+			return nil, nil, false, false, apperr.OutOfScope()
+		}
+		eid := p.EmployeeID
+		f.EmployeeID = &eid
+	}
+
 	limit := clampLimit(f.Limit)
 	f.Limit = limit + 1
 
@@ -116,6 +128,15 @@ func (s *PayslipService) Get(ctx context.Context, id string) (dom.Payslip, error
 	}
 	if err != nil {
 		return dom.Payslip{}, apperr.Internal(err)
+	}
+
+	// Agent (mobile, scope:self / PAY-01): may read only their own payslip; any
+	// other employee's payslip is hidden as 404 (no existence leak). Staff
+	// (hr/super) keep global read (route RBAC gates other roles out).
+	if pr, ok := auth.PrincipalFrom(ctx); ok && pr.Role == auth.RoleAgent {
+		if pr.EmployeeID == "" || pr.EmployeeID != r.EmployeeID {
+			return dom.Payslip{}, apperr.NotFound()
+		}
 	}
 
 	p := s.summaryFromRow(r)

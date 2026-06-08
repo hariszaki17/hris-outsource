@@ -562,9 +562,18 @@ func New(d Deps) http.Handler {
 			// COORDINATION POINT: future Phase-10 slices append AFTER this block.
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+				// Payslip READS (list + detail) are self-or-global (PAY-01): the
+				// agent reads ONLY their own (employee_id forced to the caller in
+				// the service; another employee's id → 404, no existence leak).
+				// hr/super keep the global archive.
 				r.Get("/payslips", d.Payroll.ListPayslips)
 				r.Get("/payslips/{id}", d.Payroll.GetPayslip)
+			})
+			// Audit-notes (read + append) and async export stay HR/Super-Admin
+			// ONLY — the agent self-summary surface is reads, not these.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.Get("/payslips/{id}/audit-notes", d.Payroll.ListAuditNotes)
 				r.With(d.Idempotency.Handler).Post("/payslips/{id}/audit-notes", d.Payroll.CreateAuditNote)
 				r.With(d.Idempotency.Handler).Post("/payslips:export", d.Payroll.ExportPayslips)

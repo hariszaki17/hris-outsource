@@ -395,11 +395,13 @@ func TestCreateAuditNote_MissingPayslip404(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RBAC — agent + shift_leader → 403 on every read/note endpoint.
+// RBAC — shift_leader → 403 on every read/note endpoint (no payroll access).
+// The AGENT is admitted to the READS (list/detail, self-scoped — see
+// payslip_agent_scope_test.go) but stays 403 on the audit-note endpoints.
 // ---------------------------------------------------------------------------
 
 func TestPayslipReadEndpoints_RBACForbidden(t *testing.T) {
-	endpoints := []struct {
+	allEndpoints := []struct {
 		name, method, path string
 		body               any
 	}{
@@ -408,16 +410,27 @@ func TestPayslipReadEndpoints_RBACForbidden(t *testing.T) {
 		{"notes-list", "GET", "/payslips/" + psFinal + "/audit-notes", nil},
 		{"notes-create", "POST", "/payslips/" + psFinal + "/audit-notes", map[string]any{"text": "x"}},
 	}
-	for _, role := range []auth.Role{auth.RoleAgent, auth.RoleShiftLeader} {
-		for _, ep := range endpoints {
-			t.Run(string(role)+"-"+ep.name, func(t *testing.T) {
-				h := newHarness(t, role)
-				h.seedFinal(psFinal, empBudi, "Budi Santoso", 2025, 12, ymd(2025, time.December, 28), finalMoney)
-				rr := h.do(ep.method, ep.path, ep.body)
-				if rr.Code != http.StatusForbidden {
-					t.Fatalf("%s %s as %s: expected 403, got %d: %s", ep.method, ep.path, role, rr.Code, rr.Body.String())
-				}
-			})
-		}
+	// shift_leader: forbidden everywhere (no payroll surface at all).
+	for _, ep := range allEndpoints {
+		t.Run("shift_leader-"+ep.name, func(t *testing.T) {
+			h := newHarness(t, auth.RoleShiftLeader)
+			h.seedFinal(psFinal, empBudi, "Budi Santoso", 2025, 12, ymd(2025, time.December, 28), finalMoney)
+			rr := h.do(ep.method, ep.path, ep.body)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("%s %s as shift_leader: expected 403, got %d: %s", ep.method, ep.path, rr.Code, rr.Body.String())
+			}
+		})
+	}
+	// agent: forbidden on the audit-note endpoints only (reads are self-scoped).
+	noteEndpoints := allEndpoints[2:]
+	for _, ep := range noteEndpoints {
+		t.Run("agent-"+ep.name, func(t *testing.T) {
+			h := newHarness(t, auth.RoleAgent)
+			h.seedFinal(psFinal, empBudi, "Budi Santoso", 2025, 12, ymd(2025, time.December, 28), finalMoney)
+			rr := h.do(ep.method, ep.path, ep.body)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("%s %s as agent: expected 403, got %d: %s", ep.method, ep.path, rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

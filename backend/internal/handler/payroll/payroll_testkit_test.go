@@ -566,12 +566,16 @@ func newHarness(t *testing.T, principalRole auth.Role) *harness {
 		})
 	})
 
-	// Mirror server.go: all 5 FE-used ops under RequireRole(super/hr); the two
-	// POSTs wrap the idempotency middleware.
+	// Mirror server.go: payslip READS are self-or-global (agent + hr/super);
+	// audit-notes (read + append) and async export stay HR/Super-Admin ONLY. The
+	// two POSTs wrap the idempotency middleware.
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 		r.Get("/payslips", handler.ListPayslips)
 		r.Get("/payslips/{id}", handler.GetPayslip)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 		r.Get("/payslips/{id}/audit-notes", handler.ListAuditNotes)
 		r.With(idem.Handler).Post("/payslips/{id}/audit-notes", handler.CreateAuditNote)
 		r.With(idem.Handler).Post("/payslips:export", handler.ExportPayslips)
