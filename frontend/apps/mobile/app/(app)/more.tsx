@@ -7,7 +7,10 @@ import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
 
 // Feature sections reachable from More (added per phase: leave=17, OT=18, payslip=19, profile=20).
-const MENU: { key: 'leave'; href: Href }[] = [{ key: 'leave', href: '/leave' }];
+const MENU: { key: 'leave' | 'overtime'; href: Href }[] = [
+  { key: 'leave', href: '/leave' },
+  { key: 'overtime', href: '/overtime' },
+];
 
 export default function More() {
   const { t } = useTranslation();
