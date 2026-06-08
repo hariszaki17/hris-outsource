@@ -20,6 +20,7 @@
     "@swp/ui": "workspace:*",
     "@tanstack/react-query": "5.64.1",
     "@tanstack/react-router": "1.95.1",
+    "date-holidays": "^3.30.2",
     "i18next": "24.2.1",
     "lucide-react": "0.469.0",
     "react": "19.0.0",
@@ -45,6 +46,8 @@
     "vitest": "2.1.8"
   },
   "msw": {
-    "workerDirectory": ["public"]
+    "workerDirectory": [
+      "public"
+    ]
   }
 }

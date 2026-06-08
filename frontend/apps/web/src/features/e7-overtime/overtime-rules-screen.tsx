@@ -21,9 +21,10 @@ import {
 import { type Holiday, type HolidayPage, useListHolidays } from '@swp/api-client/e7';
 import { Button, DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { CalendarPlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { HolidayImportModal } from './holiday-import-overlay.tsx';
 import { DeleteHolidayConfirm, HolidayFormModal } from './holiday-overlays.tsx';
 import { holidayCategoryTone } from './overtime-shared.tsx';
 
@@ -73,6 +74,7 @@ export function OvertimeRulesScreen() {
   const [holidayModalOpen, setHolidayModalOpen] = useState(false);
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
   const [deletingHoliday, setDeletingHoliday] = useState<Holiday | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const rulesQuery = useListOvertimeRules({ limit: 200 });
   const holidaysQuery = useListHolidays({ limit: 200 });
@@ -195,14 +197,24 @@ export function OvertimeRulesScreen() {
         <section className="w-[380px] overflow-hidden rounded-[12px] border border-border bg-surface">
           <header className="flex items-center justify-between border-b border-border-soft px-[18px] py-[14px]">
             <h2 className="text-[15px] font-bold text-text">{t('holidays.cardTitle')}</h2>
-            <button
-              type="button"
-              onClick={openAddHoliday}
-              aria-label={t('holidays.addTitle')}
-              className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-surface-2"
-            >
-              <Plus className="size-[18px]" aria-hidden="true" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-primary hover:bg-surface-2"
+              >
+                <CalendarPlus className="size-[15px]" aria-hidden="true" />
+                {t('holidays.import.button')}
+              </button>
+              <button
+                type="button"
+                onClick={openAddHoliday}
+                aria-label={t('holidays.addTitle')}
+                className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-surface-2"
+              >
+                <Plus className="size-[18px]" aria-hidden="true" />
+              </button>
+            </div>
           </header>
 
           {holidaysQuery.isError ? (
@@ -288,6 +300,11 @@ export function OvertimeRulesScreen() {
         open={deletingHoliday !== null}
         onClose={() => setDeletingHoliday(null)}
         onDeleted={() => holidaysQuery.refetch()}
+      />
+      <HolidayImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => holidaysQuery.refetch()}
       />
     </div>
   );
