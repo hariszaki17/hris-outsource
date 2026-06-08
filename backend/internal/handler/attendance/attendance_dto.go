@@ -31,6 +31,34 @@ type bulkRejectRequest struct {
 	Reason string   `json:"reason"`
 }
 
+// clockInRequest is the openapi ClockInRequest. wfo is a *bool so an omitted value
+// applies the spec default (true); employee_id is intentionally omitted — the agent is
+// always self (server fills from token).
+type clockInRequest struct {
+	Lat                  float64 `json:"lat"`
+	Lng                  float64 `json:"lng"`
+	GPSAvailable         bool    `json:"gps_available"`
+	WFO                  *bool   `json:"wfo"`
+	PhotoID              *string `json:"photo_id"`
+	ForceOutsideGeofence bool    `json:"force_outside_geofence"`
+}
+
+// wfoOrDefault applies the spec default (true) when wfo is omitted.
+func (c clockInRequest) wfoOrDefault() bool {
+	if c.WFO == nil {
+		return true
+	}
+	return *c.WFO
+}
+
+// clockOutRequest is the openapi ClockOutRequest.
+type clockOutRequest struct {
+	Lat          float64 `json:"lat"`
+	Lng          float64 `json:"lng"`
+	GPSAvailable bool    `json:"gps_available"`
+	PhotoID      *string `json:"photo_id"`
+}
+
 // --- response DTOs ---
 
 // geofenceResponse is the openapi GeofenceCheck (omitted/null when no capture).

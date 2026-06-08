@@ -130,6 +130,15 @@ func (s *AttendanceService) List(ctx context.Context, f AttendanceFilter) ([]att
 		cid := p.CompanyID
 		f.CompanyID = &cid
 	}
+	if p.Role == auth.RoleAgent {
+		// Agent (mobile, scope:self): force employee_id to the caller; reject an
+		// explicit employee_id that is not their own.
+		if f.EmployeeID != nil && *f.EmployeeID != p.EmployeeID {
+			return nil, nil, false, apperr.OutOfScope()
+		}
+		eid := p.EmployeeID
+		f.EmployeeID = &eid
+	}
 
 	limit := clampLimit(f.Limit)
 	f.Limit = limit + 1 // fetch one extra to detect has_more
@@ -165,6 +174,14 @@ func (s *AttendanceService) Get(ctx context.Context, id string) (att.Attendance,
 	}
 	if err != nil {
 		return att.Attendance{}, apperr.Internal(err)
+	}
+	// Agent (mobile, scope:self): may read only their own record; anything else is
+	// hidden as 404 (no existence leak), matching the cross-scope rule below.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if p.EmployeeID != "" && p.EmployeeID == rec.EmployeeID {
+			return rec, nil
+		}
+		return att.Attendance{}, apperr.NotFound()
 	}
 	if serr := rbac.GuardCompany(ctx, rec.CompanyID); serr != nil {
 		// Cross-scope reads return 404 (hide existence) per openapi.

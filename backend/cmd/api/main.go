@@ -216,6 +216,11 @@ func run() error {
 	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
 	attendanceHandler := attendancehttp.NewHandler(attendanceSvc, correctionSvc)
 
+	// Agent clock-in/out (F5.1): mobile self-scope create/close of attendance rows.
+	clockRepo := attendancerepo.NewClockRepo(pool)
+	clockSvc := attendancesvc.NewClockService(clockRepo, txm)
+	clockHandler := attendancehttp.NewClockHandler(clockSvc)
+
 	// Absence-sweep cron (07-xx / F5.2): in-process, single-binary job that writes
 	// ABSENT rows for scheduled shifts that ended past the grace with no clock-in.
 	// The partial unique index on attendance(schedule_id) is the idempotency guard.
@@ -298,6 +303,7 @@ func run() error {
 		Placement:            placementHandler,
 		Scheduling:           schedulingHandler,
 		Attendance:           attendanceHandler,
+		Clock:                clockHandler,
 		Leave:                leaveHandler,
 		Overtime:             overtimeHandler,
 		Payroll:              payrollHandler,

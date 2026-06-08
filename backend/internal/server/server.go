@@ -55,6 +55,8 @@ type Deps struct {
 	Scheduling *schedulinghttp.Handler
 	// ATTENDANCE slice (07-02): verify/reject (+bulk) + corrections (E5).
 	Attendance *attendancehttp.Handler
+	// ATTENDANCE clock slice (F5.1): agent mobile clock-in/out (E5).
+	Clock *attendancehttp.ClockHandler
 	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
 	Leave *leavehttp.Handler
 	// OVERTIME slice (09-02): OT two-level approval + holiday calendar (E7).
@@ -384,11 +386,27 @@ func New(d Deps) http.Handler {
 			// Leader scope is enforced in the service via rbac.GuardCompany.
 			// COORDINATION POINT: future Phase-7 slices append AFTER this block.
 			// ---------------------------------------------------------------
+			// Attendance READS: super_admin, hr_admin, shift_leader, AND agent
+			// (agent self-scope is forced in the service: employee_id → caller).
+			// Corrections reads stay admin/leader-only (web surface).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-				// reads
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 				r.Get("/attendance", d.Attendance.ListAttendance)
 				r.Get("/attendance/{id}", d.Attendance.GetAttendance)
+			})
+
+			// Agent CLOCK-IN/OUT (F5.1, mobile, scope:self). Idempotent per openapi.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent))
+				r.With(d.Idempotency.Handler).Post("/attendance:clock-in", d.Clock.ClockIn)
+				r.With(d.Idempotency.Handler).Post("/attendance:clock-out", d.Clock.ClockOut)
+			})
+
+			// Attendance/corrections WRITES + corrections reads: super_admin,
+			// hr_admin, shift_leader (the web verify/reject/corrections surface).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				// corrections reads
 				r.Get("/corrections", d.Attendance.ListCorrections)
 				r.Get("/corrections/{id}", d.Attendance.GetCorrection)
 				// actions (idempotent per openapi — Idempotency-Key required)
@@ -399,7 +417,7 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/corrections/{id}:approve", d.Attendance.ApproveCorrection)
 				r.With(d.Idempotency.Handler).Post("/corrections/{id}:reject", d.Attendance.RejectCorrection)
 			})
-			// ATTENDANCE slice end (07-02). Phase 7+ appends after this line.
+			// ATTENDANCE slice end (07-02 + F5.1 clock). Phase 7+ appends after this line.
 
 			// ---------------------------------------------------------------
 			// LEAVE slice (08-02): E6 two-level approval + quotas + calendar
@@ -519,37 +537,37 @@ func New(d Deps) http.Handler {
 			})
 			// E10 REPORTING notifications slice end (11-02). 11-02b appends after this line.
 
-				// ---------------------------------------------------------------
-				// E10 REPORTING slice — DASHBOARD + REPORT (11-02b). The role-aware
-				// landing dashboard (all 4 roles, scope=self) + the billable
-				// attendance report (HR/super/leader; leader is server-scoped to
-				// their own company, else 403 OUT_OF_SCOPE). Both return the
-				// {data:<body>} envelope the FE unwraps (query.data.data).
-				// ---------------------------------------------------------------
-				r.Group(func(r chi.Router) {
-					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
-					r.Get("/dashboards/me", d.Reporting.GetMyDashboard)
-				})
-				r.Group(func(r chi.Router) {
-					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-					r.Get("/reports/attendance-billable", d.Reporting.GetBillableReport)
-				})
+			// ---------------------------------------------------------------
+			// E10 REPORTING slice — DASHBOARD + REPORT (11-02b). The role-aware
+			// landing dashboard (all 4 roles, scope=self) + the billable
+			// attendance report (HR/super/leader; leader is server-scoped to
+			// their own company, else 403 OUT_OF_SCOPE). Both return the
+			// {data:<body>} envelope the FE unwraps (query.data.data).
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Get("/dashboards/me", d.Reporting.GetMyDashboard)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Get("/reports/attendance-billable", d.Reporting.GetBillableReport)
+			})
 
-				// ---------------------------------------------------------------
-				// E10 REPORTING slice — EXPORTS (11-02b). The generic export
-				// framework: POST /exports (202 + ExportJob, QUEUED + EnqueueTx the
-				// ReportExportWorker in one tx), GET /exports/{id} (status poll,
-				// scope=self, DB→wire status mapping), POST /exports/{id}:cancel.
-				// Create + cancel are Idempotency-wrapped per openapi. chi matches
-				// the `:cancel` action suffix natively.
-				// ---------------------------------------------------------------
-				r.Group(func(r chi.Router) {
-					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-					r.With(d.Idempotency.Handler).Post("/exports", d.Reporting.CreateExport)
-					r.Get("/exports/{export_id}", d.Reporting.GetExport)
-					r.With(d.Idempotency.Handler).Post("/exports/{export_id}:cancel", d.Reporting.CancelExport)
-				})
-				// E10 REPORTING exports slice end (11-02b).
+			// ---------------------------------------------------------------
+			// E10 REPORTING slice — EXPORTS (11-02b). The generic export
+			// framework: POST /exports (202 + ExportJob, QUEUED + EnqueueTx the
+			// ReportExportWorker in one tx), GET /exports/{id} (status poll,
+			// scope=self, DB→wire status mapping), POST /exports/{id}:cancel.
+			// Create + cancel are Idempotency-wrapped per openapi. chi matches
+			// the `:cancel` action suffix natively.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.With(d.Idempotency.Handler).Post("/exports", d.Reporting.CreateExport)
+				r.Get("/exports/{export_id}", d.Reporting.GetExport)
+				r.With(d.Idempotency.Handler).Post("/exports/{export_id}:cancel", d.Reporting.CancelExport)
+			})
+			// E10 REPORTING exports slice end (11-02b).
 		})
 	})
 

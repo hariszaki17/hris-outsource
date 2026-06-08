@@ -80,6 +80,16 @@ type Querier interface {
 	// the new DB status; the service maps DB 'CANCELLED_BY_LEAVE' → DTO new_status='LEAVE').
 	CancelScheduleEntriesForLeave(ctx context.Context, arg CancelScheduleEntriesForLeaveParams) ([]CancelScheduleEntriesForLeaveRow, error)
 	ChangeUserRole(ctx context.Context, arg ChangeUserRoleParams) (ChangeUserRoleRow, error)
+	// Insert ONE clock-in row. id fires via the column DEFAULT (omitted). schedule_id is
+	// nullable (NULL ⇒ unscheduled). ON CONFLICT (the partial schedule_id unique index)
+	// DO NOTHING makes a concurrent absence-sweep / double-tap a no-op — RETURNING then
+	// yields NO row (pgx.ErrNoRows), which the repo maps to created=false so the service
+	// emits ALREADY_CLOCKED_IN. flags is text[].
+	ClockInAttendance(ctx context.Context, arg ClockInAttendanceParams) (string, error)
+	// Close one open record: stamp the clock-out columns + recomputed worked_minutes /
+	// flags / status / verification_status. Guarded by deleted_at — yields NO row
+	// (pgx.ErrNoRows) if the record vanished, which the service treats as a 500/NotFound.
+	ClockOutAttendance(ctx context.Context, arg ClockOutAttendanceParams) (string, error)
 	// Move days pending_days → consumed_days at APPROVE (commit). Paired with an
 	// ApplyConsumption (leave_consumptions) insert in the same tx.
 	CommitReservation(ctx context.Context, arg CommitReservationParams) (CommitReservationRow, error)
@@ -307,6 +317,19 @@ type Querier interface {
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
 	// Single notification scoped to its recipient (scope=self).
 	GetNotification(ctx context.Context, arg GetNotificationParams) (Notification, error)
+	// E5 agent clock-in/out queries (F5.1 / SWP-ATT-*). The mobile agent flow:
+	// resolve the active placement + site geofence (existing generated queries), find
+	// today's schedule entry for lateness eval, detect an already-open record, then
+	// INSERT a clock-in (ON CONFLICT on the partial schedule_id unique index → no-op for
+	// a concurrent absence-sweep / double-tap) or UPDATE a clock-out. schedule_entries
+	// carries NO stored shift timestamptz — the window is computed from work_date +
+	// start_time/end_time (HH:MM, Asia/Jakarta wall-clock) via `AT TIME ZONE` (CLAUDE.md
+	// TZ layer); cross_midnight adds a day to the end. `make gen` writes
+	// internal/repository/sqlc (NEVER hand-edit).
+	// The caller's currently-open record (clocked in, not yet clocked out). Drives
+	// ALREADY_CLOCKED_IN (clock-in) / NOT_CLOCKED_IN (clock-out). Most-recent first so a
+	// stale half-open row never masks the latest.
+	GetOpenAttendanceForEmployee(ctx context.Context, employeeID string) (string, error)
 	// Single OT record with denormalized employee + company names (for GET /overtime/{id}).
 	GetOvertime(ctx context.Context, id string) (GetOvertimeRow, error)
 	// Row-lock for the state-machine transitions (confirm/approve-l1/approve-final/
@@ -333,6 +356,11 @@ type Querier interface {
 	// Row-lock for the update / activate-toggle path (omits joins; service re-reads for DTO).
 	GetShiftMasterForUpdate(ctx context.Context, id string) (GetShiftMasterForUpdateRow, error)
 	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
+	// Today's (Asia/Jakarta) live schedule entry for the employee — the basis for the
+	// lateness eval and the schedule_id stamped on the clock-in record. Mirrors
+	// absence.sql's shift-window computation. is_day_off / CANCELLED_BY_LEAVE entries are
+	// not work days; both times must be present. Earliest shift wins when more than one.
+	GetTodayScheduleForEmployee(ctx context.Context, arg GetTodayScheduleForEmployeeParams) (GetTodayScheduleForEmployeeRow, error)
 	// Email-only lookup: used by forgot-password (reset link is email-delivered).
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
 	GetUserByID(ctx context.Context, id string) (GetUserByIDRow, error)
