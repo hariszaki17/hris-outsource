@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "SWP HRIS",
+    "slug": "swp-hris-mobile",
+    "scheme": "swphris",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "id.synapsis.swp.hris"
+    },
+    "android": {
+      "package": "id.synapsis.swp.hris"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-updates",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SWP HRIS uses your location to verify you are at the assigned client site when you clock in or out."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SWP HRIS needs photo access so you can attach supporting documents to leave requests."
+        }
+      ],
+      "expo-notifications",
+      "expo-status-bar"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
