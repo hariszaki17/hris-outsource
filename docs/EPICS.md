@@ -80,7 +80,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E4 — Shift Configuration & Scheduling
 **Goal:** define shift master templates and let shift leaders schedule agents per placement; service line drives rules.
-**Features:** Work-shift master catalog (hours + breaks) · Service-line shift/attendance policies · Roster/schedule builder (leader picks from master, assigns agents to dates) · Rotation patterns · Schedule calendar & publish/notify.
+**Features:** Work-shift master catalog (hours + breaks) · Service-line shift/attendance policies · Roster/schedule builder (leader picks from master, assigns agents to dates) · Rotation patterns · Schedule calendar & publish/notify · **Roster-compliance indicators** (holiday-shift badge + holiday day-column tint; missing-weekly-rest flag; >6-consecutive-workday cap warning) — derives from roster + `/holidays`, surfaces to the shift leader (§8 D1/D3).
 **Entities:** ShiftMaster, ServiceLineShiftPolicy, Schedule, RotationPattern.
 **Depends on:** E3, E2
 
@@ -98,7 +98,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E7 — Overtime Tracking
 **Goal:** OT capture/request, approval (shift leader), duration calc per rules.
-**Features:** OT request · OT detection vs schedule · Approval workflow · OT calculation (per service-line rules) · OT status · OT reporting.
+**Features:** OT request · OT detection vs schedule · Approval workflow · OT calculation (per service-line rules) · OT status · OT reporting · **Holiday calendar bootstrap** ("Import {tahun}" prefill → HR confirm + cuti bersama, §8 D4) · **statutory OT multiplier seeding** (PP 35/2021 defaults: workday 1.5×→2×; rest-day/holiday progressive 2×/3×/4×, stored as reference).
 **Entities:** Overtime, OvertimeStatus.
 **Depends on:** E4, E5, E3
 
@@ -117,7 +117,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E10 — Reporting, Exports & Notifications (cross-cutting)
 **Goal:** operational reports + notifications across modules.
-**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending, attendance anomalies) · Approval inboxes.
+**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending, attendance anomalies) · **shift-leader compliance notifications** (agent assigned a holiday shift; agent with no weekly rest / >6 consecutive workdays — §8 D3) · Approval inboxes.
 **Depends on:** spans E2–E8.
 
 ---
@@ -192,6 +192,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **C — Profil tab no longer duplicates Sites/geofence.** The company **detail "Profil" tab** shows only statutory/billing fields + `leader_scope`; **Sites & geofence live ONLY in the "Lokasi & Site" tab** (F2.6, INV-5).
   - **D — service-line maintenance consolidated on the detail page.** Renaming a service line **and** adding/updating/removing its **positions** all happen on the service-line **detail page**; the service-line list's "Edit" action now **navigates to that detail page** instead of opening a rename-only modal.
   - See [E2 F2.3 PRD], [E2 F2.4 PRD], [E2 FEATURE §F2.3/F2.4].
+- ✅ **Service-line create may seed initial positions atomically** *(resolved 2026-06-08)* — `POST /service-lines` accepts an **optional `positions` array**; when provided, the line **and all its positions** are created in a **single all-or-nothing transaction** — if any position is invalid or duplicates another within the line, **nothing is persisted** (no line, no positions). Per-line name uniqueness (F2.4 SP-3) is enforced **across the batch**, not just against already-stored rows. The web "Tambah Lini Layanan" modal supports adding initial positions inline; the dedicated `POST /service-lines/{id}/positions` endpoint still exists for adding positions later from the detail page. No domain/invariant or soft-delete change. See [E2 F2.4 PRD], [E2 FEATURE §F2.4].
 
 **E4 — Shift & Scheduling**
 - ✅ Agent shift-swap / day-off requests: **deferred to post-v1** (v1 = leader-driven schedule edits only; F4.4 swaps drop from v1 scope)
@@ -220,6 +221,12 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - ✅ Auto-detected OT: **agent confirms, then leader approves**
 - ✅ Minimum OT counted = **30 minutes** *(superseded 2026-06-02 — was 60 min in 2026-05-29 review; PRDs were authoritative)*
 - Pre-approval: worked-without-request OT still approvable after the fact (flagged); Holiday tier beats Rest-day when both apply; cross-midnight OT → start date *(default)*
+- ✅ **Holiday & weekly-rest operating model (cross-cutting E4·E6·E7·E10)** *(resolved 2026-06-08)* — grounds the 24/7 outsourced blue-collar reality (client sites keep operating on public holidays; agents work them):
+  - **D1 — Holiday calendar is classification-only, never suppresses shifts.** The `/holidays` master (global, with optional per-service-line `HolidayCategory` scoping already in the E7 spec) is a **date-level classification** consumed by E7 OT day-type resolution (HOLIDAY tier) and E6 working-day exclusion. It does **not** drive schedule generation — the roster still rosters on holidays. The E4 grid surfaces a holiday tint/badge (visual only).
+  - **D2 — worked weekly rest day = RestDay OT premium only.** Under PP 35/2021, working the agent's weekly rest day is compensated as **RestDay-tier OT premium** (reference multiplier in v1, no monetary calc). **No TOIL/substitute-rest-day ledger and no conversion into `cuti tahunan`** — the statutory annual-leave accounting stays untouched. Rest day is **per-agent, derived from the roster** (not a fixed Sunday); HOLIDAY beats RESTDAY when both apply (existing E7 precedence).
+  - **D3 — rest-day shortfall is a compliance flag, not a balance.** "No rest day in the week" / **>6 consecutive scheduled workdays** raises a **compliance alert to the shift leader** — never a silent leave credit. Computed rolling-consecutive for the legal flag; rendered as a per-week rest indicator on the (week-scoped) E4 grid.
+  - **D4 — holiday calendar seeding = HR-confirmed yearly import, not live-sync.** A yearly **"Import {tahun}"** bootstrap (e.g. Nager.Date / `date-holidays`) prefills candidate holidays; **HR reviews/confirms** and adds **cuti bersama**. The **SKB 3 Menteri decree is authoritative** for cuti bersama (APIs lag; Islamic dates shift by rukyat). HR-maintained master stays the source of truth (no live external sync).
+  - See [E4 FEATURE], [E6 FEATURE], [E7 FEATURE §6b holiday calendar], [E10 notifications].
 
 **E8 — Payroll (read-only)**
 - Payslips **view-only** in v1 (PDF download later); historical payroll **immutable** (HR annotate via audit note); retention indefinite pending compliance input *(default)*
