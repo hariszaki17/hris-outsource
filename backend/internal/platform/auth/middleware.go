@@ -15,13 +15,14 @@ import (
 // stateless JWT verify (used by unit tests).
 type UserStateFunc func(ctx context.Context, userID string) (status string, tokensValidAfter time.Time, err error)
 
-// CompanyResolverFunc derives a shift_leader's company scope at REQUEST time from
-// the authoritative E3 leader-assignment (GAP 3), so reassigning a leader takes
-// effect on their next request — not at next login. It returns the employee's
-// active-assignment company, or an error (incl. not-found) when they lead none;
-// in that case the middleware strips company scope so any company-scoped action is
-// denied by rbac.GuardCompany (fail-safe — never escalates). Only the JWT `cmp`
-// claim is advisory once this is wired. Consulted for shift_leader only.
+// CompanyResolverFunc returns the company an employee currently LEADS via an active
+// E3 shift_leader_assignment, or an error (incl. not-found) when they lead none. It
+// is the single source of truth for shift-leader identity: the middleware derives
+// both the effective ROLE and the company SCOPE from it at request time, so the
+// stored users.role / users.company_id and the JWT `cmp` claim are advisory. An
+// employee with an active assignment IS a shift_leader scoped to that company;
+// without one they are a plain agent. Reassigning/ending a leader therefore takes
+// effect on their next request — no re-login, no drift.
 type CompanyResolverFunc func(ctx context.Context, employeeID string) (companyID string, err error)
 
 // Authenticator verifies the Bearer access token and injects the Principal.
@@ -75,16 +76,22 @@ func (a *Authenticator) Require(next http.Handler) http.Handler {
 				return
 			}
 		}
-		// GAP 3: derive a shift_leader's company scope at request time from the live
-		// E3 leader-assignment, overriding the advisory `cmp` claim. On any error
-		// (incl. no active assignment) scope is stripped (""), so GuardCompany denies
-		// every company-scoped action — fail-safe, never an escalation.
-		if p.Role == RoleShiftLeader && a.companyResolver != nil {
+		// Read-time shift-leader derivation: a field employee's effective role AND
+		// company scope come from the live E3 leader-assignment, never the stored
+		// users.role / users.company_id / `cmp` claim. An employee (stored agent or
+		// shift_leader) with an active assignment IS a shift_leader scoped to that
+		// company; without one they are a plain agent. Staff roles (super_admin /
+		// hr_admin) are global and never derived. On resolver error scope is stripped
+		// and the role falls back to agent — fail-safe, never an escalation.
+		if a.companyResolver != nil && (p.Role == RoleShiftLeader || p.Role == RoleAgent) {
 			companyID, err := a.companyResolver(r.Context(), p.EmployeeID)
-			if err != nil {
-				companyID = ""
+			if err != nil || companyID == "" {
+				p.Role = RoleAgent
+				p.CompanyID = ""
+			} else {
+				p.Role = RoleShiftLeader
+				p.CompanyID = companyID
 			}
-			p.CompanyID = companyID
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))
 	})

@@ -118,13 +118,13 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := meFromUser(user)
-	// GAP 3: a shift_leader's scope.company_id is derived at request time (the auth
-	// middleware put the live E3 leader-assignment company on the principal), not read
-	// from the possibly-stale users.company_id — so /auth/me reflects a reassignment
-	// immediately, consistent with the authorization gate.
-	if p.Role == auth.RoleShiftLeader {
-		resp.Scope = scopeFromRole(p.Role, p.CompanyID)
-	}
+	// /auth/me reports the request-time DERIVED identity: a field employee's role and
+	// company scope come from the live E3 leader-assignment (the auth middleware put
+	// them on the principal), not the stored users columns. So a freshly-assigned or
+	// -revoked leader sees the correct role + scope on their next call, no re-login.
+	// Staff roles are unchanged (principal role == stored role, scope global).
+	resp.Role = string(p.Role)
+	resp.Scope = scopeFromRole(p.Role, p.CompanyID)
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 

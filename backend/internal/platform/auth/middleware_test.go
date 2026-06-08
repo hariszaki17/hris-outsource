@@ -77,24 +77,79 @@ func TestRequire_ShiftLeaderCompanyDerivedFromResolver(t *testing.T) {
 	}
 }
 
-// Fail-safe: resolver error (e.g. leader has no active assignment) strips scope to
-// "" so GuardCompany denies every company-scoped action — never an escalation.
-func TestRequire_ShiftLeaderNoAssignmentStripsScope(t *testing.T) {
+// Fail-safe: a stored shift_leader with no active assignment (resolver error) is
+// downgraded to a plain agent with no company scope — never an escalation.
+func TestRequire_ShiftLeaderNoAssignmentDowngradesToAgent(t *testing.T) {
 	iss := newTestIssuer(t)
 	a := NewAuthenticator(iss).WithCompanyResolver(
 		func(_ context.Context, _ string) (string, error) {
-			return "", context.DeadlineExceeded // any error
+			return "", context.DeadlineExceeded // any error / no assignment
 		},
 	)
 
 	var seen Principal
 	doAuthed(a, &seen, mintSL(t, iss, "SWP-CMP-STALE"))
+	if seen.Role != RoleAgent {
+		t.Errorf("Role = %q, want agent (downgraded — no active assignment)", seen.Role)
+	}
 	if seen.CompanyID != "" {
-		t.Errorf("CompanyID = %q, want empty (scope stripped on resolver error)", seen.CompanyID)
+		t.Errorf("CompanyID = %q, want empty (scope stripped)", seen.CompanyID)
 	}
 }
 
-// Non-leader roles never consult the resolver (and keep global scope).
+// A stored agent WITH an active leader-assignment is upgraded to shift_leader,
+// scoped to that company — role is emergent from the assignment, not stored.
+func TestRequire_AgentWithAssignmentUpgradedToLeader(t *testing.T) {
+	iss := newTestIssuer(t)
+	a := NewAuthenticator(iss).WithCompanyResolver(
+		func(_ context.Context, _ string) (string, error) {
+			return "SWP-CMP-FRESH", nil
+		},
+	)
+
+	tok, _, err := iss.Issue(Principal{
+		UserID: "SWP-USR-A", EmployeeID: "SWP-EMP-A", Role: RoleAgent,
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	var seen Principal
+	doAuthed(a, &seen, tok)
+	if seen.Role != RoleShiftLeader {
+		t.Errorf("Role = %q, want shift_leader (upgraded by active assignment)", seen.Role)
+	}
+	if seen.CompanyID != "SWP-CMP-FRESH" {
+		t.Errorf("CompanyID = %q, want SWP-CMP-FRESH", seen.CompanyID)
+	}
+}
+
+// A stored agent with no assignment stays a plain agent (resolver returns none).
+func TestRequire_AgentNoAssignmentStaysAgent(t *testing.T) {
+	iss := newTestIssuer(t)
+	a := NewAuthenticator(iss).WithCompanyResolver(
+		func(_ context.Context, _ string) (string, error) {
+			return "", nil // no active assignment
+		},
+	)
+
+	tok, _, err := iss.Issue(Principal{
+		UserID: "SWP-USR-A", EmployeeID: "SWP-EMP-A", Role: RoleAgent,
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	var seen Principal
+	doAuthed(a, &seen, tok)
+	if seen.Role != RoleAgent {
+		t.Errorf("Role = %q, want agent", seen.Role)
+	}
+	if seen.CompanyID != "" {
+		t.Errorf("CompanyID = %q, want empty", seen.CompanyID)
+	}
+}
+
+// Staff roles (super_admin / hr_admin) are never derived: the resolver is not
+// consulted and they keep global (empty company) scope.
 func TestRequire_NonLeaderSkipsResolver(t *testing.T) {
 	iss := newTestIssuer(t)
 	called := false
