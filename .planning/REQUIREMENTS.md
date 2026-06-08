@@ -55,8 +55,8 @@ Three states drive per-feature effort:
 
 ### Overtime (OT) — backend NEW
 
-- [ ] **OT-01** (BE): Implement agent-scoped `POST /overtime` (request) and `POST /overtime/{id}:confirm` (confirm auto-detected); own list (F7.2).
-- [ ] **OT-02** (FE): OT request + confirm-auto-detected screens + OT detail.
+- [x] **OT-01** (BE): Implement agent-scoped `POST /overtime` (request) and `POST /overtime/{id}:confirm` (confirm auto-detected); own list (F7.2).
+- [x] **OT-02** (FE): OT request + confirm-auto-detected screens + OT detail.
 
 ### Payslip (PAY) — backend OPEN-ROUTE
 
@@ -95,6 +95,6 @@ Three states drive per-feature effort:
 | ATTEND-03..04 | Phase 15 | Done (CODE-type correction deferred) |
 | SCHED-01..02 | Phase 16 | Done (include_company geo deferred) |
 | LEAVE-01..02 | Phase 17 | Done (attachment + doc-required types deferred) |
-| OT-01..02 | Phase 18 | Pending |
+| OT-01..02 | Phase 18 | Done |
 | PAY-01..02 | Phase 19 | Pending |
 | PROFILE-01..02 | Phase 20 | Pending |

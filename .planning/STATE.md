@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
 status: in_progress
-stopped_at: Phase 17 complete (FE+BE); Phase 18 (overtime) next
+stopped_at: Phase 18 complete (FE+BE); Phase 19 (payslip) next
 last_updated: "2026-06-08T00:00:00.000Z"
 last_activity: "2026-06-08 — Phase 17 (leave request) COMPLETE, full-stack. Rebased onto latest backend (feat/backend-impl 97e7a6e: E6 leave grant-lot + Kuota), then built agent leave create→submit aligned with the grant-lot ledger: submitTx refactor (shared Submit/Create reserve core), CheckOverlappingLeave + CountLeaveDurationDays queries, validation order INVALID_DATE_RANGE→MISSING_REQUIRED_DOCUMENT→OVERLAPPING_LEAVE→BACKDATED_LEAVE→QUOTA_EXCEEDED, agent self-scope on List/Get/Balance, routes split (reads admit agent; agent-write group POST /leave-requests/:submit/:cancel). 427 tests green. FE: /leave list + /leave-new form (type chips, dates, reason) + More reworked into a feature menu. Also hardened my-attendance for the E5 true-absence model (check_in_at nullable). Ran pnpm gen (api-client gen is gitignored) to fix stale e6 barrel (leave-balances). Deferred: attachment upload, doc-required types, allows_backdated column. Next: Phase 18 — overtime (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 5
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 75
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–17 done; Phase 18 (overtime) next.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phases 13–18 done; Phase 19 (payslip) next.
 
 ## Current Position
 
-Phase: 18 of 20 (Overtime request/confirm) — next
-Plan: Phase 17 COMPLETE (FE f77c598 + BE 81f5f8f)
-Status: Phase 17 leave shipped full-stack on the latest leave model (grant-lot); 427 tests green. 5/8 agent-MVP phases done.
-Last activity: 2026-06-08 — Phase 17 complete; agent leave create+submit + RN form + More menu.
+Phase: 19 of 20 (Payslip history) — next
+Plan: Phase 18 COMPLETE (FE b78ef29 + BE)
+Status: Phase 18 overtime shipped full-stack; 433 tests green. 6/8 agent-MVP phases done.
+Last activity: 2026-06-08 — Phase 18 complete; agent overtime request/confirm/withdraw + RN screens.
 
-Progress: [██████    ] 63% (5/8 phases)
+Progress: [███████   ] 75% (6/8 phases)
 
 ## Performance Metrics
 

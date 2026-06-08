@@ -35,7 +35,7 @@ excludes agent — open route + self-filter) · **NEW** (build the handler).
   BE: agent `POST /leave-requests` + own list + attachment, quota/schedule validation, SL→HR routing.
   FE: leave form (type/dates/delegate/doc upload) + own-requests status.
   - Success: agent submits a leave request with a document; it enters the SL approval queue.
-- [ ] **Phase 18: Overtime request/confirm** (OT-01..02) — backend NEW.
+- [x] **Phase 18: Overtime request/confirm** (OT-01..02) — backend NEW. ✅ 2026-06-08.
   BE: agent `POST /overtime` + `:confirm`. FE: request + confirm-auto-detected + detail.
   - Success: agent requests OT (or confirms auto-detected); it routes to approval.
 - [ ] **Phase 19: Payslip history** (PAY-01..02) — backend OPEN-ROUTE.
