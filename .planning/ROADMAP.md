@@ -3,9 +3,31 @@
 ## Milestones
 
 - ✅ **v1.0 — Backend + Full-Stack E2E** — Phases 1–11 (shipped 2026-06-05)
-- 📋 **v1.1 (next)** — TBD via `/gsd:new-milestone`
+- 🔨 **v1.1 — Mobile Foundation (Expo Scaffold)** — Phase 12 (started 2026-06-08)
 
 ## Phases
+
+### 🔨 v1.1 — Mobile Foundation (Expo Scaffold)
+
+Scaffold-only milestone: a real, buildable Expo app in `frontend/apps/mobile` consuming the
+shared contract/tokens packages, with all MVP-required native capabilities installed. No
+feature screens. Built in worktree `feat/mobile-scaffold`.
+
+- [ ] **Phase 12: Expo Scaffold** (0/1) — Replace the `apps/mobile` placeholder with a real
+  Expo app (latest SDK, managed + dev-client, Expo Router) wired into the pnpm/Turborepo
+  monorepo (Metro workspace resolution), consuming `@swp/api-client` + `@swp/shared` +
+  `@swp/design-tokens`; NativeWind driven by the shared tokens; `expo-location` /
+  `expo-notifications` / `expo-image-picker` / `expo-updates` installed + config-plugged;
+  TS strict + Biome + turbo typecheck/lint green for mobile.
+  - Requirements: SCAF-01..03, MONO-01..03, STYLE-01..02, NATIVE-01..04, TOOL-01..03
+  - Success criteria:
+    1. `pnpm install` resolves; `frontend/apps/mobile` builds a Metro bundle (no missing-module errors for workspace packages).
+    2. Smoke screen renders using a value from each of the three shared packages.
+    3. `turbo run typecheck` (incl. mobile) and Biome lint are green.
+    4. The four native modules are present in `app.json` plugins and install cleanly.
+    5. `expo-doctor` reports no blocking issues.
+
+
 
 <details>
 <summary>✅ v1.0 — Backend + Full-Stack E2E (Phases 1–11) — SHIPPED 2026-06-05</summary>

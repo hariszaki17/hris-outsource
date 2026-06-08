@@ -13,6 +13,24 @@ API** by implementing the endpoints the FE actually calls, and proving each work
 Every screen the web app shows today works end-to-end against the real backend — provable
 by a Playwright test that exercises the real FE against the real Go API.
 
+## Current Milestone: v1.1 Mobile Foundation (Expo Scaffold)
+
+**Goal:** Stand up a real, buildable Expo app in `frontend/apps/mobile` (replacing the
+placeholder) that boots, resolves through the pnpm/Turborepo monorepo, consumes the three
+surface-agnostic shared packages, and ships with every MVP-required native capability
+installed — so agent/shift-leader feature screens can be built later on a proven foundation.
+
+**Target features (scaffold only — NO feature screens this milestone):**
+- Expo (managed + dev-client, latest SDK) + Expo Router; boots iOS/Android.
+- Monorepo wiring: Metro for pnpm workspace; `@swp/api-client` + `@swp/shared` + `@swp/design-tokens` consumed; web `@swp/ui` deliberately not reused (thin RN primitive layer instead).
+- NativeWind driven by `@swp/design-tokens` (tokens, no raw hex).
+- Native deps locked now (minimizes future forced store reinstalls): `expo-location` (F5.1 geofence), `expo-notifications` (F10.1 push), `expo-image-picker` (F6.2 docs), `expo-updates` (OTA + force-update gate stub).
+- Tooling parity: TS strict, Biome, turbo typecheck/lint include mobile.
+
+**Key context:** Greenfield Expo app added to an existing committed monorepo. Built in an
+isolated git worktree on branch `feat/mobile-scaffold`. The `min_supported_version`
+version-gate is a documented FOLLOW-UP backend contract, not implemented here.
+
 ## Requirements
 
 ### Validated

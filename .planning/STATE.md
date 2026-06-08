@@ -1,36 +1,36 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: completed
-stopped_at: Completed 11-e10-reporting/11-04-PLAN.md
-last_updated: "2026-06-05T09:37:01.327Z"
-last_activity: "2026-06-05 — Plan 11-04 complete: E10 screens wired off MSW to the real Go BE (the {data}-envelope double-unwrap in dashboard/report/export-flow + the notifications marked_count fix; reset-db TRUNCATEs notifications), proven by 14 Playwright specs under frontend/e2e/tests/e10/ — dashboard role-aware, billable report, notifications list/mark-read/mark-all, the auto-dispatch CAPSTONE (HR approve-final → un-stubbed worker → recipient sees a real LEAVE_APPROVED, not seeded), and exports (worker-DONE / cancel→CANCELLED / PDF→EXPORT_FORMAT_UNSUPPORTED). FULL e1..e10 suite: 239 passed / 6 skipped / 0 failed (10.3m), no regressions. The v1.0 milestone is CLOSED — the whole web console works end-to-end against the real backend."
+milestone: v1.1
+milestone_name: Mobile Foundation (Expo Scaffold)
+status: planning
+stopped_at: Phase 12 planned (12-01-PLAN.md)
+last_updated: "2026-06-08T00:00:00.000Z"
+last_activity: "2026-06-08 — Milestone v1.1 (Mobile Foundation) opened in worktree feat/mobile-scaffold. Scaffold-only scope: replace the apps/mobile placeholder with a real Expo app (latest SDK, managed + dev-client, Expo Router) wired into the pnpm/Turborepo monorepo, consuming @swp/api-client + @swp/shared + @swp/design-tokens; NativeWind on shared tokens; expo-location/notifications/image-picker/updates installed + config-plugged; TS strict + Biome + turbo typecheck/lint green. Phase 12 planned; executing autonomously."
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 50
-  completed_plans: 50
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 1
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-03)
+See: .planning/PROJECT.md (updated 2026-06-08)
 
-**Core value:** Every screen the web app shows works end-to-end against the real backend.
-**Current focus:** MILESTONE COMPLETE — Phase 11 (E10 Reporting & Notifications) done. All 11 phases / 50 plans complete. The whole web console (e1..e10) works end-to-end against the real Go backend; the full Playwright suite is green (239 passed / 6 skipped / 0 failed).
+**Core value:** A real, buildable Expo app exists in the monorepo, consuming the shared contract/tokens packages, with all MVP-required native capabilities installed.
+**Current focus:** Milestone v1.1 — Phase 12 (Expo Scaffold). Scaffold only; no feature screens.
 
 ## Current Position
 
-Phase: 11 of 11 (E10 Reporting & Notifications) — COMPLETE
-Plan: 11-04 COMPLETE (5 of 5 plans done — the FINAL milestone plan: E10 FE-wiring off MSW + full-stack Playwright capstone)
-Status: Milestone complete
-Last activity: 2026-06-05 — Plan 11-04 complete: E10 screens wired off MSW to the real Go BE (the {data}-envelope double-unwrap in dashboard/report/export-flow + the notifications marked_count fix; reset-db TRUNCATEs notifications), proven by 14 Playwright specs under frontend/e2e/tests/e10/ — dashboard role-aware, billable report, notifications list/mark-read/mark-all, the auto-dispatch CAPSTONE (HR approve-final → un-stubbed worker → recipient sees a real LEAVE_APPROVED, not seeded), and exports (worker-DONE / cancel→CANCELLED / PDF→EXPORT_FORMAT_UNSUPPORTED). FULL e1..e10 suite: 239 passed / 6 skipped / 0 failed (10.3m), no regressions. The v1.0 milestone is CLOSED — the whole web console works end-to-end against the real backend.
+Phase: 12 of 12 (Expo Scaffold) — executing
+Plan: 12-01 (1 of 1)
+Status: Executing autonomously in worktree feat/mobile-scaffold
+Last activity: 2026-06-08 — Milestone v1.1 opened; Phase 12 planned; building the Expo scaffold.
 
-Progress: [██████████] 100%
+Progress: [          ] 0%
 
 ## Performance Metrics
 
