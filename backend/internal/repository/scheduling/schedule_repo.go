@@ -126,6 +126,36 @@ func (r *ScheduleRepo) ListSchedule(ctx context.Context, f domain.ScheduleFilter
 	return out, nil
 }
 
+// ListScheduleByAgent returns one agent's schedule across ALL their placements
+// for the date window (F4.3 "Jadwal Saya"). No company filter — by-agent spans
+// companies; scope is enforced upstream in the service.
+func (r *ScheduleRepo) ListScheduleByAgent(ctx context.Context, employeeID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	rows, err := r.q.ListScheduleByAgent(ctx, sqlcgen.ListScheduleByAgentParams{
+		EmployeeID: employeeID,
+		StartDate:  timeToPgDate(start),
+		EndDate:    timeToPgDate(end),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.ScheduleEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mapScheduleFromByAgent(row))
+	}
+	return out, nil
+}
+
+// GetActivePlacementCompanyForEmployee resolves the company an agent is currently
+// placed at (shift-leader scope check for by-agent). domain.ErrNotFound when the
+// agent has no active placement.
+func (r *ScheduleRepo) GetActivePlacementCompanyForEmployee(ctx context.Context, employeeID string) (string, error) {
+	row, err := r.q.GetActivePlacementForEmployee(ctx, employeeID)
+	if err != nil {
+		return "", mapErr(err)
+	}
+	return row.ClientCompanyID, nil
+}
+
 func (r *ScheduleRepo) GetScheduleEntry(ctx context.Context, id string) (domain.ScheduleEntry, error) {
 	row, err := r.q.GetScheduleEntry(ctx, id)
 	if err != nil {

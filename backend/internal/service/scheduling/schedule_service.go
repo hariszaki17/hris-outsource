@@ -29,6 +29,11 @@ type ScheduleRepository interface {
 	ConflictRepo
 
 	ListSchedule(ctx context.Context, f domain.ScheduleFilter) ([]domain.ScheduleEntry, error)
+	// ListScheduleByAgent reads one agent's schedule across all placements (F4.3).
+	ListScheduleByAgent(ctx context.Context, employeeID string, start, end time.Time) ([]domain.ScheduleEntry, error)
+	// GetActivePlacementCompanyForEmployee resolves the agent's current company
+	// (shift-leader scope check for by-agent). domain.ErrNotFound when unplaced.
+	GetActivePlacementCompanyForEmployee(ctx context.Context, employeeID string) (string, error)
 	GetScheduleEntry(ctx context.Context, id string) (domain.ScheduleEntry, error)
 	GetScheduleEntryForUpdate(ctx context.Context, tx pgx.Tx, id string) (domain.ScheduleEntry, error)
 	// FindLiveEntryForAgentDateTx re-checks DOUBLE_SHIFT under the row lock.
@@ -107,6 +112,48 @@ func (s *ScheduleService) ListSchedule(ctx context.Context, f domain.ScheduleFil
 		return nil, serr
 	}
 	rows, err := s.repo.ListSchedule(ctx, f)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return rows, nil
+}
+
+// GetScheduleByAgent returns one agent's schedule across all placements for the
+// date window (F4.3 "Jadwal Saya" / E3 placement embed). RBAC scope (SV-1):
+//   - agent: ONLY their own employee_id (403 otherwise).
+//   - shift_leader: only agents currently placed at the leader's company.
+//   - hr_admin / super_admin: any agent.
+//
+// warnings is empty for the MVP (the envelope is assembled in the handler).
+func (s *ScheduleService) GetScheduleByAgent(ctx context.Context, employeeID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apperr.Unauthenticated()
+	}
+
+	switch p.Role {
+	case auth.RoleAgent:
+		// SV-1: an agent may only read their own schedule.
+		if p.EmployeeID != employeeID {
+			return nil, apperr.Forbidden()
+		}
+	case auth.RoleShiftLeader:
+		// Leader is scoped to agents currently placed at their company.
+		companyID, err := s.repo.GetActivePlacementCompanyForEmployee(ctx, employeeID)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, apperr.Forbidden()
+		}
+		if err != nil {
+			return nil, apperr.Internal(err)
+		}
+		if serr := rbac.GuardCompany(ctx, companyID); serr != nil {
+			return nil, serr
+		}
+	default:
+		// hr_admin / super_admin: no extra scope.
+	}
+
+	rows, err := s.repo.ListScheduleByAgent(ctx, employeeID, start, end)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}

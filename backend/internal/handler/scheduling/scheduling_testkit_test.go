@@ -339,6 +339,29 @@ func (r *fakeScheduleRepo) ListSchedule(_ context.Context, f domain.ScheduleFilt
 	return out, nil
 }
 
+func (r *fakeScheduleRepo) ListScheduleByAgent(_ context.Context, employeeID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	var out []domain.ScheduleEntry
+	for _, e := range r.entries {
+		if e.EmployeeID != employeeID {
+			continue
+		}
+		if e.WorkDate.Before(start) || e.WorkDate.After(end) {
+			continue
+		}
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (r *fakeScheduleRepo) GetActivePlacementCompanyForEmployee(_ context.Context, employeeID string) (string, error) {
+	p, ok := r.placements[employeeID]
+	if !ok {
+		return "", domain.ErrNotFound
+	}
+	return p.CompanyID, nil
+}
+
 func (r *fakeScheduleRepo) GetScheduleEntry(_ context.Context, id string) (domain.ScheduleEntry, error) {
 	e, ok := r.entries[id]
 	if !ok {
@@ -469,6 +492,11 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID string) *
 		r.Delete("/schedule/{id}", handler.DeleteScheduleEntry)
 		r.Post("/schedule:check", handler.CheckScheduleConflicts)
 		r.Post("/schedule:bulk-apply", handler.BulkApplySchedule)
+	})
+	// Agent self-schedule: adds RoleAgent (mirror server.go).
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+		r.Get("/schedule/by-agent/{employee_id}", handler.GetScheduleByAgent)
 	})
 	// Shift-master writes: super_admin, hr_admin only.
 	r.Group(func(r chi.Router) {

@@ -172,6 +172,30 @@ func mapScheduleFromList(row sqlcgen.ListScheduleRow) domain.ScheduleEntry {
 	}
 }
 
+func mapScheduleFromByAgent(row sqlcgen.ListScheduleByAgentRow) domain.ScheduleEntry {
+	return domain.ScheduleEntry{
+		ID:              row.ID,
+		EmployeeID:      row.EmployeeID,
+		PlacementID:     row.PlacementID,
+		CompanyID:       row.CompanyID,
+		ServiceLineID:   row.ServiceLineID,
+		ShiftMasterID:   row.ShiftMasterID,
+		ShiftMasterName: row.ShiftMasterName,
+		EmployeeName:    row.EmployeeName,
+		CompanyName:     row.CompanyName,
+		StartTime:       row.StartTime,
+		EndTime:         row.EndTime,
+		CrossMidnight:   row.CrossMidnight,
+		WorkDate:        pgDateToTime(row.WorkDate),
+		Status:          row.Status,
+		IsDayOff:        row.IsDayOff,
+		ReplacedEntryID: row.ReplacedEntryID,
+		CreatedBy:       row.CreatedBy,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+	}
+}
+
 func mapScheduleFromGet(row sqlcgen.GetScheduleEntryRow) domain.ScheduleEntry {
 	return domain.ScheduleEntry{
 		ID:              row.ID,

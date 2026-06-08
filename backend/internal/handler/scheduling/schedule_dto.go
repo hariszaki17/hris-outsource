@@ -74,6 +74,13 @@ type scheduleListResponse struct {
 	Warnings []warningResponse       `json:"warnings"`
 }
 
+// scheduleByAgentResponse is the GET /schedule/by-agent/{employee_id} body
+// (data + warnings). warnings is empty for the MVP (SV-3 enrichment deferred).
+type scheduleByAgentResponse struct {
+	Data     []scheduleEntryResponse `json:"data"`
+	Warnings []warningResponse       `json:"warnings"`
+}
+
 type warningResponse struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`

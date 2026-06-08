@@ -606,6 +606,13 @@ type Querier interface {
 	//   employee_id (optional), status__in (optional text[] → status = ANY).
 	// Ordered by employee_id, work_date for a stable grid layout.
 	ListSchedule(ctx context.Context, arg ListScheduleParams) ([]ListScheduleRow, error)
+	// F4.3 "Jadwal Saya": ONE agent's schedule across ALL their placements (no
+	// company_id filter — by-agent spans companies). Same projected columns as
+	// ListSchedule so the row reuses the list mapper. Ordered by work_date,
+	// start_time for the agent's day/week timeline.
+	// TODO(SV-3): include_company geo/address enrichment (company_geo/address) is
+	//   deferred — this query returns the base ScheduleEntry projection only.
+	ListScheduleByAgent(ctx context.Context, arg ListScheduleByAgentParams) ([]ListScheduleByAgentRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	ListServiceLines(ctx context.Context, arg ListServiceLinesParams) ([]ListServiceLinesRow, error)
 	// E3 shift_leader_assignments queries (F3.4 / SL-*). Reads LEFT JOIN the company

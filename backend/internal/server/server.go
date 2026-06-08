@@ -368,6 +368,14 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/schedule:bulk-apply", d.Scheduling.BulkApplySchedule)
 			})
 
+			// Agent self-schedule (F4.3 "Jadwal Saya"): adds RoleAgent for this
+			// ONE read; per-row scope (agent self-only / leader-company / staff
+			// any) is enforced in the service (SV-1).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Get("/schedule/by-agent/{employee_id}", d.Scheduling.GetScheduleByAgent)
+			})
+
 			// Shift-master WRITES: super_admin, hr_admin (global scope).
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))

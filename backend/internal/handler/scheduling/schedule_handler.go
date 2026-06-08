@@ -52,6 +52,42 @@ func (h *Handler) ListSchedule(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, toScheduleListResponse(rows))
 }
 
+// --- agent self-schedule (F4.3 "Jadwal Saya") ---
+
+// GetScheduleByAgent handles GET /schedule/by-agent/{employee_id} (required
+// start_date + end_date). RBAC scope (agent self-only / leader-company / staff
+// any) is enforced in the service. include_company is accepted but ignored for
+// the MVP (SV-3 geo/address enrichment deferred).
+func (h *Handler) GetScheduleByAgent(w http.ResponseWriter, r *http.Request) {
+	employeeID := chi.URLParam(r, "employee_id")
+	q := r.URL.Query()
+	start, err := parseDate(q.Get("start_date"))
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"start_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
+		return
+	}
+	end, err := parseDate(q.Get("end_date"))
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"end_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
+		return
+	}
+	// include_company is parsed for forward-compat but ignored (SV-3 deferred).
+
+	rows, serr := h.schedule.GetScheduleByAgent(r.Context(), employeeID, start, end)
+	if serr != nil {
+		httpx.WriteError(w, r, serr)
+		return
+	}
+	items := make([]scheduleEntryResponse, 0, len(rows))
+	for _, e := range rows {
+		items = append(items, toScheduleEntryResponse(e))
+	}
+	httpx.WriteJSON(w, http.StatusOK, scheduleByAgentResponse{
+		Data:     items,
+		Warnings: []warningResponse{},
+	})
+}
+
 // --- single-cell create ---
 
 // CreateScheduleEntry handles POST /schedule (201 + Location + warnings:[]).

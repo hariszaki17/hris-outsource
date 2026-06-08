@@ -462,6 +462,101 @@ func (q *Queries) ListSchedule(ctx context.Context, arg ListScheduleParams) ([]L
 	return items, nil
 }
 
+const listScheduleByAgent = `-- name: ListScheduleByAgent :many
+SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+       se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
+       se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
+       se.created_by, se.created_at, se.updated_at,
+       e.full_name AS employee_name,
+       p.client_company_id AS company_id,
+       c.name AS company_name,
+       sm.name AS shift_master_name
+FROM schedule_entries se
+JOIN placements p             ON p.id  = se.placement_id
+LEFT JOIN client_companies c  ON c.id  = p.client_company_id
+LEFT JOIN employees e         ON e.id  = se.employee_id
+LEFT JOIN shift_masters sm    ON sm.id = se.shift_master_id
+WHERE se.deleted_at IS NULL
+  AND se.employee_id = $1
+  AND se.work_date BETWEEN $2::date AND $3::date
+ORDER BY se.work_date ASC, se.start_time ASC, se.id ASC
+`
+
+type ListScheduleByAgentParams struct {
+	EmployeeID string
+	StartDate  pgtype.Date
+	EndDate    pgtype.Date
+}
+
+type ListScheduleByAgentRow struct {
+	ID              string
+	EmployeeID      string
+	PlacementID     string
+	ServiceLineID   *string
+	ShiftMasterID   *string
+	StartTime       *string
+	EndTime         *string
+	CrossMidnight   bool
+	WorkDate        pgtype.Date
+	Status          string
+	IsDayOff        bool
+	ReplacedEntryID *string
+	CreatedBy       *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	EmployeeName    *string
+	CompanyID       string
+	CompanyName     *string
+	ShiftMasterName *string
+}
+
+// F4.3 "Jadwal Saya": ONE agent's schedule across ALL their placements (no
+// company_id filter — by-agent spans companies). Same projected columns as
+// ListSchedule so the row reuses the list mapper. Ordered by work_date,
+// start_time for the agent's day/week timeline.
+// TODO(SV-3): include_company geo/address enrichment (company_geo/address) is
+//
+//	deferred — this query returns the base ScheduleEntry projection only.
+func (q *Queries) ListScheduleByAgent(ctx context.Context, arg ListScheduleByAgentParams) ([]ListScheduleByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleByAgent, arg.EmployeeID, arg.StartDate, arg.EndDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduleByAgentRow{}
+	for rows.Next() {
+		var i ListScheduleByAgentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeID,
+			&i.PlacementID,
+			&i.ServiceLineID,
+			&i.ShiftMasterID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.CrossMidnight,
+			&i.WorkDate,
+			&i.Status,
+			&i.IsDayOff,
+			&i.ReplacedEntryID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.EmployeeName,
+			&i.CompanyID,
+			&i.CompanyName,
+			&i.ShiftMasterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteScheduleEntry = `-- name: SoftDeleteScheduleEntry :execrows
 UPDATE schedule_entries
 SET deleted_at = now()
