@@ -14,6 +14,7 @@ export default function AppTabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: t('m:tabs.home') }} />
       <Tabs.Screen name="attendance" options={{ title: t('m:tabs.attendance') }} />
+      <Tabs.Screen name="schedule" options={{ title: t('m:tabs.schedule') }} />
       <Tabs.Screen name="notifications" options={{ title: t('m:tabs.notifications') }} />
       <Tabs.Screen name="more" options={{ title: t('m:tabs.more') }} />
     </Tabs>

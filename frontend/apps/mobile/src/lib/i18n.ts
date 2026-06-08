@@ -27,8 +27,16 @@ const mobileCopy = {
     tabs: {
       home: 'Beranda',
       attendance: 'Kehadiran',
+      schedule: 'Jadwal',
       notifications: 'Notifikasi',
       more: 'Lainnya',
+    },
+    schedule: {
+      title: 'Jadwal saya',
+      dayOff: 'Libur',
+      noShift: 'Tidak ada shift',
+      cancelledLeave: 'Cuti',
+      empty: 'Belum ada jadwal minggu ini.',
     },
     beranda: {
       greeting: 'Halo, {{name}}',
@@ -127,8 +135,16 @@ const mobileCopy = {
     tabs: {
       home: 'Home',
       attendance: 'Attendance',
+      schedule: 'Schedule',
       notifications: 'Notifications',
       more: 'More',
+    },
+    schedule: {
+      title: 'My schedule',
+      dayOff: 'Day off',
+      noShift: 'No shift',
+      cancelledLeave: 'On leave',
+      empty: 'No schedule this week yet.',
     },
     beranda: {
       greeting: 'Hi, {{name}}',
