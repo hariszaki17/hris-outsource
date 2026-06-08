@@ -179,6 +179,16 @@ const mobileCopy = {
       paid: 'Dibayar',
       notPaid: 'Belum dibayar',
     },
+    profile: {
+      title: 'Profil',
+      name: 'Nama',
+      phone: 'Nomor HP',
+      address: 'Alamat',
+      save: 'Ajukan perubahan',
+      success: 'Perubahan diajukan. Menunggu persetujuan HR.',
+      noChange: 'Tidak ada perubahan.',
+      error: 'Gagal mengajukan perubahan. Coba lagi.',
+    },
   },
   en: {
     common: {
@@ -352,6 +362,16 @@ const mobileCopy = {
       gross: 'Gross earnings',
       paid: 'Paid',
       notPaid: 'Not paid yet',
+    },
+    profile: {
+      title: 'Profile',
+      name: 'Name',
+      phone: 'Phone',
+      address: 'Address',
+      save: 'Request change',
+      success: 'Change requested. Awaiting HR approval.',
+      noChange: 'No changes.',
+      error: 'Failed to request change. Try again.',
     },
   },
 } as const;

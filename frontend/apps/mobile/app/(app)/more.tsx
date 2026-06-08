@@ -7,7 +7,8 @@ import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
 
 // Feature sections reachable from More (added per phase: leave=17, OT=18, payslip=19, profile=20).
-const MENU: { key: 'leave' | 'overtime' | 'payslip'; href: Href }[] = [
+const MENU: { key: 'leave' | 'overtime' | 'payslip' | 'profile'; href: Href }[] = [
+  { key: 'profile', href: '/profile' },
   { key: 'leave', href: '/leave' },
   { key: 'overtime', href: '/overtime' },
   { key: 'payslip', href: '/payslip' },
