@@ -25,10 +25,10 @@ Three states drive per-feature effort:
 
 ### Shell & session (SHELL) — backend READY
 
-- [ ] **SHELL-01**: Agent logs in on mobile (E1) and the session/token persists across app restarts (secure storage).
-- [ ] **SHELL-02**: Authenticated tab navigation (Beranda · Attendance · Schedule · More) with a force-update gate hook (from `update-gate.ts`).
-- [ ] **SHELL-03**: Beranda/home dashboard renders the agent's role-shaped `GET /dashboards/me`.
-- [ ] **SHELL-04**: Notifications list + mark-read / mark-all (`GET /notifications`), with empty/loading/error states.
+- [x] **SHELL-01**: Agent logs in on mobile (E1) and the session/token persists across app restarts (secure storage).
+- [x] **SHELL-02**: Authenticated tab navigation (Beranda · Attendance · Schedule · More) with a force-update gate hook (from `update-gate.ts`).
+- [x] **SHELL-03**: Beranda/home dashboard renders the agent's role-shaped `GET /dashboards/me`.
+- [x] **SHELL-04**: Notifications list + mark-read / mark-all (`GET /notifications`), with empty/loading/error states.
 
 ### Clock in/out + geofence (CLOCK) — backend NEW
 
@@ -88,7 +88,7 @@ Three states drive per-feature effort:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SHELL-01..04 | Phase 13 | Pending |
+| SHELL-01..04 | Phase 13 | Done (FE verified; live needs BE+device) |
 | CLOCK-01..03 | Phase 14 | Pending |
 | ATTEND-01..02 | Phase 14 | Pending |
 | ATTEND-03..04 | Phase 15 | Pending |

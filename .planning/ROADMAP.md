@@ -17,7 +17,7 @@ milestone (its endpoints already exist). Builds on the v1.1 Expo scaffold.
 Backend effort legend: **READY** (agent-callable today) · **OPEN-ROUTE** (exists, just
 excludes agent — open route + self-filter) · **NEW** (build the handler).
 
-- [ ] **Phase 13: App shell + auth + Beranda** (SHELL-01..04) — backend READY.
+- [x] **Phase 13: App shell + auth + Beranda** (SHELL-01..04) — backend READY. ✅ 2026-06-08
   Secure-storage session, tab nav + force-update gate hook, role-shaped `dashboards/me`,
   notifications list/mark-read. Foundation every other screen sits on.
   - Success: agent logs in on a device, session survives restart, Beranda + notifications render off the real BE.

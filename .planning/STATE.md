@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Mobile MVP (Agent App)
-status: planning
-stopped_at: v1.2 roadmap created (Phases 13–20); Phase 13 not started
+status: in_progress
+stopped_at: Phase 13 complete (13-01-PLAN.md); Phase 14 next
 last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — v1.1 (Expo scaffold) shipped; opened v1.2 Mobile MVP (Agent App). Full-stack vertical-slice roadmap, Phases 13–20: 13 shell+auth+Beranda+notifications (BE READY), 14 clock-in/out+geofence+my-attendance (BE NEW), 15 correction (NEW), 16 schedule (open-route), 17 leave+upload (NEW), 18 OT (NEW), 19 payslip (open-route), 20 profile+change-request (open-route+NEW). Backend audit: auth/notifications/dashboard + all shift-leader endpoints already done; agent gap = clock-in/out (missing) + open-agent-route reads + new agent POST flows. SL app deferred to a later milestone. Awaiting go to plan/execute Phase 13."
+last_activity: "2026-06-08 — Phase 13 (app shell + auth + Beranda + notifications) COMPLETE in worktree feat/mobile-scaffold. RN-only (backend was READY). expo-secure-store token store (access in memory, refresh in keychain); configureApiClient wired; RN session restore via body-based /auth/refresh + /auth/me (no cookies); expo-router auth gate ((auth)/login vs (app) tabs) + force-update hook on launch; login, Beranda (useGetMyDashboard agent role-shaped), notifications (list + mark-read/all), More (logout + change-pw stub); i18next reusing @swp/shared catalogs + mobile 'm' namespace, all copy via t(), no raw hex. Deps: expo-secure-store, @tanstack/react-query, i18next, react-i18next. Verified tsc/biome/expo-doctor 21-21/expo export 1680 modules. Live login/dashboard/notifications need running Go BE + device (human_needed). Next: Phase 14 — clock in/out + geofence (backend NEW)."
 progress:
   total_phases: 8
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 13
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-08)
 
 **Core value:** An agent runs their full daily work loop from the phone, against the real Go backend.
-**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Roadmap created (Phases 13–20); Phase 13 (app shell + auth) is next up.
+**Current focus:** Milestone v1.2 — Mobile MVP (Agent App). Phase 13 (app shell + auth) done; Phase 14 (clock in/out + geofence) next.
 
 ## Current Position
 
-Phase: 13 of 20 (App shell + auth + Beranda) — not started
-Plan: —
-Status: v1.2 roadmap created; ready to plan/execute Phase 13
-Last activity: 2026-06-08 — v1.1 scaffold shipped; v1.2 Mobile MVP roadmap (8 full-stack phases) created.
+Phase: 14 of 20 (Clock in/out + geofence) — next
+Plan: Phase 13 COMPLETE (13-01)
+Status: Phase 13 shipped (FE verified; live needs BE+device). Ready to plan/execute Phase 14.
+Last activity: 2026-06-08 — Phase 13 app shell + auth + Beranda + notifications complete; verified tsc/biome/expo-doctor/bundle.
 
-Progress: [          ] 0% (0/8 phases)
+Progress: [█         ] 13% (1/8 phases)
 
 ## Performance Metrics
 
