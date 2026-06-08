@@ -1674,6 +1674,18 @@ export const id = {
     },
     grid: { agentCol: 'AGEN' },
     cell: { ariaLabel: '{{agent}} — {{date}}', dayOff: 'Libur', cancelledLeave: 'Cuti' },
+    holiday: { badge: 'Libur Nasional', shiftBadge: 'Libur' },
+    compliance: {
+      bannerTitle: 'Perhatian kepatuhan jadwal',
+      bannerNoRest: '{{count}} agen tanpa hari libur minggu ini',
+      bannerHolidayShift: '{{count}} penugasan shift di hari libur',
+      noRest: 'Tanpa libur',
+      noRestTip: 'Agen dijadwalkan bekerja 7 hari tanpa libur minggu ini — wajib ada ≥1 hari istirahat.',
+      longRun: '{{count}} hari berturut',
+      longRunTip: '{{count}} hari kerja berturut-turut minggu ini — mendekati batas wajib libur mingguan.',
+      holidayShift: '{{count}} shift libur',
+      holidayShiftTip: 'Bekerja pada hari libur nasional memicu tarif lembur premium (tier Holiday).',
+    },
     picker: {
       title: 'Pilih shift untuk {{name}}',
       searchPlaceholder: 'Cari shift…',

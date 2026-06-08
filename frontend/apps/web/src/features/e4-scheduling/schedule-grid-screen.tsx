@@ -29,11 +29,12 @@ import {
   getListScheduleQueryKey,
   useListSchedule,
 } from '@swp/api-client/e4';
+import { type Holiday, useListHolidays } from '@swp/api-client/e7';
 import { LOCALE_ID, TZ } from '@swp/shared';
 import { Button, EmptyState, SkeletonTableRow, StateView } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ChevronLeft, ChevronRight, Copy, Radio } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Radio, Star, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CellTarget } from './schedule-overlays.tsx';
@@ -170,6 +171,72 @@ function buildAgentRows(entries: ScheduleEntry[]): AgentRow[] {
 }
 
 // ---------------------------------------------------------------------------
+// Roster-compliance derivation (EPICS §8 D3) — pure, week-scoped.
+//   A "worked day" = a scheduled shift that is not a day-off and not cancelled
+//   by approved leave. Within the visible Mon–Sun window:
+//     • noRest   → all 7 days worked (zero weekly rest)         → violation
+//     • longRun  → ≥6 consecutive worked days (but has a rest)  → warning
+//   Cross-week consecutive runs need neighbour-week data (follow-up); v1 flags
+//   within the displayed week, which is where the leader acts.
+// ---------------------------------------------------------------------------
+
+const REST_VIOLATION_DAYS = 7; // worked all 7 visible days → no weekly rest
+const LONG_RUN_WARN_DAYS = 6; // ≥6 consecutive worked days → approaching the cap
+
+function isWorkedEntry(entry: ScheduleEntry | undefined): boolean {
+  if (!entry) return false;
+  if (entry.is_day_off) return false;
+  if (entry.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE) return false;
+  return !!entry.shift_master_name;
+}
+
+function longestWorkedRun(row: AgentRow, days: string[]): number {
+  let best = 0;
+  let cur = 0;
+  for (const d of days) {
+    if (isWorkedEntry(row.cells[d])) {
+      cur += 1;
+      if (cur > best) best = cur;
+    } else {
+      cur = 0;
+    }
+  }
+  return best;
+}
+
+type RowCompliance = {
+  workedCount: number;
+  longestRun: number;
+  noRest: boolean;
+  longRun: boolean;
+  holidayShiftCount: number;
+};
+
+function computeCompliance(
+  row: AgentRow,
+  days: string[],
+  holidaySet: Set<string>,
+): RowCompliance {
+  let workedCount = 0;
+  let holidayShiftCount = 0;
+  for (const d of days) {
+    if (isWorkedEntry(row.cells[d])) {
+      workedCount += 1;
+      if (holidaySet.has(d)) holidayShiftCount += 1;
+    }
+  }
+  const longestRun = longestWorkedRun(row, days);
+  const noRest = workedCount >= REST_VIOLATION_DAYS;
+  return {
+    workedCount,
+    longestRun,
+    noRest,
+    longRun: !noRest && longestRun >= LONG_RUN_WARN_DAYS,
+    holidayShiftCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main screen
 // ---------------------------------------------------------------------------
 
@@ -226,6 +293,61 @@ export function ScheduleGridScreen() {
     : entries;
 
   const agentRows = React.useMemo(() => buildAgentRows(flatEntries), [flatEntries]);
+
+  // ---- Holiday calendar (EPICS §8 D1) — classification only, never suppresses shifts ----
+  // The week may straddle a year boundary; fetch both years (react-query dedupes equal keys).
+  const mondayYear = Number(monday.slice(0, 4));
+  const sundayYear = Number(sunday.slice(0, 4));
+  const holidaysA = useListHolidays(
+    { year: mondayYear },
+    { query: { staleTime: 5 * 60 * 1000 } },
+  );
+  const holidaysB = useListHolidays(
+    { year: sundayYear },
+    { query: { enabled: sundayYear !== mondayYear, staleTime: 5 * 60 * 1000 } },
+  );
+
+  // date(iso) → holiday name, scoped to the company's service lines (global holidays always apply).
+  const { holidaySet, holidayNameByDate } = React.useMemo(() => {
+    const extract = (q: typeof holidaysA): Holiday[] => {
+      const body = q.data?.data as { data?: Holiday[] } | Holiday[] | undefined;
+      if (Array.isArray(body)) return body;
+      return body?.data ?? [];
+    };
+    const all = [...extract(holidaysA), ...(sundayYear !== mondayYear ? extract(holidaysB) : [])];
+    const slIds = new Set(
+      agentRows.map((r) => r.serviceLineId).filter((x): x is string => !!x),
+    );
+    const nameByDate = new Map<string, string>();
+    for (const h of all) {
+      if (!days.includes(h.date)) continue;
+      const applies =
+        h.applicable_service_lines.length === 0 ||
+        h.applicable_service_lines.some((id) => slIds.has(id));
+      if (!applies) continue;
+      if (!nameByDate.has(h.date)) nameByDate.set(h.date, h.name);
+    }
+    return { holidaySet: new Set(nameByDate.keys()), holidayNameByDate: nameByDate };
+  }, [holidaysA, holidaysB, agentRows, days, mondayYear, sundayYear]);
+
+  // ---- Per-agent roster compliance (EPICS §8 D3) ----
+  const complianceByRow = React.useMemo(() => {
+    const m = new Map<string, RowCompliance>();
+    for (const row of agentRows) {
+      m.set(`${row.employeeId}::${row.placementId}`, computeCompliance(row, days, holidaySet));
+    }
+    return m;
+  }, [agentRows, days, holidaySet]);
+
+  const complianceSummary = React.useMemo(() => {
+    let agentsNoRest = 0;
+    let holidayShifts = 0;
+    for (const c of complianceByRow.values()) {
+      if (c.noRest) agentsNoRest += 1;
+      holidayShifts += c.holidayShiftCount;
+    }
+    return { agentsNoRest, holidayShifts };
+  }, [complianceByRow]);
 
   // ---- Sync URL search params ----
   const syncSearch = React.useCallback(
@@ -305,6 +427,7 @@ export function ScheduleGridScreen() {
     if (!entry.shift_master_name) return null;
 
     const dotClass = shiftDotClass(entry);
+    const isHolidayShift = holidaySet.has(dateIso);
     const timeShort =
       entry.start_time && entry.end_time
         ? `${entry.start_time.slice(0, 5).replace(':', '')}–${entry.end_time.slice(0, 5).replace(':', '')}`
@@ -317,11 +440,20 @@ export function ScheduleGridScreen() {
           <span className="truncate text-[11px] font-bold text-text leading-tight">
             {entry.shift_master_name}
           </span>
-          {entry.cross_midnight && (
-            <span className="ml-auto shrink-0 rounded bg-warn-bg px-1 text-[9px] font-bold text-warn-tx">
-              +1
-            </span>
-          )}
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {isHolidayShift && (
+              <span
+                title={t('compliance.holidayShiftTip')}
+                className="flex items-center gap-0.5 rounded bg-bad-bg px-1 text-[9px] font-bold text-bad-tx"
+              >
+                <Star aria-hidden className="size-2.5 fill-current" />
+                {t('holiday.shiftBadge')}
+              </span>
+            )}
+            {entry.cross_midnight && (
+              <span className="rounded bg-warn-bg px-1 text-[9px] font-bold text-warn-tx">+1</span>
+            )}
+          </span>
         </div>
         {timeShort && <p className="mt-0.5 font-mono text-[10px] text-text-3">{timeShort}</p>}
       </div>
@@ -472,6 +604,32 @@ export function ScheduleGridScreen() {
           />
         )}
 
+      {/* Roster-compliance summary (EPICS §8 D3) — only when something needs attention */}
+      {companyId &&
+        !scheduleQuery.isLoading &&
+        !scheduleQuery.isError &&
+        agentRows.length > 0 &&
+        (complianceSummary.agentsNoRest > 0 || complianceSummary.holidayShifts > 0) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-warn-bd bg-warn-bg px-3 py-2.5">
+            <div className="flex items-center gap-1.5">
+              <TriangleAlert aria-hidden className="size-3.5 text-warn-tx" />
+              <span className="text-xs font-semibold text-warn-tx">
+                {t('compliance.bannerTitle')}
+              </span>
+            </div>
+            {complianceSummary.agentsNoRest > 0 && (
+              <span className="text-xs font-medium text-warn-tx">
+                {t('compliance.bannerNoRest', { count: complianceSummary.agentsNoRest })}
+              </span>
+            )}
+            {complianceSummary.holidayShifts > 0 && (
+              <span className="text-xs font-medium text-warn-tx">
+                {t('compliance.bannerHolidayShift', { count: complianceSummary.holidayShifts })}
+              </span>
+            )}
+          </div>
+        )}
+
       {/* Grid */}
       {companyId && !scheduleQuery.isLoading && !scheduleQuery.isError && agentRows.length > 0 && (
         <div
@@ -497,27 +655,35 @@ export function ScheduleGridScreen() {
               {/* Day headers */}
               {days.map((d, i) => {
                 const isToday = d === todayIso;
+                const holidayName = holidayNameByDate.get(d);
+                const isHoliday = !!holidayName;
                 return (
                   <div
                     key={d}
-                    className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft py-2 last:border-r-0 ${
-                      isToday ? 'bg-primary-soft' : ''
+                    title={holidayName}
+                    className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft px-1 py-2 last:border-r-0 ${
+                      isToday ? 'bg-primary-soft' : isHoliday ? 'bg-bad-bg/40' : ''
                     }`}
                   >
                     <span
                       className={`text-[10px] font-semibold tracking-[0.3px] ${
-                        isToday ? 'text-primary' : 'text-text-3'
+                        isToday ? 'text-primary' : isHoliday ? 'text-bad-tx' : 'text-text-3'
                       }`}
                     >
                       {DAY_ABBR_ID[i]}
                     </span>
                     <span
                       className={`text-[13px] font-bold ${
-                        isToday ? 'text-primary-strong' : 'text-text'
+                        isToday ? 'text-primary-strong' : isHoliday ? 'text-bad-tx' : 'text-text'
                       }`}
                     >
                       {formatDayMonthId(d)}
                     </span>
+                    {isHoliday && (
+                      <span className="mt-0.5 max-w-full truncate text-[9px] font-medium text-bad-tx">
+                        {holidayName}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -533,23 +699,61 @@ export function ScheduleGridScreen() {
                 style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
               >
                 {/* Agent name column */}
-                <div
-                  className="shrink-0 border-r border-border-soft px-4 py-2.5"
-                  style={{ width: `${AGENT_COL_W}px` }}
-                >
-                  <p className="text-[13px] font-semibold text-text leading-tight">
-                    {row.employeeName}
-                  </p>
-                  {row.serviceLineName && (
-                    <p className="mt-0.5 text-[11px] text-text-3">{row.serviceLineName}</p>
-                  )}
-                </div>
+                {(() => {
+                  const c = complianceByRow.get(`${row.employeeId}::${row.placementId}`);
+                  return (
+                    <div
+                      className="shrink-0 border-r border-border-soft px-4 py-2.5"
+                      style={{ width: `${AGENT_COL_W}px` }}
+                    >
+                      <p className="text-[13px] font-semibold text-text leading-tight">
+                        {row.employeeName}
+                      </p>
+                      {row.serviceLineName && (
+                        <p className="mt-0.5 text-[11px] text-text-3">{row.serviceLineName}</p>
+                      )}
+                      {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {c.noRest ? (
+                            <span
+                              title={t('compliance.noRestTip')}
+                              className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                            >
+                              <TriangleAlert aria-hidden className="size-2.5" />
+                              {t('compliance.noRest')}
+                            </span>
+                          ) : (
+                            c.longRun && (
+                              <span
+                                title={t('compliance.longRunTip', { count: c.longestRun })}
+                                className="inline-flex items-center gap-0.5 rounded bg-warn-bg px-1 py-0.5 text-[9px] font-semibold text-warn-tx"
+                              >
+                                <TriangleAlert aria-hidden className="size-2.5" />
+                                {t('compliance.longRun', { count: c.longestRun })}
+                              </span>
+                            )
+                          )}
+                          {c.holidayShiftCount > 0 && (
+                            <span
+                              title={t('compliance.holidayShiftTip')}
+                              className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                            >
+                              <Star aria-hidden className="size-2.5 fill-current" />
+                              {t('compliance.holidayShift', { count: c.holidayShiftCount })}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Day cells */}
                 {days.map((d) => {
                   const entry = row.cells[d];
                   const isToday = d === todayIso;
                   const isCancelled = entry?.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE;
+                  const isHoliday = holidaySet.has(d);
 
                   return (
                     <button
@@ -562,7 +766,11 @@ export function ScheduleGridScreen() {
                       onClick={(e) => handleCellClick(row, d, e.currentTarget)}
                       className={[
                         'group relative flex flex-1 cursor-pointer items-center justify-center border-r border-border-soft p-1.5 text-left transition-colors last:border-r-0',
-                        isToday && !isCancelled ? 'bg-primary-soft/40' : '',
+                        isToday && !isCancelled
+                          ? 'bg-primary-soft/40'
+                          : isHoliday && !isCancelled
+                            ? 'bg-bad-bg/20'
+                            : '',
                         isCancelled ? 'opacity-50' : '',
                         'hover:bg-surface-2',
                       ]

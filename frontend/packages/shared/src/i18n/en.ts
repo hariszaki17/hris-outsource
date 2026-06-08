@@ -1663,6 +1663,18 @@ export const en: Messages = {
     },
     grid: { agentCol: 'AGENT' },
     cell: { ariaLabel: '{{agent}} — {{date}}', dayOff: 'Day off', cancelledLeave: 'Leave' },
+    holiday: { badge: 'Public Holiday', shiftBadge: 'Holiday' },
+    compliance: {
+      bannerTitle: 'Schedule compliance attention',
+      bannerNoRest: '{{count}} agents with no rest day this week',
+      bannerHolidayShift: '{{count}} holiday shift assignments',
+      noRest: 'No rest day',
+      noRestTip: 'Agent is scheduled 7 days with no rest this week — at least 1 weekly rest day is required.',
+      longRun: '{{count}} days in a row',
+      longRunTip: '{{count}} consecutive workdays this week — approaching the mandatory weekly-rest limit.',
+      holidayShift: '{{count}} holiday shifts',
+      holidayShiftTip: 'Working a public holiday triggers premium overtime (Holiday tier).',
+    },
     picker: {
       title: 'Pick a shift for {{name}}',
       searchPlaceholder: 'Search shifts…',
