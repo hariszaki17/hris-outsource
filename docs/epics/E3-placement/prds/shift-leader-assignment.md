@@ -65,6 +65,8 @@ flowchart TD
 | SL-7 | A company **may temporarily have no leader** (vacancy); approvals that require a leader escalate to HR admin until filled. |
 | SL-8 | All assignments/vacancies are audited and notify the incoming leader, outgoing leader, and the company's agents (E10). |
 | SL-9 | Assignment history is retained (never hard-deleted). |
+| SL-10 | A shift leader is **identified by an active `shift_leader_assignments` row** (keyed by `employee_id`); the employee's **auth role and company scope are derived at request time** by server middleware from that active assignment — **not stored on `users`**. An active assignment ⇒ effective role `shift_leader` scoped to that one company (INV-3); none ⇒ a plain agent. Reassign/revoke takes effect on the **next request** (no re-login). This is the mechanism behind SL-5 and is consistent with INV-2/3/4. |
+| SL-11 | **Single entry point.** Assign / replace / revoke a leader is performed from the **client-company detail "Pemimpin Shift" tab** (E2 [F2.3](../../E2-identity/prds/client-company-directory.md)). The placement-detail shift-leader card is **read-only** and links to that tab; the company-roster "Ganti" action (F3.5) links to the same tab. |
 
 ## 6. Data model
 
@@ -79,7 +81,7 @@ flowchart TD
 | `assigned_by` | FK → User | actor |
 | `vacated_reason` | enum | `Reassigned` \| `PlacementEnded` \| `Manual` |
 
-> RBAC scope: assignment writes a company-scoped `shift_leader` grant (E1). Revoked on `unassigned_at`.
+> RBAC scope: the `shift_leader` role + company scope are **derived at request time** from the active assignment by server middleware (SL-10), **not persisted on `users`**; they take effect on assign and lapse on `unassigned_at`, both effective on the next request (E1).
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -149,6 +151,10 @@ Feature: Shift-leader assignment
 - **F3.1** (active placement prerequisite), **F3.2/F3.3** (auto-vacate triggers), **E1** (RBAC scope + audit), **E10** (notifications), and downstream **E5/E6/E7** consume the granted scope.
 
 ## 10. Decisions & open questions
+
+**Resolved (2026-06-08 — shipped shift-leader identity model):**
+- ✅ **Role/scope derived, not stored.** A shift leader = an Employee with an active `shift_leader_assignments` row; the auth role (`shift_leader`) and single-company scope are derived at request time by server middleware (consistent with INV-2/3/4), never persisted on `users`. Reassign/revoke is effective on the next request — no re-login. (SL-10)
+- ✅ **Single entry point** = the client-company detail **"Pemimpin Shift" tab** (E2 [F2.3](../../E2-identity/prds/client-company-directory.md)). The placement-detail shift-leader card is read-only (links to the tab); the F3.5 roster "Ganti" action links there too. (SL-11)
 
 - ✅ One leader per **leadership unit**; one unit per leader (strict 1:1). *(2026-06-03: unit = company **or** site per `ClientCompany.leader_scope`; default `company` preserves prior behavior.)*
 - ✅ Leader must be actively placed **within the unit** (at the company / at that site).

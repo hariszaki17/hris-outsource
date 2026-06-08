@@ -230,6 +230,8 @@ flowchart LR
 
 > **UI/flow** *(2026-06-07, EPICS §8):* edit is a **full-page screen launched from the detail page** (`/client-companies/$id/edit`), not a drawer; the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, guarded by CC-5); the detail **"Profil" tab** shows statutory/billing + `leader_scope` only — **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated.
 
+> **Detail tabs & list scope** *(2026-06-08):* the detail page also carries three **E3-backed** tabs — **Penempatan Aktif** (active roster), **Pemimpin Shift** (current leader + assign/replace/revoke, the single entry point for E3 [F3.4](../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`) — all reading the E3 company-roster (F3.5); leader mutations call the E3 shift-leader-assignment endpoints. The company **list is role-scoped**: a shift leader sees only the company they lead (CC-7).
+
 ---
 
 ### F2.6 — Client Sites & Geofence

@@ -56,7 +56,7 @@ flowchart LR
 | RO-4 | **Scope:** HR/Super Admin can open any company; a **shift leader can open only the company they lead** (others are hidden/403). |
 | RO-5 | The roster shows summary counts (total active, by service line, by status). |
 | RO-6 | Export (Excel/PDF) reflects the **currently applied filters** and records an audit entry (who exported what, when). |
-| RO-7 | Read-only — no mutation from this view; row actions deep-link to F3.1–F3.4. |
+| RO-7 | Read-only — no mutation from this view; row actions deep-link to F3.1–F3.4. The shift-leader **"Ganti"** action and the empty-leader prompt link to the **client-company "Pemimpin Shift" tab** (E2 F2.3), the single entry point for assign/replace/revoke (F3.4 SL-11). |
 | RO-8 | Sorted by status (active first) then agent name; paginated for large companies. |
 
 ## 6. Data model
@@ -110,7 +110,7 @@ Feature: Company placement roster
 
 | # | Case | Expected behavior |
 |---|------|-------------------|
-| C-1 | Company with no shift leader | Roster shows "No shift leader — assign one" with a link to F3.4. |
+| C-1 | Company with no shift leader | Roster shows "No shift leader — assign one" linking to the company **"Pemimpin Shift" tab** (E2 F2.3 / F3.4). |
 | C-2 | Very large company (1000+ placements) | Server-side pagination + filtering; export streams/queues for big result sets. |
 | C-3 | Placement spanning the filter period boundary | Included if its period overlaps the filter range (RO-3). |
 | C-4 | Shift leader deep-links to another company's roster URL | Blocked by scope (RO-4), 403. |

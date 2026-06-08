@@ -606,11 +606,14 @@ paths:
         audited promotion — both per RB-6 and per `EPICS.md` §8 E1
         (super_admin + hr_admin may assign roles).
 
-        A role change to/from `shift_leader` does NOT automatically create
-        or revoke an E3 `ShiftLeaderAssignment` — that is handled in E3
-        (INV-3: scope is derived from the active assignment). If the user
-        currently has an active assignment and is demoted, the assignment
-        is automatically ended (E3 implicit side-effect).
+        This action only sets the stored `users.role` field, which is
+        advisory. Shift-leader status is NOT governed by this field: it is
+        governed by the E3 `ShiftLeaderAssignment` (assign/revoke on the
+        company's Pemimpin Shift tab). The effective `shift_leader` role and
+        company scope are derived server-side at request time from the active
+        assignment (INV-3) — so this action neither creates nor ends an
+        assignment, and changing the stored role does not, by itself, grant
+        or remove leader access.
       x-rbac:
         roles: [super_admin, hr_admin]
         scope: global

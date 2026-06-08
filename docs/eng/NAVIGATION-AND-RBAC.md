@@ -135,6 +135,18 @@ entirely server-side** (row-level), decided 2026-06-03 as "purely backend". It d
 the menu is identical; scope only filters the rows a list/inbox returns. The client renders
 whatever scoped rows the API returns.
 
+**Shift-leader role + company scope are derived read-time (2026-06-08).** ✅ For a field employee,
+the **effective `shift_leader` role and its company scope are not stored on `users`** — the auth
+middleware derives both **per request** from the active E3 `shift_leader_assignments` row, which is
+the **single source of truth** for leadership. An employee with an active assignment ⇒ role
+`shift_leader`, scope = that one company (INV-3); without one ⇒ role `agent`, no company scope.
+Staff roles (`super_admin`, `hr_admin`) are global and never derived. Stored `users.role` /
+`users.company_id` and the JWT `cmp` claim are **advisory only**; `/auth/me` reports the
+request-time derived role + scope. **Fail-safe:** on resolver error or no assignment the scope is
+stripped and the role falls back to `agent` — deny, never escalate. **No re-login required:**
+assigning or revoking leadership in E3 takes effect on the next request, since nothing leader-related
+is baked into the token.
+
 ### 4.3 Day-one vs deferred
 
 Built now (cheap): nav/buttons declare permissions; `SessionUser.permissions` carries the

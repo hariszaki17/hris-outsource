@@ -388,6 +388,8 @@ x-rbac:
 - `self` — caller can only access resources for their own employee record (agent)
 - `company_or_global` — leader sees their company; HR/super-admin sees all
 
+**Shift-leader role + `company` scope are derived per request (2026-06-08).** ✅ For `shift_leader`, both the effective role and the `company` they are scoped to are resolved **server-side on each request** from the active E3 `shift_leader_assignments` row (one company, per INV-3), not from stored columns: `users.role` / `users.company_id` and the JWT `cmp` claim are **advisory only**. A field employee with an active assignment ⇒ role `shift_leader`, scope = that company; without one ⇒ role `agent`, no company scope. Staff roles (`super_admin`, `hr_admin`) are `global` and never derived. Fail-safe: on resolver error or no assignment the scope is stripped and the role falls back to `agent` (deny, never escalate). The enforcement primitives are unchanged — a role gate plus row-level company guard; only the source of the role/company changes.
+
 Server enforces RBAC at controller/handler level; clients hide unauthorized actions but MUST tolerate `403` defensively.
 
 ---

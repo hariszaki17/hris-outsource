@@ -28,7 +28,7 @@ HR/Placement Admin & Super Admin (author), System (validate, audit). Read consum
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | HR/Super Admin | Full CRUD of client companies. **List** shows the directory; its only per-row action is **Aktifkan/Nonaktifkan** (no row kebab) — create and edit live elsewhere. **Edit** is a dedicated full-page screen reached from the **detail** page (route `/client-companies/$id/edit`), not a drawer. The detail **"Profil" tab** shows statutory/billing fields + `leader_scope` only; **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated in Profil. |
+| **Web console** | HR/Super Admin | Full CRUD of client companies. **List** shows the directory; its only per-row action is **Aktifkan/Nonaktifkan** (no row kebab) — create and edit live elsewhere. The list is **role-scoped** server-side (CC-7): HR/Super Admin see all, a shift leader sees only their own company. **Edit** is a dedicated full-page screen reached from the **detail** page (route `/client-companies/$id/edit`), not a drawer. The detail **"Profil" tab** shows statutory/billing fields + `leader_scope` only; **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated in Profil. The detail page also carries three **E3-backed** tabs: **Penempatan Aktif** (active agent roster at the company), **Pemimpin Shift** (current shift leader + assign/replace/revoke — the single entry point for E3 [F3.4](../../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`). All three read the **E3 company-roster** endpoint (F3.5); the Pemimpin Shift mutations call the **E3 shift-leader-assignment** endpoints (F3.4). |
 | **Mobile app** | Agent / Shift Leader | Read-only: see the client they're placed at (name, address, geo) — surfaced via placement/attendance, not as a directory. |
 
 ## 5. Business rules
@@ -43,6 +43,7 @@ HR/Placement Admin & Super Admin (author), System (validate, audit). Read consum
 | CC-4 | A company referenced by any placement **cannot be hard-deleted** — only deactivated. |
 | CC-5 | Deactivating a company with **active placements** warns and requires those placements to be ended/transferred first (or blocks). |
 | CC-6 | All actions audited (E1). |
+| CC-7 | **List scope.** `GET /client-companies` (the directory list) is **scoped server-side by role**: HR / Super Admin see all companies; a **shift leader sees only the one company they lead** (derived from their active E3 shift-leader assignment — F3.4 SL-10). |
 
 ## 6. Data model
 
@@ -100,4 +101,5 @@ E1 (RBAC/audit), E3 (placement target), E5 (geofence), E9 (migration), E10 (repo
 - ✅ ClientCompany = `companies.role=2`. ~~flat (no sub-sites)~~ **superseded 2026-06-03**: companies now have one or more **Sites** (F2.6); geofence moved to Site. (EPICS §8.)
 - ✅ `leader_scope` (company | site) added to support per-site shift leaders (E3 F3.4).
 - ✅ **UI/flow** *(resolved 2026-06-07, EPICS §8)* — edit is a **full-page screen from the detail page** (`/client-companies/$id/edit`), not a drawer (the `EditClientCompanyDrawer` is removed); the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, still guarded by CC-5); the detail **"Profil" tab** does **not** duplicate Sites/geofence (those live only in the "Lokasi & Site" tab, F2.6).
+- ✅ **Detail tabs + list scope** *(shipped 2026-06-08)* — the detail page implements three **E3-backed** tabs: **Penempatan Aktif** (active roster), **Pemimpin Shift** (current leader + assign/replace/revoke — the single entry point for E3 [F3.4](../../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`); all read the E3 company-roster endpoint (F3.5) and the leader mutations hit the E3 shift-leader-assignment endpoints (F3.4). The company **list is role-scoped** server-side — a shift leader sees only their own company (CC-7).
 - **Open:** should deactivation with active placements **hard-block** or **warn-and-guide**? (currently warn-and-guide / block-until-resolved.)

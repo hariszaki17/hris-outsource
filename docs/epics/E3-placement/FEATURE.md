@@ -257,6 +257,10 @@ flowchart LR
 
 ## 7. Decisions & open questions
 
+**Resolved (2026-06-08 — shift-leader identity model shipped):**
+- ✅ **Derived role/scope.** A shift leader is an Employee with an active `shift_leader_assignments` row (keyed by `employee_id`); the auth role + single-company scope are **derived at request time** by server middleware from that assignment, **not stored on `users`** — consistent with INV-2/3/4. Reassign/revoke is effective on the next request (no re-login). → [F3.4](prds/shift-leader-assignment.md) SL-10.
+- ✅ **Single entry point** = the client-company detail **"Pemimpin Shift" tab** (E2 [F2.3](../E2-identity/prds/client-company-directory.md)); the placement-detail shift-leader card is **read-only** and links there, and the F3.5 roster "Ganti" action links to the same tab. → F3.4 SL-11.
+
 **Resolved (2026-06-07 — comp/leave are E2 terms, EPICS §8):**
 - ✅ **`annual_leave_entitlement` and `base_salary_ref` removed from `Placement`.** Under alih-daya law the employment relationship is SWP↔agent and a placement is only a work *designation*; base salary stays the single source on E2 `CompensationRecord`, and the annual leave entitlement moves to the **EmploymentAgreement** (`annual_leave_entitlement_days`, E2 [employment-agreement.md](../E2-identity/prds/employment-agreement.md)). E6 leave-quota already sources the entitlement from E2. **BR-9 (position is selected per placement) is unaffected.**
 
