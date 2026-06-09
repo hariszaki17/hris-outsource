@@ -33,8 +33,9 @@ import { AuditDetailDrawer } from './audit-detail-drawer.tsx';
  * Cursor pagination only (ENGINEERING.md D1). Client gating is defense-in-depth.
  *
  * Export (Ekspor) is a no-op info toast — real export is deferred to E10.
- * Date filter is a preset-select placeholder — real DateRangePicker deferred
- * (no DateRangePicker in packages/ui yet).
+ * A time-range filter (AL-5) is intentionally omitted until a DateRangePicker primitive
+ * lands in packages/ui — a dead preset control that did not filter the query was removed
+ * rather than ship a misleading affordance.
  */
 const PAGE_SIZE = 50;
 
@@ -43,7 +44,6 @@ type AuditLogSearch = {
   q?: string;
   entity_type?: string;
   action?: string;
-  date_preset?: string;
   cursor?: string;
 };
 
@@ -100,7 +100,7 @@ export function AuditLogScreen() {
   };
   const query = useListAuditLog(params);
 
-  const hasFilters = Boolean(search.q || search.entity_type || search.action || search.date_preset);
+  const hasFilters = Boolean(search.q || search.entity_type || search.action);
 
   const setSearch = (patch: AuditLogSearch) => {
     void navigate({
@@ -282,20 +282,11 @@ export function AuditLogScreen() {
           <option value="leave_request.reject">{t('auditLog.actionLeaveReject')}</option>
         </FilterSelect>
         {/*
-          Date filter — placeholder select with presets. A real DateRangePicker component
-          (which would set created_at__gte / created_at__lte on the API params) is deferred
-          until a DateRangePicker primitive lands in packages/ui.
+          Time-range filter (AL-5) intentionally omitted: a real DateRangePicker
+          (setting created_at__gte / created_at__lte on the API params) is deferred until a
+          DateRangePicker primitive lands in packages/ui. A non-filtering preset placeholder
+          was removed rather than imply working time filtering.
         */}
-        <FilterSelect
-          aria-label={t('auditLog.filterDateLabel')}
-          value={search.date_preset ?? ''}
-          onChange={(e) => setSearch({ date_preset: e.target.value || undefined })}
-        >
-          <option value="">{t('auditLog.filterDateAll')}</option>
-          <option value="today">{t('auditLog.filterDateToday')}</option>
-          <option value="last7">{t('auditLog.filterDateLast7')}</option>
-          <option value="last30">{t('auditLog.filterDateLast30')}</option>
-        </FilterSelect>
       </div>
 
       {/* Data table — rows are clickable (no row actions; append-only log) */}
@@ -324,12 +315,9 @@ export function AuditLogScreen() {
         }
         footer={
           rows.length > 0 ? (
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-xs text-text-3">
-                {t('auditLog.rowCount', { count: rows.length })}
-              </span>
+            <div className="flex items-center justify-end px-4 py-2.5">
               <CursorPagination
-                rangeLabel={t('auditLog.rowCount', { count: rows.length })}
+                rangeLabel={t('auditLog.rowCountThisPage', { count: rows.length })}
                 hasPrev={prevCursors.length > 0}
                 hasNext={Boolean(page?.has_more)}
                 prevLabel={t('common.prev')}

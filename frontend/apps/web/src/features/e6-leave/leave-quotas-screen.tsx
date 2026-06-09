@@ -19,6 +19,7 @@
 
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useListEmployees } from '@swp/api-client/e2';
 import {
   type EmployeeLeaveBalance,
   type LeaveGrant,
@@ -36,7 +37,6 @@ import {
   useListLeaveBalances,
   useListLeaveGrants,
 } from '@swp/api-client/e6';
-import { useListEmployees } from '@swp/api-client/e2';
 import {
   Button,
   type Column,
@@ -186,9 +186,7 @@ function EmployeeCombobox({
   // the popover closes and the search query (hence options) resets to empty.
   const [selected, setSelected] = useState<ComboboxOption | null>(null);
   const mergedOptions =
-    selected && !options.some((o) => o.value === selected.value)
-      ? [selected, ...options]
-      : options;
+    selected && !options.some((o) => o.value === selected.value) ? [selected, ...options] : options;
 
   const handleChange = (id: string | null) => {
     if (id) {

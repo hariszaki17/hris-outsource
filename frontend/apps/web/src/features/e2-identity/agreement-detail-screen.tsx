@@ -220,6 +220,7 @@ function RenewDrawer({ agreementId, open, onOpenChange, onSuccess }: RenewDrawer
                 id="renew_agreement_no"
                 placeholder="PKWT/SWP/2027/0142"
                 {...register('agreement_no')}
+                aria-invalid={!!errors.agreement_no}
               />
             </FormField>
 
@@ -258,6 +259,7 @@ function RenewDrawer({ agreementId, open, onOpenChange, onSuccess }: RenewDrawer
                 id="renew_note"
                 placeholder={t('fieldNotePlaceholder')}
                 {...register('note')}
+                aria-invalid={!!errors.note}
               />
             </FormField>
           </FormSection>
@@ -379,6 +381,7 @@ function CloseDrawer({ agreementId, open, onOpenChange, onSuccess }: CloseDrawer
                 id="close_note"
                 placeholder={t('fieldNotePlaceholder')}
                 {...register('note')}
+                aria-invalid={!!errors.note}
               />
             </FormField>
           </FormSection>
@@ -431,12 +434,17 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
 
   if (query.isError || !agreement) {
     const { kind } = classifyError(query.error);
+    if (kind === 'forbidden' || kind === 'unauthenticated') {
+      return (
+        <EmptyState
+          variant="no-permission"
+          title={t('noPermissionTitle')}
+          description={t('noPermissionBody')}
+        />
+      );
+    }
     return kind === 'not-found' ? (
-      <EmptyState
-        variant="no-permission"
-        title={t('notFoundTitle')}
-        description={t('notFoundBody')}
-      />
+      <EmptyState variant="default" title={t('notFoundTitle')} description={t('notFoundBody')} />
     ) : (
       <StateView
         kind="error"
@@ -615,7 +623,6 @@ export function AgreementDetailScreen({ agreementId }: AgreementDetailScreenProp
 
           {/* Right column — WA5cZ */}
           <div className="flex w-[380px] shrink-0 flex-col gap-[16px]">
-
             {/* Card Rantai Perjanjian — xkQQH */}
             <DetailCard
               title={t('cardChain')}

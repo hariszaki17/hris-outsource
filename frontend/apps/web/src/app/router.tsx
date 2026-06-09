@@ -95,6 +95,7 @@ import {
   redirect,
   useNavigate,
 } from '@tanstack/react-router';
+import { hasPermission, routeRequirement } from './nav.ts';
 import { AppShell } from './shell.tsx';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
@@ -175,6 +176,17 @@ const authedRoute = createRoute({
   beforeLoad: ({ location }) => {
     if (!auth.isAuthenticated()) {
       throw redirect({ to: '/login', search: { redirect: location.href } });
+    }
+    // Capability guard (NAVIGATION-AND-RBAC §4.4): a permitted-section-but-denied deep link
+    // redirects to /forbidden rather than rendering a broken screen. Defense-in-depth only —
+    // the Go API is the real gate (ENGINEERING.md C1); SCOPE stays server-side. Skipped while
+    // the user object is still loading (token present, /me in flight) — the shell handles that.
+    const user = auth.getUser();
+    if (user) {
+      const requires = routeRequirement(location.pathname);
+      if (requires && !hasPermission(user.permissions, requires)) {
+        throw redirect({ to: '/forbidden' });
+      }
     }
   },
   component: AppShell,

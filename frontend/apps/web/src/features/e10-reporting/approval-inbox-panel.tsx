@@ -47,7 +47,9 @@ const iconToneClass: Record<InboxTone, string> = {
 
 const badgeBgClass: Record<InboxTone, string> = {
   bad: 'bg-bad-bg text-bad-tx',
-  warn: 'bg-bad-bg text-bad-tx',
+  // warn gets its OWN warn token (was collapsed into bad-bg, making warn/bad indistinguishable —
+  // DESIGN-SYSTEM: status meaning must not rely on a colour that duplicates another status).
+  warn: 'bg-warn-bg text-warn-tx',
   neutral: 'bg-surface-2 text-text-3',
 };
 
@@ -61,9 +63,12 @@ interface InboxRowProps {
 }
 
 function InboxRow({ row, isLast }: InboxRowProps) {
+  const { t } = useTranslation('dashboard');
   const navigate = useNavigate();
   const tone = inboxRowTone(row.kind);
   const Icon = inboxKindIcon(row.kind);
+  // Convey kind + count for SR users so urgency isn't communicated by badge colour alone.
+  const countLabel = t('inbox.rowCount', { kind: t(`inbox.tone.${tone}`), count: row.count });
 
   function handleNavigate() {
     // Deep-link: path is a string route path. Cast to any to avoid strict router type mismatch.
@@ -95,12 +100,15 @@ function InboxRow({ row, isLast }: InboxRowProps) {
       {/* Right: count badge + chevron */}
       <div className="flex items-center gap-2">
         <div
+          aria-label={countLabel}
           className={[
             'flex h-[22px] w-[24px] items-center justify-center rounded-full',
             badgeBgClass[tone],
           ].join(' ')}
         >
-          <span className="text-[12px] font-bold">{row.count}</span>
+          <span aria-hidden className="text-[12px] font-bold">
+            {row.count}
+          </span>
         </div>
         <ChevronRight aria-hidden className="size-4 text-text-3" />
       </div>
@@ -249,11 +257,7 @@ export function ApprovalInboxPanel({
       {/* Footer: "Buka antrean lengkap" */}
       <button
         type="button"
-        onClick={() =>
-          void (navigate as (opts: { to: string }) => Promise<void>)({
-            to: '/leave',
-          })
-        }
+        onClick={() => void navigate({ to: '/inbox' })}
         className="flex items-center justify-center gap-[6px] border-t border-border-soft bg-surface-2 px-[16px] py-[10px] hover:bg-surface transition-colors"
       >
         <span className="text-[12px] font-semibold text-primary-strong">{t('inbox.openFull')}</span>

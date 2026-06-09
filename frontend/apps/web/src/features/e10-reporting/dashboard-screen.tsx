@@ -17,6 +17,7 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type Dashboard,
   type HrDashboard,
@@ -27,6 +28,7 @@ import {
   useGetMyDashboard,
 } from '@swp/api-client/e10';
 import { EmptyState, SkeletonCard, StatCard, StateView } from '@swp/ui';
+import { Link } from '@tanstack/react-router';
 import {
   AlertTriangle,
   BarChart3,
@@ -105,6 +107,9 @@ function TrendBar({ label, value, maxValue }: TrendBarProps) {
 
 function HrDashboardView({ data }: { data: HrDashboard }) {
   const { t } = useTranslation('dashboard');
+  const user = useCurrentUser();
+  // DB widget deep-link (no dead-flow): only show the report CTA to roles with reports.read.
+  const canReadReports = user?.permissions.includes('reports.read') ?? false;
 
   const kpis = data.kpis;
 
@@ -132,13 +137,15 @@ function HrDashboardView({ data }: { data: HrDashboard }) {
         </div>
         <div className="flex items-center gap-[10px]">
           <span className="text-[12px] text-text-3">{data.role_label}</span>
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded-lg bg-primary px-[14px] py-[9px] text-[13px] font-semibold text-white hover:bg-primary-strong"
-          >
-            <BarChart3 aria-hidden className="size-4" />
-            {t('makeReport')}
-          </button>
+          {canReadReports && (
+            <Link
+              to="/reports"
+              className="flex items-center gap-2 rounded-lg bg-primary px-[14px] py-[9px] text-[13px] font-semibold text-white hover:bg-primary-strong"
+            >
+              <BarChart3 aria-hidden className="size-4" />
+              {t('makeReport')}
+            </Link>
+          )}
         </div>
       </div>
 

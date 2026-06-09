@@ -5,7 +5,7 @@ import type { LoginResponse } from '@swp/api-client/e1';
 import { useAuthLogin } from '@swp/api-client/e1';
 import { Banner, Button, Checkbox, FormField, Input } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Eye, Lock, Mail, ShieldX } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, ShieldX } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,7 @@ export function LoginScreen() {
   const navigate = useNavigate();
   const { error } = useSearch({ from: '/login' });
   const [rememberMe, setRememberMe] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
   const loginMut = useAuthLogin();
   const {
     register,
@@ -127,13 +128,25 @@ export function LoginScreen() {
           <div className="relative">
             <Input
               id="password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               autoComplete="current-password"
               aria-invalid={!!errors.password}
               className="pr-10"
               {...register('password', { required: true })}
             />
-            <Eye className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-4 text-text-3" />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+              aria-pressed={showPassword}
+              className="-translate-y-1/2 absolute top-1/2 right-3 text-text-3 hover:text-text"
+            >
+              {showPassword ? (
+                <EyeOff aria-hidden className="size-4" />
+              ) : (
+                <Eye aria-hidden className="size-4" />
+              )}
+            </button>
           </div>
         </FormField>
 

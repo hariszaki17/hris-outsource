@@ -194,6 +194,17 @@ export function EmployeeDetailScreen() {
         />
       );
     }
+    // A 403 is reachable WITH valid capability: a shift_leader (employees.read) opening an
+    // employee outside their server-side company scope. Show a no-permission state, no Retry.
+    if (kind === 'forbidden' || kind === 'unauthenticated') {
+      return (
+        <EmptyState
+          variant="no-permission"
+          title={t('noPermissionTitle')}
+          description={t('noPermissionBody')}
+        />
+      );
+    }
     return (
       <StateView
         kind="error"

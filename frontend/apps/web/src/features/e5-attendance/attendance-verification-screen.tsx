@@ -15,6 +15,7 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useListClientCompanies } from '@swp/api-client/e2';
 import {
   type Attendance,
   AttendanceFlag,
@@ -44,7 +45,7 @@ import {
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { CheckCheck, ClockAlert, MapPinOff, TriangleAlert, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,19 @@ export function AttendanceVerificationScreen() {
   const query = useListAttendance(queryParams);
   const page = query.data?.data as AttendancePage | undefined;
   const rows: Attendance[] = page?.data ?? [];
+
+  // Company options — HR/super_admin only (SL has no company picker; scope is locked server-side).
+  const companiesQuery = useListClientCompanies(
+    { limit: 200 },
+    { query: { enabled: !isShiftLeader, staleTime: 60_000 } },
+  );
+  const companyOptions = useMemo(() => {
+    if (isShiftLeader) return [];
+    const cc =
+      (companiesQuery.data?.data as { data?: { id: string; name: string }[] } | undefined)?.data ??
+      [];
+    return cc.map((c) => ({ value: c.id, label: c.name }));
+  }, [isShiftLeader, companiesQuery.data]);
 
   // Mutation hooks
   const verifySingle = useVerifyAttendance();
@@ -468,6 +482,11 @@ export function AttendanceVerificationScreen() {
             onChange={(e) => setSearch({ company_id: e.target.value || undefined })}
           >
             <option value="">{t('filterCompanyAll')}</option>
+            {companyOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </FilterSelect>
         )}
         <FilterSelect

@@ -1,3 +1,13 @@
+import {
+  addDays,
+  buildAgentRows,
+  buildHolidayMaps,
+  computeCompliance,
+  currentJakartaIso,
+  getMondayOfWeek,
+  hasComplianceIssue,
+  weekDays,
+} from '@/features/e4-scheduling/roster-compliance.ts';
 /**
  * E10 · Shift-leader compliance panel (EPICS §8 D3).
  *
@@ -15,16 +25,6 @@ import { Link } from '@tanstack/react-router';
 import { ArrowRight, CalendarCheck, Star, TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  addDays,
-  buildAgentRows,
-  buildHolidayMaps,
-  computeCompliance,
-  currentJakartaIso,
-  getMondayOfWeek,
-  hasComplianceIssue,
-  weekDays,
-} from '@/features/e4-scheduling/roster-compliance.ts';
 
 interface LeaderCompliancePanelProps {
   companyId: string;
@@ -52,7 +52,10 @@ export function LeaderCompliancePanel({ companyId }: LeaderCompliancePanelProps)
   );
 
   const issues = useMemo(() => {
-    const body = scheduleQuery.data?.data as { data?: ScheduleEntry[] } | ScheduleEntry[] | undefined;
+    const body = scheduleQuery.data?.data as
+      | { data?: ScheduleEntry[] }
+      | ScheduleEntry[]
+      | undefined;
     const entries: ScheduleEntry[] = Array.isArray(body) ? body : (body?.data ?? []);
     const rows = buildAgentRows(entries);
 

@@ -1,3 +1,5 @@
+import { useCurrentUser } from '@/lib/use-auth.ts';
+import { EmptyState } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
 import { ArrowRight, Database, Info, ScrollText, Settings, UsersRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -65,6 +67,27 @@ function SettingCard({
 
 export function SettingsOverviewScreen() {
   const { t } = useTranslation();
+  const currentUser = useCurrentUser();
+  // Defense-in-depth (ENGINEERING.md C1): this route has no capability guard, so guard the
+  // static nav grid here — a role lacking settings.access gets a no-permission state, not the
+  // grid that would route them into capability-guarded sub-screens.
+  const canAccess = currentUser?.permissions.includes('settings.access') ?? false;
+
+  if (!canAccess) {
+    return (
+      <div className="flex flex-col gap-[18px]">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-bold text-3xl text-text">{t('settingsOverview.title')}</h1>
+          <p className="text-sm text-text-3">{t('settingsOverview.subtitle')}</p>
+        </div>
+        <EmptyState
+          variant="no-permission"
+          title={t('errors.forbidden')}
+          description={t('settingsOverview.noPermissionBody')}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-[18px]">

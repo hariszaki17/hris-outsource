@@ -20,7 +20,6 @@ import {
   type AttendancePage,
   AttendanceStatus,
   type ListAttendanceParams,
-  ListAttendanceServiceLine,
   VerificationStatus,
   useListAttendance,
 } from '@swp/api-client/e5';
@@ -48,12 +47,10 @@ const PAGE_SIZE = 50;
 
 export type AttendanceDashboardSearch = {
   q?: string;
-  status?: AttendanceStatus;
   tab?: 'all' | 'present' | 'late' | 'absent';
   cursor?: string;
   company_id?: string;
   site_id?: string;
-  service_line?: ListAttendanceServiceLine;
   position_id?: string;
 };
 
@@ -154,13 +151,9 @@ export function AttendanceDashboardScreen() {
     // SL: always pass their company id (server would enforce it anyway; this keeps the cache key stable).
     company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     site_id: search.site_id || undefined,
-    service_line: search.service_line || undefined,
     position_id: search.position_id || undefined,
-    status: search.status
-      ? [search.status]
-      : tabStatusMap[activeTab]
-        ? [tabStatusMap[activeTab] as AttendanceStatus]
-        : undefined,
+    // Status is driven by the outer tab strip (Semua/Hadir/Terlambat/Tidak Hadir).
+    status: tabStatusMap[activeTab] ? [tabStatusMap[activeTab] as AttendanceStatus] : undefined,
   };
 
   const query = useListAttendance(queryParams);
@@ -209,14 +202,7 @@ export function AttendanceDashboardScreen() {
     return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
 
-  const hasFilters = Boolean(
-    search.q ||
-      search.status ||
-      search.company_id ||
-      search.site_id ||
-      search.service_line ||
-      search.position_id,
-  );
+  const hasFilters = Boolean(search.q || search.company_id || search.site_id || search.position_id);
 
   function setSearch(partial: Partial<AttendanceDashboardSearch>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -490,28 +476,6 @@ export function AttendanceDashboardScreen() {
             ))}
           </FilterSelect>
 
-          {/* Service line filter */}
-          <FilterSelect
-            aria-label={t('filterServiceLine')}
-            value={search.service_line ?? ''}
-            onChange={(e) =>
-              setSearch({
-                service_line: (e.target.value as ListAttendanceServiceLine) || undefined,
-              })
-            }
-          >
-            <option value="">{t('filterServiceLineAll')}</option>
-            <option value={ListAttendanceServiceLine.facility_services}>
-              {t(`serviceLine.${ListAttendanceServiceLine.facility_services}`)}
-            </option>
-            <option value={ListAttendanceServiceLine.building_management}>
-              {t(`serviceLine.${ListAttendanceServiceLine.building_management}`)}
-            </option>
-            <option value={ListAttendanceServiceLine.parking}>
-              {t(`serviceLine.${ListAttendanceServiceLine.parking}`)}
-            </option>
-          </FilterSelect>
-
           {/* Position filter */}
           <FilterSelect
             aria-label={t('filterPosition')}
@@ -526,30 +490,6 @@ export function AttendanceDashboardScreen() {
             ))}
           </FilterSelect>
 
-          {/* Status filter */}
-          <FilterSelect
-            aria-label={t('filterStatus')}
-            value={search.status ?? ''}
-            onChange={(e) =>
-              setSearch({ status: (e.target.value as AttendanceStatus) || undefined })
-            }
-          >
-            <option value="">{t('filterStatusAll')}</option>
-            <option value={AttendanceStatus.PRESENT}>
-              {t(`status.${AttendanceStatus.PRESENT}`)}
-            </option>
-            <option value={AttendanceStatus.LATE}>{t(`status.${AttendanceStatus.LATE}`)}</option>
-            <option value={AttendanceStatus.ABSENT}>
-              {t(`status.${AttendanceStatus.ABSENT}`)}
-            </option>
-            <option value={AttendanceStatus.INCOMPLETE}>
-              {t(`status.${AttendanceStatus.INCOMPLETE}`)}
-            </option>
-            <option value={AttendanceStatus.ON_LEAVE}>
-              {t(`status.${AttendanceStatus.ON_LEAVE}`)}
-            </option>
-          </FilterSelect>
-
           <div className="flex-1" />
           {hasFilters && (
             <button
@@ -558,10 +498,8 @@ export function AttendanceDashboardScreen() {
               onClick={() =>
                 setSearch({
                   q: undefined,
-                  status: undefined,
                   company_id: undefined,
                   site_id: undefined,
-                  service_line: undefined,
                   position_id: undefined,
                 })
               }

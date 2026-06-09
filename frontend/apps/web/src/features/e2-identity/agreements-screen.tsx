@@ -304,21 +304,18 @@ export function AgreementsScreen() {
     {
       id: 'all',
       label: t('tabAll'),
-      count: query.isLoading ? undefined : rows.length,
       active: activeTab === 'all',
       onClick: () => setSearch({ tab: 'all' }),
     },
     {
       id: 'active',
       label: t('tabActive'),
-      count: query.isLoading ? undefined : countActive,
       active: activeTab === 'active',
       onClick: () => setSearch({ tab: 'active' }),
     },
     {
       id: 'expiring',
       label: t('tabExpiring'),
-      count: query.isLoading ? undefined : countExpiring,
       active: activeTab === 'expiring',
       onClick: () => setSearch({ tab: 'expiring' }),
     },
@@ -351,8 +348,10 @@ export function AgreementsScreen() {
         <div className="flex items-center gap-[10px]">
           <button
             type="button"
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-[14px] py-[9px] text-[13px] font-medium text-text-2 hover:bg-surface-2"
-            onClick={() => void navigate({ to: '/agreements' as const })}
+            disabled
+            title={t('exportComingSoon')}
+            aria-label={t('exportComingSoon')}
+            className="flex items-center gap-2 rounded-lg border border-border bg-surface px-[14px] py-[9px] text-[13px] font-medium text-text-2 hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-surface"
           >
             {t('export')}
           </button>
@@ -372,28 +371,28 @@ export function AgreementsScreen() {
         <StatCard
           label={t('statTotal')}
           value={query.isLoading ? '—' : String(rows.length)}
-          sub={t('statTotalSub')}
+          sub={t('statThisPage')}
           icon={FileSignature}
           tone="brand"
         />
         <StatCard
           label={t('statActive')}
           value={query.isLoading ? '—' : String(countActive)}
-          sub={t('statActiveSub')}
+          sub={t('statThisPage')}
           icon={FileSignature}
           tone="ok"
         />
         <StatCard
           label={t('statExpiring')}
           value={query.isLoading ? '—' : String(countExpiring)}
-          sub={t('statExpiringSub')}
+          sub={t('statThisPage')}
           icon={AlarmClock}
           tone="warn"
         />
         <StatCard
           label={t('statArchived')}
           value={query.isLoading ? '—' : String(countArchived)}
-          sub={t('statArchivedSub')}
+          sub={t('statThisPage')}
           icon={Archive}
           tone="neutral"
         />
@@ -423,7 +422,9 @@ export function AgreementsScreen() {
           </FilterSelect>
           <FilterSelect
             aria-label={t('filterStatus')}
-            value={search.status ?? ''}
+            value={activeTab === 'all' ? (search.status ?? '') : ''}
+            disabled={activeTab !== 'all'}
+            title={activeTab !== 'all' ? t('filterStatusTabLocked') : undefined}
             onChange={(e) =>
               setSearch({ status: (e.target.value as AgreementStatus) || undefined })
             }

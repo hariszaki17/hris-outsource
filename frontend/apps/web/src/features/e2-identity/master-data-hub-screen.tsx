@@ -1,3 +1,5 @@
+import { useCurrentUser } from '@/lib/use-auth.ts';
+import { EmptyState } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
 import { ArrowRight, CalendarOff, Clock3, Info, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -24,7 +26,6 @@ interface MasterDataCardProps {
   iconColor: string;
   heading: string;
   description: string;
-  countLabel: string;
   linkLabel: string;
 }
 
@@ -35,7 +36,6 @@ function MasterDataCard({
   iconColor,
   heading,
   description,
-  countLabel,
   linkLabel,
 }: MasterDataCardProps) {
   return (
@@ -56,9 +56,8 @@ function MasterDataCard({
         <p className="text-[13px] leading-[1.5] text-text-2">{description}</p>
       </div>
 
-      {/* Footer: count + Kelola link */}
-      <div className="flex items-center justify-between border-t border-border-soft pt-3">
-        <span className="font-mono text-[12px] text-text-2">{countLabel}</span>
+      {/* Footer: Kelola link */}
+      <div className="flex items-center justify-end border-t border-border-soft pt-3">
         <div className="flex items-center gap-[6px] text-[13px] font-semibold text-primary">
           {linkLabel}
           <ArrowRight className="size-[14px]" aria-hidden />
@@ -74,6 +73,21 @@ function MasterDataCard({
 
 export function MasterDataHubScreen() {
   const { t } = useTranslation();
+  const user = useCurrentUser();
+
+  // Defense-in-depth (ENGINEERING.md C1): this hub has no API call to surface a 403, so the
+  // capability check is done client-side here. Master data is Super Admin/HR only
+  // (rbac.ts `masterdata.manage`); SL/agent get the no-permission state, not a live hub.
+  const canManage = user?.permissions.includes('masterdata.manage') ?? false;
+  if (!canManage) {
+    return (
+      <EmptyState
+        variant="no-permission"
+        title={t('errors.forbidden')}
+        description={t('masterData.noPermission')}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-[18px]">
@@ -100,7 +114,6 @@ export function MasterDataHubScreen() {
           iconColor="text-info-tx"
           heading={t('masterData.hub.leaveTypes.heading')}
           description={t('masterData.hub.leaveTypes.description')}
-          countLabel={t('masterData.hub.leaveTypes.count')}
           linkLabel={t('masterData.hub.manage')}
         />
         <MasterDataCard
@@ -110,7 +123,6 @@ export function MasterDataHubScreen() {
           iconColor="text-primary"
           heading={t('masterData.hub.attendanceCodes.heading')}
           description={t('masterData.hub.attendanceCodes.description')}
-          countLabel={t('masterData.hub.attendanceCodes.count')}
           linkLabel={t('masterData.hub.manage')}
         />
         <MasterDataCard
@@ -120,7 +132,6 @@ export function MasterDataHubScreen() {
           iconColor="text-warn-tx"
           heading={t('masterData.hub.overtimeRules.heading')}
           description={t('masterData.hub.overtimeRules.description')}
-          countLabel={t('masterData.hub.overtimeRules.count')}
           linkLabel={t('masterData.hub.manage')}
         />
       </div>

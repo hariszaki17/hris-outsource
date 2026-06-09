@@ -212,7 +212,9 @@ export function HolidayImportModal({ open, onClose, onImported }: HolidayImportM
               >
                 <ChevronLeft className="size-4" aria-hidden />
               </button>
-              <span className="min-w-[56px] text-center text-[15px] font-bold text-text">{year}</span>
+              <span className="min-w-[56px] text-center text-[15px] font-bold text-text">
+                {year}
+              </span>
               <button
                 type="button"
                 aria-label={t('holidays.import.nextYear')}
@@ -265,9 +267,7 @@ export function HolidayImportModal({ open, onClose, onImported }: HolidayImportM
           ) : !candidates || existingQuery.isLoading ? (
             <StateView kind="loading" title={t('common.loading')} />
           ) : candidates.length === 0 ? (
-            <p className="py-6 text-center text-[13px] text-text-3">
-              {t('holidays.import.empty')}
-            </p>
+            <p className="py-6 text-center text-[13px] text-text-3">{t('holidays.import.empty')}</p>
           ) : (
             <ul className="max-h-[340px] overflow-y-auto rounded-lg border border-border-soft">
               {candidates.map((c) => {
@@ -291,9 +291,7 @@ export function HolidayImportModal({ open, onClose, onImported }: HolidayImportM
                     </span>
                     <Input
                       value={nameOverrides[c.id] ?? c.name}
-                      onChange={(e) =>
-                        setNameOverrides((m) => ({ ...m, [c.id]: e.target.value }))
-                      }
+                      onChange={(e) => setNameOverrides((m) => ({ ...m, [c.id]: e.target.value }))}
                       disabled={exists || importing}
                       className="h-8 flex-1 text-[13px]"
                     />
@@ -317,7 +315,10 @@ export function HolidayImportModal({ open, onClose, onImported }: HolidayImportM
       <ModalFooter>
         <span className="flex-1 text-[12px] text-text-3">
           {importing
-            ? t('holidays.import.importingProgress', { done: progress, total: selectedImportable.length })
+            ? t('holidays.import.importingProgress', {
+                done: progress,
+                total: selectedImportable.length,
+              })
             : candidates
               ? t('holidays.import.selectedCount', { count: selectedImportable.length })
               : ''}

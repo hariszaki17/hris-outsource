@@ -2,12 +2,13 @@ import { classifyError } from '@/lib/api-error.ts';
 import {
   type ListUsers200,
   type ListUsersParams,
-  Role,
+  type Role,
   type User,
   UserStatus,
   useListUsers,
 } from '@swp/api-client/e1';
 import type { StatusTone } from '@swp/design-tokens';
+import { WEB_ROLES } from '@swp/shared';
 import {
   Avatar,
   type Column,
@@ -246,7 +247,9 @@ export function UsersScreen() {
           onChange={(e) => setSearch({ role: (e.target.value as Role) || undefined })}
         >
           <option value="">{t('users.filterRole')}</option>
-          {Object.values(Role).map((r) => (
+          {/* Staff/login accounts only — agent is mobile-only (rbac.ts WEB_ROLES, RB-4), so it
+              is not a selectable filter on this RBAC management list. */}
+          {WEB_ROLES.map((r) => (
             <option key={r} value={r}>
               {t(`role.${r}`)}
             </option>

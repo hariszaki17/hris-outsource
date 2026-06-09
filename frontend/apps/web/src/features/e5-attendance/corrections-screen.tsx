@@ -13,6 +13,7 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type Correction,
   type CorrectionPage,
@@ -33,6 +34,7 @@ import {
   StateView,
   StatusBadge,
 } from '@swp/ui';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -83,6 +85,8 @@ function CorrectionsScreenInner({
   onPrevCursorsChange,
 }: CorrectionsScreenProps) {
   const { t } = useTranslation();
+  const currentUser = useCurrentUser();
+  const isShiftLeader = currentUser?.role === 'shift_leader';
 
   const [drawerCorrectionId, setDrawerCorrectionId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -91,9 +95,14 @@ function CorrectionsScreenInner({
   // Query
   // ---------------------------------------------------------------------------
 
+  // SL is a valid approver (CR-2: routes to the company shift leader). Pin the
+  // company scope to the leader's own company — defense-in-depth; server enforces.
+  const slCompanyId = isShiftLeader ? (currentUser?.companyId ?? undefined) : undefined;
+
   const params: ListCorrectionsParams = {
     limit: PAGE_SIZE,
     cursor: search.cursor,
+    company_id: isShiftLeader ? slCompanyId : undefined,
     status: search.status ? [search.status] : undefined,
     type: search.type ? [search.type] : undefined,
   };
@@ -214,6 +223,32 @@ function CorrectionsScreenInner({
 
   return (
     <div className="flex flex-col gap-[18px]">
+      {/* SL scope banner — corrections route to the company shift leader (CR-2). */}
+      {isShiftLeader && (
+        <div className="flex items-center gap-2 bg-warn-bg px-6 py-[10px] border-b border-warn-bd">
+          <span className="text-warn-tx" aria-hidden>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <title>lock</title>
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </span>
+          <p className="text-[12px] font-semibold text-warn-tx">
+            {currentUser?.companyName
+              ? t('corrections.scopeBannerNamed', { company: currentUser.companyName })
+              : t('corrections.scopeBanner')}
+          </p>
+        </div>
+      )}
+
       <TitleBand />
 
       {/* Filters */}
@@ -335,18 +370,32 @@ function CorrectionsScreenInner({
 // ---------------------------------------------------------------------------
 
 /**
- * Exported screen component. When added to the router the route component should
- * call useSearch / useNavigate and pass `search` + `onSearch` as props.
- * When used without the router (e.g. Storybook / tests) it falls back to local state.
+ * Exported screen component wired by the /corrections route. Reads the typed URL
+ * search (validateSearch in router.tsx) via useSearch and writes patches back with
+ * useNavigate, so filters/status/type/cursor sync to the URL — deep-links and
+ * back/forward work, and filter state survives reload. prevCursors (ephemeral
+ * pagination history) stays in local state.
  */
 export function CorrectionsScreen() {
-  const [search, setSearch] = useState<CorrectionsSearch>({});
+  const navigate = useNavigate();
+  const search = useSearch({ strict: false }) as CorrectionsSearch;
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
+
+  function onSearch(patch: CorrectionsSearch) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    void (
+      navigate as (o: {
+        to: string;
+        search?: Record<string, unknown>;
+        params?: Record<string, unknown>;
+      }) => void
+    )({ to: '/corrections', search: patch });
+  }
 
   return (
     <CorrectionsScreenInner
       search={search}
-      onSearch={(patch) => setSearch(patch)}
+      onSearch={onSearch}
       prevCursors={prevCursors}
       onPrevCursorsChange={setPrevCursors}
     />

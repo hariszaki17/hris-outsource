@@ -43,7 +43,7 @@ import {
   useToast,
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { AlarmClock, Check, CheckCheck, CircleCheck, CircleX, Clock } from 'lucide-react';
+import { AlarmClock, Check, CheckCheck, Clock } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChangeRequestDetailDrawer, requestTypeLabel } from './change-request-overlays.tsx';
@@ -71,13 +71,15 @@ function daysSince(isoDate: string): number {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0] ?? '')
-    .join('')
-    .toUpperCase();
+/**
+ * Avatar initials for an employee id. The list projection (ChangeRequest) carries
+ * only `employee_id` (no name — the joined name lives on the detail response), so
+ * derive a deterministic 2-char token from the id's trailing digits rather than
+ * faking name-initials from an opaque id.
+ */
+function idInitials(employeeId: string): string {
+  const tail = employeeId.replace(/[^a-zA-Z0-9]/g, '').slice(-2);
+  return (tail || '?').toUpperCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -244,9 +246,9 @@ export function ChangeRequestsScreen() {
       width: 240,
       cell: (cr) => (
         <div className="flex items-center gap-2.5">
-          <Avatar initials={initials(cr.employee_id)} size={32} />
+          <Avatar initials={idInitials(cr.employee_id)} size={32} />
           <div className="flex flex-col">
-            <span className="font-medium text-text">{cr.employee_id}</span>
+            <span className="font-mono text-[12px] font-medium text-text">{cr.employee_id}</span>
           </div>
         </div>
       ),
@@ -394,20 +396,6 @@ export function ChangeRequestsScreen() {
           sub={t('changeRequests.statPendingSub')}
         />
         <StatCard
-          icon={<CircleCheck className="size-4 text-ok-tx" aria-hidden />}
-          iconBgClass="bg-ok-bg"
-          label={t('changeRequests.statApproved')}
-          value="—"
-          sub={t('changeRequests.statApprovedSub')}
-        />
-        <StatCard
-          icon={<CircleX className="size-4 text-bad-tx" aria-hidden />}
-          iconBgClass="bg-bad-bg"
-          label={t('changeRequests.statRejected')}
-          value="—"
-          sub={t('changeRequests.statRejectedSub')}
-        />
-        <StatCard
           icon={<AlarmClock className="size-4 text-text-3" aria-hidden />}
           iconBgClass="bg-surface-2"
           label={t('changeRequests.statStale')}
@@ -438,7 +426,10 @@ export function ChangeRequestsScreen() {
         </div>
 
         {/* Tab bar — mirrors .pen Tabs (RyErE) */}
-        <TabBar active={activeTab} onChange={(tab) => setSearch({ tab })} />
+        <TabBar
+          active={activeTab}
+          onChange={(tab) => setSearch({ tab, request_type: undefined })}
+        />
 
         {/* Filter row — mirrors .pen FilterRow (FT48h) */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border-soft px-[18px] py-3.5">
@@ -453,9 +444,12 @@ export function ChangeRequestsScreen() {
           <div className="flex items-center gap-2">
             <FilterSelect
               aria-label={t('changeRequests.filterTypeLabel')}
-              value={search.request_type ?? ''}
+              value={activeTab === 'all' ? (search.request_type ?? '') : ''}
+              disabled={activeTab !== 'all'}
+              title={activeTab !== 'all' ? t('changeRequests.filterTypeTabLocked') : undefined}
               onChange={(e) =>
                 setSearch({
+                  tab: 'all',
                   request_type: (e.target.value as ChangeRequestRequestType) || undefined,
                 })
               }

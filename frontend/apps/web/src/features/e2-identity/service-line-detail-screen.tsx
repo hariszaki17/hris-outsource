@@ -120,7 +120,7 @@ function PosRowMenu({ position, onEdit, onDelete }: PosRowMenuProps) {
       <button
         ref={triggerRef}
         type="button"
-        aria-label={t('users.rowActions')}
+        aria-label={t('serviceLines.rowActions')}
         className="flex size-8 items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={(e) => {
           e.stopPropagation();
@@ -654,6 +654,7 @@ export function ServiceLineDetailScreen({ serviceLineId }: ServiceLineDetailScre
         {/* Status filter bar */}
         <div className="flex items-center gap-[10px] border-b border-border-soft px-[18px] py-[12px]">
           <FilterSelect
+            aria-label={t('serviceLines.filterStatus')}
             value={posStatusFilter}
             onChange={(e) => {
               setPosStatusFilter(e.target.value);
@@ -711,11 +712,7 @@ export function ServiceLineDetailScreen({ serviceLineId }: ServiceLineDetailScre
           )}
           footer={
             <CursorPagination
-              rangeLabel={t('serviceLines.resultRange', {
-                from: 1,
-                to: positions.length,
-                total: positions.length,
-              })}
+              rangeLabel={t('serviceLines.resultCount', { count: positions.length })}
               hasPrev={prevPosCursors.length > 0}
               hasNext={posHasMore}
               onPrev={handlePosPrev}

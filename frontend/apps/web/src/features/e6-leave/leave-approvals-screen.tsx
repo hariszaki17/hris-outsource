@@ -15,6 +15,12 @@
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
+  LeaveTypeStatus,
+  type ListLeaveTypes200,
+  useListClientCompanies,
+  useListLeaveTypes,
+} from '@swp/api-client/e2';
+import {
   type LeaveRequest,
   LeaveStatus,
   type ListLeaveRequestsParams,
@@ -35,7 +41,7 @@ import {
 import { Link } from '@tanstack/react-router';
 // Link not used until route is registered; use plain anchor for now to avoid route type mismatch
 import { Download, RotateCcw } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { leaveStatusTone } from './leave-overlays.tsx';
 
@@ -102,6 +108,31 @@ function LeaveApprovalsScreenInner({
   };
 
   const query = useListLeaveRequests(params);
+
+  // Company filter options — HR/admin only (SL is locked to their own company).
+  const companiesQuery = useListClientCompanies(
+    { limit: 200 },
+    { query: { enabled: isHR, staleTime: 60_000 } },
+  );
+  const companyOptions = useMemo(() => {
+    if (!isHR) return [];
+    const cc =
+      (companiesQuery.data?.data as { data?: { id: string; name: string }[] } | undefined)?.data ??
+      [];
+    return cc.map((c) => ({ value: c.id, label: c.name }));
+  }, [isHR, companiesQuery.data]);
+
+  // Leave type filter options — active types only.
+  const leaveTypesQuery = useListLeaveTypes(
+    { limit: 200, status: LeaveTypeStatus.ACTIVE },
+    { query: { staleTime: 5 * 60_000 } },
+  );
+  const leaveTypeOptions = useMemo(() => {
+    const lt =
+      (leaveTypesQuery.data?.data as ListLeaveTypes200 | undefined)?.data ??
+      ([] as { id: string; name: string }[]);
+    return lt.map((l) => ({ value: l.id, label: l.name }));
+  }, [leaveTypesQuery.data]);
 
   const hasFilters = hasActiveFilters(search);
 
@@ -262,6 +293,11 @@ function LeaveApprovalsScreenInner({
             onChange={(e) => setSearch({ company_id: e.target.value || undefined })}
           >
             <option value="">{t('approvals.filterCompany')}</option>
+            {companyOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </FilterSelect>
         )}
         <FilterSelect
@@ -270,6 +306,11 @@ function LeaveApprovalsScreenInner({
           onChange={(e) => setSearch({ leave_type_id: e.target.value || undefined })}
         >
           <option value="">{t('approvals.filterType')}</option>
+          {leaveTypeOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
         </FilterSelect>
 
         {hasFilters && (
@@ -378,7 +419,13 @@ function TitleBand({ isHR }: { isHR: boolean }) {
           {isHR ? t('approvals.subtitleHR') : t('approvals.subtitleSL')}
         </p>
       </div>
-      <Button type="button" variant="secondary">
+      <Button
+        type="button"
+        variant="secondary"
+        disabled
+        title={t('approvals.exportComingSoon')}
+        aria-label={t('approvals.exportComingSoon')}
+      >
         <Download aria-hidden className="size-4" />
         {t('approvals.export')}
       </Button>

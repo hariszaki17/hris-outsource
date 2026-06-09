@@ -1,10 +1,10 @@
 import { AuthLayout } from '@/features/auth/auth-layout.tsx';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { ApiError } from '@swp/api-client';
 import { useAuthResetPassword } from '@swp/api-client/e1';
-import { zodResolver } from '@hookform/resolvers/zod';
 import { Banner, Button, FormField, Input } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { Check, Circle, Eye, ShieldCheck } from 'lucide-react';
+import { Check, Circle, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -31,6 +31,8 @@ export function ResetPasswordScreen() {
   const navigate = useNavigate();
   const [screen, setScreen] = useState<ScreenState>('form');
   const [tokenExpired, setTokenExpired] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const resetMut = useAuthResetPassword();
 
   // Read the typed token from the URL search params (validated in router.tsx).
@@ -86,7 +88,9 @@ export function ResetPasswordScreen() {
           setTokenExpired(true);
         } else if (e.code === 'WEAK_PASSWORD') {
           setError('newPassword', {
-            message: t('reset.weakPassword', { defaultValue: 'Password does not meet requirements' }),
+            message: t('reset.weakPassword', {
+              defaultValue: 'Password does not meet requirements',
+            }),
           });
         } else {
           // Generic error — surface as token-expired banner (safe fallback)
@@ -131,7 +135,8 @@ export function ResetPasswordScreen() {
           tone="bad"
           title={t('reset.expiredTitle', { defaultValue: 'Link telah kedaluwarsa' })}
           description={t('reset.expiredBody', {
-            defaultValue: 'Tautan reset kata sandi ini sudah tidak berlaku. Silakan minta tautan baru.',
+            defaultValue:
+              'Tautan reset kata sandi ini sudah tidak berlaku. Silakan minta tautan baru.',
           })}
         />
       )}
@@ -146,13 +151,25 @@ export function ResetPasswordScreen() {
           <div className="relative">
             <Input
               id="new-password"
-              type="password"
+              type={showNew ? 'text' : 'password'}
               autoComplete="new-password"
               aria-invalid={!!errors.newPassword}
               className="pr-10"
               {...register('newPassword')}
             />
-            <Eye className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-4 text-text-3" />
+            <button
+              type="button"
+              onClick={() => setShowNew((v) => !v)}
+              aria-label={showNew ? t('auth.hidePassword') : t('auth.showPassword')}
+              aria-pressed={showNew}
+              className="-translate-y-1/2 absolute top-1/2 right-3 text-text-3 hover:text-text"
+            >
+              {showNew ? (
+                <EyeOff aria-hidden className="size-4" />
+              ) : (
+                <Eye aria-hidden className="size-4" />
+              )}
+            </button>
           </div>
         </FormField>
 
@@ -165,13 +182,25 @@ export function ResetPasswordScreen() {
           <div className="relative">
             <Input
               id="confirm-password"
-              type="password"
+              type={showConfirm ? 'text' : 'password'}
               autoComplete="new-password"
               aria-invalid={!!errors.confirmPassword}
               className="pr-10"
               {...register('confirmPassword')}
             />
-            <Eye className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-4 text-text-3" />
+            <button
+              type="button"
+              onClick={() => setShowConfirm((v) => !v)}
+              aria-label={showConfirm ? t('auth.hidePassword') : t('auth.showPassword')}
+              aria-pressed={showConfirm}
+              className="-translate-y-1/2 absolute top-1/2 right-3 text-text-3 hover:text-text"
+            >
+              {showConfirm ? (
+                <EyeOff aria-hidden className="size-4" />
+              ) : (
+                <Eye aria-hidden className="size-4" />
+              )}
+            </button>
           </div>
         </FormField>
 

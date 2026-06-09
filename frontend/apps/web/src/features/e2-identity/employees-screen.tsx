@@ -15,6 +15,7 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useCompanyOptions } from '@/lib/use-company-options.ts';
 import {
   type Employee,
   EmployeeStatus,
@@ -122,6 +123,10 @@ export function EmployeesScreen() {
   const currentUser = useCurrentUser();
   const isShiftLeader = currentUser?.role === 'shift_leader';
 
+  // Company filter options — HR/super_admin pick freely; SL is server-pinned to one company
+  // (NAVIGATION-AND-RBAC §4.2), so skip the fetch and lock the control below.
+  const { options: companyOptions } = useCompanyOptions({ enabled: !isShiftLeader });
+
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
   // Debounce the free-text search so we navigate once the user pauses, not per keystroke.
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,19 +148,24 @@ export function EmployeesScreen() {
         ? EmployeeStatus.INACTIVE
         : undefined;
 
+  // SCOPING: a shift_leader is pinned to their own company server-side; pin the param too so the
+  // client query mirrors the server scope (mirror attendance-dashboard-screen.tsx). HR/super_admin
+  // pick a company freely via the filter dropdown.
+  const slCompanyId = isShiftLeader ? (currentUser?.companyId ?? undefined) : undefined;
+
   const params: ListEmployeesParams = {
     limit: PAGE_SIZE,
     q: search.q || undefined,
     status: tabStatus ?? search.status,
-    service_line: search.service_line || undefined,
-    client_company: search.client_company || undefined,
+    client_company: isShiftLeader ? slCompanyId : search.client_company || undefined,
     cursor: search.cursor,
   };
 
   const query = useListEmployees(params);
 
+  // SL company pin is implicit scope, not a user-set filter → exclude it from hasFilters.
   const hasFilters = Boolean(
-    search.q || search.status || search.service_line || search.client_company,
+    search.q || search.status || (!isShiftLeader && search.client_company),
   );
 
   // Totals for stat cards (from page envelope, not real aggregates — use count from loaded page)
@@ -367,10 +377,12 @@ export function EmployeesScreen() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-3 gap-4">
+        {/* Counts are derived from the current cursor page only (no server total field on the
+            page envelope) — labelled "on this page" so they are never read as org-wide totals. */}
         <StatCard
           label={t('statTotal')}
           value={query.isLoading ? '—' : String(rows.length)}
-          sub={t('statTotalSub')}
+          sub={t('statThisPage')}
           icon={Users}
           tone="brand"
         />
@@ -381,7 +393,7 @@ export function EmployeesScreen() {
               ? '—'
               : String(rows.filter((e) => e.status === EmployeeStatus.ACTIVE).length)
           }
-          sub={t('statActiveSub')}
+          sub={t('statThisPage')}
           icon={CircleCheck}
           tone="ok"
         />
@@ -392,7 +404,7 @@ export function EmployeesScreen() {
               ? '—'
               : String(rows.filter((e) => e.status === EmployeeStatus.INACTIVE).length)
           }
-          sub={t('statInactiveSub')}
+          sub={t('statThisPage')}
           icon={UserX}
           tone="bad"
         />
@@ -432,6 +444,39 @@ export function EmployeesScreen() {
               searchDebounce.current = setTimeout(() => setSearch({ q: v || undefined }), 300);
             }}
           />
+          {/* Company filter — locked (disabled) for shift_leader; populated dropdown for HR. */}
+          {isShiftLeader ? (
+            <span className="inline-flex items-center gap-[6px] rounded-lg border border-border bg-surface-2 px-[10px] py-[9px] text-[13px] text-text-2 opacity-70">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <title>lock</title>
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              {currentUser?.companyName ?? currentUser?.companyId ?? t('filterCompany')}
+            </span>
+          ) : (
+            <select
+              aria-label={t('filterCompany')}
+              className="rounded-lg border border-border bg-surface px-[10px] py-[9px] text-[13px] text-text-2 outline-none"
+              value={search.client_company ?? ''}
+              onChange={(e) => setSearch({ client_company: e.target.value || undefined })}
+            >
+              <option value="">{t('filterCompanyAll')}</option>
+              {companyOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
           {/* Status filtering is the tabs above (Semua / Aktif / Nonaktif) — no separate dropdown. */}
         </div>
 

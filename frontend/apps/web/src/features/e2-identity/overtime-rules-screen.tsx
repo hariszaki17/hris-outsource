@@ -9,6 +9,7 @@ import {
   type OvertimeRuleWriteRequest,
   useCreateOvertimeRule,
   useListOvertimeRules,
+  useListServiceLines,
   useSoftDeleteOvertimeRule,
   useUpdateOvertimeRule,
 } from '@swp/api-client/e2';
@@ -30,11 +31,22 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, Check, Info, MoreVertical, Plus, Sparkles, Timer, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import {
+  ArrowLeft,
+  Check,
+  Info,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Sparkles,
+  Timer,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
+import { ServiceLinePicker } from './pickers/service-line-picker.tsx';
 
 /**
  * E2 · Aturan Lembur — list + Tambah/Edit modal + soft-delete confirm.
@@ -115,7 +127,7 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
     },
   });
 
-  const { register, handleSubmit, reset, setValue, watch, setError, formState } = form;
+  const { register, handleSubmit, reset, setValue, watch, setError, control, formState } = form;
   const preApproval = watch('pre_approval_required');
 
   useEffect(() => {
@@ -213,17 +225,23 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
               />
             </FormField>
 
-            {/* Lini Layanan (optional — null = global) */}
+            {/* Lini Layanan (optional — cleared/empty = global, OR-2) */}
             <FormField
               htmlFor="or-sl"
               label={t('masterData.overtimeRules.fieldServiceLine')}
               error={formState.errors.service_line_id?.message}
             >
-              <input
-                id="or-sl"
-                {...register('service_line_id')}
-                className="h-9 w-full rounded-md border border-border bg-surface px-3 text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                placeholder={t('masterData.overtimeRules.fieldServiceLinePlaceholder')}
+              <Controller
+                control={control}
+                name="service_line_id"
+                render={({ field }) => (
+                  <ServiceLinePicker
+                    value={field.value || null}
+                    onChange={(v) => field.onChange(v ?? '')}
+                    error={!!formState.errors.service_line_id}
+                    placeholder={t('masterData.overtimeRules.fieldServiceLinePlaceholder')}
+                  />
+                )}
               />
             </FormField>
 
@@ -370,6 +388,101 @@ function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRule
 }
 
 // ---------------------------------------------------------------------------
+// Row kebab menu — Edit + Deactivate (MD-1 soft-delete)
+// ---------------------------------------------------------------------------
+
+interface RowActionsMenuProps {
+  onEdit: () => void;
+  onDeactivate: () => void;
+}
+
+function RowActionsMenu({ onEdit, onDeactivate }: RowActionsMenuProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
+  const itemBase =
+    'flex w-full items-center gap-[10px] rounded-[7px] px-3 py-[10px] text-[13px] text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={t('masterData.rowActions')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex size-[30px] items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        <MoreVertical className="size-4" aria-hidden />
+      </button>
+
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="absolute right-0 z-50 w-[200px] rounded-[10px] border border-border bg-surface p-1.5 shadow-overlay"
+          style={{ top: '100%' }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={itemBase}
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          >
+            <Pencil className="size-4" aria-hidden />
+            {t('masterData.menuEdit')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${itemBase} text-bad-tx`}
+            onClick={() => {
+              setOpen(false);
+              onDeactivate();
+            }}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            {t('masterData.menuDeactivate')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // OvertimeRulesScreen
 // ---------------------------------------------------------------------------
 
@@ -391,6 +504,18 @@ export function OvertimeRulesScreen() {
   const query = useListOvertimeRules(params);
   const deleteMut = useSoftDeleteOvertimeRule();
   const seedMut = useCreateOvertimeRule();
+
+  // Resolve service_line_id → name for the table (OR-2 renders a scope label, not a raw FK).
+  const serviceLinesQuery = useListServiceLines(
+    { limit: 50 },
+    { query: { staleTime: 5 * 60_000 } },
+  );
+  const serviceLineName = (id: string): string => {
+    const list =
+      (serviceLinesQuery.data?.data as { data?: { id: string; name: string }[] } | undefined)
+        ?.data ?? [];
+    return list.find((sl) => sl.id === id)?.name ?? id;
+  };
 
   const hasFilters = Boolean(statusFilter);
 
@@ -466,7 +591,9 @@ export function OvertimeRulesScreen() {
           <div className="flex flex-col gap-[2px]">
             <span className="text-[14px] font-medium text-text">{row.name}</span>
             {row.service_line_id && (
-              <span className="text-[11px] text-text-2">{row.service_line_id}</span>
+              <span className="text-[11px] text-text-2">
+                {serviceLineName(row.service_line_id)}
+              </span>
             )}
           </div>
         </div>
@@ -478,7 +605,9 @@ export function OvertimeRulesScreen() {
       width: 160,
       cell: (row) => (
         <span className="text-[13px] text-text">
-          {row.service_line_id ?? t('masterData.overtimeRules.global')}
+          {row.service_line_id
+            ? serviceLineName(row.service_line_id)
+            : t('masterData.overtimeRules.global')}
         </span>
       ),
     },
@@ -647,11 +776,7 @@ export function OvertimeRulesScreen() {
                 title={t('masterData.overtimeRules.emptyTitle')}
                 description={t('masterData.overtimeRules.seedHint')}
                 action={
-                  <Button
-                    type="button"
-                    onClick={handleSeedDefault}
-                    disabled={seedMut.isPending}
-                  >
+                  <Button type="button" onClick={handleSeedDefault} disabled={seedMut.isPending}>
                     <Sparkles aria-hidden />
                     {t('masterData.overtimeRules.seedButton')}
                   </Button>
@@ -660,15 +785,10 @@ export function OvertimeRulesScreen() {
             )
           }
           rowActions={(row) => (
-            <button
-              type="button"
-              aria-label={t('masterData.rowActions')}
-              aria-haspopup="menu"
-              className="flex size-[30px] items-center justify-center rounded-md text-text-2 hover:bg-surface-2"
-              onClick={() => openEdit(row)}
-            >
-              <MoreVertical className="size-4" aria-hidden />
-            </button>
+            <RowActionsMenu
+              onEdit={() => openEdit(row)}
+              onDeactivate={() => setDeleteTarget(row)}
+            />
           )}
         />
       </div>

@@ -22,6 +22,12 @@ import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-p
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
+  type ListServiceLines200,
+  type ServiceLine,
+  ServiceLineStatus,
+  useListServiceLines,
+} from '@swp/api-client/e2';
+import {
   type ListShiftMasters200,
   type ListShiftMastersParams,
   type ShiftMaster,
@@ -533,6 +539,16 @@ export function ShiftMastersScreen() {
   const deactivateMut = useDeactivateShiftMaster();
   const reactivateMut = useReactivateShiftMaster();
 
+  // Service lines for the filter dropdown (active only). Global shifts (no line)
+  // are matched server-side regardless of the selected line.
+  const serviceLinesQuery = useListServiceLines(
+    { limit: 50 },
+    { query: { staleTime: 5 * 60_000 } },
+  );
+  const serviceLineOptions = (
+    ((serviceLinesQuery.data?.data as ListServiceLines200 | undefined)?.data ?? []) as ServiceLine[]
+  ).filter((sl) => sl.status === ServiceLineStatus.ACTIVE);
+
   const page = query.data?.data as ListShiftMasters200 | undefined;
   const rows: ShiftMaster[] = page?.data ?? [];
   const nextCursor = page?.next_cursor ?? undefined;
@@ -766,13 +782,13 @@ export function ShiftMastersScreen() {
       <div className="flex items-center gap-[10px]">
         <SearchField
           placeholder={t('searchPlaceholder')}
-          defaultValue={searchQ}
+          value={searchQ}
           containerClassName="w-[280px]"
           onChange={(e) => handleSearch(e.target.value)}
         />
 
-        {/* Service line filter — uses ServiceLinePicker inline as a FilterSelect equivalent;
-            using plain FilterSelect here since this is a string ID filter not a full picker */}
+        {/* Service line filter — active lines from the master list (global shifts
+            with no line are matched server-side regardless of selection). */}
         <FilterSelect
           aria-label={t('filterServiceLine')}
           value={serviceLineFilter ?? ''}
@@ -780,9 +796,11 @@ export function ShiftMastersScreen() {
           containerClassName="w-[200px]"
         >
           <option value="">{t('filterAllServiceLines')}</option>
-          {/* Service lines are loaded dynamically in the full picker; for the filter
-              we show the current selection's name if known, otherwise show IDs.
-              The ServiceLinePicker is used in the modal — filter uses native select. */}
+          {serviceLineOptions.map((sl) => (
+            <option key={sl.id} value={sl.id}>
+              {sl.name}
+            </option>
+          ))}
         </FilterSelect>
 
         <FilterSelect

@@ -470,7 +470,14 @@ export function LeaveCalendarScreen() {
             </FilterSelect>
           )}
           {/* Export */}
-          <Button type="button" variant="secondary" size="sm">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled
+            title={t('exportComingSoon')}
+            aria-label={t('exportComingSoon')}
+          >
             <Download aria-hidden className="h-4 w-4 mr-1.5" />
             {t('export')}
           </Button>

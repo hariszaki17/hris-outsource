@@ -104,6 +104,14 @@ export function PlacementsScreen() {
 
   const expiringOn = Boolean(search.expiring_soon);
 
+  // ShiftLeader can read service lines only via placements.read; they have no
+  // service_lines.read, so the master-data-backed ServiceLinePicker is not shown.
+  const canReadServiceLines = currentUser?.permissions.includes('service_lines.read') ?? false;
+
+  // For SL the company filter is server-pinned to currentUser.companyId; client
+  // reflects it (locked control) and pins the param so the cache key is stable.
+  const slCompanyId = isShiftLeader ? (currentUser?.companyId ?? undefined) : undefined;
+
   // ---------------------------------------------------------------------------
   // Search params → API params
   // ---------------------------------------------------------------------------
@@ -111,7 +119,7 @@ export function PlacementsScreen() {
   const regularParams: ListPlacementsParams = {
     limit: PAGE_SIZE,
     q: search.q || undefined,
-    company_id: search.company_id || undefined,
+    company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     service_line_id: search.service_line_id || undefined,
     status: search.status || undefined,
     cursor: search.cursor,
@@ -119,7 +127,7 @@ export function PlacementsScreen() {
 
   const expiringParams: ListExpiringPlacementsParams = {
     limit: PAGE_SIZE,
-    company_id: search.company_id || undefined,
+    company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     cursor: search.cursor,
   };
 
@@ -363,22 +371,45 @@ export function PlacementsScreen() {
               containerClassName="w-[220px]"
               onChange={(e) => setSearch({ q: e.target.value || undefined })}
             />
-            {/* ClientCompanyPicker as filter (inline combobox) */}
-            <div className="w-[200px]">
-              <ClientCompanyPicker
-                value={search.company_id ?? null}
-                onChange={(v) => setSearch({ company_id: v ?? undefined })}
-                placeholder={t('filterCompany')}
-              />
-            </div>
-            {/* ServiceLinePicker as filter */}
-            <div className="w-[240px]">
-              <ServiceLinePicker
-                value={search.service_line_id ?? null}
-                onChange={(v) => setSearch({ service_line_id: v ?? undefined })}
-                placeholder={t('filterServiceLine')}
-              />
-            </div>
+            {/* Company filter — locked (disabled) for shift_leader, pinned to their
+                own company; free ClientCompanyPicker for HR/super_admin. */}
+            {isShiftLeader ? (
+              <span className="inline-flex items-center gap-[6px] rounded-lg border border-border bg-surface-2 px-[10px] py-[9px] text-[13px] text-text-2 opacity-70">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <title>{t('filterCompanyLocked')}</title>
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                {currentUser?.companyName ?? currentUser?.companyId ?? t('filterCompany')}
+              </span>
+            ) : (
+              <div className="w-[200px]">
+                <ClientCompanyPicker
+                  value={search.company_id ?? null}
+                  onChange={(v) => setSearch({ company_id: v ?? undefined })}
+                  placeholder={t('filterCompany')}
+                />
+              </div>
+            )}
+            {/* ServiceLinePicker as filter — only when the role can read the
+                service-lines master endpoint (SL lacks service_lines.read). */}
+            {canReadServiceLines && (
+              <div className="w-[240px]">
+                <ServiceLinePicker
+                  value={search.service_line_id ?? null}
+                  onChange={(v) => setSearch({ service_line_id: v ?? undefined })}
+                  placeholder={t('filterServiceLine')}
+                />
+              </div>
+            )}
           </div>
           {/* Expiring-soon toggle — from .pen C2SSLA "Akan berakhir" toggle */}
           <div className="flex items-center gap-[8px]">

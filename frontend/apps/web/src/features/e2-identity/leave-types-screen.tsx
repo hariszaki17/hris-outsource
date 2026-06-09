@@ -31,8 +31,17 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, CalendarOff, Check, Minus, MoreVertical, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import {
+  ArrowLeft,
+  CalendarOff,
+  Check,
+  Minus,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -281,11 +290,12 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
             {/* Warna */}
             <FormField htmlFor="lt-color" label={t('masterData.leaveTypes.fieldColor')}>
               <div id="lt-color" className="flex items-center gap-2">
-                {COLOR_SWATCHES.map((c) => (
+                {COLOR_SWATCHES.map((c, i) => (
                   <button
                     key={c}
                     type="button"
-                    aria-label={c}
+                    aria-label={t('masterData.colorSwatch', { n: i + 1 })}
+                    aria-pressed={selectedColor === c}
                     onClick={() => setValue('color', c)}
                     className="flex size-6 items-center justify-center rounded-full transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     style={{ backgroundColor: c }}
@@ -315,6 +325,101 @@ function LeaveTypeModal({ open, onOpenChange, editing, onDone }: LeaveTypeModalP
         </ModalFooter>
       </form>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row kebab menu — Edit + Deactivate (MD-1 soft-delete)
+// ---------------------------------------------------------------------------
+
+interface RowActionsMenuProps {
+  onEdit: () => void;
+  onDeactivate: () => void;
+}
+
+function RowActionsMenu({ onEdit, onDeactivate }: RowActionsMenuProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
+  const itemBase =
+    'flex w-full items-center gap-[10px] rounded-[7px] px-3 py-[10px] text-[13px] text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+  return (
+    <div className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={t('masterData.rowActions')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex size-[30px] items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        <MoreVertical className="size-4" aria-hidden />
+      </button>
+
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          className="absolute right-0 z-50 w-[200px] rounded-[10px] border border-border bg-surface p-1.5 shadow-overlay"
+          style={{ top: '100%' }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={itemBase}
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          >
+            <Pencil className="size-4" aria-hidden />
+            {t('masterData.menuEdit')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${itemBase} text-bad-tx`}
+            onClick={() => {
+              setOpen(false);
+              onDeactivate();
+            }}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            {t('masterData.menuDeactivate')}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -560,15 +665,10 @@ export function LeaveTypesScreen() {
             )
           }
           rowActions={(row) => (
-            <button
-              type="button"
-              aria-label={t('masterData.rowActions')}
-              aria-haspopup="menu"
-              className="flex size-[30px] items-center justify-center rounded-md text-text-2 hover:bg-surface-2"
-              onClick={() => openEdit(row)}
-            >
-              <MoreVertical className="size-4" aria-hidden />
-            </button>
+            <RowActionsMenu
+              onEdit={() => openEdit(row)}
+              onDeactivate={() => setDeleteTarget(row)}
+            />
           )}
         />
       </div>

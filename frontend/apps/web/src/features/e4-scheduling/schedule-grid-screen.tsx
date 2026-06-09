@@ -23,6 +23,7 @@
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useCompanyOptions } from '@/lib/use-company-options.ts';
 import {
   type ListScheduleParams,
   type ScheduleEntry,
@@ -136,6 +137,15 @@ export function ScheduleGridScreen() {
     slCompanyId ?? search.company_id ?? null,
   );
 
+  // Resolve the SELECTED client company's display name for the page title — independent of
+  // whether any placements/rows exist (a company can be selected with zero placed agents).
+  // Shift leaders are pinned to their own company (companyName on the session); HR/super-admin
+  // look the label up from the shared company options by the selected id.
+  const { options: companyOptions } = useCompanyOptions({ enabled: !isShiftLeader });
+  const selectedCompanyName = isShiftLeader
+    ? (user?.companyName ?? null)
+    : (companyOptions.find((o) => o.value === companyId)?.label ?? null);
+
   // ---- Popover state ----
   const [popoverTarget, setPopoverTarget] = React.useState<CellTarget | null>(null);
   const [popoverAnchor] = React.useState<React.RefObject<HTMLElement | null>>(
@@ -177,10 +187,7 @@ export function ScheduleGridScreen() {
   // The week may straddle a year boundary; fetch both years (react-query dedupes equal keys).
   const mondayYear = Number(monday.slice(0, 4));
   const sundayYear = Number(sunday.slice(0, 4));
-  const holidaysA = useListHolidays(
-    { year: mondayYear },
-    { query: { staleTime: 5 * 60 * 1000 } },
-  );
+  const holidaysA = useListHolidays({ year: mondayYear }, { query: { staleTime: 5 * 60 * 1000 } });
   const holidaysB = useListHolidays(
     { year: sundayYear },
     { query: { enabled: sundayYear !== mondayYear, staleTime: 5 * 60 * 1000 } },
@@ -202,7 +209,10 @@ export function ScheduleGridScreen() {
   const complianceByRow = React.useMemo(() => {
     const m = new Map<string, RowCompliance>();
     for (const row of agentRows) {
-      m.set(`${row.employeeId}::${row.placementId}`, computeCompliance(row.cells, days, holidaySet));
+      m.set(
+        `${row.employeeId}::${row.placementId}`,
+        computeCompliance(row.cells, days, holidaySet),
+      );
     }
     return m;
   }, [agentRows, days, holidaySet]);
@@ -353,7 +363,7 @@ export function ScheduleGridScreen() {
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold text-text">
             {t('screen.title', {
-              company: agentRows[0]?.serviceLineName || t('screen.titleNoCompany'),
+              company: selectedCompanyName || t('screen.titleNoCompany'),
             })}
           </h1>
           <p className="text-sm text-text-3">{t('screen.subtitle', { count: agentRows.length })}</p>
@@ -631,7 +641,7 @@ export function ScheduleGridScreen() {
                       type="button"
                       aria-label={t('cell.ariaLabel', {
                         agent: row.employeeName,
-                        date: d,
+                        date: formatDayMonthId(d),
                       })}
                       onClick={(e) => handleCellClick(row, d, e.currentTarget)}
                       className={[

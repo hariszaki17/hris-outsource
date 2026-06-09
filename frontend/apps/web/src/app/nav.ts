@@ -188,6 +188,56 @@ export function activeSection(pathname: string): string | null {
   return direct ? direct.to : null;
 }
 
+/**
+ * Capability requirement for a concrete pathname (route-level guard, NAVIGATION-AND-RBAC §4.4).
+ * The router's `beforeLoad` uses this to redirect a permitted-section-but-denied deep link to
+ * `/forbidden`, instead of rendering a broken screen and relying on the API 403 (defense-in-depth,
+ * ENGINEERING.md C1 — the Go API is still the real gate). Rules are ordered most-specific first;
+ * the first match wins. A `null` result means the route is not capability-gated (auth-only, e.g.
+ * `/`, `/notifications`, `/forbidden`). SCOPE (which rows) stays server-only and never appears here.
+ */
+const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
+  // Most-specific first.
+  [/^\/client-companies\/[^/]+\/roster/, 'placements.read'],
+  [/^\/client-companies/, 'clients.read'],
+  [/^\/employees/, 'employees.read'],
+  [/^\/service-lines/, 'service_lines.read'],
+  [/^\/change-requests/, 'change_requests.read'],
+  [/^\/agreements/, 'agreements.read'],
+  [/^\/master-data/, 'masterdata.manage'],
+  [/^\/placements/, 'placements.read'],
+  [/^\/schedule/, 'schedule.read'],
+  [/^\/shifts/, 'shifts.read'],
+  [/^\/attendance\/verification/, 'attendance.verify'],
+  [/^\/attendance/, 'attendance.read'],
+  [/^\/corrections/, 'attendance.verify'],
+  [/^\/leave\/quotas/, 'leave_quotas.read'],
+  [/^\/leave/, 'leave.read'],
+  [/^\/overtime\/aturan/, 'overtime_rules.read'],
+  [/^\/overtime/, 'overtime.read'],
+  [/^\/payroll/, 'payroll.read'],
+  [/^\/reports/, 'reports.read'],
+  [
+    /^\/inbox/,
+    {
+      anyOf: ['leave.approve', 'overtime.approve', 'attendance.verify', 'change_requests.approve'],
+    },
+  ],
+  [/^\/settings/, 'settings.access'],
+];
+
+/**
+ * Returns the capability required to view `pathname`, or `null` for auth-only routes.
+ * `/` (dashboard) is gated on `dashboard.view`; unmatched routes are ungated.
+ */
+export function routeRequirement(pathname: string): Requirement | null {
+  if (pathname === '/') return 'dashboard.view';
+  for (const [pattern, requires] of ROUTE_REQUIREMENTS) {
+    if (pattern.test(pathname)) return requires;
+  }
+  return null;
+}
+
 /** The sub-nav tabs for a section, filtered by permission. Empty when <2 tabs are visible. */
 export function subnavForSection(
   sectionTo: string | null,

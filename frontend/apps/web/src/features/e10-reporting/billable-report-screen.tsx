@@ -6,7 +6,12 @@
  *   FJ6hX  "E10 · Ekspor Laporan (modal)"                 — export modal (ExportModal)
  *
  * Routes:
- *   /reports/billable   (role: hr_admin | super_admin | shift_leader)
+ *   /reports/billable   (permission: reports.read → hr_admin | super_admin only)
+ *
+ * NOTE: shift_leader has NO reports.read in the authoritative role model
+ * (rbac.ts ROLE_PERMISSIONS.shift_leader; NAVIGATION-AND-RBAC.md — SL has "no reports").
+ * The nav item and the API gate both exclude SL, so this screen is HR/super-admin only.
+ * (Per CLAUDE.md the eng RBAC doc wins over the per-feature PRD BR-4, which is stale.)
  *
  * Frame layout (EF8AZ):
  *   Sidebar + Main column:
@@ -24,6 +29,8 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useCompanyOptions } from '@/lib/use-company-options.ts';
+import { useServiceLineOptions } from '@/lib/use-service-line-options.ts';
 import {
   type BillableReport,
   type BillableReportRow,
@@ -84,7 +91,12 @@ function formatHours(h: number): string {
 }
 
 function hasActiveFilters(s: BillableReportSearch): boolean {
-  return Boolean(s.company_id || s.service_line_id);
+  // A non-default group_by is an active filter too, so the Reset affordance surfaces when only
+  // the grouping has changed (resetFilters restores group_by to `employee`).
+  const groupByChanged = Boolean(
+    s.group_by && s.group_by !== GetBillableAttendanceReportGroupBy.employee,
+  );
+  return Boolean(s.company_id || s.service_line_id) || groupByChanged;
 }
 
 function toFilterChips(s: BillableReportSearch, t: (k: string) => string) {
@@ -123,6 +135,11 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   const { t } = useTranslation();
   const user = useCurrentUser();
   const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
+
+  // Filter option lists. Company picker is HR-only (SL is server-scoped to one company);
+  // service-line picker is available to everyone who can reach the screen.
+  const { options: companyOptions } = useCompanyOptions({ enabled: isHR });
+  const { options: serviceLineOptions } = useServiceLineOptions();
 
   const periodStart = filters.period_start ?? DEFAULT_PERIOD_START;
   const periodEnd = filters.period_end ?? DEFAULT_PERIOD_END;
@@ -359,6 +376,11 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
               onChange={(e) => setFilter({ company_id: e.target.value || undefined })}
             >
               <option value="">{t('report.filterCompany')}</option>
+              {companyOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </FilterSelect>
           )}
 
@@ -369,6 +391,11 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
             onChange={(e) => setFilter({ service_line_id: e.target.value || undefined })}
           >
             <option value="">{t('report.filterServiceLine')}</option>
+            {serviceLineOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </FilterSelect>
 
           {/* Group by — EF8AZ "Kelompok: per agen" */}

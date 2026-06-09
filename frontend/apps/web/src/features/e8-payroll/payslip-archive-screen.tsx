@@ -296,7 +296,8 @@ function PayslipArchiveInner({
           See DEVIATIONS in the module-level JSDoc.
         */}
         <SearchField
-          placeholder={t('archive.searchPlaceholder')}
+          aria-label={t('archive.searchExactAriaLabel')}
+          placeholder={t('archive.searchExactPlaceholder')}
           defaultValue={filters.employeeSearch}
           containerClassName="w-64"
           onChange={(e) => patchFilters({ employeeSearch: e.target.value })}

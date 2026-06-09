@@ -12,7 +12,6 @@
  *      currentUser.companyId (not from search.company_id).
  */
 
-import { AttendanceStatus, ListAttendanceServiceLine } from '@swp/api-client/e5';
 import { describe, expect, it } from 'vitest';
 import type { AttendanceDashboardSearch } from './attendance-dashboard-screen.ts';
 
@@ -22,29 +21,25 @@ import type { AttendanceDashboardSearch } from './attendance-dashboard-screen.ts
 // ---------------------------------------------------------------------------
 
 describe('AttendanceDashboardSearch type', () => {
-  it('accepts all four new filter fields alongside existing ones', () => {
+  it('accepts the filter fields alongside existing ones', () => {
     const search: AttendanceDashboardSearch = {
       q: 'budi',
-      status: AttendanceStatus.LATE,
       tab: 'late',
       cursor: 'abc',
       company_id: 'SWP-CMP-014',
       site_id: 'SWP-SITE-031',
-      service_line: ListAttendanceServiceLine.facility_services,
       position_id: 'SWP-POS-009',
     };
     expect(search.company_id).toBe('SWP-CMP-014');
     expect(search.site_id).toBe('SWP-SITE-031');
-    expect(search.service_line).toBe('facility_services');
     expect(search.position_id).toBe('SWP-POS-009');
   });
 
-  it('all new filter fields are optional', () => {
-    // Should compile with none of the new fields set.
+  it('all filter fields are optional', () => {
+    // Should compile with none of the filter fields set.
     const search: AttendanceDashboardSearch = {};
     expect(search.company_id).toBeUndefined();
     expect(search.site_id).toBeUndefined();
-    expect(search.service_line).toBeUndefined();
     expect(search.position_id).toBeUndefined();
   });
 });

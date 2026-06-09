@@ -10,9 +10,9 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import {
+  type DeactivateEmployeeBodyReason,
   type Employee,
   EmployeeStatus,
-  DeactivateEmployeeBodyReason,
   useDeactivateEmployee,
   useReactivateEmployee,
 } from '@swp/api-client/e2';

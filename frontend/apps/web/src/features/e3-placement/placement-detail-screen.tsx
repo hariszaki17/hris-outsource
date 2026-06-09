@@ -38,6 +38,7 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type Placement,
   type PlacementDetailResponse,
@@ -52,11 +53,13 @@ import {
   Banner,
   Button,
   DateText,
+  EmptyState,
   IdChip,
   StateView,
   StatusBadge,
   toneForPlacement,
 } from '@swp/ui';
+import { Link } from '@tanstack/react-router';
 import {
   ArrowLeftRight,
   ArrowUpRight,
@@ -218,6 +221,11 @@ function Initials({ name }: { name: string }) {
 
 export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProps) {
   const { t } = useTranslation('placementDetail');
+  const currentUser = useCurrentUser();
+  // Lifecycle mutations are HR/Admin-only (F3.2/F3.3). SL has placements.read only.
+  const canEdit = currentUser?.permissions.includes('placements.write') ?? false;
+  // The leader-management link targets /client-companies/$id, which needs clients.read.
+  const canManageOnCompany = currentUser?.permissions.includes('clients.read') ?? false;
 
   // Overlay state
   const [showTransfer, setShowTransfer] = useState(false);
@@ -250,6 +258,17 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
           kind="empty"
           title={t('notFound.title')}
           description={t('notFound.description')}
+        />
+      );
+    }
+    // Scope 403: the role can open the screen but this placement row is outside
+    // their server-side scope — render a no-permission empty state, no retry.
+    if (classified.kind === 'forbidden' || classified.kind === 'unauthenticated') {
+      return (
+        <EmptyState
+          variant="no-permission"
+          title={t('forbidden.title')}
+          description={t('forbidden.description')}
         />
       );
     }
@@ -343,8 +362,9 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
           </div>
         </div>
 
-        {/* Action buttons (.pen waTmo) — Perpanjang · Transfer · Akhiri */}
-        {showActions && (
+        {/* Action buttons (.pen waTmo) — Perpanjang · Transfer · Akhiri.
+            HR/Admin-only (placements.write); hidden for shift_leader. */}
+        {showActions && canEdit && (
           <div className="flex items-center gap-2.5">
             <Button type="button" variant="primary" size="sm" onClick={() => setShowRenew(true)}>
               <RefreshCw className="mr-1.5 size-4" aria-hidden="true" />
@@ -451,8 +471,9 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
         />
       )}
 
-      {/* Secondary actions (Terminate / Resign) — ghost links, active-like + expiring only */}
-      {showActions && (
+      {/* Secondary actions (Terminate / Resign) — ghost links, active-like +
+          expiring only. HR/Admin-only (placements.write). */}
+      {showActions && canEdit && (
         <div className="flex items-center justify-end gap-3">
           <button
             type="button"
@@ -553,6 +574,7 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
             leader={currentLeader ?? null}
             noLeaderWarning={noLeaderWarning}
             terminal={terminal}
+            canManageOnCompany={canManageOnCompany}
           />
         </div>
       </div>
@@ -650,22 +672,33 @@ interface ShiftLeaderCardProps {
   leader: ShiftLeaderAssignmentSummary | null;
   noLeaderWarning: boolean;
   terminal: boolean;
+  /** Whether the viewer can open the company's Pemimpin Shift tab (clients.read). */
+  canManageOnCompany: boolean;
 }
 
-function ShiftLeaderCard({ placement, leader, noLeaderWarning, terminal }: ShiftLeaderCardProps) {
+function ShiftLeaderCard({
+  placement,
+  leader,
+  noLeaderWarning,
+  terminal,
+  canManageOnCompany,
+}: ShiftLeaderCardProps) {
   const { t } = useTranslation('placementDetail');
 
   // Read-only on placement detail: the leader is ASSIGNED/REPLACED/REVOKED from the
-  // company's "Pemimpin Shift" tab (single entry point). Here we only link there.
-  const actionArea = !terminal ? (
-    <a
-      href={`/client-companies/${placement.client_company_id}`}
-      className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
-    >
-      {t('sl.manageOnCompany')}
-      <ArrowUpRight className="size-3" aria-hidden="true" />
-    </a>
-  ) : null;
+  // company's "Pemimpin Shift" tab (single entry point), an HR/Admin action. The link
+  // is shown only to roles with clients.read so SL doesn't get a dead link.
+  const actionArea =
+    !terminal && canManageOnCompany ? (
+      <Link
+        to="/client-companies/$clientCompanyId"
+        params={{ clientCompanyId: placement.client_company_id }}
+        className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
+      >
+        {t('sl.manageOnCompany')}
+        <ArrowUpRight className="size-3" aria-hidden="true" />
+      </Link>
+    ) : null;
 
   return (
     <DetailCard
@@ -701,13 +734,14 @@ function ShiftLeaderCard({ placement, leader, noLeaderWarning, terminal }: Shift
                 : t('sl.otherAgent')}
             </span>
           </div>
-          <a
-            href={`/employees/${leader.employee_id}`}
+          <Link
+            to="/employees/$employeeId"
+            params={{ employeeId: leader.employee_id }}
             className="ml-auto flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
           >
             {t('sl.viewProfile')}
             <ArrowUpRight className="size-3" aria-hidden="true" />
-          </a>
+          </Link>
         </div>
       )}
 

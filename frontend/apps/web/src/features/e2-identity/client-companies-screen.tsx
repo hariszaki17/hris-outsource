@@ -13,6 +13,7 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type ClientCompany,
   ClientCompanyStatus,
@@ -47,6 +48,12 @@ const PAGE_SIZE = 50;
 export type ClientCompaniesSearch = {
   q?: string;
   status?: ClientCompanyStatus;
+  /**
+   * Reserved: parsed by the route's validateSearch but NOT applied — the directory PRD
+   * (client-company-directory.md) specifies only search + active/inactive status filtering,
+   * and there is no service-line options source on this screen. Kept for URL/route-type
+   * compatibility; intentionally not wired into the query or `hasFilters`.
+   */
   service_line?: string;
   cursor?: string;
 };
@@ -61,6 +68,11 @@ export function ClientCompaniesScreen() {
   // useSearch needs the route registered; cast to avoid TS path errors since routes will be added
   const search = useSearch({ strict: false }) as ClientCompaniesSearch;
   const { toast } = useToast();
+  const currentUser = useCurrentUser();
+  // Defense-in-depth (ENGINEERING.md A2): the directory + its write actions are HR/super_admin
+  // only (clients.read/clients.write). A shift_leader has neither, so hide write affordances —
+  // the API is the real gate, but we never paint a button that would 403 (no dead-flow).
+  const canWrite = currentUser?.role === 'hr_admin' || currentUser?.role === 'super_admin';
 
   const [deactivateTarget, setDeactivateTarget] = useState<ClientCompany | null>(null);
   const [reactivateTarget, setReactivateTarget] = useState<ClientCompany | null>(null);
@@ -69,7 +81,6 @@ export function ClientCompaniesScreen() {
     limit: PAGE_SIZE,
     ...(search.q ? { q: search.q } : {}),
     ...(search.status ? { status: search.status } : {}),
-    ...(search.service_line ? { service_line: search.service_line } : {}),
     ...(search.cursor ? { cursor: search.cursor } : {}),
   };
 
@@ -167,12 +178,6 @@ export function ClientCompaniesScreen() {
       ),
     },
     {
-      id: 'service_line',
-      header: t('table.serviceLine'),
-      width: 170,
-      cell: () => <span className="text-[13px] text-text-3">—</span>,
-    },
-    {
       id: 'has_leader',
       header: t('table.shiftLeader'),
       width: 200,
@@ -224,7 +229,12 @@ export function ClientCompaniesScreen() {
         );
       },
     },
-    {
+  ];
+
+  // Deactivate/Reactivate are hr_admin/super_admin only — append the actions column only when
+  // the role can write, so read-only roles never get a row action that would 403.
+  if (canWrite) {
+    columns.push({
       id: 'actions',
       header: '',
       width: 140,
@@ -247,10 +257,10 @@ export function ClientCompaniesScreen() {
             {t('actions.reactivate')}
           </button>
         ),
-    },
-  ];
+    });
+  }
 
-  const hasFilters = !!(search.q || search.status || search.service_line);
+  const hasFilters = !!(search.q || search.status);
 
   return (
     <div className="flex flex-col gap-[18px] p-6 bg-app-bg min-h-full overflow-y-auto">
@@ -260,14 +270,16 @@ export function ClientCompaniesScreen() {
           <h1 className="text-[18px] font-semibold text-text">{t('title')}</h1>
           <p className="text-[13px] text-text-2">{t('subtitle')}</p>
         </div>
-        <Link to={'/client-companies/new' as never}>
-          <button
-            type="button"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-[14px] font-medium hover:bg-primary-strong"
-          >
-            {t('actions.addCompany')}
-          </button>
-        </Link>
+        {canWrite && (
+          <Link to={'/client-companies/new' as never}>
+            <button
+              type="button"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-[14px] font-medium hover:bg-primary-strong"
+            >
+              {t('actions.addCompany')}
+            </button>
+          </Link>
+        )}
       </div>
 
       {/* Stat cards */}
@@ -313,6 +325,7 @@ export function ClientCompaniesScreen() {
           <div className="flex w-[280px] items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
             <input
               type="search"
+              aria-label={t('filter.searchLabel')}
               className="flex-1 border-0 bg-transparent p-0 text-[13px] text-text outline-none placeholder:text-text-3"
               placeholder={t('filter.searchPlaceholder')}
               value={search.q ?? ''}
@@ -321,6 +334,7 @@ export function ClientCompaniesScreen() {
           </div>
           <div className="relative w-44 rounded-md border border-border bg-surface px-3 py-2">
             <select
+              aria-label={t('filter.statusLabel')}
               className="w-full appearance-none border-0 bg-transparent pr-6 text-[13px] font-medium text-text-2 outline-none"
               value={search.status ?? ''}
               onChange={(e) =>
@@ -337,20 +351,36 @@ export function ClientCompaniesScreen() {
         {/* Data table */}
         {query.isPending ? (
           <DataTable<ClientCompany>
+            aria-label={t('title')}
             columns={columns}
             data={[]}
             getRowId={(row) => row.id}
             isLoading
           />
         ) : query.isError ? (
-          <div className="p-8">
-            <StateView
-              kind="error"
-              title={t('state.errorTitle')}
-              description={classifyError(query.error).message}
-              onRetry={() => void query.refetch()}
-            />
-          </div>
+          (() => {
+            const { kind, message } = classifyError(query.error);
+            // A role lacking clients.read (e.g. shift_leader deep-linking) gets a 403 here —
+            // render a no-permission state with no Retry, mirroring employees-screen.tsx.
+            return kind === 'forbidden' || kind === 'unauthenticated' ? (
+              <div className="p-8">
+                <EmptyState
+                  variant="no-permission"
+                  title={t('state.noPermissionTitle')}
+                  description={t('state.noPermissionBody')}
+                />
+              </div>
+            ) : (
+              <div className="p-8">
+                <StateView
+                  kind="error"
+                  title={t('state.errorTitle')}
+                  description={message}
+                  onRetry={() => void query.refetch()}
+                />
+              </div>
+            );
+          })()
         ) : companies.length === 0 ? (
           <div className="p-8">
             <EmptyState
@@ -360,7 +390,12 @@ export function ClientCompaniesScreen() {
             />
           </div>
         ) : (
-          <DataTable<ClientCompany> columns={columns} data={companies} getRowId={(row) => row.id} />
+          <DataTable<ClientCompany>
+            aria-label={t('title')}
+            columns={columns}
+            data={companies}
+            getRowId={(row) => row.id}
+          />
         )}
 
         {/* Pagination */}

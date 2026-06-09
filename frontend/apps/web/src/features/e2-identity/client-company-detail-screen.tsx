@@ -13,8 +13,9 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import { type ClientCompany, ClientCompanyStatus, useGetClientCompany } from '@swp/api-client/e2';
-import { DateText, StateView, StatusBadge } from '@swp/ui';
+import { DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, Building2, Edit2, Info } from 'lucide-react';
 import type * as React from 'react';
@@ -51,6 +52,11 @@ function FieldRow({
 export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDetailScreenProps) {
   const { t } = useTranslation('clientCompanies');
   const [activeTab, setActiveTab] = useState<DetailTab>('profil');
+  const currentUser = useCurrentUser();
+  // Edit/deactivate are clients.write (hr_admin/super_admin). A company-scoped shift_leader can
+  // legitimately open this read-only detail (getClientCompany is company_or_global), so gate the
+  // write affordance rather than the whole screen — defense-in-depth, no dead-flow (A2).
+  const canWrite = currentUser?.role === 'hr_admin' || currentUser?.role === 'super_admin';
 
   const query = useGetClientCompany(clientCompanyId);
   const company = query.data?.data as ClientCompany | undefined;
@@ -73,6 +79,20 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
 
   if (query.isError || !company) {
     const { kind, message } = classifyError(query.error);
+    // A 403 is reachable WITH valid capability: a shift_leader hitting a company outside their
+    // server-side scope (or a role without clients.read deep-linking). Show a no-permission
+    // state with no Retry, mirroring the list screens.
+    if (kind === 'forbidden' || kind === 'unauthenticated') {
+      return (
+        <div className="p-6 bg-app-bg h-full">
+          <EmptyState
+            variant="no-permission"
+            title={t('state.noPermissionTitle')}
+            description={t('state.noPermissionBody')}
+          />
+        </div>
+      );
+    }
     return (
       <div className="p-6 bg-app-bg h-full">
         <StateView
@@ -123,14 +143,16 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
               ? t('status.active')
               : t('status.inactive')}
           </StatusBadge>
-          <Link
-            to={'/client-companies/$clientCompanyId/edit' as never}
-            params={{ clientCompanyId } as never}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-[13px] font-medium text-text hover:bg-surface-2"
-          >
-            <Edit2 size={14} aria-hidden />
-            {t('actions.edit')}
-          </Link>
+          {canWrite && (
+            <Link
+              to={'/client-companies/$clientCompanyId/edit' as never}
+              params={{ clientCompanyId } as never}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-[13px] font-medium text-text hover:bg-surface-2"
+            >
+              <Edit2 size={14} aria-hidden />
+              {t('actions.edit')}
+            </Link>
+          )}
         </div>
       </div>
 

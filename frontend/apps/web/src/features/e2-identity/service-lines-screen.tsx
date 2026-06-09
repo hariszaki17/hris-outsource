@@ -127,7 +127,7 @@ function RowMenu({ row, onEdit, onDiscontinue }: RowMenuProps) {
       <button
         ref={triggerRef}
         type="button"
-        aria-label={t('users.rowActions')}
+        aria-label={t('serviceLines.rowActions')}
         className="flex size-8 items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={(e) => {
           e.stopPropagation();
@@ -539,9 +539,11 @@ export function ServiceLinesScreen() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('serviceLines.searchPlaceholder')}
+            aria-label={t('serviceLines.searchPlaceholder')}
             className="w-[280px]"
           />
           <FilterSelect
+            aria-label={t('serviceLines.filterStatus')}
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
@@ -589,11 +591,7 @@ export function ServiceLinesScreen() {
           )}
           footer={
             <CursorPagination
-              rangeLabel={t('serviceLines.resultRange', {
-                from: 1,
-                to: filtered.length,
-                total: filtered.length,
-              })}
+              rangeLabel={t('serviceLines.resultCount', { count: filtered.length })}
               hasPrev={prevCursors.length > 0}
               hasNext={hasMore}
               onPrev={handlePrev}

@@ -24,6 +24,7 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { useCompanyOptions } from '@/lib/use-company-options.ts';
 import {
   type ListOvertimeParams,
   type Overtime,
@@ -120,11 +121,16 @@ function OvertimeRecordsScreenInner({
   const { t } = useTranslation('overtime');
   const user = useCurrentUser();
   const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
+  const isShiftLeader = user?.role === 'shift_leader';
+
+  // SL is pinned to their own company server-side; mirror it in the query so the cache key
+  // is stable and the client never requests cross-company rows (defense-in-depth, E5 pattern).
+  const slCompanyId = isShiftLeader ? (user?.companyId ?? undefined) : undefined;
 
   const params: ListOvertimeParams = {
     limit: PAGE_SIZE,
     cursor: search.cursor,
-    company_id: search.company_id || undefined,
+    company_id: isHR ? search.company_id || undefined : slCompanyId,
     work_date__gte: search.work_date__gte || undefined,
     work_date__lte: search.work_date__lte || undefined,
     status: search.status || undefined,
@@ -134,6 +140,9 @@ function OvertimeRecordsScreenInner({
 
   const query = useListOvertime(params);
   const hasFilters = hasActiveFilters(search);
+
+  // Company filter options — HR/super_admin only (SL company is server-pinned, no list needed).
+  const { options: companyOptions } = useCompanyOptions({ enabled: isHR });
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -370,6 +379,11 @@ function OvertimeRecordsScreenInner({
             onChange={(e) => setSearch({ company_id: e.target.value || undefined })}
           >
             <option value="">{t('rekap.filterCompany')}</option>
+            {companyOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </FilterSelect>
         )}
 
