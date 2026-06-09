@@ -19,8 +19,7 @@ import {
   useListOvertimeRules,
 } from '@swp/api-client/e2';
 import { type Holiday, type HolidayPage, useListHolidays } from '@swp/api-client/e7';
-import { Button, DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
-import { Link } from '@tanstack/react-router';
+import { DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
 import { CalendarPlus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -120,12 +119,6 @@ export function OvertimeRulesScreen() {
         <section className="flex-1 overflow-hidden rounded-[12px] border border-border bg-surface">
           <header className="flex items-center justify-between border-b border-border-soft px-[18px] py-[14px]">
             <h2 className="text-[15px] font-bold text-text">{t('rules.cardTitle')}</h2>
-            <Button asChild variant="secondary" size="sm">
-              <Link to="/master-data/overtime-rules">
-                <Plus className="size-[13px]" aria-hidden="true" />
-                {t('rules.addRule')}
-              </Link>
-            </Button>
           </header>
 
           {rulesQuery.isError ? (

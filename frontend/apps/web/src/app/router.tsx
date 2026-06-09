@@ -10,7 +10,6 @@ import {
 } from '@/features/e1-foundations/global-states.tsx';
 import { SettingsGeneralScreen } from '@/features/e1-foundations/settings-general-screen.tsx';
 import { SettingsLayout } from '@/features/e1-foundations/settings-layout.tsx';
-import { SettingsOverviewScreen } from '@/features/e1-foundations/settings-overview-screen.tsx';
 import { UsersScreen } from '@/features/e1-foundations/users-screen.tsx';
 import { AgreementDetailScreen } from '@/features/e2-identity/agreement-detail-screen.tsx';
 import { CreateAgreementScreen } from '@/features/e2-identity/agreement-form.tsx';
@@ -631,7 +630,10 @@ const settingsRoute = createRoute({
 const settingsIndexRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/',
-  component: SettingsOverviewScreen,
+  // Overview is hidden from nav; the section entry (/settings) lands on Role Management.
+  beforeLoad: () => {
+    throw redirect({ to: '/settings/users' });
+  },
 });
 const usersRoute = createRoute({
   getParentRoute: () => settingsRoute,

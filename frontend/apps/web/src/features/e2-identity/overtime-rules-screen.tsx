@@ -1,486 +1,28 @@
-import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { classifyError } from '@/lib/api-error.ts';
 import {
   type ListOvertimeRules200,
   type ListOvertimeRulesParams,
   type OvertimeRule,
-  type OvertimeRuleId,
   OvertimeRuleStatus,
-  type OvertimeRuleWriteRequest,
-  useCreateOvertimeRule,
   useListOvertimeRules,
   useListServiceLines,
-  useSoftDeleteOvertimeRule,
-  useUpdateOvertimeRule,
 } from '@swp/api-client/e2';
-import {
-  Button,
-  type Column,
-  ConfirmDialog,
-  DataTable,
-  EmptyState,
-  FilterSelect,
-  FormField,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
-  StateView,
-  StatusBadge,
-  Toggle,
-  useToast,
-} from '@swp/ui';
+import { type Column, DataTable, EmptyState, FilterSelect, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
-import {
-  ArrowLeft,
-  Check,
-  Info,
-  MoreVertical,
-  Pencil,
-  Plus,
-  Sparkles,
-  Timer,
-  Trash2,
-} from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { ArrowLeft, Info, Timer } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { z } from 'zod';
-import { ServiceLinePicker } from './pickers/service-line-picker.tsx';
 
 /**
- * E2 · Aturan Lembur — list + Tambah/Edit modal + soft-delete confirm.
- * Built from .pen frames `SnXpE` (list), `JYmgi` (modal).
- * D4 (2026-06-02): min_minutes default = 30, minimum = 30 (EPICS §8).
- * OR-1: create, OR-2: service_line_id scoping (null = global), OR-3: rates.
+ * E2 · Aturan Lembur — read-only list.
+ * Built from .pen frame `SnXpE` (list). Seeded rules rarely change, so this screen
+ * is view-only: no create/edit/deactivate entry-points (decided 2026-06-09).
+ * OR-2: service_line_id scoping (null = global), OR-3: rates.
  * Routes: /master-data/overtime-rules — consumers must register in the router.
  * Refs: F7.1 (E7 OT calc consumes this master).
  */
 
 const PAGE_SIZE = 200;
-
-// ---------------------------------------------------------------------------
-// Zod schema (hand-written — E2 Zod deferred)
-// ---------------------------------------------------------------------------
-
-// RHF stores type="number" input values as numbers (via valueAsNumber), so the schema
-// must use z.coerce.number() to accept both the initial string defaultValues and the
-// numbers that RHF gives to zodResolver on submit.
-const overtimeRuleSchema = z.object({
-  name: z.string().min(1, 'Nama wajib diisi').max(100),
-  service_line_id: z.string().optional(),
-  weekday_rate: z.coerce.number().positive('Harus > 0'),
-  restday_rate: z.coerce.number().positive('Harus > 0'),
-  holiday_rate: z.coerce.number().positive('Harus > 0'),
-  min_minutes: z.coerce.number().int().min(30, 'Minimal 30 menit (D4)'),
-  // Optional number: empty string / undefined → undefined; otherwise coerce to positive int.
-  max_minutes_per_day: z.preprocess(
-    (v) => (v === '' || v === undefined || v === null ? undefined : Number(v)),
-    z.number().int().positive().optional(),
-  ),
-  pre_approval_required: z.boolean(),
-});
-
-// Explicit form shape — use number for fields that RHF stores as numbers (type="number" inputs).
-type OvertimeRuleFormValues = {
-  name: string;
-  service_line_id: string;
-  weekday_rate: number | string;
-  restday_rate: number | string;
-  holiday_rate: number | string;
-  min_minutes: number | string;
-  max_minutes_per_day: number | string | undefined;
-  pre_approval_required: boolean;
-};
-
-// ---------------------------------------------------------------------------
-// OvertimeRuleModal — Tambah/Edit
-// ---------------------------------------------------------------------------
-
-interface OvertimeRuleModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  editing: OvertimeRule | null;
-  onDone: () => void;
-}
-
-function OvertimeRuleModal({ open, onOpenChange, editing, onDone }: OvertimeRuleModalProps) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-  const isEdit = editing !== null;
-
-  const createMut = useCreateOvertimeRule();
-  const updateMut = useUpdateOvertimeRule();
-  const isPending = createMut.isPending || updateMut.isPending;
-
-  const form = useForm<OvertimeRuleFormValues>({
-    resolver: zodResolver(overtimeRuleSchema),
-    defaultValues: {
-      name: '',
-      service_line_id: '',
-      weekday_rate: 1.5,
-      restday_rate: 2.0,
-      holiday_rate: 3.0,
-      min_minutes: 30,
-      max_minutes_per_day: '',
-      pre_approval_required: false,
-    },
-  });
-
-  const { register, handleSubmit, reset, setValue, watch, setError, control, formState } = form;
-  const preApproval = watch('pre_approval_required');
-
-  useEffect(() => {
-    if (open) {
-      if (editing) {
-        reset({
-          name: editing.name,
-          service_line_id: editing.service_line_id ?? '',
-          weekday_rate: editing.weekday_rate,
-          restday_rate: editing.restday_rate,
-          holiday_rate: editing.holiday_rate,
-          min_minutes: editing.min_minutes,
-          max_minutes_per_day: editing.max_minutes_per_day ?? '',
-          pre_approval_required: editing.pre_approval_required,
-        });
-      } else {
-        reset({
-          name: '',
-          service_line_id: '',
-          weekday_rate: 1.5,
-          restday_rate: 2.0,
-          holiday_rate: 3.0,
-          min_minutes: 30,
-          max_minutes_per_day: '',
-          pre_approval_required: false,
-        });
-      }
-    }
-  }, [open, editing, reset]);
-
-  async function onSubmit(values: OvertimeRuleFormValues) {
-    // zodResolver already validated + coerced — values are safe here; parse again to get
-    // the output type with numbers guaranteed by z.coerce.number().
-    const parsed = overtimeRuleSchema.parse(values);
-    const payload: OvertimeRuleWriteRequest = {
-      name: parsed.name,
-      service_line_id: parsed.service_line_id || null,
-      weekday_rate: parsed.weekday_rate as number,
-      restday_rate: parsed.restday_rate as number,
-      holiday_rate: parsed.holiday_rate as number,
-      min_minutes: parsed.min_minutes as number,
-      max_minutes_per_day: parsed.max_minutes_per_day,
-      pre_approval_required: parsed.pre_approval_required,
-    };
-
-    try {
-      if (isEdit && editing) {
-        await updateMut.mutateAsync({
-          overtimeRuleId: editing.id as OvertimeRuleId,
-          data: payload,
-        });
-        toast({ tone: 'success', title: t('masterData.overtimeRules.updateSuccess') });
-      } else {
-        await createMut.mutateAsync({ data: payload });
-        toast({ tone: 'success', title: t('masterData.overtimeRules.createSuccess') });
-      }
-      onDone();
-      onOpenChange(false);
-    } catch (err) {
-      if (!applyFieldErrors(err, setError)) {
-        const { message } = classifyError(err);
-        toast({ tone: 'error', title: t(message) });
-      }
-    }
-  }
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange} size="lg">
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalHeader
-          icon={Timer}
-          tone="warn"
-          title={
-            isEdit
-              ? t('masterData.overtimeRules.editTitle')
-              : t('masterData.overtimeRules.addTitle')
-          }
-        />
-        <ModalBody>
-          <div className="flex flex-col gap-[14px]">
-            <p className="text-[12px] text-text-2">{t('masterData.overtimeRules.modalSubtitle')}</p>
-
-            {/* Nama Aturan */}
-            <FormField
-              htmlFor="or-name"
-              label={t('masterData.overtimeRules.fieldName')}
-              required
-              error={formState.errors.name?.message}
-            >
-              <input
-                id="or-name"
-                {...register('name')}
-                className="h-9 w-full rounded-md border border-border bg-surface px-3 text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                placeholder={t('masterData.overtimeRules.fieldNamePlaceholder')}
-              />
-            </FormField>
-
-            {/* Lini Layanan (optional — cleared/empty = global, OR-2) */}
-            <FormField
-              htmlFor="or-sl"
-              label={t('masterData.overtimeRules.fieldServiceLine')}
-              error={formState.errors.service_line_id?.message}
-            >
-              <Controller
-                control={control}
-                name="service_line_id"
-                render={({ field }) => (
-                  <ServiceLinePicker
-                    value={field.value || null}
-                    onChange={(v) => field.onChange(v ?? '')}
-                    error={!!formState.errors.service_line_id}
-                    placeholder={t('masterData.overtimeRules.fieldServiceLinePlaceholder')}
-                  />
-                )}
-              />
-            </FormField>
-
-            {/* Multiplier rates */}
-            <div className="flex flex-col gap-[10px] rounded-lg bg-surface-2 px-[14px] py-3">
-              <p className="text-[13px] font-semibold text-text">
-                {t('masterData.overtimeRules.ratesLabel')}
-              </p>
-              <div className="flex gap-3">
-                <FormField
-                  htmlFor="or-weekday"
-                  label={t('masterData.overtimeRules.rateWeekday')}
-                  required
-                  error={formState.errors.weekday_rate?.message}
-                  className="flex-1"
-                >
-                  <input
-                    id="or-weekday"
-                    {...register('weekday_rate')}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    className="h-9 w-full rounded-md border border-border bg-surface px-3 font-mono text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                    placeholder="1.5"
-                  />
-                </FormField>
-                <FormField
-                  htmlFor="or-restday"
-                  label={t('masterData.overtimeRules.rateRestday')}
-                  required
-                  error={formState.errors.restday_rate?.message}
-                  className="flex-1"
-                >
-                  <input
-                    id="or-restday"
-                    {...register('restday_rate')}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    className="h-9 w-full rounded-md border border-border bg-surface px-3 font-mono text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                    placeholder="2.0"
-                  />
-                </FormField>
-                <FormField
-                  htmlFor="or-holiday"
-                  label={t('masterData.overtimeRules.rateHoliday')}
-                  required
-                  error={formState.errors.holiday_rate?.message}
-                  className="flex-1"
-                >
-                  <input
-                    id="or-holiday"
-                    {...register('holiday_rate')}
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    className="h-9 w-full rounded-md border border-border bg-surface px-3 font-mono text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                    placeholder="3.0"
-                  />
-                </FormField>
-              </div>
-            </div>
-
-            {/* Min / Max minutes */}
-            <div className="flex gap-3">
-              <FormField
-                htmlFor="or-min"
-                label={t('masterData.overtimeRules.fieldMinMinutes')}
-                required
-                error={formState.errors.min_minutes?.message}
-                className="flex-1"
-              >
-                <input
-                  id="or-min"
-                  {...register('min_minutes')}
-                  type="number"
-                  min={30}
-                  className="h-9 w-full rounded-md border border-border bg-surface px-3 font-mono text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                  placeholder="30"
-                />
-              </FormField>
-              <FormField
-                htmlFor="or-max"
-                label={t('masterData.overtimeRules.fieldMaxMinutes')}
-                error={formState.errors.max_minutes_per_day?.message}
-                className="flex-1"
-              >
-                <input
-                  id="or-max"
-                  {...register('max_minutes_per_day')}
-                  type="number"
-                  min={1}
-                  className="h-9 w-full rounded-md border border-border bg-surface px-3 font-mono text-[14px] text-text outline-none placeholder:text-text-3 focus:border-primary focus:ring-1 focus:ring-primary"
-                  placeholder="240"
-                />
-              </FormField>
-            </div>
-
-            {/* Pre-approval toggle */}
-            <div className="flex items-center justify-between rounded-lg bg-surface-2 px-3 py-[10px]">
-              <div className="flex flex-col gap-[1px]">
-                <p className="text-[13px] font-medium text-text">
-                  {t('masterData.overtimeRules.togglePreApproval')}
-                </p>
-                <p className="text-[11px] text-text-3">
-                  {t('masterData.overtimeRules.togglePreApprovalHint')}
-                </p>
-              </div>
-              <Toggle
-                checked={preApproval}
-                onCheckedChange={(v) => setValue('pre_approval_required', v)}
-                aria-label={t('masterData.overtimeRules.togglePreApproval')}
-              />
-            </div>
-
-            {/* D4 hint */}
-            <div className="flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-3 py-[10px]">
-              <Info className="mt-px size-[14px] shrink-0 text-info-tx" aria-hidden />
-              <p className="text-[11px] text-info-tx">{t('masterData.overtimeRules.d4Hint')}</p>
-            </div>
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <p className="mr-auto text-[11px] text-text-3">
-            {t('masterData.overtimeRules.auditHint')}
-          </p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={isPending}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" size="sm" disabled={isPending}>
-            <Check aria-hidden />
-            {isPending ? t('common.loading') : t('common.save')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Row kebab menu — Edit + Deactivate (MD-1 soft-delete)
-// ---------------------------------------------------------------------------
-
-interface RowActionsMenuProps {
-  onEdit: () => void;
-  onDeactivate: () => void;
-}
-
-function RowActionsMenu({ onEdit, onDeactivate }: RowActionsMenuProps) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [open]);
-
-  const itemBase =
-    'flex w-full items-center gap-[10px] rounded-[7px] px-3 py-[10px] text-[13px] text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label={t('masterData.rowActions')}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex size-[30px] items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <MoreVertical className="size-4" aria-hidden />
-      </button>
-
-      {open && (
-        <div
-          ref={menuRef}
-          role="menu"
-          className="absolute right-0 z-50 w-[200px] rounded-[10px] border border-border bg-surface p-1.5 shadow-overlay"
-          style={{ top: '100%' }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className={itemBase}
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-          >
-            <Pencil className="size-4" aria-hidden />
-            {t('masterData.menuEdit')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className={`${itemBase} text-bad-tx`}
-            onClick={() => {
-              setOpen(false);
-              onDeactivate();
-            }}
-          >
-            <Trash2 className="size-4" aria-hidden />
-            {t('masterData.menuDeactivate')}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // OvertimeRulesScreen
@@ -490,11 +32,6 @@ export function OvertimeRulesScreen() {
   const { t } = useTranslation();
 
   const [statusFilter, setStatusFilter] = useState<OvertimeRuleStatus | undefined>(undefined);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<OvertimeRule | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<OvertimeRule | null>(null);
-
-  const { toast } = useToast();
 
   const params: ListOvertimeRulesParams = {
     limit: PAGE_SIZE,
@@ -502,8 +39,6 @@ export function OvertimeRulesScreen() {
   };
 
   const query = useListOvertimeRules(params);
-  const deleteMut = useSoftDeleteOvertimeRule();
-  const seedMut = useCreateOvertimeRule();
 
   // Resolve service_line_id → name for the table (OR-2 renders a scope label, not a raw FK).
   const serviceLinesQuery = useListServiceLines(
@@ -518,65 +53,6 @@ export function OvertimeRulesScreen() {
   };
 
   const hasFilters = Boolean(statusFilter);
-
-  // EPICS §5 (E7 build item) — PP 35/2021 statutory default OT multipliers, stored as
-  // reference (no monetary calc in v1). Mirrors the dev-seed SWP-OTR-001 so dev and a
-  // fresh prod install (OT rules are net-new per E9 G-5) converge on one canonical rule.
-  async function handleSeedDefault() {
-    try {
-      await seedMut.mutateAsync({
-        data: {
-          name: t('masterData.overtimeRules.seedName'),
-          service_line_id: null,
-          weekday_rate: 1.5,
-          restday_rate: 2,
-          holiday_rate: 3,
-          min_minutes: 30,
-          max_minutes_per_day: 240,
-          pre_approval_required: true,
-        },
-      });
-      toast({ tone: 'success', title: t('masterData.overtimeRules.seedSuccess') });
-      void query.refetch();
-    } catch (err) {
-      const { kind } = classifyError(err);
-      toast({
-        tone: kind === 'conflict' ? 'warn' : 'error',
-        title:
-          kind === 'conflict'
-            ? t('masterData.overtimeRules.seedExists')
-            : t('masterData.overtimeRules.seedFailed'),
-      });
-    }
-  }
-
-  function openAdd() {
-    setEditingItem(null);
-    setModalOpen(true);
-  }
-
-  function openEdit(item: OvertimeRule) {
-    setEditingItem(item);
-    setModalOpen(true);
-  }
-
-  function handleDone() {
-    void query.refetch();
-  }
-
-  async function handleDelete() {
-    if (!deleteTarget) return;
-    try {
-      await deleteMut.mutateAsync({ overtimeRuleId: deleteTarget.id as OvertimeRuleId });
-      toast({ tone: 'success', title: t('masterData.overtimeRules.deleteSuccess') });
-      void query.refetch();
-    } catch (err) {
-      const { message } = classifyError(err);
-      toast({ tone: 'error', title: t(message) });
-    } finally {
-      setDeleteTarget(null);
-    }
-  }
 
   const columns: Column<OvertimeRule>[] = [
     {
@@ -717,23 +193,6 @@ export function OvertimeRulesScreen() {
           </h1>
           <p className="text-[13px] text-text-2">{t('masterData.overtimeRules.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
-          {rows.length === 0 && !hasFilters && !query.isLoading && (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleSeedDefault}
-              disabled={seedMut.isPending}
-            >
-              <Sparkles aria-hidden />
-              {t('masterData.overtimeRules.seedButton')}
-            </Button>
-          )}
-          <Button type="button" onClick={openAdd}>
-            <Plus aria-hidden />
-            {t('masterData.overtimeRules.add')}
-          </Button>
-        </div>
       </div>
 
       {/* Shared-with-E7 note */}
@@ -775,51 +234,11 @@ export function OvertimeRulesScreen() {
                 variant="fresh"
                 title={t('masterData.overtimeRules.emptyTitle')}
                 description={t('masterData.overtimeRules.seedHint')}
-                action={
-                  <Button type="button" onClick={handleSeedDefault} disabled={seedMut.isPending}>
-                    <Sparkles aria-hidden />
-                    {t('masterData.overtimeRules.seedButton')}
-                  </Button>
-                }
               />
             )
           }
-          rowActions={(row) => (
-            <RowActionsMenu
-              onEdit={() => openEdit(row)}
-              onDeactivate={() => setDeleteTarget(row)}
-            />
-          )}
         />
       </div>
-
-      {/* Modal */}
-      <OvertimeRuleModal
-        open={modalOpen}
-        onOpenChange={(open) => {
-          if (!open) setModalOpen(false);
-        }}
-        editing={editingItem}
-        onDone={handleDone}
-      />
-
-      {/* Soft-delete confirm */}
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-        icon={Trash2}
-        tone="danger"
-        title={t('masterData.deleteTitle')}
-        description={t('masterData.overtimeRules.deleteBody', {
-          name: deleteTarget?.name ?? '',
-        })}
-        confirmLabel={t('masterData.deleteConfirm')}
-        cancelLabel={t('common.cancel')}
-        loading={deleteMut.isPending}
-        onConfirm={handleDelete}
-      />
     </div>
   );
 }
