@@ -759,6 +759,25 @@ func placementCreateBody(empID, agID, companyID, siteID, start, end string) map[
 	}
 }
 
+// Regression: a placement whose start_date is *today* (Asia/Jakarta) must be
+// ACTIVE immediately, not PENDING_START. The TZ helpers previously expressed
+// "today" as Jakarta-zone midnight while start_date parses to UTC-midnight, so
+// a same-day start sorted 7h "after" today and stayed PENDING_START (Terjadwal).
+func TestCreatePlacement_StartToday_Active(t *testing.T) {
+	h := newPlacementHarness(t)
+	h.seedFullCreateContext("SWP-CMP-0021", "SWP-SITE-0001", "SWP-EMP-1042", "SWP-AG-7002")
+
+	// fixedNow is 12:00 WIB on 2026-06-04 → today (Jakarta) = 2026-06-04.
+	body := placementCreateBody("SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "2026-06-04", "2026-12-31")
+	rr := h.doJSON("POST", "/placements", body)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := decodeBody(t, rr)["lifecycle_status"]; got != "ACTIVE" {
+		t.Errorf("start_date=today: lifecycle_status = %v, want ACTIVE", got)
+	}
+}
+
 func TestCreatePlacement_Happy_201_LocationAndBody(t *testing.T) {
 	h := newPlacementHarness(t)
 	h.seedFullCreateContext("SWP-CMP-0021", "SWP-SITE-0001", "SWP-EMP-1042", "SWP-AG-7002")

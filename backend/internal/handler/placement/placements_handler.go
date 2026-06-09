@@ -38,7 +38,10 @@ func jakartaToday() time.Time {
 		loc = time.FixedZone("WIB", 7*3600)
 	}
 	n := time.Now().In(loc)
-	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
+	// UTC-midnight of the Jakarta calendar day — matches how start/end dates are
+	// parsed/stored (UTC `date` columns), so PENDING_START→ACTIVE derivation at
+	// the boundary fires on the actual start day, not a day late.
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // --- list / get ---

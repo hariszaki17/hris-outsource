@@ -162,7 +162,11 @@ func (s *PlacementService) today() time.Time {
 		loc = time.FixedZone("WIB", 7*3600)
 	}
 	n := s.now().In(loc)
-	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
+	// Express the Jakarta calendar day as UTC midnight so it compares correctly
+	// against start/end dates, which are parsed and stored as UTC-midnight `date`
+	// columns. Using loc here put `today` 7h behind a same-day start_date, so a
+	// placement starting today was wrongly left PENDING_START instead of ACTIVE.
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // expiringWindowDays is the default expiring-soon threshold (FEATURE.md §7).
