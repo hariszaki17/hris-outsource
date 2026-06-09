@@ -8,11 +8,6 @@
  * Both states are driven by the same component. The decrypt-fail variant activates when
  * `payslip.decrypt_fail === true` (equivalently `payslip.status === 'DECRYPT_FAIL'`).
  *
- * Export entry-point:
- *   The "Ekspor" button calls `onExportClick(payslipId)` — a prop callback the caller wires
- *   to open the E10 export modal. The modal itself is NOT built here (deferred to E10).
- *   This component only renders the entry button and exposes the prop.
- *
  * RBAC: HR admin / Super admin only (PA-2 / INV-4). Shift leader + agent → no-permission gate.
  *
  * Routes (proposed):
@@ -33,7 +28,7 @@ import {
   useListPayslipAuditNotes,
 } from '@swp/api-client/e8';
 import { Banner, Button, DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
-import { ArrowLeft, Download, Lock, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Lock, TriangleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   formatMoney,
@@ -49,8 +44,6 @@ import {
 export interface PayslipDetailScreenProps {
   /** `SWP-PS-{n}` id string from the route param. */
   payslipId: string;
-  /** Called when the user clicks "Ekspor". Wire to the E10 export modal opener. */
-  onExportClick?: (payslipId: string) => void;
   /** Called when the user clicks the back button. */
   onBack?: () => void;
   /** Called when the user clicks "Tambah Catatan" — opens the append-only HR audit-note drawer. */
@@ -61,12 +54,7 @@ export interface PayslipDetailScreenProps {
 // PayslipDetailScreen
 // ---------------------------------------------------------------------------
 
-export function PayslipDetailScreen({
-  payslipId,
-  onExportClick,
-  onBack,
-  onAddNote,
-}: PayslipDetailScreenProps) {
+export function PayslipDetailScreen({ payslipId, onBack, onAddNote }: PayslipDetailScreenProps) {
   const { t } = useTranslation('payroll');
   const user = useCurrentUser();
 
@@ -81,26 +69,14 @@ export function PayslipDetailScreen({
     );
   }
 
-  return (
-    <PayslipDetailInner
-      payslipId={payslipId}
-      onExportClick={onExportClick}
-      onBack={onBack}
-      onAddNote={onAddNote}
-    />
-  );
+  return <PayslipDetailInner payslipId={payslipId} onBack={onBack} onAddNote={onAddNote} />;
 }
 
 // ---------------------------------------------------------------------------
 // Inner component (RBAC cleared)
 // ---------------------------------------------------------------------------
 
-function PayslipDetailInner({
-  payslipId,
-  onExportClick,
-  onBack,
-  onAddNote,
-}: PayslipDetailScreenProps) {
+function PayslipDetailInner({ payslipId, onBack, onAddNote }: PayslipDetailScreenProps) {
   const { t } = useTranslation('payroll');
 
   const query = useGetPayslip(payslipId);
@@ -202,21 +178,8 @@ function PayslipDetailInner({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Back row + action buttons */}
-      <div className="flex items-center justify-between">
-        <BackRow onBack={onBack} />
-        {/*
-          "Ekspor" entry-point button — frame `TR9pR` / `BtnSecondary`.
-          onClick delegates to `onExportClick` prop; the actual export modal
-          is built in E10. Not rendered on decrypt-fail rows (no exportable data).
-        */}
-        {!isDecryptFail && (
-          <Button type="button" variant="secondary" onClick={() => onExportClick?.(payslipId)}>
-            <Download aria-hidden className="size-4" />
-            {t('detail.export')}
-          </Button>
-        )}
-      </div>
+      {/* Back row */}
+      <BackRow onBack={onBack} />
 
       {/* Decrypt-fail banner — frame `mNs7a` / `DecryptFailBanner` */}
       {isDecryptFail && (

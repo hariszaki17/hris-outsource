@@ -2,8 +2,7 @@
  * E10 Reporting & Notifications — shared icon/tone maps (pre-created so the parallel screen
  * agents share one canonical mapping). Status color only via StatusBadge tones (G4).
  */
-import { ApprovalInboxRowKind, ExportStatus, NotificationKind } from '@swp/api-client/e10';
-import type { StatusTone } from '@swp/design-tokens';
+import { ApprovalInboxRowKind, NotificationKind } from '@swp/api-client/e10';
 import {
   AlarmClock,
   Bell,
@@ -74,35 +73,5 @@ export function inboxKindIcon(kind: ApprovalInboxRowKind): LucideIcon {
       return UserCog;
     default:
       return Inbox;
-  }
-}
-
-/** Export job status → tone. */
-export function exportStatusTone(status: ExportStatus): StatusTone {
-  switch (status) {
-    case ExportStatus.COMPLETED:
-      return 'ok';
-    case ExportStatus.QUEUED:
-    case ExportStatus.PROCESSING:
-      return 'onprogress';
-    case ExportStatus.FAILED:
-      return 'bad';
-    case ExportStatus.CANCELLED:
-      return 'neutral';
-    default:
-      return 'neutral';
-  }
-}
-
-/** Map an export job status to the ExportModal `step`. */
-export function exportStatusToStep(status: ExportStatus): 'progress' | 'success' | 'error' {
-  switch (status) {
-    case ExportStatus.COMPLETED:
-      return 'success';
-    case ExportStatus.FAILED:
-    case ExportStatus.CANCELLED:
-      return 'error';
-    default:
-      return 'progress';
   }
 }

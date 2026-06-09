@@ -181,7 +181,7 @@ export function ComponentGallery() {
                 toast({
                   tone: 'queued',
                   title: 'Sedang diproses',
-                  description: 'Ekspor sedang diproses…',
+                  description: 'Permintaan sedang diproses…',
                   duration: Number.POSITIVE_INFINITY,
                 })
               }
@@ -217,7 +217,7 @@ export function ComponentGallery() {
             <Toast
               tone="queued"
               title="Sedang diproses"
-              description="Ekspor sedang diproses…"
+              description="Permintaan sedang diproses…"
               onClose={() => undefined}
             />
           </div>

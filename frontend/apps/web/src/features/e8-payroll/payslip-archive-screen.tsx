@@ -431,12 +431,6 @@ function ArchiveTitleBand() {
         <h1 className="font-bold text-3xl text-text">{t('archive.title')}</h1>
         <p className="text-sm text-text-3">{t('archive.subtitle')}</p>
       </div>
-      {/*
-        DEVIATION: "Ekspor (RAHASIA)" button in the title band is an entry-point only.
-        The real export modal lives in E10. onClick fires onExportClick prop (not wired
-        here because archive-level export is distinct from single-slip export in detail).
-        Rendered as secondary button matching frame `RFJJj`.
-      */}
     </div>
   );
 }

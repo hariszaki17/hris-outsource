@@ -46,7 +46,7 @@ import {
   StateView,
   StatusBadge,
 } from '@swp/ui';
-import { Calendar, Clock, Download, RotateCcw, Star, Timer } from 'lucide-react';
+import { Calendar, Clock, RotateCcw, Star, Timer } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -162,7 +162,7 @@ function OvertimeRecordsScreenInner({
     if (kind === 'forbidden' || kind === 'unauthenticated') {
       return (
         <div className="flex flex-col gap-[18px]">
-          <RekapTitleBand onExportClick={() => void 0} />
+          <RekapTitleBand />
           <EmptyState
             variant="no-permission"
             title={t('errors.forbidden')}
@@ -173,7 +173,7 @@ function OvertimeRecordsScreenInner({
     }
     return (
       <div className="flex flex-col gap-[18px]">
-        <RekapTitleBand onExportClick={() => void 0} />
+        <RekapTitleBand />
         <StateView
           kind="error"
           title={t('rekap.errorTitle')}
@@ -309,7 +309,7 @@ function OvertimeRecordsScreenInner({
 
   return (
     <div className="flex flex-col gap-[18px]">
-      <RekapTitleBand onExportClick={() => void 0} />
+      <RekapTitleBand />
 
       {/* Stat cards — frame: Total OT disetujui · Hari Kerja · Hari Libur · Hari Besar */}
       <div className="grid grid-cols-4 gap-4">
@@ -529,14 +529,10 @@ export function OvertimeRecordsScreen() {
 }
 
 // ---------------------------------------------------------------------------
-// TitleBand — frame TitleBand: title + subtitle + Export button
+// TitleBand — frame TitleBand: title + subtitle
 // ---------------------------------------------------------------------------
 
-interface RekapTitleBandProps {
-  onExportClick: () => void;
-}
-
-function RekapTitleBand({ onExportClick }: RekapTitleBandProps) {
+function RekapTitleBand() {
   const { t } = useTranslation('overtime');
   return (
     <div className="flex items-start justify-between">
@@ -544,10 +540,6 @@ function RekapTitleBand({ onExportClick }: RekapTitleBandProps) {
         <h1 className="text-3xl font-bold text-text">{t('rekap.title')}</h1>
         <p className="text-sm text-text-3">{t('rekap.subtitle')}</p>
       </div>
-      <Button type="button" variant="primary" onClick={onExportClick}>
-        <Download aria-hidden className="size-4" />
-        {t('rekap.export')}
-      </Button>
     </div>
   );
 }
