@@ -76,6 +76,13 @@ export {
 } from './molecules/drawer.tsx';
 export { NotifCard, type NotifCardProps } from './molecules/notif-card.tsx';
 export {
+  DropdownMenu,
+  DropdownMenuItem,
+  type DropdownMenuProps,
+  type DropdownMenuItemProps,
+  type DropdownMenuItemTone,
+} from './molecules/dropdown-menu.tsx';
+export {
   ExportModal,
   type ExportModalProps,
   type ExportModalLabels,

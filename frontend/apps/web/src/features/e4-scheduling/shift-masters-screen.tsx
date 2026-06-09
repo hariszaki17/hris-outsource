@@ -45,6 +45,8 @@ import {
   ConfirmDialog,
   CursorPagination,
   DataTable,
+  DropdownMenu,
+  DropdownMenuItem,
   EmptyState,
   FilterSelect,
   FormField,
@@ -59,18 +61,8 @@ import {
   Toggle,
   useToast,
 } from '@swp/ui';
-import {
-  AlarmClock,
-  Check,
-  Clock,
-  Info,
-  Moon,
-  MoreVertical,
-  Plus,
-  PowerOff,
-  RefreshCw,
-} from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { AlarmClock, Check, Clock, Info, Moon, Plus, PowerOff, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -408,83 +400,24 @@ interface RowActionsMenuProps {
 
 function RowActionsMenu({ shift, onEdit, onDeactivate, onReactivate }: RowActionsMenuProps) {
   const { t } = useTranslation('shiftMasters');
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [open]);
-
   const isActive = shift.status === ShiftMasterStatus.ACTIVE;
 
   return (
-    <div ref={menuRef} className="relative">
-      <button
-        type="button"
-        aria-label={t('rowActions')}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex size-[30px] items-center justify-center rounded-md text-text-2 transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <MoreVertical className="size-4" aria-hidden="true" />
-      </button>
+    <DropdownMenu triggerLabel={t('rowActions')} menuWidth={180}>
+      <DropdownMenuItem icon={Clock} onSelect={() => onEdit(shift)}>
+        {t('actions.edit')}
+      </DropdownMenuItem>
 
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-md"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-[9px] text-[13px] text-text hover:bg-surface-2"
-            onClick={() => {
-              setOpen(false);
-              onEdit(shift);
-            }}
-          >
-            <Clock className="size-[14px] text-text-2" aria-hidden="true" />
-            {t('actions.edit')}
-          </button>
-
-          {isActive ? (
-            <button
-              type="button"
-              role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-[9px] text-[13px] text-bad-tx hover:bg-bad-bg"
-              onClick={() => {
-                setOpen(false);
-                onDeactivate(shift);
-              }}
-            >
-              <PowerOff className="size-[14px]" aria-hidden="true" />
-              {t('actions.deactivate')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-[9px] text-[13px] text-ok-tx hover:bg-ok-bg"
-              onClick={() => {
-                setOpen(false);
-                onReactivate(shift);
-              }}
-            >
-              <RefreshCw className="size-[14px]" aria-hidden="true" />
-              {t('actions.reactivate')}
-            </button>
-          )}
-        </div>
+      {isActive ? (
+        <DropdownMenuItem icon={PowerOff} tone="danger" onSelect={() => onDeactivate(shift)}>
+          {t('actions.deactivate')}
+        </DropdownMenuItem>
+      ) : (
+        <DropdownMenuItem icon={RefreshCw} tone="ok" onSelect={() => onReactivate(shift)}>
+          {t('actions.reactivate')}
+        </DropdownMenuItem>
       )}
-    </div>
+    </DropdownMenu>
   );
 }
 

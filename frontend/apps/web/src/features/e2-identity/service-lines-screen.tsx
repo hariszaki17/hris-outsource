@@ -25,6 +25,8 @@ import {
   ConfirmDialog,
   CursorPagination,
   DataTable,
+  DropdownMenu,
+  DropdownMenuItem,
   EmptyState,
   FilterSelect,
   FormField,
@@ -39,8 +41,8 @@ import {
   useToast,
 } from '@swp/ui';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Info, Layers, MoreVertical, Plus, Sparkles, Trash2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Info, Layers, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
@@ -92,85 +94,16 @@ interface RowMenuProps {
 
 function RowMenu({ row, onEdit, onDiscontinue }: RowMenuProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [open]);
-
-  const itemBase =
-    'flex w-full items-center gap-[10px] rounded-[7px] px-3 py-[10px] text-[13px] text-text hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label={t('serviceLines.rowActions')}
-        className="flex size-8 items-center justify-center rounded-md text-text-2 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-      >
-        <MoreVertical className="size-[18px]" aria-hidden />
-      </button>
-
-      {open && (
-        <div
-          ref={menuRef}
-          role="menu"
-          className="absolute right-0 z-50 w-[220px] rounded-[10px] border border-border bg-surface p-1.5 shadow-overlay"
-          style={{ top: '100%' }}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className={itemBase}
-            onClick={() => {
-              setOpen(false);
-              onEdit(row);
-            }}
-          >
-            {t('serviceLines.menuEdit')}
-          </button>
-          {row.status === ServiceLineStatus.ACTIVE && (
-            <button
-              type="button"
-              role="menuitem"
-              className={`${itemBase} text-bad-tx`}
-              onClick={() => {
-                setOpen(false);
-                onDiscontinue(row);
-              }}
-            >
-              {t('serviceLines.menuDiscontinue')}
-            </button>
-          )}
-        </div>
+    <DropdownMenu triggerLabel={t('serviceLines.rowActions')} menuWidth={220}>
+      <DropdownMenuItem onSelect={() => onEdit(row)}>{t('serviceLines.menuEdit')}</DropdownMenuItem>
+      {row.status === ServiceLineStatus.ACTIVE && (
+        <DropdownMenuItem tone="danger" onSelect={() => onDiscontinue(row)}>
+          {t('serviceLines.menuDiscontinue')}
+        </DropdownMenuItem>
       )}
-    </div>
+    </DropdownMenu>
   );
 }
 
