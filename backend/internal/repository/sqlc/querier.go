@@ -612,6 +612,21 @@ type Querier interface {
 	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
 	// Cursor page ordered by (created_at desc, id desc), scoped to one service line.
 	ListPositionsForLine(ctx context.Context, arg ListPositionsForLineParams) ([]ListPositionsForLineRow, error)
+	// E4 shift-time propagation (F4.1 SM-2 ripple → F4.2 entries, with E5 attendance
+	// freezing). When a shift master's start_time/end_time/cross_midnight change, the
+	// snapshot times on its FUTURE schedule_entries are re-synced — UNLESS an
+	// attendance row has already frozen the entry (checked-in freezes the start;
+	// checked-out freezes everything). The per-row decision + cross_midnight + the
+	// Asia/Jakarta shift_end_at timestamptz math live in Go (schedule_propagation.go)
+	// for clarity/testability; these queries are the row-fetch + the two focused
+	// writes. Times are text columns (HH:MM, Asia/Jakarta wall-clock).
+	// The FUTURE, live, non-day-off, non-cancelled entries linked to a master, with
+	// their attendance check-in/out instants LEFT-JOINed (≤1 attendance per entry via
+	// the attendance_schedule_uq partial unique index). "future" = work_date >= the
+	// current Asia/Jakarta calendar date (passed as `now` and reduced to a date here,
+	// mirroring clock.sql). The Go layer inspects check_in_at/check_out_at to pick the
+	// freeze branch per row.
+	ListPropagationCandidates(ctx context.Context, arg ListPropagationCandidatesParams) ([]ListPropagationCandidatesRow, error)
 	// E4 schedule-entry queries (F4.2/F4.3 / SWP-SCH-*). Reads LEFT JOIN employees for
 	// employee_name, shift_masters for shift_master_name, and JOIN placements →
 	// client_companies for company_id/company_name. Times are text columns (HH:MM).
@@ -752,6 +767,14 @@ type Querier interface {
 	// unearmarked group (earmark IS NULL) is the flat pool; each non-null earmark is one
 	// per-purpose line. Returns Σ(amount-consumed-pending) and the soonest expiry per group.
 	SumActiveBalanceByEarmark(ctx context.Context, arg SumActiveBalanceByEarmarkParams) ([]SumActiveBalanceByEarmarkRow, error)
+	// DELIBERATE CROSS-EPIC WRITE (E4 → E5): when a master's end_time moves and an
+	// agent is mid-shift (checked in, NOT yet out), the entry keeps its frozen start
+	// but its end is re-synced; the OPEN attendance row's shift_end_at must follow so
+	// the auto-close / overtime windows stay correct. Guarded by check_out_at IS NULL
+	// (only open rows) + deleted_at IS NULL. shift_start_at is intentionally NOT
+	// touched (the start is frozen at clock-in). Computed shift_end_at (work_date +
+	// new end, +1 day when cross) is passed in from Go.
+	SyncOpenAttendanceShiftEnd(ctx context.Context, arg SyncOpenAttendanceShiftEndParams) (int64, error)
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
@@ -783,6 +806,10 @@ type Querier interface {
 	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
 	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
 	UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error)
+	// Focused update of just the three snapshot time columns (start/end/cross), used
+	// by the propagation loop. Status / is_day_off / shift_master_id are untouched —
+	// this is a re-sync of the window only, not a reschedule.
+	UpdateScheduleEntryTimes(ctx context.Context, arg UpdateScheduleEntryTimesParams) (int64, error)
 	UpdateServiceLine(ctx context.Context, arg UpdateServiceLineParams) (UpdateServiceLineRow, error)
 	// Full overwrite of the editable fields (06-02 builds the full param set from the
 	// current row + the PATCH overlay). cross_midnight re-derived by the service.

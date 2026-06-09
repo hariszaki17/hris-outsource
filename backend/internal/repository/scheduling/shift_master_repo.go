@@ -6,6 +6,7 @@ package scheduling
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -118,4 +119,57 @@ func (r *ShiftMasterRepo) SetShiftMasterActive(ctx context.Context, tx pgx.Tx, i
 		return domain.ShiftMaster{}, mapErr(err)
 	}
 	return mapShiftMasterFromSetActive(row), nil
+}
+
+// --- shift-time propagation (SM-2 ripple → F4.2 entries + E5 attendance) ---
+
+// ListPropagationCandidates reads the future/live/non-day-off/non-cancelled
+// entries linked to masterID, with their attendance check-in/out instants. Runs
+// on the pool (the per-row writes take the master-update tx).
+func (r *ShiftMasterRepo) ListPropagationCandidates(ctx context.Context, masterID string, now time.Time) ([]svc.PropagationCandidate, error) {
+	mid := masterID
+	rows, err := r.q.ListPropagationCandidates(ctx, sqlcgen.ListPropagationCandidatesParams{
+		ShiftMasterID: &mid,
+		Now:           now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]svc.PropagationCandidate, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, svc.PropagationCandidate{
+			EntryID:       row.ID,
+			WorkDate:      pgDateToTime(row.WorkDate),
+			StartTime:     row.StartTime,
+			EndTime:       row.EndTime,
+			CrossMidnight: row.CrossMidnight,
+			CheckInAt:     row.AttCheckInAt,
+			CheckOutAt:    row.AttCheckOutAt,
+		})
+	}
+	return out, nil
+}
+
+// UpdateScheduleEntryTimes re-syncs the three snapshot time columns on one entry.
+func (r *ShiftMasterRepo) UpdateScheduleEntryTimes(ctx context.Context, tx pgx.Tx, entryID, startTime, endTime string, cross bool) error {
+	st, et := startTime, endTime
+	_, err := r.q.WithTx(tx).UpdateScheduleEntryTimes(ctx, sqlcgen.UpdateScheduleEntryTimesParams{
+		StartTime:     &st,
+		EndTime:       &et,
+		CrossMidnight: cross,
+		ID:            entryID,
+	})
+	return err
+}
+
+// SyncOpenAttendanceShiftEnd pushes the open attendance row's shift_end_at
+// (E4→E5 cross-epic write). A no-op when the entry has no open attendance row.
+func (r *ShiftMasterRepo) SyncOpenAttendanceShiftEnd(ctx context.Context, tx pgx.Tx, scheduleID string, shiftEndAt time.Time) error {
+	sid := scheduleID
+	end := shiftEndAt
+	_, err := r.q.WithTx(tx).SyncOpenAttendanceShiftEnd(ctx, sqlcgen.SyncOpenAttendanceShiftEndParams{
+		ShiftEndAt: &end,
+		ScheduleID: &sid,
+	})
+	return err
 }

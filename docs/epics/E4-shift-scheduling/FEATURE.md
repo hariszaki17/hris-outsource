@@ -59,6 +59,7 @@ erDiagram
 - **INV-2:** an agent can only be scheduled on a date where they have an **active placement** (E3); the schedule links that `placement_id` (and thus the company + service line).
 - **INV-3:** a shift leader may schedule only agents at **their own company** (F3.4 scope); HR/Super Admin any.
 - **INV-4:** **auto-publish** — saving a schedule entry makes it immediately visible to the agent (mobile) and triggers a notification.
+- **INV-5:** a schedule entry's times **track the shift master until realized by attendance** — `start_time` is frozen at **check-in**; `end_time`/`cross_midnight` is frozen at **check-out**. Before check-in both values follow the current master live; after check-in but before check-out, `start_time` is frozen while `end_time` still tracks master edits (the open attendance window updates accordingly). Both are frozen once check-out is recorded. Propagation scope: only entries with `work_date >= today`, `status != Off`, and not leave-cancelled. Break times are master-only and not stored on entries.
 
 ## 5. Features
 

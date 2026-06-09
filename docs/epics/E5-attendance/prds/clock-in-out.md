@@ -42,6 +42,7 @@ Agent (mobile), System (geofence check, persist, audit), Shift Leader (monitors,
 | CI-6 | Clock-out captures `check_out_at` + `lat/lng` + `in_geofence_out`; closes the open record. |
 | CI-7 | A default attendance code is applied at clock-in (configurable default, e.g., "Present"); leader/correction can change it. |
 | CI-8 | All clock events are audited; the record is near-live to the leader (F5.5). |
+| CI-9 | The **scheduled shift window** an attendance record uses is the entry's **effective** window at the moment of each clock event (E4 INV-5): `shift_start_at` is fixed to the entry's `start_time` at clock-in and does not change; `shift_end_at` continues to follow master edits on the linked `Schedule` entry until clock-out, at which point it is fixed to the entry's current `end_time`. |
 
 ## 6. Data model
 

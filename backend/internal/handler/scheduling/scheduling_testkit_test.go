@@ -132,6 +132,10 @@ type fakeShiftMasterRepo struct {
 	masters   map[string]domain.ShiftMaster
 	nameIndex map[string]string // live name -> id
 	seq       int
+
+	// sched is the sibling schedule repo (set by newFakeScheduleRepo) so the
+	// shift-time propagation can read its entries + attendance and write them back.
+	sched *fakeScheduleRepo
 }
 
 func newFakeShiftMasterRepo() *fakeShiftMasterRepo {
@@ -247,7 +251,91 @@ func (r *fakeShiftMasterRepo) SetShiftMasterActive(_ context.Context, _ pgx.Tx, 
 	return cur, nil
 }
 
+// --- PropagationRepo (SM-2 time-change ripple → entries + attendance) ---
+
+func (r *fakeShiftMasterRepo) ListPropagationCandidates(_ context.Context, masterID string, now time.Time) ([]svc.PropagationCandidate, error) {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		loc = time.FixedZone("WIB", 7*3600)
+	}
+	jn := now.In(loc)
+	today := time.Date(jn.Year(), jn.Month(), jn.Day(), 0, 0, 0, 0, time.UTC)
+
+	var out []svc.PropagationCandidate
+	if r.sched == nil {
+		return out, nil
+	}
+	for _, e := range r.sched.entries {
+		if e.ShiftMasterID == nil || *e.ShiftMasterID != masterID {
+			continue
+		}
+		if e.IsDayOff || e.Status == "CANCELLED_BY_LEAVE" {
+			continue
+		}
+		// work_date >= today (Asia/Jakarta). Entries are stored at UTC midnight
+		// (ymd helper), so compare dates directly.
+		ed := time.Date(e.WorkDate.Year(), e.WorkDate.Month(), e.WorkDate.Day(), 0, 0, 0, 0, time.UTC)
+		if ed.Before(today) {
+			continue
+		}
+		st, et := e.StartTime, e.EndTime
+		cand := svc.PropagationCandidate{
+			EntryID:       e.ID,
+			WorkDate:      e.WorkDate,
+			StartTime:     st,
+			EndTime:       et,
+			CrossMidnight: e.CrossMidnight,
+		}
+		if att, ok := r.sched.attendance[e.ID]; ok {
+			cand.CheckInAt = att.checkIn
+			cand.CheckOutAt = att.checkOut
+		}
+		out = append(out, cand)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].EntryID < out[j].EntryID })
+	return out, nil
+}
+
+func (r *fakeShiftMasterRepo) UpdateScheduleEntryTimes(_ context.Context, _ pgx.Tx, entryID, startTime, endTime string, cross bool) error {
+	if r.sched == nil {
+		return nil
+	}
+	e, ok := r.sched.entries[entryID]
+	if !ok {
+		return nil
+	}
+	s, en := startTime, endTime
+	e.StartTime = &s
+	e.EndTime = &en
+	e.CrossMidnight = cross
+	r.sched.entries[entryID] = e
+	return nil
+}
+
+func (r *fakeShiftMasterRepo) SyncOpenAttendanceShiftEnd(_ context.Context, _ pgx.Tx, scheduleID string, shiftEndAt time.Time) error {
+	if r.sched == nil {
+		return nil
+	}
+	att, ok := r.sched.attendance[scheduleID]
+	if !ok || att.checkOut != nil {
+		return nil // no open attendance row → no-op (mirrors the SQL guard)
+	}
+	end := shiftEndAt
+	att.shiftEndAt = &end
+	r.sched.attendance[scheduleID] = att
+	return nil
+}
+
 var _ svc.ShiftMasterRepository = (*fakeShiftMasterRepo)(nil)
+
+// fakeAttendance is the minimal attendance state the propagation tests need: the
+// check-in/out instants (drive the freeze branch) + the shift_end_at the E4→E5
+// sync writes.
+type fakeAttendance struct {
+	checkIn    *time.Time
+	checkOut   *time.Time
+	shiftEndAt *time.Time
+}
 
 // ---------------------------------------------------------------------------
 // fakeScheduleRepo — in-memory svc.ScheduleRepository (embeds the engine's
@@ -266,18 +354,24 @@ type fakeScheduleRepo struct {
 	approvedLeave map[string]svc.ApprovedLeave
 	// liveEntry[employeeID+"|"+YYYY-MM-DD] = the existing live entry id.
 	liveEntry map[string]svc.LiveEntry
+	// attendance[entryID] = the (≤1) attendance row linked to a schedule entry
+	// (drives the shift-time propagation freeze branches).
+	attendance map[string]fakeAttendance
 
 	seq int
 }
 
 func newFakeScheduleRepo(masters *fakeShiftMasterRepo) *fakeScheduleRepo {
-	return &fakeScheduleRepo{
+	r := &fakeScheduleRepo{
 		masters:       masters,
 		entries:       map[string]domain.ScheduleEntry{},
 		placements:    map[string]svc.PlacementCover{},
 		approvedLeave: map[string]svc.ApprovedLeave{},
 		liveEntry:     map[string]svc.LiveEntry{},
+		attendance:    map[string]fakeAttendance{},
 	}
+	masters.sched = r // let the master repo's propagation reach the entries/attendance
+	return r
 }
 
 func leaveKey(empID string, date time.Time) string { return empID + "|" + dateStr(date) }
@@ -457,6 +551,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID string) *
 	sched := newFakeScheduleRepo(masters)
 
 	msvc := svc.NewShiftMasterService(masters, &fakeTxRunner{})
+	msvc.SetClock(func() time.Time { return fixedNow })
 	ssvc := svc.NewScheduleService(sched, &fakeTxRunner{})
 	ssvc.SetClock(func() time.Time { return fixedNow })
 
@@ -578,6 +673,34 @@ func (h *harness) seedLiveEntry(id, empID, companyID string, date time.Time, shi
 		ID: id, EmployeeID: empID, CompanyID: companyID, WorkDate: date,
 		Status: "SCHEDULED", ShiftMasterName: strp(shiftName),
 		CreatedAt: fixedNow, UpdatedAt: fixedNow,
+	}
+}
+
+// seedEntry plants a schedule_entry linked to a master (propagation candidate).
+// start/end are the entry's current snapshot; cross is derived (end<=start).
+func (h *harness) seedEntry(id, empID, masterID string, date time.Time, start, end string, isDayOff bool, status string) {
+	st, et := start, end
+	h.schedule.entries[id] = domain.ScheduleEntry{
+		ID:            id,
+		EmployeeID:    empID,
+		ShiftMasterID: strp(masterID),
+		StartTime:     &st,
+		EndTime:       &et,
+		CrossMidnight: end <= start,
+		WorkDate:      date,
+		Status:        status,
+		IsDayOff:      isDayOff,
+		CreatedAt:     fixedNow,
+		UpdatedAt:     fixedNow,
+	}
+}
+
+// seedAttendance links an attendance row to an entry. checkIn/checkOut are
+// optional (nil = absent). shiftEndAt seeds the pre-sync value so a test can
+// assert the E4→E5 push.
+func (h *harness) seedAttendance(entryID string, checkIn, checkOut *time.Time, shiftEndAt *time.Time) {
+	h.schedule.attendance[entryID] = fakeAttendance{
+		checkIn: checkIn, checkOut: checkOut, shiftEndAt: shiftEndAt,
 	}
 }
 

@@ -9,6 +9,7 @@ package scheduling
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -30,6 +31,9 @@ type ShiftMasterRepository interface {
 	CreateShiftMaster(ctx context.Context, tx pgx.Tx, p CreateShiftMasterParams) (domain.ShiftMaster, error)
 	UpdateShiftMaster(ctx context.Context, tx pgx.Tx, p UpdateShiftMasterParams) (domain.ShiftMaster, error)
 	SetShiftMasterActive(ctx context.Context, tx pgx.Tx, id string, active bool) (domain.ShiftMaster, error)
+
+	// PropagationRepo: the time-propagation read + writes (SM-2 ripple, F4.2/E5).
+	PropagationRepo
 }
 
 // CreateShiftMasterParams carries the columns for an insert (cross_midnight
@@ -63,13 +67,20 @@ type UpdateShiftMasterParams struct {
 // ShiftMasterService implements the shift-master business logic.
 type ShiftMasterService struct {
 	repo ShiftMasterRepository
+	prop PropagationRepo
 	txm  TxRunner
+	now  Clock
 }
 
-// NewShiftMasterService wires the shift-master service.
+// NewShiftMasterService wires the shift-master service. The repo doubles as the
+// PropagationRepo (time-change ripple to future schedule_entries).
 func NewShiftMasterService(repo ShiftMasterRepository, txm TxRunner) *ShiftMasterService {
-	return &ShiftMasterService{repo: repo, txm: txm}
+	return &ShiftMasterService{repo: repo, prop: repo, txm: txm, now: time.Now}
 }
+
+// SetClock overrides the time source (tests only). Drives the Asia/Jakarta
+// "today" cutoff for time-change propagation.
+func (s *ShiftMasterService) SetClock(c Clock) { s.now = c }
 
 // --- list / get ---
 
@@ -238,6 +249,17 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 			}
 			return inErr
 		}
+
+		// SM-2 ripple: if the shift window actually moved, re-sync the snapshot
+		// times on this master's FUTURE schedule_entries (attendance-frozen rows
+		// excepted). Runs in the SAME tx so the master edit + its ripple commit
+		// atomically. Name/service-line/break-only edits don't move the window.
+		if w.StartTime != cur.StartTime || w.EndTime != cur.EndTime || cross != cur.CrossMidnight {
+			if perr := s.propagateShiftMasterTimeChange(ctx, tx, id, w.StartTime, w.EndTime, cross, s.now()); perr != nil {
+				return perr
+			}
+		}
+
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionUpdate,
 			EntityType: "shift_master",
