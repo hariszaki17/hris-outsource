@@ -28,6 +28,27 @@ LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
 LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
 WHERE e.deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR e.status = sqlc.narg(status)::text)
+  -- role: filter by the linked User's E1 role (CONVENTIONS §18). Requires the
+  -- bidirectional link e.user_id (set on provisioning / seed back-fill).
+  AND (
+        sqlc.narg(role)::text IS NULL
+        OR EXISTS (
+            SELECT 1 FROM users u
+            WHERE u.id = e.user_id
+              AND u.deleted_at IS NULL
+              AND u.role = sqlc.narg(role)::text
+        )
+      )
+  -- assigned: true/false against an active shift-leader assignment (unassigned_at
+  -- IS NULL). Drives the unassigned-leader picker (role=shift_leader&assigned=false).
+  AND (
+        sqlc.narg(assigned)::boolean IS NULL
+        OR sqlc.narg(assigned)::boolean = EXISTS (
+            SELECT 1 FROM shift_leader_assignments sla
+            WHERE sla.employee_id = e.id
+              AND sla.unassigned_at IS NULL
+        )
+      )
   AND (
         sqlc.narg(q)::text IS NULL
         OR e.full_name ILIKE '%' || sqlc.narg(q)::text || '%'

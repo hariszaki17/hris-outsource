@@ -389,6 +389,10 @@ export const id = {
       placeholder: 'Pilih pemimpin shift',
       empty: 'Tidak ada pemimpin shift tersedia',
     },
+    companyLeader: {
+      empty:
+        'Tidak ada karyawan dengan penempatan aktif di perusahaan ini. Tempatkan agen dulu sebelum menetapkan pemimpin.',
+    },
     agreement: {
       placeholder: 'Pilih perjanjian kerja',
       disabledPlaceholder: 'Pilih agen terlebih dahulu',

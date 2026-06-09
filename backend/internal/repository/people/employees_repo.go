@@ -36,6 +36,8 @@ func (r *Repository) ListEmployees(ctx context.Context, f domain.EmployeeFilter)
 	rows, err := r.q.ListEmployees(ctx, sqlcgen.ListEmployeesParams{
 		Status:          f.Status,
 		Q:               f.Q,
+		Role:            f.Role,
+		Assigned:        f.Assigned,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,
 		RowLimit:        int32(f.Limit),

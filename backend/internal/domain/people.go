@@ -70,6 +70,8 @@ type ClientCompanyRef struct {
 type EmployeeFilter struct {
 	Q               *string
 	Status          *string
+	Role            *string // filter by linked User role (E1): agent|shift_leader|hr_admin|super_admin
+	Assigned        *bool   // true/false against an active shift-leader assignment
 	Limit           int
 	CursorCreatedAt *time.Time
 	CursorID        *string

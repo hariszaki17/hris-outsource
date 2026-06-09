@@ -395,8 +395,10 @@ export function PemimpinShiftPanel({
             open={replaceOpen}
             onClose={() => setReplaceOpen(false)}
             assignmentId={leader.id}
+            companyId={clientCompanyId}
             companyName={companyName}
             currentLeaderName={leader.employee_name ?? leader.employee_id}
+            currentLeaderEmployeeId={leader.employee_id}
           />
           <ShiftLeaderEndConfirm
             open={endOpen}

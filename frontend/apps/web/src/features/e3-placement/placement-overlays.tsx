@@ -23,9 +23,9 @@
  */
 
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
+import { CompanyLeaderCandidatePicker } from '@/features/e2-identity/pickers/company-leader-picker.tsx';
 import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
 import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
-import { ShiftLeaderPicker } from '@/features/e2-identity/pickers/shift-leader-picker.tsx';
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import {
   type EndRequest,
@@ -999,7 +999,8 @@ export function ShiftLeaderAssignModal({
               name="employee_id"
               rules={{ required: t('validation.required') }}
               render={({ field }) => (
-                <ShiftLeaderPicker
+                <CompanyLeaderCandidatePicker
+                  companyId={companyId}
                   value={field.value || null}
                   onChange={(v) => field.onChange(v ?? '')}
                   error={!!errors.employee_id}
@@ -1050,8 +1051,11 @@ export interface ShiftLeaderReplaceModalProps {
   open: boolean;
   onClose: () => void;
   assignmentId: string;
+  companyId: string;
   companyName: string;
   currentLeaderName: string;
+  /** Current leader's employee id — omitted from the candidate list. */
+  currentLeaderEmployeeId: string;
 }
 
 interface ReplaceFormValues {
@@ -1064,8 +1068,10 @@ export function ShiftLeaderReplaceModal({
   open,
   onClose,
   assignmentId,
+  companyId,
   companyName,
   currentLeaderName,
+  currentLeaderEmployeeId,
 }: ShiftLeaderReplaceModalProps) {
   const { t } = useTranslation('placementDetail');
   const { toast } = useToast();
@@ -1146,7 +1152,9 @@ export function ShiftLeaderReplaceModal({
               name="new_employee_id"
               rules={{ required: t('validation.required') }}
               render={({ field }) => (
-                <ShiftLeaderPicker
+                <CompanyLeaderCandidatePicker
+                  companyId={companyId}
+                  excludeEmployeeId={currentLeaderEmployeeId}
                   value={field.value || null}
                   onChange={(v) => field.onChange(v ?? '')}
                   error={!!errors.new_employee_id}

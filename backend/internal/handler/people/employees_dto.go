@@ -170,6 +170,21 @@ func queryStringPtr(s string) *string {
 	return &s
 }
 
+// queryBoolPtr returns a *bool from a query param: "true"/"false" → &v, anything
+// else (incl. empty) → nil (filter not applied).
+func queryBoolPtr(s string) *bool {
+	switch s {
+	case "true":
+		v := true
+		return &v
+	case "false":
+		v := false
+		return &v
+	default:
+		return nil
+	}
+}
+
 // parseLimit parses the limit query param, returning 0 (means "use default") on error.
 func parseLimit(s string) int {
 	if s == "" {

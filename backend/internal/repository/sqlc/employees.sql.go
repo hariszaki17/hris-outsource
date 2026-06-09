@@ -297,22 +297,45 @@ LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
 LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
 WHERE e.deleted_at IS NULL
   AND ($1::text IS NULL OR e.status = $1::text)
+  -- role: filter by the linked User's E1 role (CONVENTIONS §18). Requires the
+  -- bidirectional link e.user_id (set on provisioning / seed back-fill).
   AND (
         $2::text IS NULL
-        OR e.full_name ILIKE '%' || $2::text || '%'
-        OR e.nik       ILIKE '%' || $2::text || '%'
-        OR e.nip       ILIKE '%' || $2::text || '%'
+        OR EXISTS (
+            SELECT 1 FROM users u
+            WHERE u.id = e.user_id
+              AND u.deleted_at IS NULL
+              AND u.role = $2::text
+        )
+      )
+  -- assigned: true/false against an active shift-leader assignment (unassigned_at
+  -- IS NULL). Drives the unassigned-leader picker (role=shift_leader&assigned=false).
+  AND (
+        $3::boolean IS NULL
+        OR $3::boolean = EXISTS (
+            SELECT 1 FROM shift_leader_assignments sla
+            WHERE sla.employee_id = e.id
+              AND sla.unassigned_at IS NULL
+        )
       )
   AND (
-        $3::timestamptz IS NULL
-        OR (e.created_at, e.id) < ($3::timestamptz, $4::text)
+        $4::text IS NULL
+        OR e.full_name ILIKE '%' || $4::text || '%'
+        OR e.nik       ILIKE '%' || $4::text || '%'
+        OR e.nip       ILIKE '%' || $4::text || '%'
+      )
+  AND (
+        $5::timestamptz IS NULL
+        OR (e.created_at, e.id) < ($5::timestamptz, $6::text)
       )
 ORDER BY e.created_at DESC, e.id DESC
-LIMIT $5
+LIMIT $7
 `
 
 type ListEmployeesParams struct {
 	Status          *string
+	Role            *string
+	Assigned        *bool
 	Q               *string
 	CursorCreatedAt *time.Time
 	CursorID        *string
@@ -357,6 +380,8 @@ type ListEmployeesRow struct {
 func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error) {
 	rows, err := q.db.Query(ctx, listEmployees,
 		arg.Status,
+		arg.Role,
+		arg.Assigned,
 		arg.Q,
 		arg.CursorCreatedAt,
 		arg.CursorID,

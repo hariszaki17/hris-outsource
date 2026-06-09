@@ -172,6 +172,19 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 		if err != nil {
 			return fmt.Errorf("create user %q: %w", p.email, err)
 		}
+
+		// Back-fill the reverse link employees.user_id so has_login (derived from
+		// user_id) and the role/assigned employee filters resolve. CreateUser only
+		// sets users.employee_id; the 1:1 link is bidirectional (see EP-3 /
+		// SetEmployeeUserID). Without this, every seeded employee reads has_login=false.
+		if p.employeeID != nil {
+			if err := q.SetEmployeeUserID(ctx, sqlcgen.SetEmployeeUserIDParams{
+				UserID: &user.ID,
+				ID:     *p.employeeID,
+			}); err != nil {
+				return fmt.Errorf("link employee %q to user %q: %w", *p.employeeID, user.ID, err)
+			}
+		}
 		slog.Info("seed: created user", "email", user.Email, "id", user.ID, "role", user.Role)
 	}
 

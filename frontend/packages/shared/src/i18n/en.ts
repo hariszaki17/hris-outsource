@@ -388,6 +388,10 @@ export const en: Messages = {
       placeholder: 'Select shift leader',
       empty: 'No shift leaders available',
     },
+    companyLeader: {
+      empty:
+        'No employees with an active placement at this company. Place an agent here before assigning a leader.',
+    },
     agreement: {
       placeholder: 'Select employment agreement',
       disabledPlaceholder: 'Select an agent first',
