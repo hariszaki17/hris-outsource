@@ -63,6 +63,28 @@ func NewShiftLeaderService(repo ShiftLeaderRepository, txm TxRunner) *ShiftLeade
 // SetClock overrides the time source (tests only).
 func (s *ShiftLeaderService) SetClock(c Clock) { s.now = c }
 
+// today returns the current calendar date (Asia/Jakarta) expressed as UTC
+// midnight, matching how placement start/end dates are parsed and stored — see
+// PlacementService.today for the same convention.
+func (s *ShiftLeaderService) today() time.Time {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		loc = time.FixedZone("WIB", 7*3600)
+	}
+	n := s.now().In(loc)
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// placementNotStarted reports whether a placement fails INV-4 because it has not
+// begun yet. A placement is leadable once it has reached its start day; a
+// PENDING_START whose start_date is still in the future is not. There is no
+// stored-status promoter — "active now" is derived by date (consistent with the
+// read-time DTO boundary), so we must NOT reject a PENDING_START that has already
+// started (e.g. a placement created with start_date = today).
+func placementNotStarted(p domain.Placement, today time.Time) bool {
+	return p.LifecycleStatus == "PENDING_START" && p.StartDate.After(today)
+}
+
 // --- assign ---
 
 // AssignParams carries the create-assignment request fields.
@@ -108,10 +130,10 @@ func (s *ShiftLeaderService) CreateAssignment(ctx context.Context, p AssignParam
 
 	var result AssignResult
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		// INV-4: employee must have an ACTIVE placement at the company (PENDING_START
-		// does not satisfy SL-2). Row-locked.
+		// INV-4: employee must have a placement at the company that has already
+		// started (a future-dated PENDING_START is not yet leadable). Row-locked.
 		placement, inErr := s.repo.GetActivePlacementForEmployeeAtCompany(ctx, tx, p.EmployeeID, p.ClientCompanyID)
-		if errors.Is(inErr, domain.ErrNotFound) || (inErr == nil && placement.LifecycleStatus == "PENDING_START") {
+		if errors.Is(inErr, domain.ErrNotFound) || (inErr == nil && placementNotStarted(placement, s.today())) {
 			return inv4Conflict(p.ClientCompanyID, p.EmployeeID, placement, errors.Is(inErr, domain.ErrNotFound))
 		}
 		if inErr != nil {
@@ -211,7 +233,7 @@ func (s *ShiftLeaderService) ReplaceAssignment(ctx context.Context, p ReplacePar
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		// Re-validate INV-4 for the new candidate at the same company.
 		placement, inErr := s.repo.GetActivePlacementForEmployeeAtCompany(ctx, tx, p.NewEmployeeID, cur.ClientCompanyID)
-		if errors.Is(inErr, domain.ErrNotFound) || (inErr == nil && placement.LifecycleStatus == "PENDING_START") {
+		if errors.Is(inErr, domain.ErrNotFound) || (inErr == nil && placementNotStarted(placement, s.today())) {
 			return inv4Conflict(cur.ClientCompanyID, p.NewEmployeeID, placement, errors.Is(inErr, domain.ErrNotFound))
 		}
 		if inErr != nil {

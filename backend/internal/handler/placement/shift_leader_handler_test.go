@@ -432,13 +432,22 @@ func TestCreateSLA_PendingStartFailsINV4_409_C2(t *testing.T) {
 	h := newPlacementHarness(t)
 	h.seedLeaderCompany("SWP-CMP-0021", "Plaza Senayan", "company")
 	h.repo.employees["SWP-EMP-7000"] = domain.Employee{ID: "SWP-EMP-7000", FullName: "Future", Status: "active"}
-	// Only a PENDING_START placement at the company — does NOT satisfy INV-4 (C-2).
-	h.seedActivePlacementWithLine("SWP-PL-PEND", "SWP-EMP-7000", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-001", "PENDING_START")
+	// Only a PENDING_START placement that has NOT yet started (start_date in the
+	// future relative to fixedNow 2026-06-04) — i.e. genuinely "Scheduled / not
+	// yet active" per C-2. A PENDING_START whose start day has already arrived is
+	// leadable; this fixture must be future-dated to exercise the block.
+	end := jktDate(2027, 6, 30)
+	h.seedPlacement(domain.Placement{
+		ID: "SWP-PL-PEND", EmployeeID: "SWP-EMP-7000", ClientCompanyID: "SWP-CMP-0021",
+		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		AgreementID: "SWP-AG-7002", StartDate: jktDate(2026, 6, 20), EndDate: &end,
+		LifecycleStatus: "PENDING_START", EmployeeName: strp("Future"),
+	})
 
 	rr := h.doJSON("POST", "/shift-leader-assignments", map[string]any{
 		"client_company_id": "SWP-CMP-0021",
 		"employee_id":       "SWP-EMP-7000",
-		"start_date":        "2026-06-03",
+		"start_date":        "2026-06-20",
 	})
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 INV_4_VIOLATION (PENDING_START fails C-2), got %d: %s", rr.Code, rr.Body.String())
@@ -455,6 +464,36 @@ func TestCreateSLA_PendingStartFailsINV4_409_C2(t *testing.T) {
 	}
 	if pls[0].(map[string]any)["lifecycle_status"] != "PENDING_START" {
 		t.Errorf("surfaced placement status = %v, want PENDING_START", pls[0].(map[string]any)["lifecycle_status"])
+	}
+}
+
+// Regression: a placement stored PENDING_START whose start_date has already
+// arrived (e.g. created with start_date = today, or a future placement that
+// reached its start day with no status-promoter) IS leadable — INV-4 derives
+// "active now" by date, consistent with the read-time DTO boundary. Mirrors the
+// real bug where a same-day placement showed ACTIVE in the roster but the SL
+// assign was wrongly blocked with INV_4_VIOLATION.
+func TestCreateSLA_PendingStartButStarted_OK_201(t *testing.T) {
+	h := newPlacementHarness(t)
+	h.seedLeaderCompany("SWP-CMP-0021", "Plaza Senayan", "company")
+	h.repo.employees["SWP-EMP-7001"] = domain.Employee{ID: "SWP-EMP-7001", FullName: "Jana", Status: "active"}
+	// fixedNow = 2026-06-04; start_date today, but stored PENDING_START (created
+	// before the activation fix, or no promoter ran yet).
+	end := jktDate(2027, 6, 30)
+	h.seedPlacement(domain.Placement{
+		ID: "SWP-PL-STARTED", EmployeeID: "SWP-EMP-7001", ClientCompanyID: "SWP-CMP-0021",
+		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		AgreementID: "SWP-AG-7002", StartDate: jktDate(2026, 6, 4), EndDate: &end,
+		LifecycleStatus: "PENDING_START", EmployeeName: strp("Jana"),
+	})
+
+	rr := h.doJSON("POST", "/shift-leader-assignments", map[string]any{
+		"client_company_id": "SWP-CMP-0021",
+		"employee_id":       "SWP-EMP-7001",
+		"start_date":        "2026-06-04",
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201 (started PENDING_START is leadable), got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
