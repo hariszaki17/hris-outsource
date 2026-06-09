@@ -130,6 +130,24 @@ export function ShiftPickerPopover({
 
   const popoverRef = React.useRef<HTMLDivElement>(null);
 
+  // Position the popover at the clicked cell. It must be `fixed` (viewport-anchored):
+  // the grid container is `relative overflow-hidden`, so an `absolute` popover with no
+  // offsets pins to the grid's top-left corner and gets clipped — i.e. clicking "+"
+  // appeared to do nothing. Compute from the anchor cell's rect, clamped to the viewport.
+  const POPOVER_W = 360;
+  const POPOVER_MAXH = 360;
+  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!target || !anchorRef.current) {
+      setPos(null);
+      return;
+    }
+    const r = anchorRef.current.getBoundingClientRect();
+    const top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - POPOVER_MAXH - 8));
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - POPOVER_W - 8));
+    setPos({ top, left });
+  }, [target, anchorRef]);
+
   // Close on outside mousedown (ENGINEERING.md combobox pattern)
   React.useEffect(() => {
     if (!target) return;
@@ -347,7 +365,8 @@ export function ShiftPickerPopover({
   return (
     <div
       ref={popoverRef}
-      className="absolute z-50 w-[360px] rounded-xl border border-border bg-surface shadow-overlay"
+      className="fixed z-50 w-[360px] rounded-xl border border-border bg-surface shadow-overlay"
+      style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
       aria-label={t('picker.title', { name: target.employeeName })}
     >
       {/* Header */}
