@@ -8,7 +8,6 @@ import {
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
-  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -18,10 +17,9 @@ import {
   SearchField,
   StateView,
   StatusBadge,
-  useToast,
 } from '@swp/ui';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { Cpu, Download } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AuditDetailDrawer } from './audit-detail-drawer.tsx';
@@ -32,7 +30,6 @@ import { AuditDetailDrawer } from './audit-detail-drawer.tsx';
  * Filters live in typed URL search params (shareable + stable cache key).
  * Cursor pagination only (ENGINEERING.md D1). Client gating is defense-in-depth.
  *
- * Export (Ekspor) is a no-op info toast — real export is deferred to E10.
  * A time-range filter (AL-5) is intentionally omitted until a DateRangePicker primitive
  * lands in packages/ui — a dead preset control that did not filter the query was removed
  * rather than ship a misleading affordance.
@@ -82,7 +79,6 @@ function actorInitials(label: string): string {
 
 export function AuditLogScreen() {
   const { t } = useTranslation();
-  const { toast } = useToast();
   const navigate = useNavigate();
   const search = useSearch({ from: '/authed/settings/audit-log' });
   // Cursor history for the Prev button (cursors are forward-only).
@@ -111,15 +107,6 @@ export function AuditLogScreen() {
     setPrevCursors([]);
   };
 
-  function handleExport() {
-    // Real export modal is deferred to E10. Push an info toast for now.
-    toast({
-      tone: 'info',
-      title: t('auditLog.exportToastTitle'),
-      description: t('auditLog.exportToastBody'),
-    });
-  }
-
   function openDrawer(id: string) {
     setSelectedId(id);
     setDrawerOpen(true);
@@ -146,7 +133,7 @@ export function AuditLogScreen() {
               <span className="inline-flex size-[28px] shrink-0 items-center justify-center rounded-md bg-surface-2 text-text-3">
                 <Cpu className="size-3.5" aria-hidden="true" />
               </span>
-              <span className="text-xs text-text-2">
+              <span className="block max-w-[180px] truncate text-xs text-text-2">
                 {row.actor_label ?? t('auditLog.systemActor')}
               </span>
             </div>
@@ -159,7 +146,12 @@ export function AuditLogScreen() {
               size={28}
               tone="neutral"
             />
-            <span className="text-xs text-text">{row.actor_label ?? row.actor_user_id}</span>
+            <span
+              className="block max-w-[180px] truncate text-xs text-text"
+              title={row.actor_label ?? row.actor_user_id}
+            >
+              {row.actor_label ?? row.actor_user_id}
+            </span>
           </div>
         );
       },
@@ -167,10 +159,12 @@ export function AuditLogScreen() {
     {
       id: 'aksi',
       header: t('auditLog.colAksi'),
-      width: 160,
+      width: 210,
       cell: (row) => (
         <StatusBadge dot tone={actionTone(row.action)}>
-          <span className="font-mono">{row.action}</span>
+          <span className="block max-w-[150px] truncate font-mono" title={row.action}>
+            {row.action}
+          </span>
         </StatusBadge>
       ),
     },
@@ -178,11 +172,17 @@ export function AuditLogScreen() {
       id: 'entitas',
       header: t('auditLog.colEntitas'),
       width: 230,
-      cell: (row) => (
-        <span className="font-mono text-xs text-text-2">
-          {entityLabel(row.entity_type)} #{row.entity_id}
-        </span>
-      ),
+      cell: (row) => {
+        const label = `${entityLabel(row.entity_type)} #${row.entity_id}`;
+        return (
+          <span
+            className="block max-w-[200px] truncate font-mono text-xs text-text-2"
+            title={label}
+          >
+            {label}
+          </span>
+        );
+      },
     },
     {
       id: 'perubahan',
@@ -206,10 +206,6 @@ export function AuditLogScreen() {
         <h1 className="font-bold text-3xl text-text">{t('auditLog.title')}</h1>
         <p className="max-w-[640px] text-sm text-text-3">{t('auditLog.subtitle')}</p>
       </div>
-      <Button type="button" variant="secondary" onClick={handleExport}>
-        <Download aria-hidden="true" />
-        {t('auditLog.export')}
-      </Button>
     </div>
   );
 
