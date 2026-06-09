@@ -126,7 +126,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           title: t('detail.toastForwardedTitle'),
           description: t('detail.toastForwardedBody'),
         });
-        void query.refetch();
       },
       onError: (err) => {
         const { kind } = classifyError(err);
@@ -147,7 +146,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           title: t('detail.toastApprovedTitle'),
           description: t('detail.toastApprovedBody'),
         });
-        void query.refetch();
       },
       onError: (err) => {
         const { kind } = classifyError(err);
@@ -169,7 +167,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           title: t('detail.toastRejectedTitle'),
           description: t('detail.toastRejectedBody'),
         });
-        void query.refetch();
       },
       onError: (err) => {
         const { kind } = classifyError(err);
@@ -191,7 +188,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           title: t('detail.toastWithdrawnTitle'),
           description: t('detail.toastWithdrawnBody'),
         });
-        void query.refetch();
       },
       onError: (err) => {
         const { kind } = classifyError(err);
@@ -213,7 +209,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           title: t('detail.toastConfirmedTitle'),
           description: t('detail.toastConfirmedBody'),
         });
-        void query.refetch();
       },
       onError: (err) => {
         const { kind } = classifyError(err);

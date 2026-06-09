@@ -181,7 +181,6 @@ function OvertimeApprovalsScreenInner({
         {
           onSuccess: () => {
             toast({ tone: 'success', title: t('approvals.approvedToast') });
-            void query.refetch();
           },
           onError: (err) => {
             const { message } = classifyError(err);
@@ -195,7 +194,6 @@ function OvertimeApprovalsScreenInner({
         {
           onSuccess: () => {
             toast({ tone: 'success', title: t('approvals.approvedToast') });
-            void query.refetch();
           },
           onError: (err) => {
             const { message } = classifyError(err);
@@ -214,7 +212,6 @@ function OvertimeApprovalsScreenInner({
         onSuccess: () => {
           setRejectTarget(null);
           toast({ tone: 'success', title: t('approvals.rejectedToast') });
-          void query.refetch();
         },
         onError: (err) => {
           const { message } = classifyError(err);
@@ -236,7 +233,6 @@ function OvertimeApprovalsScreenInner({
             tone: 'success',
             title: t('approvals.bulkApprovedToast', { count: ids.length }),
           });
-          void query.refetch();
         },
         onError: (err) => {
           const { message } = classifyError(err);
@@ -258,7 +254,6 @@ function OvertimeApprovalsScreenInner({
             tone: 'success',
             title: t('approvals.bulkRejectedToast', { count: ids.length }),
           });
-          void query.refetch();
         },
         onError: (err) => {
           const { message } = classifyError(err);

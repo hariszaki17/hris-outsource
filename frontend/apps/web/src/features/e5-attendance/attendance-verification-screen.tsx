@@ -211,7 +211,6 @@ export function AttendanceVerificationScreen() {
         onSuccess: () => {
           setBulkVerifyOpen(false);
           setSelectedIds(new Set());
-          query.refetch();
           toast({ tone: 'success', title: t('bulkVerifySuccess', { count: selectedIds.size }) });
         },
         onError: (err) => {
@@ -230,7 +229,6 @@ export function AttendanceVerificationScreen() {
           setBulkRejectOpen(false);
           setSelectedIds(new Set());
           setRejectReason('');
-          query.refetch();
           toast({ tone: 'success', title: t('bulkRejectSuccess', { count: selectedIds.size }) });
         },
         onError: (err) => {
@@ -248,7 +246,6 @@ export function AttendanceVerificationScreen() {
       {
         onSuccess: () => {
           setSingleVerifyId(null);
-          query.refetch();
           toast({ tone: 'success', title: t('verifySuccess') });
         },
         onError: (err) => {
@@ -267,7 +264,6 @@ export function AttendanceVerificationScreen() {
         onSuccess: () => {
           setSingleRejectId(null);
           setRejectReason('');
-          query.refetch();
           toast({ tone: 'success', title: t('rejectSuccess') });
         },
         onError: (err) => {

@@ -99,8 +99,10 @@ export function UsersScreen() {
   }
 
   function handleDone() {
+    // The global MutationCache.onSuccess hook (query-client.ts) already invalidates all active
+    // queries after every successful mutation, so useListUsers refetches automatically — no manual
+    // refetch needed here (would otherwise double-fire the request).
     closeOverlay();
-    void query.refetch();
   }
 
   // ---------------------------------------------------------------------------

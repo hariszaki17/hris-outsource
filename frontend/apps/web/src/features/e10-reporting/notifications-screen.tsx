@@ -25,8 +25,6 @@ import {
   type MarkAllNotificationsReadBody,
   type Notification,
   NotificationKind,
-  getGetNotificationCountQueryKey,
-  getListNotificationsQueryKey,
   useListNotifications,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -41,7 +39,6 @@ import {
   StateView,
   useToast,
 } from '@swp/ui';
-import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { RotateCcw } from 'lucide-react';
 import { useState } from 'react';
@@ -150,7 +147,6 @@ function NotificationsScreenInner({
   const { t } = useTranslation('notifications');
   const { toast } = useToast();
   const navigate = useNavigate();
-  const qc = useQueryClient();
 
   // Optimistic local override: IDs currently being marked read (card-level)
   const [pendingReadIds, setPendingReadIds] = useState<Set<string>>(new Set());
@@ -167,13 +163,14 @@ function NotificationsScreenInner({
   const markRead = useMarkNotificationRead({
     mutation: {
       onSuccess: (_data, { notificationId }) => {
+        // Refetch of the list + unread count is handled by the global MutationCache
+        // onSuccess invalidate (query-client.ts); only the local optimistic-state
+        // bookkeeping needs clearing here.
         setPendingReadIds((prev) => {
           const next = new Set(prev);
           next.delete(notificationId);
           return next;
         });
-        void qc.invalidateQueries({ queryKey: getListNotificationsQueryKey() });
-        void qc.invalidateQueries({ queryKey: getGetNotificationCountQueryKey() });
       },
       onError: (_err, { notificationId }) => {
         setPendingReadIds((prev) => {
@@ -195,8 +192,7 @@ function NotificationsScreenInner({
           tone: 'success',
           title: t('markAllSuccess', { count: affected }),
         });
-        void qc.invalidateQueries({ queryKey: getListNotificationsQueryKey() });
-        void qc.invalidateQueries({ queryKey: getGetNotificationCountQueryKey() });
+        // List + unread-count refetch handled by the global MutationCache invalidate.
       },
       onError: () => {
         toast({ tone: 'error', title: t('errors.markAllFailed') });

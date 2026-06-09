@@ -125,7 +125,6 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
       {
         onSuccess: () => {
           setVerifyOpen(false);
-          query.refetch();
           toast({ tone: 'success', title: t('verifySuccess') });
         },
         onError: (err) => {
@@ -143,7 +142,6 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
         onSuccess: () => {
           setRejectOpen(false);
           setRejectReason('');
-          query.refetch();
           toast({ tone: 'success', title: t('rejectSuccess') });
         },
         onError: (err) => {
