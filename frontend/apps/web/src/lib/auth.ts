@@ -25,6 +25,12 @@ export interface SessionUser {
   permissions: readonly Permission[];
   /** Avatar initials (display-only). */
   initials: string;
+  /**
+   * The signed-in employee's `SWP-EMP-…` id. Used by the agent self-service screens (/me/*) to
+   * query their own records on endpoints that take an explicit `employee_id` (schedule, profile,
+   * leave balance). The server still enforces `scope: self` — this is just the value to send.
+   */
+  employeeId: string;
   /** Shift leaders are scoped to ONE client company; surfaced in the shell. */
   companyName?: string;
   /**
@@ -106,6 +112,7 @@ export function buildSessionUser(u: MeResponse): SessionUser {
     role: u.role as Role,
     permissions: permissionsForRole(u.role as Role),
     initials,
+    employeeId: u.employee_id,
     companyName: companyId,
     companyId,
   };

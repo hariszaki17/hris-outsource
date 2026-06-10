@@ -1,10 +1,11 @@
-import type { Permission } from '@swp/shared';
+import type { Permission, Role } from '@swp/shared';
 import {
   Banknote,
   Building2,
   CalendarClock,
   ChartColumn,
   ClipboardCheck,
+  Fingerprint,
   Inbox,
   LayoutDashboard,
   type LucideIcon,
@@ -12,6 +13,7 @@ import {
   Plane,
   Settings,
   Timer,
+  UserRound,
   Users,
 } from 'lucide-react';
 
@@ -104,6 +106,38 @@ export const SETTINGS_ITEM: NavItem = {
 };
 
 /**
+ * Agent self-service nav backbone (web console under `/me/*`; docs/eng/AGENT-WEB-ACCESS.md).
+ * Entirely separate from the staff `NAV_ITEMS` — agents and staff never share a sidebar. Each
+ * item is gated on a `self.*` capability key, which only the `agent` bundle carries, so this
+ * list filters to empty for any staff role. The shell picks this backbone when the signed-in
+ * role is `agent` (AW-4); item visibility within it stays permission-keyed.
+ */
+export const AGENT_NAV_ITEMS: readonly NavItem[] = [
+  { to: '/me', labelKey: 'nav.meDashboard', icon: LayoutDashboard, requires: 'self.dashboard' },
+  {
+    to: '/me/attendance',
+    labelKey: 'nav.meAttendance',
+    icon: Fingerprint,
+    requires: 'self.attendance',
+  },
+  {
+    to: '/me/schedule',
+    labelKey: 'nav.meSchedule',
+    icon: CalendarClock,
+    requires: 'self.schedule',
+  },
+  { to: '/me/leave', labelKey: 'nav.meLeave', icon: Plane, requires: 'self.leave' },
+  { to: '/me/overtime', labelKey: 'nav.meOvertime', icon: Timer, requires: 'self.overtime' },
+  { to: '/me/payslip', labelKey: 'nav.mePayslip', icon: Banknote, requires: 'self.payslip' },
+  { to: '/me/profile', labelKey: 'nav.meProfile', icon: UserRound, requires: 'self.profile' },
+];
+
+/** The primary nav backbone for a role: agents get the self-service list, staff get the modules. */
+export function navForRole(role: Role): readonly NavItem[] {
+  return role === 'agent' ? AGENT_NAV_ITEMS : NAV_ITEMS;
+}
+
+/**
  * Secondary section sub-nav — keyed by the parent primary route. Rendered as a tab strip under
  * the topbar when the active section has >1 visible sub-page. Sub-routes with no entry here
  * (detail/create pages) inherit their parent section for active-state.
@@ -177,6 +211,15 @@ export function activeSection(pathname: string): string | null {
     }
   }
   if (best) return best;
+  // Agent self-service backbone (/me/*) — longest matching item wins so /me/attendance beats /me.
+  if (pathname === '/me' || pathname.startsWith('/me/')) {
+    const agent = AGENT_NAV_ITEMS.reduce<string | null>((acc, i) => {
+      const match = i.to === '/me' ? pathname === '/me' : pathname.startsWith(i.to);
+      if (!match) return acc;
+      return acc === null || i.to.length > acc.length ? i.to : acc;
+    }, null);
+    if (agent) return agent;
+  }
   // Alias routes (rosters, payroll, master data).
   for (const [route, parent] of Object.entries(SECTION_ALIASES)) {
     if (pathname.startsWith(route)) return parent;
@@ -197,6 +240,15 @@ export function activeSection(pathname: string): string | null {
  * `/`, `/notifications`, `/forbidden`). SCOPE (which rows) stays server-only and never appears here.
  */
 const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
+  // Agent self-service (/me/*) — most-specific first; /me/notifications is auth-only (no entry).
+  [/^\/me\/attendance/, 'self.attendance'],
+  [/^\/me\/correction/, 'self.attendance'],
+  [/^\/me\/schedule/, 'self.schedule'],
+  [/^\/me\/leave/, 'self.leave'],
+  [/^\/me\/overtime/, 'self.overtime'],
+  [/^\/me\/payslip/, 'self.payslip'],
+  [/^\/me\/profile/, 'self.profile'],
+  [/^\/me$/, 'self.dashboard'],
   // Most-specific first.
   [/^\/client-companies\/[^/]+\/roster/, 'placements.read'],
   [/^\/client-companies/, 'clients.read'],

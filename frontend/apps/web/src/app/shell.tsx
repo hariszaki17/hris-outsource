@@ -1,8 +1,8 @@
 import {
-  NAV_ITEMS,
   SETTINGS_ITEM,
   activeSection,
   hasPermission,
+  navForRole,
   subnavForSection,
   visibleNav,
 } from '@/app/nav.ts';
@@ -53,8 +53,10 @@ export function AppShell() {
   // refresh). Render nothing rather than a broken chrome; the guard handles redirects.
   if (!user) return <Outlet />;
 
-  const items = visibleNav(NAV_ITEMS, user.permissions);
+  const isAgent = user.role === 'agent';
+  const items = visibleNav(navForRole(user.role), user.permissions);
   const showSettings = hasPermission(user.permissions, SETTINGS_ITEM.requires);
+  const notificationsTo = isAgent ? '/me/notifications' : '/notifications';
 
   const inSettings = pathname.startsWith('/settings');
   const section = inSettings ? '/settings' : activeSection(pathname);
@@ -103,7 +105,7 @@ export function AppShell() {
               <TopbarIconButton
                 icon={Bell}
                 label={t('shell.notifications')}
-                onClick={() => navigate({ to: '/notifications' })}
+                onClick={() => navigate({ to: notificationsTo })}
               />
               <UserMenu user={user} onLogout={handleLogout} />
             </div>

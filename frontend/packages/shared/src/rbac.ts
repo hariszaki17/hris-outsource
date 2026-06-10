@@ -10,11 +10,16 @@
 export const ROLES = ['super_admin', 'hr_admin', 'shift_leader', 'agent'] as const;
 export type Role = (typeof ROLES)[number];
 
-/** Roles that sign in to the web console (`agent` is mobile-only). */
+/**
+ * Roles that sign in to the web console. As of 2026-06-10 `agent` is included — agents get a
+ * web self-service console under `/me/*` (docs/eng/AGENT-WEB-ACCESS.md, EPICS §8). Their
+ * capability keys (`self.*`) never overlap the staff keys, so the surfaces stay separate.
+ */
 export const WEB_ROLES = [
   'super_admin',
   'hr_admin',
   'shift_leader',
+  'agent',
 ] as const satisfies readonly Role[];
 export type WebRole = (typeof WEB_ROLES)[number];
 
@@ -83,6 +88,16 @@ export const PERMISSIONS = [
   'settings.users.manage',
   'settings.roles.manage',
   'audit.read',
+  // Agent self-service (web console under /me/*; docs/eng/AGENT-WEB-ACCESS.md). These gate the
+  // agent's OWN records only — data scope (`scope: self`) is enforced server-side. They never
+  // overlap the staff capability keys above, so the agent nav and the admin nav stay disjoint.
+  'self.dashboard',
+  'self.attendance',
+  'self.schedule',
+  'self.leave',
+  'self.overtime',
+  'self.profile',
+  'self.payslip',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -116,8 +131,17 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'overtime.read',
     'overtime.approve',
   ],
-  // Mobile-only — no web console access.
-  agent: [],
+  // Agent self-service (mobile + web console under /me/*). These `self.*` keys gate the agent's
+  // OWN records; data scope is server-enforced (scope: self). See docs/eng/AGENT-WEB-ACCESS.md.
+  agent: [
+    'self.dashboard',
+    'self.attendance',
+    'self.schedule',
+    'self.leave',
+    'self.overtime',
+    'self.profile',
+    'self.payslip',
+  ],
 };
 
 /** Effective permissions for a role (interim: from the static bundle; later: from the API). */

@@ -125,7 +125,12 @@ Interim role bundles:
 - **shift_leader** — `dashboard.view`, `employees.read`, `placements.read`, `schedule.read/.write`,
   `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`. No clients,
   contracts, payroll, reports, master data, or settings.
-- **agent** — none (mobile-only).
+- **agent** — the `self.*` self-service bundle: `self.dashboard`, `self.attendance`, `self.schedule`,
+  `self.leave`, `self.overtime`, `self.profile`, `self.payslip`. *(Updated 2026-06-10: agents now
+  have a **web self-service console** under `/me/*` — reverses the prior "none (mobile-only)". The
+  shell picks the nav backbone by role; `self.*` keys never overlap the staff capability keys, so
+  the two surfaces stay cleanly separated. Ratified EPICS §8; full spec:
+  [AGENT-WEB-ACCESS.md](./AGENT-WEB-ACCESS.md).)*
 
 ### 4.2 Scope axis — data rows (server-only) ✅
 

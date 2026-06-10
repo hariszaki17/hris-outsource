@@ -53,8 +53,10 @@ export function LoginScreen() {
         },
       });
       const body = res.data as LoginResponse;
-      auth.login(body.access_token, buildSessionUser(body.user));
-      await navigate({ to: '/' });
+      const sessionUser = buildSessionUser(body.user);
+      auth.login(body.access_token, sessionUser);
+      // Agents land on their self-service home; staff on the dashboard.
+      await navigate({ to: sessionUser.role === 'agent' ? '/me' : '/' });
     } catch (e) {
       if (e instanceof ApiError) {
         if (e.code === 'ACCOUNT_DISABLED') {

@@ -1,3 +1,14 @@
+import { AgentAttendanceScreen } from '@/features/agent/me-attendance-screen.tsx';
+import { AgentCorrectionScreen } from '@/features/agent/me-correction-screen.tsx';
+import { AgentDashboardScreen } from '@/features/agent/me-dashboard-screen.tsx';
+import { AgentLeaveCreateScreen } from '@/features/agent/me-leave-create-screen.tsx';
+import { AgentLeaveScreen } from '@/features/agent/me-leave-screen.tsx';
+import { AgentNotificationsScreen } from '@/features/agent/me-notifications-screen.tsx';
+import { AgentOvertimeCreateScreen } from '@/features/agent/me-overtime-create-screen.tsx';
+import { AgentOvertimeScreen } from '@/features/agent/me-overtime-screen.tsx';
+import { AgentPayslipScreen } from '@/features/agent/me-payslip-screen.tsx';
+import { AgentProfileScreen } from '@/features/agent/me-profile-screen.tsx';
+import { AgentScheduleScreen } from '@/features/agent/me-schedule-screen.tsx';
 import { ForgotPasswordScreen } from '@/features/auth/forgot-password-screen.tsx';
 import { LoginScreen } from '@/features/auth/login-screen.tsx';
 import { ResetPasswordScreen } from '@/features/auth/reset-password-screen.tsx';
@@ -59,12 +70,12 @@ import {
   type AttendanceDashboardSearch,
 } from '@/features/e5-attendance/attendance-dashboard-screen.tsx';
 import { AttendanceDetailScreen } from '@/features/e5-attendance/attendance-detail-screen.tsx';
-import { ManualAttendanceCreateScreen } from '@/features/e5-attendance/manual-attendance-create-screen.tsx';
 import { AttendanceVerificationScreen } from '@/features/e5-attendance/attendance-verification-screen.tsx';
 import {
   CorrectionsScreen,
   type CorrectionsSearch,
 } from '@/features/e5-attendance/corrections-screen.tsx';
+import { ManualAttendanceCreateScreen } from '@/features/e5-attendance/manual-attendance-create-screen.tsx';
 import { LeaveApprovalsScreen } from '@/features/e6-leave/leave-approvals-screen.tsx';
 import { LeaveCalendarScreen } from '@/features/e6-leave/leave-calendar-screen.tsx';
 import { LeaveDetailScreen } from '@/features/e6-leave/leave-detail-screen.tsx';
@@ -186,6 +197,11 @@ const authedRoute = createRoute({
     // the user object is still loading (token present, /me in flight) — the shell handles that.
     const user = auth.getUser();
     if (user) {
+      // Agents have no staff dashboard — send them to their self-service home (/me).
+      // docs/eng/AGENT-WEB-ACCESS.md (AW-2/AW-4).
+      if (user.role === 'agent' && location.pathname === '/') {
+        throw redirect({ to: '/me' });
+      }
       const requires = routeRequirement(location.pathname);
       if (requires && !hasPermission(user.permissions, requires)) {
         throw redirect({ to: '/forbidden' });
@@ -502,17 +518,18 @@ const attendanceDashboardRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): AttendanceDashboardSearch => {
     const out: AttendanceDashboardSearch = {};
     if (typeof search.q === 'string' && search.q) out.q = search.q;
-    if (
-      typeof search.tab === 'string' &&
-      ['all', 'present', 'late', 'absent'].includes(search.tab)
-    )
+    if (typeof search.tab === 'string' && ['all', 'present', 'late', 'absent'].includes(search.tab))
       out.tab = search.tab as AttendanceDashboardSearch['tab'];
-    if (typeof search.company_id === 'string' && search.company_id) out.company_id = search.company_id;
+    if (typeof search.company_id === 'string' && search.company_id)
+      out.company_id = search.company_id;
     if (typeof search.site_id === 'string' && search.site_id) out.site_id = search.site_id;
-    if (typeof search.position_id === 'string' && search.position_id) out.position_id = search.position_id;
+    if (typeof search.position_id === 'string' && search.position_id)
+      out.position_id = search.position_id;
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
-    if (typeof search.date_from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_from)) out.date_from = search.date_from;
-    if (typeof search.date_to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_to)) out.date_to = search.date_to;
+    if (typeof search.date_from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_from))
+      out.date_from = search.date_from;
+    if (typeof search.date_to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_to))
+      out.date_to = search.date_to;
     return out;
   },
 });
@@ -725,6 +742,75 @@ const settingsGeneralRoute = createRoute({
   component: SettingsGeneralScreen,
 });
 
+// Agent self-service (/me/*) — docs/eng/AGENT-WEB-ACCESS.md. Gated by `self.*` keys via the
+// authedRoute capability guard; rendered inside AppShell with the agent nav backbone.
+const meDashboardRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me',
+  component: AgentDashboardScreen,
+});
+const meAttendanceRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/attendance',
+  component: AgentAttendanceScreen,
+});
+const meScheduleRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/schedule',
+  component: AgentScheduleScreen,
+});
+const meLeaveRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/leave',
+  component: AgentLeaveScreen,
+});
+const meLeaveNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/leave/new',
+  component: AgentLeaveCreateScreen,
+});
+const meOvertimeRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/overtime',
+  component: AgentOvertimeScreen,
+});
+const meOvertimeNewRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/overtime/new',
+  component: AgentOvertimeCreateScreen,
+});
+const meProfileRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/profile',
+  component: AgentProfileScreen,
+});
+const mePayslipRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/payslip',
+  component: AgentPayslipScreen,
+});
+const meNotificationsRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/notifications',
+  component: AgentNotificationsScreen,
+});
+interface MeCorrectionSearch {
+  attendanceId?: string;
+  date?: string;
+}
+const meCorrectionRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/correction',
+  component: AgentCorrectionScreen,
+  validateSearch: (search: Record<string, unknown>): MeCorrectionSearch => {
+    const out: MeCorrectionSearch = {};
+    if (typeof search.attendanceId === 'string' && search.attendanceId)
+      out.attendanceId = search.attendanceId;
+    if (typeof search.date === 'string' && search.date) out.date = search.date;
+    return out;
+  },
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   forgotPasswordRoute,
@@ -776,6 +862,18 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     reportsRoute,
     notificationsRoute,
+    // Agent self-service (/me/*)
+    meDashboardRoute,
+    meAttendanceRoute,
+    meScheduleRoute,
+    meLeaveRoute,
+    meLeaveNewRoute,
+    meOvertimeRoute,
+    meOvertimeNewRoute,
+    meProfileRoute,
+    mePayslipRoute,
+    meNotificationsRoute,
+    meCorrectionRoute,
     settingsRoute.addChildren([
       settingsIndexRoute,
       usersRoute,
