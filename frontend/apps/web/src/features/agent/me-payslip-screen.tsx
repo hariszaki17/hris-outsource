@@ -8,81 +8,30 @@
  * RBAC: agent scope only (INV-3 / PH-5). No component breakdown; summary totals only.
  */
 import { type Payslip, type PayslipListResponse, useListPayslips } from '@swp/api-client/e8';
-import { Button, StateView, StatusBadge } from '@swp/ui';
+import {
+  type Column,
+  CursorPagination,
+  DataTable,
+  DateText,
+  EmptyState,
+  StateView,
+  StatusBadge,
+} from '@swp/ui';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { formatMoney, formatPeriod } from '../e8-payroll/payroll-shared.tsx';
+import {
+  formatMoney,
+  formatPeriod,
+  payslipStatusKey,
+  payslipStatusTone,
+} from '../e8-payroll/payroll-shared.tsx';
 import { AgentPage } from './agent-page.tsx';
 
 // ---------------------------------------------------------------------------
-// Page size — small for the agent card list
+// Page size
 // ---------------------------------------------------------------------------
 
-const PAGE_SIZE = 12;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * paid_on is an ISO date string (YYYY-MM-DD). Format as "DD Mon YYYY".
- * Returns null when not paid yet.
- */
-function formatPaidOn(paidOn: string | null): string | null {
-  if (!paidOn) return null;
-  // paidOn is YYYY-MM-DD; parse without timezone ambiguity
-  const [y, m, d] = paidOn.split('-').map(Number);
-  if (!y || !m || !d) return paidOn;
-  return new Date(y, m - 1, d).toLocaleDateString('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-// ---------------------------------------------------------------------------
-// PayslipCard
-// ---------------------------------------------------------------------------
-
-function PayslipCard({ p, t }: { p: Payslip; t: ReturnType<typeof useTranslation<'agent'>>['t'] }) {
-  const paidOn = formatPaidOn(p.paid_on);
-  const tone = paidOn ? ('ok' as const) : ('neutral' as const);
-
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      {/* Header: period + payment status */}
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[15px] font-semibold text-text">{formatPeriod(p.period)}</span>
-        <StatusBadge dot tone={tone}>
-          {paidOn ? t('payslipPaid') : t('payslipNotPaid')}
-        </StatusBadge>
-      </div>
-
-      {/* Money rows */}
-      <div className="mt-3 flex flex-col gap-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] text-text-2">{t('payslipTakeHome')}</span>
-          <span className="text-[14px] font-semibold tabular-nums text-text">
-            {formatMoney(p.take_home_pay)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] text-text-2">{t('payslipGross')}</span>
-          <span className="text-[12px] tabular-nums text-text-2">
-            {formatMoney(p.gross_earnings)}
-          </span>
-        </div>
-      </div>
-
-      {/* Paid-on date (shown only when available) */}
-      {paidOn && (
-        <p className="mt-2 text-[11px] text-text-3">
-          {t('payslipPaid')} {paidOn}
-        </p>
-      )}
-    </div>
-  );
-}
+const PAGE_SIZE = 20;
 
 // ---------------------------------------------------------------------------
 // AgentPayslipScreen
@@ -100,66 +49,115 @@ export function AgentPayslipScreen() {
   const items: Payslip[] = body?.data ?? [];
   const hasMore = body?.has_more ?? false;
 
-  function goNext() {
-    const nextCursor = body?.next_cursor;
-    if (!nextCursor) return;
-    setPrevCursors((prev) => [...prev, cursor ?? '']);
-    setCursor(nextCursor);
-  }
+  // -------------------------------------------------------------------------
+  // Columns
+  // -------------------------------------------------------------------------
 
-  function goPrev() {
-    const next = [...prevCursors];
-    const prev = next.pop();
-    setPrevCursors(next);
-    setCursor(prev || undefined);
-  }
+  const columns: Column<Payslip>[] = [
+    {
+      id: 'period',
+      header: t('payslipPeriodCol', { defaultValue: 'Periode' }),
+      width: 160,
+      cell: (r) => <span className="font-medium text-text">{formatPeriod(r.period)}</span>,
+    },
+    {
+      id: 'takeHome',
+      header: t('payslipTakeHome', { defaultValue: 'Gaji Bersih' }),
+      width: 180,
+      cell: (r) => (
+        <span className="font-semibold tabular-nums text-text">{formatMoney(r.take_home_pay)}</span>
+      ),
+    },
+    {
+      id: 'gross',
+      header: t('payslipGross', { defaultValue: 'Penghasilan Bruto' }),
+      width: 180,
+      cell: (r) => (
+        <span className="text-sm tabular-nums text-text-2">{formatMoney(r.gross_earnings)}</span>
+      ),
+    },
+    {
+      id: 'status',
+      header: t('payslipStatusCol', { defaultValue: 'Status' }),
+      width: 140,
+      cell: (r) => (
+        <StatusBadge dot tone={payslipStatusTone(r.status)}>
+          {t(payslipStatusKey(r.status), { ns: 'payroll', defaultValue: r.status })}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: 'paidOn',
+      header: t('payslipPaidOnCol', { defaultValue: 'Tanggal Bayar' }),
+      width: 140,
+      cell: (r) =>
+        r.paid_on ? (
+          <DateText kind="date" value={r.paid_on} className="text-sm text-text-2" />
+        ) : (
+          <span className="text-sm italic text-text-3">—</span>
+        ),
+    },
+  ];
 
-  const hasPrev = prevCursors.length > 0;
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
 
-  return (
-    <AgentPage title={t('payslipTitle')}>
-      {query.isLoading ? (
-        <StateView kind="loading" title={t('loading')} />
-      ) : query.isError ? (
+  if (query.isError) {
+    return (
+      <AgentPage title={t('payslipTitle')}>
         <StateView
           kind="error"
           title={t('errorGeneric')}
           onRetry={() => void query.refetch()}
           retryLabel={t('retry')}
         />
-      ) : items.length === 0 ? (
-        <StateView kind="empty" title={t('payslipEmpty')} />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {items.map((p) => (
-            <PayslipCard key={p.id} p={p} t={t} />
-          ))}
+      </AgentPage>
+    );
+  }
 
-          {/* Cursor pagination — only shown when there's more than one page */}
-          {(hasPrev || hasMore) && (
-            <div className="flex items-center justify-between pt-1">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!hasPrev}
-                onClick={goPrev}
-              >
-                {t('prev', { defaultValue: 'Sebelumnya' })}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!hasMore}
-                onClick={goNext}
-              >
-                {t('next', { defaultValue: 'Berikutnya' })}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+  return (
+    <AgentPage title={t('payslipTitle')}>
+      <DataTable
+        aria-label={t('payslipTitle')}
+        columns={columns}
+        data={items}
+        getRowId={(r) => r.id}
+        isLoading={query.isLoading}
+        skeletonRows={8}
+        empty={
+          <EmptyState
+            variant="fresh"
+            title={t('payslipEmpty', { defaultValue: 'Belum ada slip gaji' })}
+          />
+        }
+        footer={
+          items.length > 0 && (hasMore || prevCursors.length > 0) ? (
+            <CursorPagination
+              rangeLabel={t('resultRange', {
+                defaultValue: '{{count}} entri',
+                count: items.length,
+              })}
+              hasPrev={prevCursors.length > 0}
+              hasNext={hasMore}
+              prevLabel={t('prev', { defaultValue: 'Sebelumnya' })}
+              nextLabel={t('next', { defaultValue: 'Berikutnya' })}
+              onPrev={() => {
+                const next = [...prevCursors];
+                const prev = next.pop();
+                setPrevCursors(next);
+                setCursor(prev || undefined);
+              }}
+              onNext={() => {
+                const nextCursor = body?.next_cursor;
+                if (!nextCursor) return;
+                setPrevCursors((prev) => [...prev, cursor ?? '']);
+                setCursor(nextCursor);
+              }}
+            />
+          ) : undefined
+        }
+      />
     </AgentPage>
   );
 }

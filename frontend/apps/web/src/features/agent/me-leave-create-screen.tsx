@@ -95,106 +95,123 @@ export function AgentLeaveCreateScreen() {
 
   return (
     <AgentPage title={t('leaveNewBtn')} backTo="/me/leave" backLabel={t('back')}>
-      <div className="flex flex-col gap-5">
-        {/* Leave type picker */}
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-semibold text-text">{t('leaveType')}</span>
-          {typesQ.isLoading ? (
-            <StateView kind="loading" title={t('loading')} />
-          ) : typesQ.isError ? (
-            <StateView
-              kind="error"
-              title={t('errorGeneric')}
-              onRetry={() => void typesQ.refetch()}
-            />
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {types.map((lt) => (
-                <button
-                  key={lt.id}
-                  type="button"
-                  onClick={() => {
-                    setTypeId(lt.id);
-                    setFieldErr((prev) => ({ ...prev, type: undefined }));
-                  }}
-                  className={[
-                    'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                    typeId === lt.id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-surface text-text-2 hover:bg-muted',
-                  ].join(' ')}
-                >
-                  {lt.name}
-                </button>
-              ))}
+      <div className="max-w-2xl">
+        <div className="rounded-xl border border-border bg-surface p-6">
+          <div className="flex flex-col gap-5">
+            {/* Leave type picker */}
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-text-2">
+                {t('leaveType')}
+                <span className="ml-0.5 text-bad">*</span>
+              </span>
+              {typesQ.isLoading ? (
+                <StateView kind="loading" title={t('loading')} />
+              ) : typesQ.isError ? (
+                <StateView
+                  kind="error"
+                  title={t('errorGeneric')}
+                  onRetry={() => void typesQ.refetch()}
+                />
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {types.map((lt) => (
+                    <button
+                      key={lt.id}
+                      type="button"
+                      onClick={() => {
+                        setTypeId(lt.id);
+                        setFieldErr((prev) => ({ ...prev, type: undefined }));
+                      }}
+                      className={[
+                        'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                        typeId === lt.id
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border bg-surface text-text-2 hover:bg-muted',
+                      ].join(' ')}
+                    >
+                      {lt.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {fieldErr.type && (
+                <p role="alert" className="text-xs text-bad-tx">
+                  {fieldErr.type}
+                </p>
+              )}
             </div>
-          )}
-          {fieldErr.type && (
-            <p role="alert" className="text-xs text-bad-tx">
-              {fieldErr.type}
-            </p>
-          )}
-        </div>
 
-        {/* Date range */}
-        <div className="grid grid-cols-2 gap-4">
-          <FormField
-            label={t('leaveStartDate')}
-            htmlFor="leave-start"
-            error={fieldErr.start}
-            required
-          >
-            <Input
-              id="leave-start"
-              type="date"
-              value={start}
-              onChange={(e) => {
-                setStart(e.target.value);
-                setFieldErr((prev) => ({ ...prev, start: undefined }));
-              }}
-            />
-          </FormField>
+            {/* Date range */}
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                label={t('leaveStartDate')}
+                htmlFor="leave-start"
+                error={fieldErr.start}
+                required
+              >
+                <Input
+                  id="leave-start"
+                  type="date"
+                  value={start}
+                  onChange={(e) => {
+                    setStart(e.target.value);
+                    setFieldErr((prev) => ({ ...prev, start: undefined }));
+                  }}
+                />
+              </FormField>
 
-          <FormField label={t('leaveEndDate')} htmlFor="leave-end" error={fieldErr.end} required>
-            <Input
-              id="leave-end"
-              type="date"
-              value={end}
-              min={start || undefined}
-              onChange={(e) => {
-                setEnd(e.target.value);
-                setFieldErr((prev) => ({ ...prev, end: undefined }));
-              }}
-            />
-          </FormField>
-        </div>
+              <FormField
+                label={t('leaveEndDate')}
+                htmlFor="leave-end"
+                error={fieldErr.end}
+                required
+              >
+                <Input
+                  id="leave-end"
+                  type="date"
+                  value={end}
+                  min={start || undefined}
+                  onChange={(e) => {
+                    setEnd(e.target.value);
+                    setFieldErr((prev) => ({ ...prev, end: undefined }));
+                  }}
+                />
+              </FormField>
+            </div>
 
-        {/* Reason */}
-        <FormField label={t('leaveReason')} htmlFor="leave-reason" error={fieldErr.reason} required>
-          <textarea
-            id="leave-reason"
-            value={reason}
-            rows={3}
-            onChange={(e) => {
-              setReason(e.target.value);
-              setFieldErr((prev) => ({ ...prev, reason: undefined }));
-            }}
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 resize-none"
-          />
-        </FormField>
+            {/* Reason */}
+            <FormField
+              label={t('leaveReason')}
+              htmlFor="leave-reason"
+              error={fieldErr.reason}
+              required
+            >
+              <textarea
+                id="leave-reason"
+                value={reason}
+                rows={3}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  setFieldErr((prev) => ({ ...prev, reason: undefined }));
+                }}
+                className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 resize-none"
+              />
+            </FormField>
 
-        {/* Actions */}
-        <div className="flex items-center gap-3">
-          <Button variant="primary" disabled={create.isPending} onClick={() => void onSubmit()}>
-            {t('leaveSubmitBtn')}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={create.isPending}
-            onClick={() => void navigate({ to: '/me/leave' })}
-          >
-            {t('cancel')}
-          </Button>
+            {/* Footer actions */}
+            <div className="flex items-center gap-3 border-t border-border pt-5">
+              <Button variant="primary" disabled={create.isPending} onClick={() => void onSubmit()}>
+                {t('leaveSubmitBtn')}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={create.isPending}
+                onClick={() => void navigate({ to: '/me/leave' })}
+              >
+                {t('cancel')}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </AgentPage>

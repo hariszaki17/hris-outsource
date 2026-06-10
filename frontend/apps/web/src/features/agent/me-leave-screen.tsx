@@ -14,7 +14,7 @@ import {
 } from '@swp/api-client/e6';
 import type { StatusTone } from '@swp/design-tokens';
 import { formatDate } from '@swp/shared';
-import { Button, StateView, StatusBadge } from '@swp/ui';
+import { Button, type Column, DataTable, EmptyState, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
 import { CalendarDays } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -39,35 +39,6 @@ function leaveStatusTone(status: LeaveStatus): StatusTone {
 }
 
 // ---------------------------------------------------------------------------
-// Row
-// ---------------------------------------------------------------------------
-
-function LeaveRow({ item }: { item: LeaveRequest }) {
-  const { t } = useTranslation('agent');
-  const tone = leaveStatusTone(item.status as LeaveStatus);
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[14px] font-semibold text-text">
-            {item.leave_type_name ?? item.leave_type_id}
-          </span>
-          <span className="text-[12px] text-text-2">
-            {formatDate(item.start_date)} &rarr; {formatDate(item.end_date)}
-          </span>
-          {item.reason && (
-            <span className="mt-1 text-[12px] text-text-3 line-clamp-1">{item.reason}</span>
-          )}
-        </div>
-        <StatusBadge dot tone={tone}>
-          {t(`leave.status.${item.status}`, { defaultValue: item.status })}
-        </StatusBadge>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -86,35 +57,88 @@ export function AgentLeaveScreen() {
 
   const balance = (balanceQ.data?.data as { pool_remaining?: number } | undefined)?.pool_remaining;
 
+  // ---------------------------------------------------------------------------
+  // Columns
+  // ---------------------------------------------------------------------------
+
+  const columns: Column<LeaveRequest>[] = [
+    {
+      id: 'type',
+      header: t('leaveType'),
+      width: 200,
+      cell: (r) => (
+        <span className="font-medium text-text">{r.leave_type_name ?? r.leave_type_id}</span>
+      ),
+    },
+    {
+      id: 'dateRange',
+      header: t('leaveDateRange'),
+      width: 220,
+      cell: (r) => (
+        <span className="text-sm text-text-2 tabular-nums">
+          {formatDate(r.start_date)} &rarr; {formatDate(r.end_date)}
+        </span>
+      ),
+    },
+    {
+      id: 'reason',
+      header: t('leaveReason'),
+      cell: (r) =>
+        r.reason ? (
+          <span className="text-sm text-text-2 line-clamp-1">{r.reason}</span>
+        ) : (
+          <span className="text-sm text-text-3 italic">—</span>
+        ),
+    },
+    {
+      id: 'status',
+      header: t('leaveStatus'),
+      width: 160,
+      cell: (r) => (
+        <StatusBadge dot tone={leaveStatusTone(r.status as LeaveStatus)}>
+          {t(`leave.status.${r.status}`, { defaultValue: r.status })}
+        </StatusBadge>
+      ),
+    },
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   return (
     <AgentPage
       title={t('leaveTitle')}
       actions={
-        <Button variant="primary" asChild size="sm">
-          <Link to="/me/leave/new">{t('leaveNewBtn')}</Link>
-        </Button>
+        <>
+          {/* Balance chip — shown in the actions area alongside the CTA button */}
+          {balance !== undefined && (
+            <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
+              <CalendarDays size={14} className="text-primary" aria-hidden />
+              <span className="text-[13px] text-text-2">
+                {t('leaveBalance', { days: balance })}
+              </span>
+            </div>
+          )}
+          <Button variant="primary" asChild size="sm">
+            <Link to="/me/leave/new">{t('leaveNewBtn')}</Link>
+          </Button>
+        </>
       }
     >
-      {/* Balance chip */}
-      {balance !== undefined && (
-        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3">
-          <CalendarDays size={16} className="text-primary" aria-hidden />
-          <span className="text-[13px] text-text-2">{t('leaveBalance', { days: balance })}</span>
-        </div>
+      {listQ.isError ? (
+        <StateView kind="error" title={t('errorGeneric')} onRetry={() => void listQ.refetch()} />
+      ) : (
+        <DataTable
+          aria-label={t('leaveTitle')}
+          columns={columns}
+          data={items}
+          getRowId={(r) => r.id}
+          isLoading={listQ.isLoading}
+          skeletonRows={6}
+          empty={<EmptyState variant="fresh" title={t('leaveEmpty')} />}
+        />
       )}
-
-      {/* List */}
-      <div className="flex flex-col gap-3">
-        {listQ.isLoading ? (
-          <StateView kind="loading" title={t('loading')} />
-        ) : listQ.isError ? (
-          <StateView kind="error" title={t('errorGeneric')} onRetry={() => void listQ.refetch()} />
-        ) : items.length === 0 ? (
-          <StateView kind="empty" title={t('leaveEmpty')} />
-        ) : (
-          items.map((item) => <LeaveRow key={item.id} item={item} />)
-        )}
-      </div>
     </AgentPage>
   );
 }

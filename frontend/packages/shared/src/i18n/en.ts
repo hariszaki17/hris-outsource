@@ -2951,6 +2951,9 @@ export const en: Messages = {
     dashHours: '{{count}} h',
     dashUnread: '{{count}} unread notifications',
     dashQuickClock: 'Clock In Now',
+    recent7dPresent: 'Present (7d)',
+    recent7dLate: 'Late (7d)',
+    recent7dAbsent: 'Absent (7d)',
     // Clock (/me/attendance)
     clockTitle: 'Attendance',
     clockedInAt: 'Clocked in at {{time}}',

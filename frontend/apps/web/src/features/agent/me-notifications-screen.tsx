@@ -7,6 +7,9 @@
  * Unread rows (read_at == null) styled distinctly via NotifCard `unread` prop; clicking
  * marks the notification read. "Mark all read" sits in the AgentPage `actions` header slot.
  *
+ * Layout: a single rounded panel (border bg-surface) with divide-y rows — NOT separate
+ * bordered mobile cards with gaps. Full-width console design system per AgentPage.
+ *
  * F10.1 refs: NT-1, NT-2, NT-4, NT-5, NT-6.
  */
 import {
@@ -17,7 +20,7 @@ import {
   useMarkNotificationRead,
 } from '@swp/api-client/e10';
 import { formatInstant } from '@swp/shared';
-import { Button, NotifCard, StateView, useToast } from '@swp/ui';
+import { Button, EmptyState, NotifCard, StateView, useToast } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { notifKindIcon } from '../e10-reporting/e10-shared.tsx';
@@ -69,7 +72,7 @@ export function AgentNotificationsScreen() {
 
   return (
     <AgentPage title={t('notifTitle')} actions={headerActions}>
-      {/* Unread summary chip */}
+      {/* Unread summary — only shown when there are unread items */}
       {unreadCount > 0 && (
         <p className="text-[13px] text-text-2">{t('notifUnread', { count: unreadCount })}</p>
       )}
@@ -79,9 +82,14 @@ export function AgentNotificationsScreen() {
       ) : list.isError ? (
         <StateView kind="error" title={t('errorGeneric')} onRetry={() => void list.refetch()} />
       ) : items.length === 0 ? (
-        <StateView kind="empty" title={t('notifEmpty')} />
+        <EmptyState
+          variant="fresh"
+          title={t('notifEmpty', { defaultValue: 'Tidak ada notifikasi' })}
+        />
       ) : (
-        <div className="flex flex-col gap-3">
+        /* Single panel — cards strip their own outer border via className; the panel
+           provides the shared border + bg, and divide-y supplies per-row separators. */
+        <div className="overflow-hidden rounded-xl border border-border bg-surface divide-y divide-border-soft">
           {items.map((n) => (
             <NotifCard
               key={n.id}
@@ -91,6 +99,13 @@ export function AgentNotificationsScreen() {
               time={formatInstant(n.created_at, { dateStyle: 'medium', timeStyle: 'short' })}
               unread={!n.read_at}
               onClick={n.read_at ? undefined : () => void onMarkOne(n.id)}
+              /* Strip the card's own outer border so the panel border + divide-y govern
+                 all edges. Unread cards keep their left-4 primary accent. */
+              className={
+                n.read_at
+                  ? 'rounded-none border-0'
+                  : 'rounded-none border-0 border-l-4 border-primary'
+              }
             />
           ))}
         </div>

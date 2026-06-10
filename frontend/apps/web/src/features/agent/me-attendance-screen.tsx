@@ -2,11 +2,11 @@ import { getCurrentCoords } from '@/lib/geolocation.ts';
 /**
  * /me/attendance — Agent web clock-in/out + own attendance history (F5.1 / F5.6 self surface).
  *
- * Web port of apps/mobile/app/(app)/attendance.tsx (docs/eng/AGENT-WEB-ACCESS.md §5). GPS via the
- * browser Geolocation API (lib/geolocation.ts); out-of-geofence override mirrors mobile; photo is
- * deferred (photo_id stays unwired). The server resolves the agent from the JWT principal — no
- * employee_id is sent. History below is the agent's own records (server self-filtered); each row
- * links to file a correction within the 7-day window.
+ * Web port of apps/mobile/app/(app)/attendance.tsx (docs/eng/AGENT-WEB-ACCESS.md §5), built to
+ * the console's web layout: title band + a clock panel + a DataTable history (NOT mobile card
+ * stacks). GPS via the browser Geolocation API (lib/geolocation.ts); out-of-geofence override
+ * mirrors mobile; photo deferred. The server resolves the agent from the JWT principal — no
+ * employee_id is sent. Each history row links to file a correction (7-day window).
  */
 import { ApiError } from '@swp/api-client';
 import {
@@ -19,9 +19,18 @@ import {
 } from '@swp/api-client/e5';
 import type { StatusTone } from '@swp/design-tokens';
 import { formatInstant } from '@swp/shared';
-import { Button, ConfirmDialog, StateView, StatusBadge, useToast } from '@swp/ui';
+import {
+  Button,
+  type Column,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  StateView,
+  StatusBadge,
+  useToast,
+} from '@swp/ui';
 import { useNavigate } from '@tanstack/react-router';
-import { Clock, Fingerprint, MapPin } from 'lucide-react';
+import { Fingerprint, LogIn, LogOut, MapPin } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AgentPage } from './agent-page.tsx';
@@ -58,7 +67,6 @@ export function AgentAttendanceScreen() {
   const clockIn = useClockIn();
   const clockOut = useClockOut();
   const [busy, setBusy] = useState(false);
-  // Out-of-geofence confirm dialog state (carries the distance/radius for the message).
   const [geofencePrompt, setGeofencePrompt] = useState<{ distance: string; radius: string } | null>(
     null,
   );
@@ -69,9 +77,9 @@ export function AgentAttendanceScreen() {
   // check_out_at but no check_in_at either — it must NOT count as open.
   const open = items.find((a) => a.check_in_at && !a.check_out_at);
 
-  function handleClockError(e: unknown, onForce?: () => void) {
+  function handleClockError(e: unknown) {
     if (e instanceof ApiError) {
-      if (e.code === 'OUT_OF_GEOFENCE' && onForce) {
+      if (e.code === 'OUT_OF_GEOFENCE') {
         setGeofencePrompt({
           distance: String(e.fields?.distance_m ?? '?'),
           radius: String(e.fields?.radius_m ?? '?'),
@@ -116,7 +124,7 @@ export function AgentAttendanceScreen() {
         await list.refetch();
         toast({ tone: 'success', title: t('successIn') });
       } catch (e) {
-        handleClockError(e, () => undefined);
+        handleClockError(e);
       }
     } finally {
       setBusy(false);
@@ -147,68 +155,111 @@ export function AgentAttendanceScreen() {
 
   const pending = busy || clockIn.isPending || clockOut.isPending;
 
+  const columns: Column<Attendance>[] = [
+    {
+      id: 'date',
+      header: t('clockTitle'),
+      width: 200,
+      cell: (r) => <span className="font-medium text-text">{dateOf(r.check_in_at)}</span>,
+    },
+    {
+      id: 'in',
+      header: t('in'),
+      width: 120,
+      cell: (r) => (
+        <span className="text-sm text-text-2 tabular-nums">{timeOf(r.check_in_at)}</span>
+      ),
+    },
+    {
+      id: 'out',
+      header: t('out'),
+      width: 120,
+      cell: (r) => (
+        <span className="text-sm text-text-2 tabular-nums">{timeOf(r.check_out_at)}</span>
+      ),
+    },
+    {
+      id: 'status',
+      header: t('historyTitle'),
+      width: 160,
+      cell: (r) => (
+        <StatusBadge dot tone={attendanceStatusTone(r.status)}>
+          {t(`attendance.status.${r.status}`, { ns: 'common', defaultValue: r.status })}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: 'action',
+      header: '',
+      width: 120,
+      align: 'right',
+      cell: (r) => (
+        <button
+          type="button"
+          className="text-sm font-medium text-primary hover:underline"
+          onClick={() =>
+            navigate({
+              to: '/me/correction',
+              search: { attendanceId: r.id, date: r.check_in_at ?? r.shift_start_at ?? '' },
+            })
+          }
+        >
+          {t('fileCorrection')}
+        </button>
+      ),
+    },
+  ];
+
   return (
     <AgentPage title={t('clockTitle')}>
-      {/* Clock card */}
-      <div className="rounded-xl border border-border bg-surface p-6">
-        <div className="flex items-center gap-2 text-text-3">
-          <Fingerprint size={16} aria-hidden />
-          <span className="text-[12px]">{t('clockTitle')}</span>
-        </div>
-        <p className="mt-2 text-[18px] font-semibold text-text">
-          {open ? t('clockedInAt', { time: timeOf(open.check_in_at) }) : t('notClockedIn')}
-        </p>
-        <div className="mt-4">
-          <Button
-            variant="primary"
-            disabled={pending}
-            onClick={() => (open ? void doClockOut() : void doClockIn(false))}
+      {/* Clock panel */}
+      <div className="flex items-center justify-between gap-6 rounded-xl border border-border bg-surface p-6">
+        <div className="flex items-center gap-4">
+          <div
+            className={[
+              'flex size-12 items-center justify-center rounded-full',
+              open ? 'bg-ok-bg text-ok-tx' : 'bg-surface-2 text-text-3',
+            ].join(' ')}
           >
-            {pending ? t('acquiring') : open ? t('clockOut') : t('clockIn')}
-          </Button>
+            <Fingerprint className="size-6" aria-hidden />
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[12px] text-text-3">{t('clockTitle')}</span>
+            <span className="text-[18px] font-semibold text-text">
+              {open ? t('clockedInAt', { time: timeOf(open.check_in_at) }) : t('notClockedIn')}
+            </span>
+          </div>
         </div>
+        <Button
+          variant="primary"
+          size="lg"
+          disabled={pending}
+          onClick={() => (open ? void doClockOut() : void doClockIn(false))}
+        >
+          {open ? (
+            <LogOut className="size-4" aria-hidden />
+          ) : (
+            <LogIn className="size-4" aria-hidden />
+          )}
+          {pending ? t('acquiring') : open ? t('clockOut') : t('clockIn')}
+        </Button>
       </div>
 
       {/* History */}
       <div className="flex flex-col gap-3">
-        <h2 className="text-[15px] font-semibold text-text">{t('historyTitle')}</h2>
-        {list.isLoading ? (
-          <StateView kind="loading" title={t('loading')} />
-        ) : list.isError ? (
+        <h2 className="text-[15px] font-bold text-text">{t('historyTitle')}</h2>
+        {list.isError ? (
           <StateView kind="error" title={t('errorGeneric')} onRetry={() => void list.refetch()} />
-        ) : items.length === 0 ? (
-          <StateView kind="empty" title={t('historyEmpty')} />
         ) : (
-          items.map((a) => (
-            <div key={a.id} className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[14px] font-semibold text-text">{dateOf(a.check_in_at)}</span>
-                <StatusBadge dot tone={attendanceStatusTone(a.status)}>
-                  {t(`attendance.status.${a.status}`, { ns: 'common', defaultValue: a.status })}
-                </StatusBadge>
-              </div>
-              <div className="mt-1 flex items-center gap-1.5 text-[12px] text-text-2">
-                <Clock size={13} aria-hidden />
-                {t('in')} {timeOf(a.check_in_at)}
-                {a.check_out_at ? ` · ${t('out')} ${timeOf(a.check_out_at)}` : ''}
-              </div>
-              <button
-                type="button"
-                className="mt-3 text-[12px] font-semibold text-primary hover:underline"
-                onClick={() =>
-                  navigate({
-                    to: '/me/correction',
-                    search: {
-                      attendanceId: a.id,
-                      date: a.check_in_at ?? a.shift_start_at ?? '',
-                    },
-                  })
-                }
-              >
-                {t('fileCorrection')}
-              </button>
-            </div>
-          ))
+          <DataTable
+            aria-label={t('historyTitle')}
+            columns={columns}
+            data={items}
+            getRowId={(r) => r.id}
+            isLoading={list.isLoading}
+            skeletonRows={6}
+            empty={<EmptyState variant="fresh" title={t('historyEmpty')} />}
+          />
         )}
       </div>
 

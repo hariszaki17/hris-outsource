@@ -83,7 +83,7 @@ export function AgentOvertimeCreateScreen() {
 
   return (
     <AgentPage title={t('otNewBtn')} backTo="/me/overtime" backLabel={t('back')}>
-      <form onSubmit={(e) => void onSubmit(e)} noValidate>
+      <form onSubmit={(e) => void onSubmit(e)} noValidate className="max-w-2xl">
         <div className="rounded-xl border border-border bg-surface p-6">
           <FormSection>
             {/* Work date */}

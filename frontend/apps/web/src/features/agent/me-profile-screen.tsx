@@ -70,7 +70,7 @@ export function AgentProfileScreen() {
 
   return (
     <AgentPage title={t('profileTitle')}>
-      <div className="rounded-xl border border-border bg-surface p-5">
+      <div className="max-w-2xl rounded-xl border border-border bg-surface p-6">
         <div className="flex flex-col gap-4">
           {/* Name — read-only (statutory field) */}
           <FormField label={t('profileName')} htmlFor="profile-name">
@@ -88,20 +88,33 @@ export function AgentProfileScreen() {
           </FormField>
 
           {/* Address — agent-editable */}
-          <FormField label={t('profileAddress')} htmlFor="profile-address" span={2}>
+          <FormField label={t('profileAddress')} htmlFor="profile-address">
             <textarea
               id="profile-address"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               rows={3}
-              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full resize-y rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
           </FormField>
 
           {/* "pending HR approval" note — shown once a request has been submitted */}
           {create.isSuccess && <p className="text-sm text-text-2">{t('profileChangePending')}</p>}
 
-          <div className="flex justify-end">
+          {/* Footer: Cancel + Save */}
+          <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+            <Button
+              variant="secondary"
+              disabled={create.isPending}
+              onClick={() => {
+                if (emp) {
+                  setPhone(emp.phone ?? '');
+                  setAddress(emp.address ?? '');
+                }
+              }}
+            >
+              {t('cancel')}
+            </Button>
             <Button variant="primary" disabled={create.isPending} onClick={() => void onSave()}>
               {t('profileSave')}
             </Button>

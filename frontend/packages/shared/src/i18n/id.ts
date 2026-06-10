@@ -2969,6 +2969,9 @@ export const id = {
     dashHours: '{{count}} jam',
     dashUnread: '{{count}} notifikasi belum dibaca',
     dashQuickClock: 'Absen Sekarang',
+    recent7dPresent: 'Hadir (7 hari)',
+    recent7dLate: 'Terlambat (7 hari)',
+    recent7dAbsent: 'Absen (7 hari)',
     // Clock (/me/attendance)
     clockTitle: 'Absensi',
     clockedInAt: 'Masuk pukul {{time}}',

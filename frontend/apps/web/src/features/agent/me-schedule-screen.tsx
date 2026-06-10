@@ -65,52 +65,63 @@ function formatWeekRange(monday: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// DayCard — one row per day of the week
+// DayRow — one divided row per day inside the weekly panel
 // ---------------------------------------------------------------------------
 
-interface DayCardProps {
+interface DayRowProps {
   iso: string; // YYYY-MM-DD
   entry?: ScheduleEntry;
 }
 
-function DayCard({ iso, entry }: DayCardProps) {
+function DayRow({ iso, entry }: DayRowProps) {
   const { t } = useTranslation('agent');
 
-  let detail: string;
+  let statusLabel: string;
   let tone: 'neutral' | 'info' | 'ok' | 'warn' | 'bad' = 'neutral';
+  let shiftTime: string | null = null;
 
   if (!entry) {
-    detail = t('scheduleNoShift');
+    statusLabel = t('scheduleNoShift');
     tone = 'neutral';
   } else if (entry.is_day_off) {
-    detail = t('scheduleDayOff');
+    statusLabel = t('scheduleDayOff');
     tone = 'neutral';
   } else if (entry.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE) {
-    detail = t('scheduleCancelledLeave');
+    statusLabel = t('scheduleCancelledLeave');
     tone = 'info';
   } else {
-    detail = `${entry.start_time ?? '—'}–${entry.end_time ?? '—'}`;
+    shiftTime = `${entry.start_time ?? '—'}–${entry.end_time ?? '—'}`;
+    statusLabel = shiftTime;
     tone = 'ok';
   }
 
   return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex items-center justify-between gap-3">
-        {/* Left: weekday + date */}
-        <div className="flex min-w-[48px] flex-col gap-0.5">
-          <span className="text-[12px] text-text-3">{formatDayAbbr(iso)}</span>
-          <span className="text-[16px] font-semibold text-text">{formatDayNum(iso)}</span>
-        </div>
+    <div className="flex items-center gap-4 px-5 py-4">
+      {/* Left: weekday abbr + date number */}
+      <div className="flex w-12 shrink-0 flex-col gap-0.5">
+        <span className="text-[11px] uppercase tracking-wide text-text-3">
+          {formatDayAbbr(iso)}
+        </span>
+        <span className="text-[17px] font-semibold leading-tight text-text">
+          {formatDayNum(iso)}
+        </span>
+      </div>
 
-        {/* Right: shift details + company */}
-        <div className="flex flex-1 items-center justify-end gap-3">
-          {entry?.company_name ? (
-            <span className="truncate text-[12px] text-text-3">{entry.company_name}</span>
-          ) : null}
-          <StatusBadge dot tone={tone}>
-            {detail}
-          </StatusBadge>
-        </div>
+      {/* Middle: company name (if any) */}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {entry?.company_name ? (
+          <span className="truncate text-[13px] font-medium text-text">{entry.company_name}</span>
+        ) : null}
+        {shiftTime ? (
+          <span className="text-[12px] tabular-nums text-text-3">{shiftTime}</span>
+        ) : null}
+      </div>
+
+      {/* Right: status badge */}
+      <div className="shrink-0">
+        <StatusBadge dot tone={tone}>
+          {statusLabel}
+        </StatusBadge>
       </div>
     </div>
   );
@@ -148,37 +159,45 @@ export function AgentScheduleScreen() {
   const entries: ScheduleEntry[] = (body as { data?: ScheduleEntry[] } | undefined)?.data ?? [];
   const byDate = (iso: string) => entries.find((e) => e.work_date === iso);
 
+  // ---- Week nav — goes in the AgentPage `actions` slot ----
+  const weekNav = (
+    <>
+      <Button variant="ghost" size="sm" onClick={prevWeek} aria-label={t('schedulePrevWeek')}>
+        <ChevronLeft size={16} aria-hidden />
+      </Button>
+      <span className="min-w-[160px] text-center text-[13px] font-medium text-text">
+        {formatWeekRange(monday)}
+      </span>
+      <Button variant="ghost" size="sm" onClick={nextWeek} aria-label={t('scheduleNextWeek')}>
+        <ChevronRight size={16} aria-hidden />
+      </Button>
+    </>
+  );
+
   return (
-    <AgentPage title={t('scheduleTitle')}>
-      {/* Week navigation */}
-      <div className="flex items-center justify-between gap-2">
-        <Button variant="ghost" onClick={prevWeek} aria-label={t('schedulePrevWeek')}>
-          <ChevronLeft size={16} aria-hidden />
-          <span className="sr-only">{t('schedulePrevWeek')}</span>
-        </Button>
-
-        <span className="text-[14px] font-medium text-text">{formatWeekRange(monday)}</span>
-
-        <Button variant="ghost" onClick={nextWeek} aria-label={t('scheduleNextWeek')}>
-          <ChevronRight size={16} aria-hidden />
-          <span className="sr-only">{t('scheduleNextWeek')}</span>
-        </Button>
+    <AgentPage title={t('scheduleTitle')} actions={weekNav}>
+      {/* Weekly schedule panel — one panel, rows divided by a hairline */}
+      <div className="rounded-xl border border-border bg-surface">
+        {q.isLoading ? (
+          <div className="p-6">
+            <StateView kind="loading" title={t('loading')} />
+          </div>
+        ) : q.isError ? (
+          <div className="p-6">
+            <StateView kind="error" title={t('errorGeneric')} onRetry={() => void q.refetch()} />
+          </div>
+        ) : entries.length === 0 && days.every((d) => !byDate(d)) ? (
+          <div className="p-6">
+            <StateView kind="empty" title={t('scheduleEmpty')} />
+          </div>
+        ) : (
+          <div className="divide-y divide-border-soft">
+            {days.map((iso) => (
+              <DayRow key={iso} iso={iso} entry={byDate(iso)} />
+            ))}
+          </div>
+        )}
       </div>
-
-      {/* States */}
-      {q.isLoading ? (
-        <StateView kind="loading" title={t('loading')} />
-      ) : q.isError ? (
-        <StateView kind="error" title={t('errorGeneric')} onRetry={() => void q.refetch()} />
-      ) : entries.length === 0 && days.every((d) => !byDate(d)) ? (
-        <StateView kind="empty" title={t('scheduleEmpty')} />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {days.map((iso) => (
-            <DayCard key={iso} iso={iso} entry={byDate(iso)} />
-          ))}
-        </div>
-      )}
     </AgentPage>
   );
 }

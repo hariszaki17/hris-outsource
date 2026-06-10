@@ -12,10 +12,17 @@ import {
   useListOvertime,
   useWithdrawOvertime,
 } from '@swp/api-client/e7';
-import type { StatusTone } from '@swp/design-tokens';
 import { formatDate } from '@swp/shared';
-import { Button, StateView, StatusBadge, useToast } from '@swp/ui';
-import { useNavigate } from '@tanstack/react-router';
+import {
+  Button,
+  type Column,
+  DataTable,
+  EmptyState,
+  StateView,
+  StatusBadge,
+  useToast,
+} from '@swp/ui';
+import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { overtimeStatusTone } from '../e7-overtime/overtime-shared.tsx';
 import { AgentPage } from './agent-page.tsx';
@@ -38,8 +45,8 @@ function isPending(status: OvertimeStatus): boolean {
 
 export function AgentOvertimeScreen() {
   const { t } = useTranslation('agent');
+  const { t: tOt } = useTranslation('overtime');
   const { toast } = useToast();
-  const navigate = useNavigate();
 
   const list = useListOvertime({ limit: 20 });
   const confirm = useConfirmOvertime();
@@ -68,101 +75,99 @@ export function AgentOvertimeScreen() {
     }
   }
 
+  const columns: Column<Overtime>[] = [
+    {
+      id: 'date',
+      header: t('otWorkDate'),
+      width: 140,
+      cell: (r) => <span className="font-medium text-text">{formatDate(r.work_date)}</span>,
+    },
+    {
+      id: 'time',
+      header: t('otTimeRange'),
+      width: 160,
+      cell: (r) => (
+        <span className="text-sm text-text-2 tabular-nums">
+          {r.planned_start_time ?? '—'} – {r.planned_end_time ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'reason',
+      header: t('otReason'),
+      cell: (r) =>
+        r.reason ? (
+          <span className="line-clamp-2 text-sm text-text-2">{r.reason}</span>
+        ) : (
+          <span className="text-sm italic text-text-3">—</span>
+        ),
+    },
+    {
+      id: 'status',
+      header: t('otStatus'),
+      width: 200,
+      cell: (r) => (
+        <StatusBadge dot tone={overtimeStatusTone(r.status)}>
+          {tOt(`status.${r.status}`, { defaultValue: r.status })}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: 'actions',
+      header: '',
+      width: 200,
+      align: 'right',
+      cell: (r) => {
+        const pending = isPending(r.status);
+        const confirmBusy = confirm.isPending && confirm.variables?.id === r.id;
+        const withdrawBusy = withdraw.isPending && withdraw.variables?.id === r.id;
+        const busy = confirmBusy || withdrawBusy;
+
+        if (!pending) return null;
+
+        return (
+          <div className="flex items-center justify-end gap-2">
+            {r.status === OvertimeStatus.PENDING_AGENT_CONFIRM && (
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                onClick={() => void onConfirm(r.id)}
+              >
+                {t('otConfirm')}
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void onWithdraw(r.id)}>
+              {t('otWithdraw')}
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <AgentPage
       title={t('otTitle')}
       actions={
-        <Button variant="primary" onClick={() => void navigate({ to: '/me/overtime/new' })}>
-          {t('otNewBtn')}
+        <Button variant="primary" asChild size="sm">
+          <Link to="/me/overtime/new">{t('otNewBtn')}</Link>
         </Button>
       }
     >
-      <div className="flex flex-col gap-3">
-        {list.isLoading ? (
-          <StateView kind="loading" title={t('loading')} />
-        ) : list.isError ? (
-          <StateView kind="error" title={t('errorGeneric')} onRetry={() => void list.refetch()} />
-        ) : items.length === 0 ? (
-          <StateView kind="empty" title={t('otEmpty')} />
-        ) : (
-          items.map((it) => (
-            <OvertimeCard
-              key={it.id}
-              item={it}
-              tone={overtimeStatusTone(it.status)}
-              pending={isPending(it.status)}
-              onConfirm={onConfirm}
-              onWithdraw={onWithdraw}
-              confirmBusy={confirm.isPending && confirm.variables?.id === it.id}
-              withdrawBusy={withdraw.isPending && withdraw.variables?.id === it.id}
-            />
-          ))
-        )}
-      </div>
+      {list.isError ? (
+        <StateView kind="error" title={t('errorGeneric')} onRetry={() => void list.refetch()} />
+      ) : (
+        <DataTable
+          aria-label={t('otTitle')}
+          columns={columns}
+          data={items}
+          getRowId={(r) => r.id}
+          isLoading={list.isLoading}
+          skeletonRows={6}
+          empty={<EmptyState variant="fresh" title={t('otEmpty')} />}
+        />
+      )}
     </AgentPage>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Card
-// ---------------------------------------------------------------------------
-
-interface OvertimeCardProps {
-  item: Overtime;
-  tone: StatusTone;
-  pending: boolean;
-  onConfirm: (id: string) => Promise<void>;
-  onWithdraw: (id: string) => Promise<void>;
-  confirmBusy: boolean;
-  withdrawBusy: boolean;
-}
-
-function OvertimeCard({
-  item,
-  tone,
-  pending,
-  onConfirm,
-  onWithdraw,
-  confirmBusy,
-  withdrawBusy,
-}: OvertimeCardProps) {
-  const { t } = useTranslation('agent');
-  const { t: tOt } = useTranslation('overtime');
-  const busy = confirmBusy || withdrawBusy;
-
-  return (
-    <div className="rounded-xl border border-border bg-surface p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-[14px] font-semibold text-text">{formatDate(item.work_date)}</span>
-        <StatusBadge dot tone={tone}>
-          {tOt(`status.${item.status}`, { defaultValue: item.status })}
-        </StatusBadge>
-      </div>
-
-      {(item.planned_start_time || item.planned_end_time) && (
-        <p className="mt-1 text-[12px] text-text-2">
-          {item.planned_start_time ?? '—'} – {item.planned_end_time ?? '—'}
-        </p>
-      )}
-
-      {item.reason ? (
-        <p className="mt-1 text-[12px] text-text-3 line-clamp-2">{item.reason}</p>
-      ) : null}
-
-      {(item.status === OvertimeStatus.PENDING_AGENT_CONFIRM || pending) && (
-        <div className="mt-3 flex items-center gap-2">
-          {item.status === OvertimeStatus.PENDING_AGENT_CONFIRM && (
-            <Button variant="primary" disabled={busy} onClick={() => void onConfirm(item.id)}>
-              {t('otConfirm')}
-            </Button>
-          )}
-          {pending && (
-            <Button variant="secondary" disabled={busy} onClick={() => void onWithdraw(item.id)}>
-              {t('otWithdraw')}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
