@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Mobile MVP (Agent App)
+milestone: v1.0
+milestone_name: milestone
 status: completed
-stopped_at: Phase 20 complete — milestone v1.2 CLOSED
-last_updated: "2026-06-08T00:00:00.000Z"
-last_activity: "2026-06-08 — Phase 17 (leave request) COMPLETE, full-stack. Rebased onto latest backend (feat/backend-impl 97e7a6e: E6 leave grant-lot + Kuota), then built agent leave create→submit aligned with the grant-lot ledger: submitTx refactor (shared Submit/Create reserve core), CheckOverlappingLeave + CountLeaveDurationDays queries, validation order INVALID_DATE_RANGE→MISSING_REQUIRED_DOCUMENT→OVERLAPPING_LEAVE→BACKDATED_LEAVE→QUOTA_EXCEEDED, agent self-scope on List/Get/Balance, routes split (reads admit agent; agent-write group POST /leave-requests/:submit/:cancel). 427 tests green. FE: /leave list + /leave-new form (type chips, dates, reason) + More reworked into a feature menu. Also hardened my-attendance for the E5 true-absence model (check_in_at nullable). Ran pnpm gen (api-client gen is gitignored) to fix stale e6 barrel (leave-balances). Deferred: attachment upload, doc-required types, allows_backdated column. Next: Phase 18 — overtime (backend NEW)."
+stopped_at: context exhaustion at 75% (2026-06-10)
+last_updated: "2026-06-10T05:50:37.715Z"
+last_activity: 2026-06-08 — Phase 20 complete; agent profile self-read + change-request. Milestone v1.2 CLOSED.
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 5
-  completed_plans: 8
-  percent: 100
+  total_phases: 2
+  completed_phases: 0
+  total_plans: 2
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -35,6 +35,7 @@ Progress: [██████████] 100% (8/8 phases)
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 3
 - Average duration: ~35min
 - Total execution time: ~1.75 hours
@@ -100,6 +101,7 @@ Progress: [██████████] 100% (8/8 phases)
 ### Decisions
 
 Full log in PROJECT.md Key Decisions. Recent:
+
 - Scope = FE-used endpoints only (`.planning/reference/fe-endpoint-inventory.md` is the contract).
 - No server-side OpenAPI codegen (oapi-codegen lacks 3.1 support) — hand-written handlers + Go contract tests.
 - Full-stack Playwright E2E (real BE + ephemeral Postgres); exhaustive per Gherkin AC.
@@ -246,6 +248,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-06-05T09:23:15.352Z
-Stopped at: Completed 11-e10-reporting/11-04-PLAN.md
+Last session: 2026-06-10T05:50:37.710Z
+Stopped at: context exhaustion at 75% (2026-06-10)
 Resume file: None

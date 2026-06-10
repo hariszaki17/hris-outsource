@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-10T05:58:10Z",
+  "phase": "",
+  "phase_name": "",
+  "phase_dir": "",
+  "plan": 1,
+  "task": 7,
+  "total_tasks": 9,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "Plan F5.6 feature scope", "status": "done"},
+    {"id": 2, "name": "Add FlagManualEntry to domain model", "status": "done"},
+    {"id": 3, "name": "Add CreateManualAttendance SQL query", "status": "done"},
+    {"id": 4, "name": "Add sqlc-generated types", "status": "done"},
+    {"id": 5, "name": "Add repo interface + impl + mapping", "status": "done"},
+    {"id": 6, "name": "Add ManualCreate service method", "status": "done"},
+    {"id": 7, "name": "Add handler + DTO + route registration", "status": "done"}
+  ],
+  "remaining_tasks": [
+    {"id": 8, "name": "Add backend tests for manual attendance", "status": "not_started"},
+    {"id": 9, "name": "Add frontend manual-attendance modal + trigger + i18n", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "Route POST /attendance:manual-create in admin/leader group", "rationale": "Same RBAC scope as verify/reject endpoints"},
+    {"decision": "Always MANUAL_ENTRY flag + PENDING verification", "rationale": "Manual entries need explicit verification, never auto-approved"},
+    {"decision": "Bypass geofence for manual entries", "rationale": "HR fills in times directly, no GPS involved"},
+    {"decision": "Reuse GetActivePlacement + GetTodaySchedule on AttendanceRepository", "rationale": "Avoid circular dependency with ClockRepository"},
+    {"decision": "check_out >= check_in validation in service layer", "rationale": "Business rule MR-7: physical impossibility"}
+  ],
+  "uncommitted_files": [
+    "backend/internal/domain/attendance/attendance.go",
+    "backend/db/queries/attendance/attendance.sql",
+    "backend/internal/repository/sqlc/querier.go",
+    "backend/internal/repository/sqlc/attendance.sql.go",
+    "backend/internal/service/attendance/attendance_service.go",
+    "backend/internal/repository/attendance/attendance_repo.go",
+    "backend/internal/repository/attendance/mapping.go",
+    "backend/internal/handler/attendance/attendance_dto.go",
+    "backend/internal/handler/attendance/attendance_handler.go",
+    "backend/internal/server/server.go"
+  ],
+  "next_action": "Add CreateManualAttendance to fakeAttendanceRepo in testkit + handler tests",
+  "context_notes": "Backend all compiles clean. Tests + frontend remaining. deepseek-reasoner model incompatible with Workflow subagents — implement directly. Use absolute paths in python scripts."
+}
