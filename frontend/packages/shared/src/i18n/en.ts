@@ -2942,6 +2942,13 @@ export const en: Messages = {
     save: 'Save',
     submit: 'Submit',
     back: 'Back',
+    // Generic table-column headers
+    colDate: 'Date',
+    colStatus: 'Status',
+    leaveDateRange: 'Date range',
+    leaveStatus: 'Status',
+    otTimeRange: 'Time',
+    otStatus: 'Status',
     // Dashboard (/me)
     dashGreeting: 'Hi, {{name}}',
     dashTodayShift: "Today's Shift",

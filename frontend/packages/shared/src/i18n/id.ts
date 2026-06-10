@@ -2960,6 +2960,13 @@ export const id = {
     save: 'Simpan',
     submit: 'Kirim',
     back: 'Kembali',
+    // Generic table-column headers
+    colDate: 'Tanggal',
+    colStatus: 'Status',
+    leaveDateRange: 'Rentang Tanggal',
+    leaveStatus: 'Status',
+    otTimeRange: 'Jam',
+    otStatus: 'Status',
     // Dashboard (/me)
     dashGreeting: 'Halo, {{name}}',
     dashTodayShift: 'Shift Hari Ini',

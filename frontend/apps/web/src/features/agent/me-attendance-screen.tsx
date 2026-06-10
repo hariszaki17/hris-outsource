@@ -158,7 +158,7 @@ export function AgentAttendanceScreen() {
   const columns: Column<Attendance>[] = [
     {
       id: 'date',
-      header: t('clockTitle'),
+      header: t('colDate'),
       width: 200,
       cell: (r) => <span className="font-medium text-text">{dateOf(r.check_in_at)}</span>,
     },
@@ -180,7 +180,7 @@ export function AgentAttendanceScreen() {
     },
     {
       id: 'status',
-      header: t('historyTitle'),
+      header: t('colStatus'),
       width: 160,
       cell: (r) => (
         <StatusBadge dot tone={attendanceStatusTone(r.status)}>
@@ -191,12 +191,12 @@ export function AgentAttendanceScreen() {
     {
       id: 'action',
       header: '',
-      width: 120,
+      width: 150,
       align: 'right',
       cell: (r) => (
         <button
           type="button"
-          className="text-sm font-medium text-primary hover:underline"
+          className="whitespace-nowrap text-sm font-medium text-primary hover:underline"
           onClick={() =>
             navigate({
               to: '/me/correction',
