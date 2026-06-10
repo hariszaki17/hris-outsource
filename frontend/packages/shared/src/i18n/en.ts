@@ -1939,6 +1939,18 @@ export const en: Messages = {
     manualShiftEnd: 'Shift End Time',
     manualBack: 'Back',
     manualPageError: 'Failed to load data',
+    manualPlacementSummary: 'Placement Summary',
+    manualSummaryEmpty: 'Select an employee to see placement & schedule',
+    manualGuidelineTitle: 'Guidelines',
+    manualGuidelineBody:
+      'Manual attendance is used when an agent cannot check in themselves. Make sure check-in matches the shift schedule; check-out is optional. Add a note explaining the manual entry.',
+    manualNoPlacementTitle: 'No active placement',
+    manualNoPlacementBody:
+      'This employee has no active placement on the selected date. You can still create attendance, but double-check the employee and date — attendance without a placement will not be linked to any client, site, or schedule.',
+    manualExistingTitle: 'Attendance already exists',
+    manualExistingBody:
+      'An attendance record for this employee on that date was already created automatically by the system and is awaiting verification/correction. No manual entry needed — open the record to verify or correct it.',
+    manualExistingCta: 'View & Correct Attendance',
   },
   corrections: {
     title: 'Attendance Corrections',

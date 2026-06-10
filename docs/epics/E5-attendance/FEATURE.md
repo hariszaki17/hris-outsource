@@ -244,10 +244,10 @@ HR/Shift-Leader creates attendance record for any employee who forgot clock-in o
 **Page-based flow** (full-page form, not a modal):
 1. **Employee search** — type-ahead search selects target employee
 2. **Date picker** — select attendance date
-3. **Autofill** — server resolves placement + today's schedule (GET `:manual-autofill`); shows company, site, position, schedule times
+3. **Autofill** — server resolves placement + today's schedule + any **existing attendance record** (GET `:manual-autofill`); shows company, site, position, schedule times in a right-column summary card
 4. **Enter times** — check-in (required) + check-out (optional) datetime-local inputs
 5. **Optional note** — free-text reason
-6. **Submit** — POST `:manual-create`; redirects to attendance dashboard
+6. **Submit** — POST `:manual-create`; redirects to attendance dashboard. *If a record already exists for the employee + date (e.g. the absence-sweep's `ABSENT`/`PENDING` row), the form disables create and links to verify/correct it instead (MR-14).*
 
 **Business rules:**
 - **MR-1:** server resolves employee's active placement; rejects with `422 NO_ACTIVE_PLACEMENT` if none.
@@ -263,8 +263,10 @@ HR/Shift-Leader creates attendance record for any employee who forgot clock-in o
 - **MR-11:** `NOTE` optional, stored as `note` text.
 - **MR-12:** `created_by` set from JWT principal of the creating user (HR/SL), stored on `attendance.created_by`.
 - **MR-13:** shift leader scope: SL can create attendance only for employees whose active placement belongs to the SL's own company; `422 OUT_OF_SCOPE` if violated.
+- **MR-14:** autofill also returns any **existing attendance** for the employee + date (`existing_attendance_id`/`_status`/`_verification_status`); when present the web form disables create and steers to verify/correct it (F5.3/F5.4) — avoiding duplicate rows.
+- **MR-15:** autofill `422 NO_ACTIVE_PLACEMENT` is a **non-blocking informational warning** in the web form (re-validate employee/date), not a hard error; create still re-validates per MR-1. Genuine network/5xx → blocking error with retry.
 
-**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position, service line) + today's schedule (schedule_id, shift_start_at, shift_end_at) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement.
+**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position, service line) + today's schedule (schedule_id, shift_start_at, shift_end_at) + existing-attendance fields (existing_attendance_id, existing_attendance_status, existing_verification_status) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement. Placement resolution: `lifecycle_status IN (ACTIVE, EXPIRING, EXTENDED)` whose term covers the date (`end_date IS NULL` = open-ended PKWTT).
 
 ```mermaid
 flowchart TD
@@ -272,13 +274,16 @@ flowchart TD
     H1 --> H2[Select date]
     H2 --> H3[Autofill: GET :manual-autofill]
     subgraph SYS_AF[Server: autofill]
-        H3 --> AF1{Active placement?}
+        H3 --> AF1{Active placement covering date?}
         AF1 -- No --> AF2[422 NO_ACTIVE_PLACEMENT]
-        AF1 -- Yes --> AF3[Resolve schedule for date]
-        AF3 --> AF4[Return placement + schedule info]
+        AF1 -- Yes --> AF3[Resolve schedule + existing attendance for date]
+        AF3 --> AF4[Return placement + schedule + existing-attendance info]
     end
+    AF2 -. non-blocking warning .-> H4
     AF4 --> H4[HR reviews placement/schedule]
-    H4 --> H5[Enter check-in time + optional check-out / note]
+    H4 --> HX{Existing attendance record?}
+    HX -- Yes --> HXa[Disable create; link to verify/correct F5.3/F5.4]
+    HX -- No --> H5[Enter check-in time + optional check-out / note]
     H5 --> H6[Submit POST :manual-create]
     subgraph SYS[Server: create]
         H6 --> S1{SL creating outside own company?}
@@ -306,6 +311,8 @@ flowchart TD
 - ✅ Page-based flow, not modal — form has enough fields to warrant full page (employee search, date, placement card, schedule card, times, note, submit).
 - ✅ No `attendance_code_id` on manual entry — no code picker; the `MANUAL_ENTRY` flag covers the classification.
 - ✅ `created_by` traced from JWT principal — enables audit trail of who manually overrode clock-in.
+- ✅ *(2026-06-10)* Autofill surfaces existing attendance + steers to verify/correct — the absence-sweep already creates `ABSENT`/`PENDING` rows for scheduled shifts, so manual create is reserved for unscheduled/unprocessed gaps (MR-14).
+- ✅ *(2026-06-10)* No-placement on autofill is a non-blocking warning; placement window includes `EXPIRING`/`EXTENDED` and open-ended (PKWTT) terms (MR-1, MR-15).
 - ✅ PRD: [manual-attendance.md](prds/manual-attendance.md).
 
 ---

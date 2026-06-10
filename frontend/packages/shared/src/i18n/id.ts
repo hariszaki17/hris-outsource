@@ -1952,6 +1952,18 @@ export const id = {
     manualShiftEnd: 'Jam Selesai Shift',
     manualBack: 'Kembali',
     manualPageError: 'Gagal memuat data',
+    manualPlacementSummary: 'Ringkasan Penempatan',
+    manualSummaryEmpty: 'Pilih karyawan untuk melihat penempatan & jadwal',
+    manualGuidelineTitle: 'Panduan',
+    manualGuidelineBody:
+      'Kehadiran manual dipakai bila agen tidak dapat absen sendiri. Pastikan jam masuk sesuai jadwal shift; jam keluar opsional. Tambahkan catatan untuk alasan input manual.',
+    manualNoPlacementTitle: 'Tidak ada penempatan aktif',
+    manualNoPlacementBody:
+      'Karyawan ini tidak memiliki penempatan aktif pada tanggal yang dipilih. Anda tetap dapat membuat kehadiran, tetapi periksa kembali karyawan dan tanggalnya — kehadiran tanpa penempatan tidak akan terkait ke klien, lokasi, atau jadwal mana pun.',
+    manualExistingTitle: 'Kehadiran sudah ada',
+    manualExistingBody:
+      'Data kehadiran untuk karyawan ini pada tanggal tersebut sudah dibuat otomatis oleh sistem dan menunggu verifikasi/koreksi. Tidak perlu membuat manual — buka catatan tersebut untuk memverifikasi atau mengoreksi.',
+    manualExistingCta: 'Lihat & Koreksi Kehadiran',
   },
   corrections: {
     title: 'Koreksi Kehadiran',

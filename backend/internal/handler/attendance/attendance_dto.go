@@ -53,6 +53,12 @@ type autofillResponse struct {
 	ScheduleID   *string `json:"schedule_id"`
 	ShiftStartAt *string `json:"shift_start_at"`
 	ShiftEndAt   *string `json:"shift_end_at"`
+	// Existing attendance for this employee+date (null when none). When present the
+	// cron already created a record (e.g. ABSENT/PENDING) — the form redirects the
+	// admin to verify/correct it instead of creating a duplicate.
+	ExistingAttendanceID   *string `json:"existing_attendance_id"`
+	ExistingAttendanceStat *string `json:"existing_attendance_status"`
+	ExistingVerification   *string `json:"existing_verification_status"`
 }
 // clockInRequest is the openapi ClockInRequest. wfo is a *bool so an omitted value
 // applies the spec default (true); employee_id is intentionally omitted — the agent is

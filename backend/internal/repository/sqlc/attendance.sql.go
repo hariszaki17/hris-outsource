@@ -591,10 +591,21 @@ SELECT
     cs.name      AS site_name,
     pos.name     AS position_name,
     se.id       AS schedule_id,
-    ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
-    (((se.work_date + se.end_time::time)
+    -- COALESCE to an epoch sentinel so sqlc types these NOT NULL (time.Time) and the
+    -- row scan never sees a raw NULL on no-schedule days. The repo gates shift-time use
+    -- on schedule_id != NULL, so the sentinel value is never read.
+    COALESCE(((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz,
+             'epoch'::timestamptz)::timestamptz AS shift_start_at,
+    COALESCE((((se.work_date + se.end_time::time)
         + (CASE WHEN se.cross_midnight THEN interval '1 day' ELSE interval '0' END))
-        AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_end_at
+        AT TIME ZONE 'Asia/Jakarta')::timestamptz,
+             'epoch'::timestamptz)::timestamptz AS shift_end_at,
+    -- Existing attendance for this employee on this date (cron auto-creates ABSENT
+    -- rows for missed scheduled shifts). When present, the manual form steers the
+    -- admin to verify/correct it instead of creating a duplicate.
+    COALESCE(att.id, '')                  AS existing_attendance_id,
+    COALESCE(att.status, '')              AS existing_attendance_status,
+    COALESCE(att.verification_status, '') AS existing_verification_status
 FROM placements p
 JOIN employees e  ON e.id = p.employee_id
 JOIN client_companies cc ON cc.id = p.client_company_id
@@ -609,10 +620,23 @@ LEFT JOIN schedule_entries se
     AND se.status <> 'CANCELLED_BY_LEAVE'
     AND se.start_time IS NOT NULL
     AND se.end_time   IS NOT NULL
+LEFT JOIN LATERAL (
+    SELECT a.id, a.status, a.verification_status
+    FROM attendance a
+    WHERE a.employee_id = p.employee_id
+      AND a.deleted_at IS NULL
+      AND (
+        (se.id IS NOT NULL AND a.schedule_id = se.id)
+        OR (a.check_in_at AT TIME ZONE 'Asia/Jakarta')::date = $1::date
+      )
+    ORDER BY a.check_in_at DESC
+    LIMIT 1
+) att ON true
 WHERE p.employee_id = $2
   AND p.deleted_at IS NULL
-  AND ($1::date BETWEEN p.start_date AND p.end_date)
-  AND p.status = 'ACTIVE'
+  AND p.start_date <= $1::date
+  AND (p.end_date IS NULL OR $1::date <= p.end_date)
+  AND p.lifecycle_status IN ('ACTIVE', 'EXPIRING', 'EXTENDED')
 LIMIT 1
 `
 
@@ -622,18 +646,21 @@ type GetManualAutofillDataParams struct {
 }
 
 type GetManualAutofillDataRow struct {
-	PlacementID     string
-	ClientCompanyID string
-	ServiceLineName string
-	SiteID          string
-	PositionID      string
-	EmployeeName    string
-	CompanyName     string
-	SiteName        *string
-	PositionName    *string
-	ScheduleID      *string
-	ShiftStartAt    time.Time
-	ShiftEndAt      time.Time
+	PlacementID                string
+	ClientCompanyID            string
+	ServiceLineName            string
+	SiteID                     string
+	PositionID                 string
+	EmployeeName               string
+	CompanyName                string
+	SiteName                   *string
+	PositionName               *string
+	ScheduleID                 *string
+	ShiftStartAt               time.Time
+	ShiftEndAt                 time.Time
+	ExistingAttendanceID       string
+	ExistingAttendanceStatus   string
+	ExistingVerificationStatus string
 }
 
 // Resolve the active placement + today's schedule for manual attendance (F5.6).
@@ -655,6 +682,9 @@ func (q *Queries) GetManualAutofillData(ctx context.Context, arg GetManualAutofi
 		&i.ScheduleID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
+		&i.ExistingAttendanceID,
+		&i.ExistingAttendanceStatus,
+		&i.ExistingVerificationStatus,
 	)
 	return i, err
 }

@@ -490,6 +490,12 @@ type ManualAutofillData struct {
 	ScheduleID      *string
 	ShiftStartAt    *time.Time
 	ShiftEndAt      *time.Time
+	// Existing attendance for this employee+date (cron auto-creates ABSENT rows for
+	// missed scheduled shifts). nil when none — otherwise the manual form steers the
+	// admin to verify/correct it instead of creating a duplicate.
+	ExistingAttendanceID   *string
+	ExistingAttendanceStat *string // status: PRESENT|LATE|INCOMPLETE|ABSENT|ON_LEAVE
+	ExistingVerification   *string // verification_status: AUTO_APPROVED|PENDING|VERIFIED|REJECTED|ESCALATED
 }
 
 // ManualCreate creates an attendance record for any employee (HR/SL, F5.6).

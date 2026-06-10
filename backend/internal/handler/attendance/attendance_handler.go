@@ -225,6 +225,9 @@ func (h *Handler) ManualAutofill(w http.ResponseWriter, r *http.Request) {
 		ScheduleID:   data.ScheduleID,
 		ShiftStartAt: rfc3339Ptr(data.ShiftStartAt),
 		ShiftEndAt:   rfc3339Ptr(data.ShiftEndAt),
+		ExistingAttendanceID:   data.ExistingAttendanceID,
+		ExistingAttendanceStat: data.ExistingAttendanceStat,
+		ExistingVerification:   data.ExistingVerification,
 	}})
 }
 

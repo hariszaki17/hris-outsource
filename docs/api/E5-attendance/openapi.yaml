@@ -1757,6 +1757,22 @@ components:
         shift_end_at:
           type: [string, "null"]
           format: date-time
+        existing_attendance_id:
+          type: [string, "null"]
+          pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+          description: |
+            Non-null when an attendance record already exists for this employee on the
+            given date (the absence-sweep cron auto-creates ABSENT/PENDING rows for missed
+            scheduled shifts). The client steers the admin to verify/correct this record
+            instead of creating a duplicate.
+        existing_attendance_status:
+          type: [string, "null"]
+          enum: [PRESENT, LATE, INCOMPLETE, ABSENT, ON_LEAVE, null]
+          description: Status of the existing attendance record (null when none).
+        existing_verification_status:
+          type: [string, "null"]
+          enum: [AUTO_APPROVED, PENDING, VERIFIED, REJECTED, ESCALATED, null]
+          description: Verification status of the existing attendance record (null when none).
 
     # -----------------------------------------------------------------------
     # Clock-in / clock-out request & response

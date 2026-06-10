@@ -11,6 +11,8 @@ Agents who forget to clock in/out, whose GPS fails to capture, or whose mobile a
 
 HR and shift leaders need a **manual entry path** to create an attendance record for any employee on any date, bypassing GPS/geofence entirely. This is a **traceable override** — the record carries the `MANUAL_ENTRY` flag and `created_by` so the audit trail is clear.
 
+**Important interaction with the absence-sweep (F5.2).** A cron auto-creates an `ABSENT` / `PENDING` attendance row for every *scheduled* shift that ends (plus a grace) with no clock-in. So for a scheduled day, an attendance record usually **already exists** — manually creating another would duplicate it. The manual page therefore resolves any existing record for the chosen employee + date and, when one is found, **steers the admin to verify/correct it** (F5.3 / F5.4) instead of creating a duplicate. Manual creation remains the right path only for **unscheduled** gaps (no schedule → no cron row) or scheduled days the sweep has not yet processed.
+
 ## 2. Goals & non-goals
 
 **Goals**
@@ -40,7 +42,7 @@ HR and shift leaders need a **manual entry path** to create an attendance record
 
 | Ref | Rule | Source |
 |-----|------|--------|
-| MR-1 | Server resolves employee's active placement; rejects `422 NO_ACTIVE_PLACEMENT` if none. | FEATURE.md |
+| MR-1 | Server resolves employee's active placement; rejects `422 NO_ACTIVE_PLACEMENT` if none. **Create** uses the INV-1 active-placement pre-check (`lifecycle_status IN (ACTIVE, EXPIRING, PENDING_START)`). **Autofill** resolves the placement whose term covers the chosen date — `lifecycle_status IN (ACTIVE, EXPIRING, EXTENDED)` and `start_date ≤ date ≤ end_date` with `end_date IS NULL` treated as open-ended (PKWTT). | FEATURE.md |
 | MR-2 | `check_out_at >= check_in_at` required; `400 INVALID_REQUEST` if violated. | FEATURE.md |
 | MR-3 | Always created with `verification_status=PENDING` + `MANUAL_ENTRY` flag. | FEATURE.md |
 | MR-4 | If schedule exists for today, lateness evaluation runs against it (15 min grace); sets `LATE`/`EARLY` flags as applicable. | FEATURE.md |
@@ -53,6 +55,8 @@ HR and shift leaders need a **manual entry path** to create an attendance record
 | MR-11 | Note optional, stored as `note` text. | FEATURE.md |
 | MR-12 | `created_by` set from JWT principal of creating user (HR/SL), stored on `attendance.created_by`. | FEATURE.md |
 | MR-13 | Shift leader can create only for employees whose active placement belongs to the SL's own company; `422 OUT_OF_SCOPE` if violated. | FEATURE.md |
+| MR-14 | Autofill also resolves an **existing attendance record** for the employee + date (matched by the resolved `schedule_id`, else by check-in date) and returns `existing_attendance_id` / `existing_attendance_status` / `existing_verification_status`. When present (typically the absence-sweep's `ABSENT`/`PENDING` row), the web form **disables manual create** and links to verify/correct that record — avoiding duplicates (the partial unique index on `attendance(schedule_id)` would reject a second scheduled row anyway). | F5.2, F5.3, F5.4 |
+| MR-15 | When autofill returns `422 NO_ACTIVE_PLACEMENT`, the web form treats it as a **non-blocking informational warning** ("no active placement on this date — re-check employee and date"), not a hard error. The admin may still attempt submit; the **create** endpoint independently re-validates and rejects per MR-1 if there is genuinely no placement. Genuine fetch failures (network / 5xx) remain a blocking error state with retry. | UX (2026-06-10) |
 
 ## 6. Fields
 
@@ -77,6 +81,9 @@ HR and shift leaders need a **manual entry path** to create an attendance record
 | `schedule_id` | string\|null | Today's schedule ID (null if none) |
 | `shift_start_at` | string\|null | Schedule shift start (null if none) |
 | `shift_end_at` | string\|null | Schedule shift end (null if none) |
+| `existing_attendance_id` | string\|null | Existing attendance record for this employee + date (null if none). Non-null ⇒ steer to verify/correct, not create. |
+| `existing_attendance_status` | string\|null | Status of the existing record: `PRESENT`\|`LATE`\|`INCOMPLETE`\|`ABSENT`\|`ON_LEAVE` (null if none). |
+| `existing_verification_status` | string\|null | Verification status of the existing record: `AUTO_APPROVED`\|`PENDING`\|`VERIFIED`\|`REJECTED`\|`ESCALATED` (null if none). |
 
 ## 7. Gherkin acceptance criteria
 
@@ -217,6 +224,47 @@ Then the response contains:
 Given the employee has an active placement but NO schedule for 2026-06-04
 When HR calls GET /attendance:manual-autofill?employee_id=SWP-EMP-1002&date=2026-06-04
 Then the response contains schedule_id: null, shift_start_at: null, shift_end_at: null
+  And existing_attendance_id: null
+  And the web form shows the placement summary, a non-blocking "no schedule" notice, and an enabled submit
+```
+
+### AC-13: Autofill resolves open-ended (PKWTT) and EXPIRING placements
+
+```gherkin
+Given the employee has one placement with lifecycle_status "EXPIRING" and end_date 2026-06-29
+   Or the employee has one placement with end_date NULL (open-ended PKWTT)
+  And the chosen date falls on/after start_date (and on/before end_date when set)
+When HR calls GET /attendance:manual-autofill for that employee and date
+Then the response resolves that placement (company/site/position/service_line populated)
+  And does NOT return NO_ACTIVE_PLACEMENT
+```
+
+### AC-14: Autofill surfaces an existing attendance record → steer to verify/correct
+
+```gherkin
+Given the employee has an active placement and a schedule for 2026-06-10
+  And the absence-sweep already created an ABSENT/PENDING attendance record (SWP-ATT-3) for that shift
+When HR calls GET /attendance:manual-autofill?employee_id=SWP-EMP-3001&date=2026-06-10
+Then the response contains:
+  | Field                        | Value      |
+  |------------------------------|------------|
+  | schedule_id                  | SWP-SCH-…  |
+  | existing_attendance_id       | SWP-ATT-3  |
+  | existing_attendance_status   | ABSENT     |
+  | existing_verification_status | PENDING    |
+  And the web form disables manual create and shows a "Kehadiran sudah ada" card
+    with a "Lihat & Koreksi Kehadiran" action that opens /attendance/SWP-ATT-3
+```
+
+### AC-15: No-placement autofill is a non-blocking warning, not a fetch error
+
+```gherkin
+Given the employee has NO active placement on the chosen date
+When the web form requests autofill and receives 422 NO_ACTIVE_PLACEMENT
+Then the placement summary shows an informational "no active placement" warning (not the red error state)
+  And submit remains enabled (the create endpoint re-validates per MR-1)
+But when autofill fails with a network or 5xx error
+Then the summary shows the blocking error state with a "Coba lagi" (retry) action
 ```
 
 ## 8. Cases (edge & error)
@@ -231,7 +279,7 @@ Then the response contains schedule_id: null, shift_start_at: null, shift_end_at
 | C-6 | `check_out_at` equals `check_in_at` | Valid (0 minutes worked). |
 | C-7 | SL scope: SL's own employee ID is the target | Allowed — SL can create manual attendance for themselves (but it still goes to PENDING for another HR/leader to verify). |
 | C-8 | Super admin creating for any company | Always allowed (no scope restriction). |
-| C-9 | Already exists for same employee+date+shift? | Not blocked — multiple manual records for the same shift date are technically possible (the attendance table has no unique constraint on employee_id+date). The downstream evaluation (F5.2) and verification (F5.3) handle duplicates via scheduling evaluation rules. HR is expected to self-police. |
+| C-9 | Already exists for same employee+date+shift | Autofill now detects the existing record (MR-14) and the web form **disables create + links to verify/correct it**, so the duplicate is avoided at the UI. For *scheduled* days a second row is also rejected by the partial unique index on `attendance(schedule_id)`. Unscheduled days have no such index, so HR is still expected to self-police repeated unscheduled manual entries on the same date. |
 
 ## 9. Dependencies
 
@@ -239,13 +287,20 @@ Then the response contains schedule_id: null, shift_start_at: null, shift_end_at
 |------------|-----|
 | E3 (Placement) | Resolve employee's active placement for company/site/position/service line. |
 | E4 (Schedule) | Resolve today's schedule for lateness/early evaluation. |
-| E5 F5.2 (Evaluation) | Lateness, early clock-out, and status computation (reused logic). |
+| E5 F5.2 (Evaluation + absence-sweep) | Lateness/status computation; the absence-sweep cron is the source of the pre-existing `ABSENT`/`PENDING` rows the autofill detects (MR-14). |
+| E5 F5.3 (Verification) / F5.4 (Corrections) | Target of the "verify/correct existing record" steer when autofill finds a record (MR-14). |
 | Migration 00046 | `created_by` column on `attendance` table. |
 
 ## 10. Design references
 
 - **Asana C3W — 18 Kehadiran Manual · Buat**: page-based form with employee search, date picker, placement card, schedule card, check-in/out times, note, submit.
 - The frontend screen component is at `frontend/apps/web/src/features/e5-attendance/manual-attendance-create-screen.tsx`.
+- **Layout (2026-06-10):** two-column page modelled on `/client-companies/new` — left column = form section cards (employee + date, check-in/out, note) and footer with cancel/submit; right column = a **"Ringkasan Penempatan"** summary card plus a guideline card. The summary card renders the autofill states:
+  - *No employee selected* → empty hint.
+  - *Loading* → loading text.
+  - *No active placement* (422) → non-blocking amber warning (MR-15).
+  - *Fetch failure* → red error + "Coba lagi" retry (MR-15).
+  - *Resolved* → placement rows + "Jadwal ditemukan" (or "Tidak ada jadwal") and, when a record already exists, a "Kehadiran sudah ada" card with the "Lihat & Koreksi Kehadiran" action (MR-14).
 
 ## 11. Decisions
 
@@ -258,3 +313,6 @@ Then the response contains schedule_id: null, shift_start_at: null, shift_end_at
 | `created_by` traceability? | ✅ Stored on record | JWT principal of the creating user enables audit trail of who manually overrode clock-in. |
 | Geofence bypass? | ✅ Always | Manual entry assumes on-site presence. |
 | Verification status? | ✅ Always PENDING | Another HR/leader must verify; no auto-approve for manual entries. |
+| Steer to verify/correct when a record exists? | ✅ Yes *(2026-06-10)* | The absence-sweep auto-creates `ABSENT`/`PENDING` rows for scheduled shifts, so for scheduled days a record usually already exists. Autofill now returns it (MR-14) and the form disables create + links to verify/correct — avoiding duplicates and matching how admins actually fix missed check-ins. |
+| No-placement = blocking error? | ❌ Non-blocking warning *(2026-06-10)* | Per operator feedback, a missing placement on the chosen date is worth surfacing for re-validation but should not block — the create endpoint still re-validates (MR-1, MR-15). |
+| Autofill placement window | ✅ `(ACTIVE, EXPIRING, EXTENDED)` + date-in-term, open-ended `end_date` *(2026-06-10)* | Open-ended (PKWTT) placements have `end_date IS NULL`; the original `BETWEEN start AND end` excluded them, and `EXPIRING`/`EXTENDED` (e.g. a placement ending soon) are still operationally active. Both are now resolved (MR-1, AC-13). |

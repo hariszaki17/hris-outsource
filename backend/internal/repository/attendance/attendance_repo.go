@@ -234,19 +234,30 @@ func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID s
 		shiftEnd = &se
 	}
 	return svc.ManualAutofillData{
-		PlacementID:  row.PlacementID,
-		CompanyID:    row.ClientCompanyID,
-		ServiceLine:  serviceLine,
-		SiteID:       row.SiteID,
-		PositionID:   row.PositionID,
-		EmployeeName: row.EmployeeName,
-		CompanyName:  row.CompanyName,
-		SiteName:     row.SiteName,
-		PositionName: row.PositionName,
-		ScheduleID:   row.ScheduleID,
-		ShiftStartAt: shiftStart,
-		ShiftEndAt:   shiftEnd,
+		PlacementID:            row.PlacementID,
+		CompanyID:              row.ClientCompanyID,
+		ServiceLine:            serviceLine,
+		SiteID:                 row.SiteID,
+		PositionID:             row.PositionID,
+		EmployeeName:           row.EmployeeName,
+		CompanyName:            row.CompanyName,
+		SiteName:               row.SiteName,
+		PositionName:           row.PositionName,
+		ScheduleID:             row.ScheduleID,
+		ShiftStartAt:           shiftStart,
+		ShiftEndAt:             shiftEnd,
+		ExistingAttendanceID:   emptyToNil(row.ExistingAttendanceID),
+		ExistingAttendanceStat: emptyToNil(row.ExistingAttendanceStatus),
+		ExistingVerification:   emptyToNil(row.ExistingVerificationStatus),
 	}, true, nil
+}
+
+// emptyToNil maps the COALESCE'd empty-string sentinel back to a nil pointer.
+func emptyToNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (r *AttendanceRepo) GetActivePlacement(ctx context.Context, employeeID string) (svc.PlacementInfo, bool, error) {
