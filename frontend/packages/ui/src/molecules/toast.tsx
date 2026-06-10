@@ -9,6 +9,7 @@
  * Zero external deps — React context + setTimeout only.
  */
 
+import { uuid } from '@swp/shared';
 import { CircleCheck, CircleX, Info, LoaderCircle, TriangleAlert, X } from 'lucide-react';
 import {
   type ReactNode,
@@ -201,7 +202,7 @@ export function useToast(): UseToastReturn {
       description?: string;
       duration?: number;
     }): string => {
-      const id = crypto.randomUUID();
+      const id = uuid();
       // queued tone: default to Infinity (no auto-dismiss); others: 5000ms
       const defaultDuration = opts.tone === 'queued' ? Number.POSITIVE_INFINITY : 5000;
       const duration = opts.duration ?? defaultDuration;

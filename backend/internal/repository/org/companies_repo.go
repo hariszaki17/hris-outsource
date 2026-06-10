@@ -34,7 +34,7 @@ func New(pool *db.Pool) *Repository {
 
 // ListClientCompanies returns a page of client companies matching the filter.
 // SiteCount is populated via a secondary CountActiveSitesForCompany query per row.
-// HasLeader and ActivePlacementCount are hardcoded Phase-3 stubs (TODO: Phase-5).
+// HasLeader is derived from shift_leader_assignments. ActivePlacementCount is a Phase-3 stub.
 func (r *Repository) ListClientCompanies(ctx context.Context, f domain.CompanyFilter) ([]domain.ClientCompany, error) {
 	rows, err := r.q.ListClientCompanies(ctx, sqlcgen.ListClientCompaniesParams{
 		Status:          f.Status,
@@ -65,7 +65,7 @@ func (r *Repository) ListClientCompanies(ctx context.Context, f domain.CompanyFi
 			Phone:                row.Phone,
 			Email:                row.Email,
 			Status:               row.Status,
-			HasLeader:            false, // TODO(Phase-5): wire to shift_leader assignment
+			HasLeader:            row.HasLeader, // derived from shift_leader_assignments
 			SiteCount:            int(siteCount),
 			ActivePlacementCount: 0, // TODO(Phase-5): wire to placements table
 			CreatedAt:            row.CreatedAt,
@@ -95,7 +95,7 @@ func (r *Repository) GetCompanyByID(ctx context.Context, id string) (domain.Clie
 		Phone:                row.Phone,
 		Email:                row.Email,
 		Status:               row.Status,
-		HasLeader:            false, // TODO(Phase-5): wire to shift_leader assignment
+		HasLeader:            row.HasLeader, // derived from shift_leader_assignments
 		SiteCount:            int(siteCount),
 		ActivePlacementCount: 0, // TODO(Phase-5): wire to placements table
 		CreatedAt:            row.CreatedAt,

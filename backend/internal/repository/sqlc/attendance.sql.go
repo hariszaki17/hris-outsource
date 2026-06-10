@@ -151,6 +151,200 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 	return i, err
 }
 
+const createManualAttendance = `-- name: CreateManualAttendance :one
+INSERT INTO attendance (
+    employee_id, placement_id, schedule_id, company_id, service_line,
+    site_id, position_id, attendance_code_id,
+    shift_start_at, shift_end_at,
+    check_in_at, check_out_at,
+    lat_in, lng_in, lat_out, lng_out,
+    wfo, is_late, late_minutes, worked_minutes,
+    in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
+    status, verification_status, flags,
+    created_by,
+    created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10,
+    $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20,
+    $21, $22, $23, $24, $25,
+    $26, $27, $28::text[],
+    $29,
+    now(), now()
+) RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
+            site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+            check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+            photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
+            in_geofence, in_distance_m, out_geofence, out_distance_m,
+            geofence_radius_m, status, verification_status, flags, verified_by,
+            verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+            created_by,
+            created_at, updated_at
+`
+
+type CreateManualAttendanceParams struct {
+	EmployeeID         string
+	PlacementID        string
+	ScheduleID         *string
+	CompanyID          string
+	ServiceLine        string
+	SiteID             string
+	PositionID         string
+	AttendanceCodeID   *string
+	ShiftStartAt       *time.Time
+	ShiftEndAt         *time.Time
+	CheckInAt          *time.Time
+	CheckOutAt         *time.Time
+	LatIn              *float64
+	LngIn              *float64
+	LatOut             *float64
+	LngOut             *float64
+	Wfo                bool
+	IsLate             bool
+	LateMinutes        int32
+	WorkedMinutes      *int32
+	InGeofence         *bool
+	InDistanceM        *int32
+	OutGeofence        *bool
+	OutDistanceM       *int32
+	GeofenceRadiusM    int32
+	Status             string
+	VerificationStatus string
+	Flags              []string
+	CreatedBy          *string
+}
+
+type CreateManualAttendanceRow struct {
+	ID                 string
+	EmployeeID         string
+	PlacementID        string
+	ScheduleID         *string
+	CompanyID          string
+	ServiceLine        string
+	SiteID             string
+	PositionID         string
+	AttendanceCodeID   *string
+	ShiftStartAt       *time.Time
+	ShiftEndAt         *time.Time
+	CheckInAt          *time.Time
+	CheckOutAt         *time.Time
+	LatIn              *float64
+	LngIn              *float64
+	LatOut             *float64
+	LngOut             *float64
+	PhotoInID          *string
+	PhotoOutID         *string
+	Wfo                bool
+	IsLate             bool
+	LateMinutes        int32
+	WorkedMinutes      *int32
+	AutoClosed         bool
+	InGeofence         *bool
+	InDistanceM        *int32
+	OutGeofence        *bool
+	OutDistanceM       *int32
+	GeofenceRadiusM    int32
+	Status             string
+	VerificationStatus string
+	Flags              []string
+	VerifiedBy         *string
+	VerifiedAt         *time.Time
+	RejectedBy         *string
+	RejectedAt         *time.Time
+	RejectReason       *string
+	LastCorrectionID   *string
+	CreatedBy          *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// HR/admin creates an attendance record for any agent (F5.6). Bypasses GPS/geofence.
+// id allocated by column DEFAULT. flags includes MANUAL_ENTRY. Service pre-computes
+// is_late, late_minutes, worked_minutes, status, verification_status. created_by is
+// the SWP-EMP-* of the HR/admin who created the record.
+// Returns the full row for the domain mapper.
+func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAttendanceParams) (CreateManualAttendanceRow, error) {
+	row := q.db.QueryRow(ctx, createManualAttendance,
+		arg.EmployeeID,
+		arg.PlacementID,
+		arg.ScheduleID,
+		arg.CompanyID,
+		arg.ServiceLine,
+		arg.SiteID,
+		arg.PositionID,
+		arg.AttendanceCodeID,
+		arg.ShiftStartAt,
+		arg.ShiftEndAt,
+		arg.CheckInAt,
+		arg.CheckOutAt,
+		arg.LatIn,
+		arg.LngIn,
+		arg.LatOut,
+		arg.LngOut,
+		arg.Wfo,
+		arg.IsLate,
+		arg.LateMinutes,
+		arg.WorkedMinutes,
+		arg.InGeofence,
+		arg.InDistanceM,
+		arg.OutGeofence,
+		arg.OutDistanceM,
+		arg.GeofenceRadiusM,
+		arg.Status,
+		arg.VerificationStatus,
+		arg.Flags,
+		arg.CreatedBy,
+	)
+	var i CreateManualAttendanceRow
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.PlacementID,
+		&i.ScheduleID,
+		&i.CompanyID,
+		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
+		&i.AttendanceCodeID,
+		&i.ShiftStartAt,
+		&i.ShiftEndAt,
+		&i.CheckInAt,
+		&i.CheckOutAt,
+		&i.LatIn,
+		&i.LngIn,
+		&i.LatOut,
+		&i.LngOut,
+		&i.PhotoInID,
+		&i.PhotoOutID,
+		&i.Wfo,
+		&i.IsLate,
+		&i.LateMinutes,
+		&i.WorkedMinutes,
+		&i.AutoClosed,
+		&i.InGeofence,
+		&i.InDistanceM,
+		&i.OutGeofence,
+		&i.OutDistanceM,
+		&i.GeofenceRadiusM,
+		&i.Status,
+		&i.VerificationStatus,
+		&i.Flags,
+		&i.VerifiedBy,
+		&i.VerifiedAt,
+		&i.RejectedBy,
+		&i.RejectedAt,
+		&i.RejectReason,
+		&i.LastCorrectionID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAttendance = `-- name: GetAttendance :one
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.service_line, a.site_id, a.position_id, a.attendance_code_id,
@@ -381,6 +575,86 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 		&i.LastCorrectionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getManualAutofillData = `-- name: GetManualAutofillData :one
+SELECT
+    p.id       AS placement_id,
+    p.client_company_id,
+    COALESCE(sl.name, '') AS service_line_name,
+    p.site_id,
+    p.position_id,
+    e.full_name AS employee_name,
+    cc.name      AS company_name,
+    cs.name      AS site_name,
+    pos.name     AS position_name,
+    se.id       AS schedule_id,
+    ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
+    (((se.work_date + se.end_time::time)
+        + (CASE WHEN se.cross_midnight THEN interval '1 day' ELSE interval '0' END))
+        AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_end_at
+FROM placements p
+JOIN employees e  ON e.id = p.employee_id
+JOIN client_companies cc ON cc.id = p.client_company_id
+LEFT JOIN client_sites cs ON cs.id = p.site_id
+LEFT JOIN positions pos   ON pos.id = p.position_id
+LEFT JOIN service_lines sl ON sl.id = p.service_line_id
+LEFT JOIN schedule_entries se
+    ON se.employee_id = p.employee_id
+    AND se.work_date = ($1::date)
+    AND se.deleted_at IS NULL
+    AND se.is_day_off = false
+    AND se.status <> 'CANCELLED_BY_LEAVE'
+    AND se.start_time IS NOT NULL
+    AND se.end_time   IS NOT NULL
+WHERE p.employee_id = $2
+  AND p.deleted_at IS NULL
+  AND ($1::date BETWEEN p.start_date AND p.end_date)
+  AND p.status = 'ACTIVE'
+LIMIT 1
+`
+
+type GetManualAutofillDataParams struct {
+	RefDate    pgtype.Date
+	EmployeeID string
+}
+
+type GetManualAutofillDataRow struct {
+	PlacementID     string
+	ClientCompanyID string
+	ServiceLineName string
+	SiteID          string
+	PositionID      string
+	EmployeeName    string
+	CompanyName     string
+	SiteName        *string
+	PositionName    *string
+	ScheduleID      *string
+	ShiftStartAt    time.Time
+	ShiftEndAt      time.Time
+}
+
+// Resolve the active placement + today's schedule for manual attendance (F5.6).
+// Returns placement details and (if scheduled) the live schedule's shift window.
+// Returns zero rows (pgx.ErrNoRows) when the employee has no active placement.
+func (q *Queries) GetManualAutofillData(ctx context.Context, arg GetManualAutofillDataParams) (GetManualAutofillDataRow, error) {
+	row := q.db.QueryRow(ctx, getManualAutofillData, arg.RefDate, arg.EmployeeID)
+	var i GetManualAutofillDataRow
+	err := row.Scan(
+		&i.PlacementID,
+		&i.ClientCompanyID,
+		&i.ServiceLineName,
+		&i.SiteID,
+		&i.PositionID,
+		&i.EmployeeName,
+		&i.CompanyName,
+		&i.SiteName,
+		&i.PositionName,
+		&i.ScheduleID,
+		&i.ShiftStartAt,
+		&i.ShiftEndAt,
 	)
 	return i, err
 }
@@ -771,6 +1045,143 @@ type VerifyAttendanceRow struct {
 func (q *Queries) VerifyAttendance(ctx context.Context, arg VerifyAttendanceParams) (VerifyAttendanceRow, error) {
 	row := q.db.QueryRow(ctx, verifyAttendance, arg.VerifiedBy, arg.ID)
 	var i VerifyAttendanceRow
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.PlacementID,
+		&i.ScheduleID,
+		&i.CompanyID,
+		&i.ServiceLine,
+		&i.SiteID,
+		&i.PositionID,
+		&i.AttendanceCodeID,
+		&i.ShiftStartAt,
+		&i.ShiftEndAt,
+		&i.CheckInAt,
+		&i.CheckOutAt,
+		&i.LatIn,
+		&i.LngIn,
+		&i.LatOut,
+		&i.LngOut,
+		&i.PhotoInID,
+		&i.PhotoOutID,
+		&i.Wfo,
+		&i.IsLate,
+		&i.LateMinutes,
+		&i.WorkedMinutes,
+		&i.AutoClosed,
+		&i.InGeofence,
+		&i.InDistanceM,
+		&i.OutGeofence,
+		&i.OutDistanceM,
+		&i.GeofenceRadiusM,
+		&i.Status,
+		&i.VerificationStatus,
+		&i.Flags,
+		&i.VerifiedBy,
+		&i.VerifiedAt,
+		&i.RejectedBy,
+		&i.RejectedAt,
+		&i.RejectReason,
+		&i.LastCorrectionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const verifyAttendanceWithTimes = `-- name: VerifyAttendanceWithTimes :one
+UPDATE attendance
+SET verification_status = 'VERIFIED',
+    check_in_at         = $1::timestamptz,
+    check_out_at        = COALESCE($2::timestamptz, check_out_at),
+    status              = COALESCE($3::text, status),
+    is_late             = COALESCE($4::boolean, is_late),
+    late_minutes        = COALESCE($5::integer, late_minutes),
+    verified_by         = $6,
+    verified_at         = now(),
+    updated_at          = now()
+WHERE id = $7
+  AND deleted_at IS NULL
+  AND verification_status IN ('PENDING','ESCALATED')
+RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
+          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
+          in_geofence, in_distance_m, out_geofence, out_distance_m,
+          geofence_radius_m, status, verification_status, flags, verified_by,
+          verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+          created_at, updated_at
+`
+
+type VerifyAttendanceWithTimesParams struct {
+	CheckInAt   time.Time
+	CheckOutAt  *time.Time
+	Status      *string
+	IsLate      *bool
+	LateMinutes *int32
+	VerifiedBy  *string
+	ID          string
+}
+
+type VerifyAttendanceWithTimesRow struct {
+	ID                 string
+	EmployeeID         string
+	PlacementID        string
+	ScheduleID         *string
+	CompanyID          string
+	ServiceLine        string
+	SiteID             string
+	PositionID         string
+	AttendanceCodeID   *string
+	ShiftStartAt       *time.Time
+	ShiftEndAt         *time.Time
+	CheckInAt          *time.Time
+	CheckOutAt         *time.Time
+	LatIn              *float64
+	LngIn              *float64
+	LatOut             *float64
+	LngOut             *float64
+	PhotoInID          *string
+	PhotoOutID         *string
+	Wfo                bool
+	IsLate             bool
+	LateMinutes        int32
+	WorkedMinutes      *int32
+	AutoClosed         bool
+	InGeofence         *bool
+	InDistanceM        *int32
+	OutGeofence        *bool
+	OutDistanceM       *int32
+	GeofenceRadiusM    int32
+	Status             string
+	VerificationStatus string
+	Flags              []string
+	VerifiedBy         *string
+	VerifiedAt         *time.Time
+	RejectedBy         *string
+	RejectedAt         *time.Time
+	RejectReason       *string
+	LastCorrectionID   *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// Approve an exception record AND override check_in/check_out times (HR/SL
+// fills actual times when verifying an ABSENT/INCOMPLETE record). The service
+// reevaluates status/is_late/late_minutes before calling — those override nargs
+// are COALESCEd so they can be left NULL (verify-only, no times mutation).
+func (q *Queries) VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAttendanceWithTimesParams) (VerifyAttendanceWithTimesRow, error) {
+	row := q.db.QueryRow(ctx, verifyAttendanceWithTimes,
+		arg.CheckInAt,
+		arg.CheckOutAt,
+		arg.Status,
+		arg.IsLate,
+		arg.LateMinutes,
+		arg.VerifiedBy,
+		arg.ID,
+	)
+	var i VerifyAttendanceWithTimesRow
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeID,

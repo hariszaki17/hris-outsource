@@ -109,6 +109,8 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+  const [verifyCheckInAt, setVerifyCheckInAt] = useState('');
+  const [verifyCheckOutAt, setVerifyCheckOutAt] = useState('');
 
   const query = useGetAttendance(attendanceId);
   // getAttendanceResponse.data is GetAttendance200 | error unions; GetAttendance200 has { data?: Attendance }
@@ -120,8 +122,17 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
   const isSaving = verifySingle.isPending || rejectSingle.isPending;
 
   function handleVerifyConfirm() {
+    const data: Record<string, string> = {};
+    const needsTimes = record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE;
+    if (needsTimes && verifyCheckInAt) {
+      // datetime-local gives YYYY-MM-DDTHH:mm in local time; append WIB offset explicitly.
+      data.check_in_at = verifyCheckInAt + '+07:00';
+      if (verifyCheckOutAt) {
+        data.check_out_at = verifyCheckOutAt + '+07:00';
+      }
+    }
     verifySingle.mutate(
-      { id: attendanceId, data: {} },
+      { id: attendanceId, data },
       {
         onSuccess: () => {
           setVerifyOpen(false);
@@ -160,21 +171,12 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
         <div className="flex flex-col gap-4">
           <button
             type="button"
-            aria-label={t('backToVerification')}
+            aria-label={t('back')}
             className="flex items-center gap-2 text-[13px] font-medium text-text-2 hover:text-text"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onClick={() =>
-              void (
-                navigate as (o: {
-                  to: string;
-                  search?: Record<string, unknown>;
-                  params?: Record<string, unknown>;
-                }) => void
-              )({ to: '/attendance/verification' })
-            }
+            onClick={() => window.history.back()}
           >
             <ArrowLeft className="size-4" aria-hidden />
-            {t('backToVerification')}
+            {t('back')}
           </button>
           <div className="rounded-xl border border-border bg-surface px-5 py-[18px]">
             <p className="text-[14px] text-text-2">{t('notFound')}</p>
@@ -258,20 +260,11 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
             type="button"
             aria-label={t('back')}
             className="flex size-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onClick={() =>
-              void (
-                navigate as (o: {
-                  to: string;
-                  search?: Record<string, unknown>;
-                  params?: Record<string, unknown>;
-                }) => void
-              )({ to: '/attendance/verification' })
-            }
+            onClick={() => window.history.back()}
           >
             <ArrowLeft className="size-4 text-text-2" aria-hidden />
           </button>
-          <span className="text-[13px] font-medium text-text-2">{t('backToVerification')}</span>
+          <span className="text-[13px] font-medium text-text-2">{t('back')}</span>
         </div>
         {canActOnRecord && (
           <div className="flex items-center gap-2">
@@ -378,11 +371,13 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                     />
                   </span>
                 )}
-                {(record.late_minutes ?? 0) > 0 && (
+                {(record.late_minutes ?? 0) > 0 ? (
                   <span className="text-[11px] text-warn-tx font-medium">
                     {t('lateBy', { minutes: record.late_minutes })}
                   </span>
-                )}
+                ) : record.status === AttendanceStatus.PRESENT || record.status === AttendanceStatus.LATE ? (
+                  <span className="text-[11px] text-ok-tx font-medium">{t('onTime')}</span>
+                ) : null}
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium uppercase tracking-wider text-text-3">
@@ -410,7 +405,7 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                     />
                   </span>
                 )}
-                {record.worked_minutes !== undefined && (
+                {record.worked_minutes != null && (
                   <span className="text-[11px] text-text-2">
                     {t('workedMinutes', { minutes: record.worked_minutes })}
                   </span>
@@ -441,7 +436,7 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                   </StatusBadge>
                 )}
               </div>
-              {record.lat_out !== undefined && record.lng_out !== undefined && (
+              {record.lat_out != null && record.lng_out != null && (
                 <div className="flex flex-col gap-1">
                   <span className="text-[11px] font-medium uppercase tracking-wider text-text-3">
                     {t('checkOutGeo')}
@@ -579,7 +574,10 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
       {/* Verify confirm */}
       <ConfirmDialog
         open={verifyOpen}
-        onOpenChange={setVerifyOpen}
+        onOpenChange={(open) => {
+          setVerifyOpen(open);
+          if (!open) { setVerifyCheckInAt(''); setVerifyCheckOutAt(''); }
+        }}
         icon={CheckCheck}
         tone="neutral"
         title={t('verifyDialogTitle')}
@@ -587,9 +585,39 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
         cancelLabel={t('cancel')}
         confirmLabel={verifySingle.isPending ? t('saving') : t('verifyConfirm')}
         confirmTone="primary"
+        confirmDisabled={verifySingle.isPending || ((record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE) && !verifyCheckInAt)}
         loading={verifySingle.isPending}
         onConfirm={handleVerifyConfirm}
-      />
+      >
+        {(record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE) && (
+          <div className="mt-3 flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="verify-checkin" className="text-[12px] font-medium text-text-2">
+                {t('checkInLabel')}
+              </label>
+              <Input
+                id="verify-checkin"
+                type="datetime-local"
+                value={verifyCheckInAt}
+                onChange={(e) => setVerifyCheckInAt(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="verify-checkout" className="text-[12px] font-medium text-text-2">
+                {t('checkOutLabel')}
+              </label>
+              <Input
+                id="verify-checkout"
+                type="datetime-local"
+                value={verifyCheckOutAt}
+                onChange={(e) => setVerifyCheckOutAt(e.target.value)}
+              />
+            </div>
+            <p className="text-[11px] text-text-3">{t('verifyTimeNote')}</p>
+          </div>
+        )}
+      </ConfirmDialog>
 
       {/* Reject confirm */}
       <ConfirmDialog

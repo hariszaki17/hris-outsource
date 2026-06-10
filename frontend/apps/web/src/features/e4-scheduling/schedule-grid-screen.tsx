@@ -308,7 +308,7 @@ export function ScheduleGridScreen() {
     const isHolidayShift = holidaySet.has(dateIso);
     const timeShort =
       entry.start_time && entry.end_time
-        ? `${entry.start_time.slice(0, 5).replace(':', '')}–${entry.end_time.slice(0, 5).replace(':', '')}`
+        ? `${entry.start_time.slice(0, 5).replace(':', '.')}–${entry.end_time.slice(0, 5).replace(':', '.')}`
         : '';
 
     return (

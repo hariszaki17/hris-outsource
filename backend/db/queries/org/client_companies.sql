@@ -1,27 +1,41 @@
 -- name: ListClientCompanies :many
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
--- Filters: q (ILIKE name), status. service_line and has_leader filters accepted
--- but not applied at DB level (no placements/assignments table in Phase 3).
+-- Filters: q (ILIKE name), status, service_line, has_leader.
 SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
-       status, created_at, updated_at
+       status, created_at, updated_at,
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) AS has_leader
 FROM client_companies
 WHERE deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(q)::text IS NULL OR name ILIKE '%' || sqlc.narg(q)::text || '%')
   AND (sqlc.narg(service_line)::text IS NULL OR TRUE)
-  AND (sqlc.narg(has_leader)::boolean IS NULL OR TRUE)
+  AND (sqlc.narg(has_leader)::boolean IS NULL OR
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) = sqlc.narg(has_leader)::boolean)
   AND (
         sqlc.narg(cursor_created_at)::timestamptz IS NULL
-        OR (created_at, id) < (sqlc.narg(cursor_created_at)::timestamptz, sqlc.narg(cursor_id)::text)
+        OR (client_companies.created_at, client_companies.id) < (sqlc.narg(cursor_created_at)::timestamptz, sqlc.narg(cursor_id)::text)
       )
-ORDER BY created_at DESC, id DESC
+ORDER BY client_companies.created_at DESC, client_companies.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetClientCompanyByID :one
 SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
-       status, created_at, updated_at
+       status, created_at, updated_at,
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) AS has_leader
 FROM client_companies
-WHERE id = sqlc.arg(id)
+WHERE client_companies.id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
 -- name: CreateClientCompany :one

@@ -49,6 +49,7 @@ const (
 	FlagAutoClosed            Flag = "AUTO_CLOSED"
 	FlagAbsent                Flag = "ABSENT"
 	FlagNeedsCodeVerification Flag = "NEEDS_CODE_VERIFICATION"
+	FlagManualEntry           Flag = "MANUAL_ENTRY"
 )
 
 // ServiceLine enumerates the placement service lines carried on the record.
@@ -113,6 +114,8 @@ type Attendance struct {
 	RejectedAt       *time.Time
 	RejectReason     *string
 	LastCorrectionID *string
+
+	CreatedBy *string // SWP-EMP-* of who created the record (nil = system)
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

@@ -368,12 +368,17 @@ func New(d Deps) http.Handler {
 			// COORDINATION POINT: future Phase-6 slices append AFTER this block.
 			// ---------------------------------------------------------------
 
-			// Shift-master reads + ALL schedule ops: super_admin, hr_admin,
-			// shift_leader (leader scope enforced in the service via GuardCompany).
+			// Shift-master reads: super_admin, hr_admin only (SL has no shifts.read).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.Get("/shift-masters", d.Scheduling.ListShiftMasters)
 				r.Get("/shift-masters/{id}", d.Scheduling.GetShiftMaster)
+			})
+
+			// Schedule ops: super_admin, hr_admin, shift_leader (leader scope enforced
+			// in the service via GuardCompany).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.Get("/schedule", d.Scheduling.ListSchedule)
 				r.With(d.Idempotency.Handler).Post("/schedule", d.Scheduling.CreateScheduleEntry)
 				r.With(d.Idempotency.Handler).Patch("/schedule/{id}", d.Scheduling.UpdateScheduleEntry)
@@ -449,6 +454,9 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/attendance:bulk-reject", d.Attendance.BulkReject)
 				r.With(d.Idempotency.Handler).Post("/corrections/{id}:approve", d.Attendance.ApproveCorrection)
 				r.With(d.Idempotency.Handler).Post("/corrections/{id}:reject", d.Attendance.RejectCorrection)
+				// F5.6 — Manual attendance (HR-only).
+				r.Get("/attendance:manual-autofill", d.Attendance.ManualAutofill)
+				r.With(d.Idempotency.Handler).Post("/attendance:manual-create", d.Attendance.ManualCreate)
 			})
 			// ATTENDANCE slice end (07-02 + F5.1 clock). Phase 7+ appends after this line.
 

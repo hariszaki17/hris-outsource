@@ -42,8 +42,8 @@ import {
   Toggle,
 } from '@swp/ui';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { Building2, CalendarClock, CheckCircle2, Clock, MoreVertical, Plus } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { Building2, CalendarClock, CheckCircle2, Clock, Plus } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,6 @@ export function PlacementsScreen() {
   const isShiftLeader = currentUser?.role === 'shift_leader';
 
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
-  const [openMenuPlacementId, setOpenMenuPlacementId] = useState<string | null>(null);
-  const kebabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const expiringOn = Boolean(search.expiring_soon);
 
@@ -196,12 +194,12 @@ export function PlacementsScreen() {
     {
       id: 'liniLayanan',
       header: t('colLiniLayanan'),
-      width: 155,
+      width: undefined,
       cell: (pl) =>
         pl.service_line_name ? (
           <div className="flex items-center gap-[7px]">
             <span className="size-[7px] rounded-full bg-info-tx shrink-0" aria-hidden />
-            <span className="text-[13px] text-text-2">{pl.service_line_name}</span>
+            <span className="whitespace-nowrap text-[13px] text-text-2">{pl.service_line_name}</span>
           </div>
         ) : (
           <span className="text-[13px] text-text-3">—</span>
@@ -241,36 +239,6 @@ export function PlacementsScreen() {
     },
   ];
 
-  // Kebab only for HR/Admin
-  if (!isShiftLeader) {
-    columns.push({
-      id: 'actions',
-      header: '',
-      width: 52,
-      cell: (pl) => {
-        const isOpen = openMenuPlacementId === pl.id;
-        const setRef = (el: HTMLButtonElement | null) => {
-          if (el) kebabRefs.current.set(pl.id, el);
-          else kebabRefs.current.delete(pl.id);
-        };
-        return (
-          <div className="relative flex justify-center">
-            <button
-              ref={setRef}
-              type="button"
-              aria-label={t('rowActions')}
-              aria-expanded={isOpen}
-              aria-haspopup="menu"
-              className="flex size-[30px] items-center justify-center rounded-[7px] text-text-3 hover:bg-surface-2"
-              onClick={() => setOpenMenuPlacementId(isOpen ? null : pl.id)}
-            >
-              <MoreVertical className="size-4" aria-hidden />
-            </button>
-          </div>
-        );
-      },
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // Error state

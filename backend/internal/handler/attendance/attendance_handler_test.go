@@ -15,6 +15,7 @@ package attendance_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
@@ -552,5 +553,213 @@ func TestVerify_Idempotency_KeyReuse_409(t *testing.T) {
 	}
 	if code := errCode(t, rr2); code != "IDEMPOTENCY_KEY_REUSED" {
 		t.Errorf("error.code = %q, want IDEMPOTENCY_KEY_REUSED", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET /attendance:manual-autofill (F5.6) — resolve placement + schedule
+// ---------------------------------------------------------------------------
+
+func TestManualAutofill_Success(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	h.attendance.seedSchedule("SWP-EMP-1002", fixedNow, fixedNow.Add(8*time.Hour))
+	rr := h.do("GET", "/attendance:manual-autofill?employee_id=SWP-EMP-1002&date=2026-06-04", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data missing: %T", body["data"])
+	}
+	for _, k := range []string{"employee_name", "company_name", "service_line", "site_name", "position_name"} {
+		if _, ok := data[k]; !ok {
+			t.Errorf("response missing key: %s", k)
+		}
+	}
+	if data["schedule_id"] == nil {
+		t.Errorf("expected schedule_id to be non-nil, got nil")
+	}
+}
+
+func TestManualAutofill_NoPlacement_404(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	rr := h.do("GET", "/attendance:manual-autofill?employee_id="+empNoPlacement+"&date=2026-06-04", nil)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "NO_ACTIVE_PLACEMENT" {
+		t.Errorf("error.code = %q, want NO_ACTIVE_PLACEMENT", code)
+	}
+}
+
+func TestManualAutofill_MissingParams_400(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	rr := h.do("GET", "/attendance:manual-autofill?employee_id=SWP-EMP-1002", nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "INVALID_REQUEST" {
+		t.Errorf("error.code = %q, want INVALID_REQUEST", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /attendance:manual-create (F5.6) — HR/SL creates attendance manually
+// ---------------------------------------------------------------------------
+
+func TestManualCreate_Success(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "SWP-EMP-0001")
+	ci := fixedNow.Format(time.RFC3339)
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id": empOther,
+		"check_in_at": ci,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data missing/not an object: %T", body["data"])
+	}
+	for _, k := range []string{"id", "employee_id", "placement_id", "company_id", "check_in_at", "verification_status", "flags"} {
+		if _, ok := data[k]; !ok {
+			t.Errorf("response missing key: %s", k)
+		}
+	}
+	if data["employee_id"] != empOther {
+		t.Errorf("employee_id = %v, want %s", data["employee_id"], empOther)
+	}
+	if data["verification_status"] != "PENDING" {
+		t.Errorf("verification_status = %v, want PENDING", data["verification_status"])
+	}
+	flags, ok := data["flags"].([]any)
+	if !ok {
+		t.Fatalf("flags missing/not array: %T", data["flags"])
+	}
+	hasManual := false
+	for _, f := range flags {
+		if f == "MANUAL_ENTRY" {
+			hasManual = true
+			break
+		}
+	}
+	if !hasManual {
+		t.Errorf("flags missing MANUAL_ENTRY: %v", flags)
+	}
+	// Verify created_by is set from the principal.
+	if data["created_by"] != "SWP-EMP-0001" {
+		t.Errorf("created_by = %v, want SWP-EMP-0001", data["created_by"])
+	}
+}
+
+func TestManualCreate_NoActivePlacement_422(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	ci := fixedNow.Format(time.RFC3339)
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id": empNoPlacement,
+		"check_in_at": ci,
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "NO_ACTIVE_PLACEMENT" {
+		t.Errorf("error.code = %q, want NO_ACTIVE_PLACEMENT", code)
+	}
+}
+
+func TestManualCreate_InvalidCheckIn_400(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id": empOther,
+		"check_in_at": "invaliddate",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "INVALID_REQUEST" {
+		t.Errorf("error.code = %q, want INVALID_REQUEST", code)
+	}
+}
+
+func TestManualCreate_CheckOutBeforeCheckIn_422(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+	ci := fixedNow.Format(time.RFC3339)
+	co := fixedNow.Add(-30 * time.Minute).Format(time.RFC3339)
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id":  empOther,
+		"check_in_at":  ci,
+		"check_out_at": co,
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if code := strOf(errObject(t, body)["code"]); code != "INVALID_REQUEST" {
+		t.Errorf("error.code = %q, want INVALID_REQUEST", code)
+	}
+	e := errObject(t, body)
+	fields, ok := e["fields"].(map[string]any)
+	if !ok || fields["check_out_at"] == nil {
+		t.Errorf("error.fields.check_out_at missing: %v", e["fields"])
+	}
+}
+
+func TestManualCreate_MissingEmployeeID_400(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"check_in_at": fixedNow.Format(time.RFC3339),
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "INVALID_REQUEST" {
+		t.Errorf("error.code = %q, want INVALID_REQUEST", code)
+	}
+}
+
+func TestManualCreate_ShiftLeaderOutOfScope_422(t *testing.T) {
+	// SL for cmpOther tries to create attendance for an empOther whose placement
+	// is at cmpLed → OUT_OF_SCOPE.
+	h := newHarness(t, auth.RoleShiftLeader, cmpOther, empLeader)
+	ci := fixedNow.Format(time.RFC3339)
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id": empOther,
+		"check_in_at": ci,
+	})
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "OUT_OF_SCOPE" {
+		t.Errorf("error.code = %q, want OUT_OF_SCOPE", code)
+	}
+}
+
+func TestManualCreate_ShiftLeaderInScope_Success(t *testing.T) {
+	// SL for cmpLed creates attendance for empOther who is at cmpLed → success.
+	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
+	ci := fixedNow.Format(time.RFC3339)
+
+	rr := h.do("POST", "/attendance:manual-create", map[string]any{
+		"employee_id": empOther,
+		"check_in_at": ci,
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data missing/not an object: %T", body["data"])
+	}
+	if data["verification_status"] != "PENDING" {
+		t.Errorf("verification_status = %v, want PENDING", data["verification_status"])
 	}
 }

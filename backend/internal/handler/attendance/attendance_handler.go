@@ -5,10 +5,12 @@ package attendance
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 )
@@ -66,7 +68,7 @@ func (h *Handler) GetAttendance(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[attendanceResponse]{Data: toAttendanceResponse(rec)})
 }
 
-// VerifyAttendance handles POST /attendance/{id}:verify (optional note body).
+// VerifyAttendance handles POST /attendance/{id}:verify (optional body with note + times).
 func (h *Handler) VerifyAttendance(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req verifyRequest
@@ -74,7 +76,7 @@ func (h *Handler) VerifyAttendance(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	rec, err := h.attendance.Verify(r.Context(), id, req.Note)
+	rec, err := h.attendance.Verify(r.Context(), id, req.Note, req.CheckInAt, req.CheckOutAt)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -142,6 +144,88 @@ func (h *Handler) BulkReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeBulk(w, result)
+}
+
+
+// ManualCreate handles POST /attendance:manual-create (F5.6, HR-only).
+func (h *Handler) ManualCreate(w http.ResponseWriter, r *http.Request) {
+	var req manualCreateRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if req.EmployeeID == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"employee_id": "Wajib diisi."}))
+		return
+	}
+	checkInAt, err := time.Parse(time.RFC3339, req.CheckInAt)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"check_in_at": "Format waktu tidak valid (RFC3339)."}))
+		return
+	}
+	var checkOutAt *time.Time
+	if req.CheckOutAt != nil {
+		co, perr := time.Parse(time.RFC3339, *req.CheckOutAt)
+		if perr != nil {
+			httpx.WriteError(w, r, apperr.Invalid(map[string]string{"check_out_at": "Format waktu tidak valid (RFC3339)."}))
+			return
+		}
+		checkOutAt = &co
+	}
+	createdBy := ""
+	if p, ok := auth.PrincipalFrom(r.Context()); ok {
+		createdBy = p.EmployeeID
+	}
+	rec, err := h.attendance.ManualCreate(r.Context(), svc.ManualCreateRequest{
+		EmployeeID: req.EmployeeID,
+		CheckInAt:  checkInAt,
+		CheckOutAt: checkOutAt,
+		Note:       req.Note,
+		CreatedBy:  createdBy,
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, dataResponse[attendanceResponse]{Data: toAttendanceResponse(rec)})
+}
+
+// ManualAutofill handles GET /attendance:manual-autofill?employee_id=xxx&date=yyyy-mm-dd.
+// Returns the employee's active placement info and today's schedule (if any).
+func (h *Handler) ManualAutofill(w http.ResponseWriter, r *http.Request) {
+	empID := r.URL.Query().Get("employee_id")
+	dateStr := r.URL.Query().Get("date")
+	if empID == "" || dateStr == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{
+			"employee_id": "Wajib diisi.",
+			"date":        "Wajib diisi (YYYY-MM-DD).",
+		}))
+		return
+	}
+	refDate, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
+		return
+	}
+	data, found, err := h.attendance.GetManualAutofillData(r.Context(), empID, refDate)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if !found {
+		httpx.WriteError(w, r, apperr.Rule("NO_ACTIVE_PLACEMENT", nil))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, dataResponse[autofillResponse]{Data: autofillResponse{
+		EmployeeName: data.EmployeeName,
+		CompanyName:  data.CompanyName,
+		SiteName:     data.SiteName,
+		PositionName: data.PositionName,
+		ServiceLine:  data.ServiceLine,
+		ScheduleID:   data.ScheduleID,
+		ShiftStartAt: rfc3339Ptr(data.ShiftStartAt),
+		ShiftEndAt:   rfc3339Ptr(data.ShiftEndAt),
+	}})
 }
 
 // writeBulk writes the BulkActionResponse with 200 (≥1 succeeded) or 422 (all failed).

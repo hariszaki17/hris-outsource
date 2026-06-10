@@ -56,6 +56,10 @@ WHERE e.deleted_at IS NULL
         OR e.nip       ILIKE '%' || sqlc.narg(q)::text || '%'
       )
   AND (
+        sqlc.narg(client_company)::text IS NULL
+        OR cc.id = sqlc.narg(client_company)::text
+      )
+  AND (
         sqlc.narg(cursor_created_at)::timestamptz IS NULL
         OR (e.created_at, e.id) < (sqlc.narg(cursor_created_at)::timestamptz, sqlc.narg(cursor_id)::text)
       )

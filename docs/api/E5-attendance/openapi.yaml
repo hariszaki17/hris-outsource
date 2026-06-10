@@ -898,6 +898,158 @@ paths:
         '500': { $ref: '#/components/responses/InternalError' }
 
   # ---------------------------------------------------------------------------
+  # F5.6 — Manual Attendance Entry (HR creates attendance for any employee)
+  # ---------------------------------------------------------------------------
+  /attendance:manual-autofill:
+    get:
+      tags: [attendance-records]
+      operationId: manualAutofill
+      summary: Resolve placement + schedule for manual attendance form.
+      description: |
+        Returns the employee's active placement info and today's schedule (if any)
+        for the manual attendance form (F5.6). Called by the page's autofill step
+        after the HR/SL selects an employee and date.
+
+        **No active placement** → `422 NO_ACTIVE_PLACEMENT`.
+        **Missing params** → `400 INVALID_REQUEST`.
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      parameters:
+        - in: query
+          name: employee_id
+          required: true
+          schema: { type: string, pattern: '^SWP-EMP-[A-Za-z0-9]+$' }
+          description: Target employee's SWP-EMP ID.
+          example: SWP-EMP-1042
+        - in: query
+          name: date
+          required: true
+          schema: { type: string, format: date }
+          description: Attendance date (YYYY-MM-DD) — resolves the schedule for this day.
+          example: '2026-06-04'
+      responses:
+        '200':
+          description: Placement + schedule autofill data.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AutofillResponse' }
+              examples:
+                with_schedule:
+                  summary: Employee with a schedule this day
+                  value:
+                    data:
+                      employee_name: Budi Santoso
+                      company_name: Plaza Senayan
+                      site_name: Plaza Senayan — Lobby Utama
+                      position_name: Petugas Kebersihan
+                      service_line: facility_services
+                      schedule_id: SWP-SCH-22041
+                      shift_start_at: '2026-06-04T07:00:00Z'
+                      shift_end_at: '2026-06-04T15:00:00Z'
+                no_schedule:
+                  summary: Employee with active placement but no schedule this day
+                  value:
+                    data:
+                      employee_name: Budi Santoso
+                      company_name: Plaza Senayan
+                      site_name: Plaza Senayan — Lobby Utama
+                      position_name: Petugas Kebersihan
+                      service_line: facility_services
+                      schedule_id: null
+                      shift_start_at: null
+                      shift_end_at: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: No active placement for employee.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                no_active_placement:
+                  value:
+                    error:
+                      code: NO_ACTIVE_PLACEMENT
+                      message: Karyawan tidak memiliki penempatan aktif.
+                      request_id: req_01J5XKFNOPQRST
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /attendance:manual-create:
+    post:
+      tags: [attendance-records]
+      operationId: createManualAttendance
+      summary: Create an attendance record manually (HR/SL).
+      description: |
+        HR/Super-Admin/Shift-Leader creates an attendance record for an agent who forgot
+        to clock in or whose clock-in/out was not captured. Bypasses GPS/geofence
+        entirely. Requires `Idempotency-Key`.
+
+        **Placement resolution:** server looks up the employee's active placement. If no
+        active placement exists → `422 NO_ACTIVE_PLACEMENT`.
+
+        **Schedule resolution:** if the employee has a schedule today, lateness and early
+        clock-out are evaluated against it (15 min grace). Otherwise the record is
+        flagged `UNSCHEDULED`.
+
+        **Verification:** always created with `verification_status=PENDING` and
+        `MANUAL_ENTRY` flag. A leader or another HR must verify.
+
+        **Shift leader scope:** SL can only create attendance for employees in their own
+        led company; `422 OUT_OF_SCOPE` if violated.
+
+        **Geofence:** bypassed. `geofence_in = { inside: true, distance_m: 0, radius_m: 0 }`,
+        `lat_in`/`lng_in` are null.
+
+        **created_by:** traced from the JWT principal of the creating user (HR/SL).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - manual-attendance-create-page
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualCreateRequest' }
+      responses:
+        '201':
+          description: Attendance record created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Attendance' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: Business rule violation (no active placement, time ordering, SL out-of-scope).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ---------------------------------------------------------------------------
   # F5.4 — Corrections
   # ---------------------------------------------------------------------------
   /corrections:
@@ -1478,6 +1630,13 @@ components:
           description: |
             ID of the most-recently-applied correction, if any. The `CORRECTED` flag also appears
             in `flags[]`. Full correction history via `GET /corrections?employee_id=...&attendance_id=...`.
+        created_by:
+          type: [string, "null"]
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+          description: |
+            SWP-EMP-* of who created this record. `null` for system-created records
+            (auto-close, absence sweep); the agent's own id for organic clock-ins;
+            the HR/SL's id for manual entries (F5.6). Populated from the JWT principal.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -1536,6 +1695,68 @@ components:
           minimum: 0
           description: "Site's configured radius from `ClientCompany.geofence_radius_m` (default 100; EPICS §8)."
           example: 100
+
+    # -----------------------------------------------------------------------
+    # F5.6 — Manual attendance entry request
+    # -----------------------------------------------------------------------
+    ManualCreateRequest:
+      type: object
+      required: [employee_id, check_in_at]
+      properties:
+        employee_id:
+          type: string
+          description: Target employee's SWP-EMP ID.
+          example: SWP-EMP-1042
+        check_in_at:
+          type: string
+          format: date-time
+          description: Clock-in timestamp (RFC3339).
+          example: '2026-06-04T08:00:00+07:00'
+        check_out_at:
+          type: string
+          format: date-time
+          description: Clock-out timestamp (RFC3339, optional).
+          example: '2026-06-04T17:00:00+07:00'
+        note:
+          type: string
+          description: Optional note/reason for manual entry.
+          example: Lupa clock-in pagi ini
+
+    AutofillResponse:
+      type: object
+      description: |
+        Response for GET /attendance:manual-autofill (F5.6). Contains the employee's
+        active placement info and today's schedule (if any).
+      required:
+        - employee_name
+        - company_name
+        - service_line
+      properties:
+        employee_name:
+          type: string
+          example: Budi Santoso
+        company_name:
+          type: string
+          example: Plaza Senayan
+        site_name:
+          type: [string, "null"]
+          example: Plaza Senayan — Lobby Utama
+        position_name:
+          type: [string, "null"]
+          example: Petugas Kebersihan
+        service_line:
+          type: string
+          enum: [facility_services, building_management, parking]
+        schedule_id:
+          type: [string, "null"]
+          pattern: '^SWP-SCH-[A-Za-z0-9]+$'
+          description: Non-null when the employee has a schedule on the given date.
+        shift_start_at:
+          type: [string, "null"]
+          format: date-time
+        shift_end_at:
+          type: [string, "null"]
+          format: date-time
 
     # -----------------------------------------------------------------------
     # Clock-in / clock-out request & response
@@ -1814,6 +2035,7 @@ components:
               - `CORRECTION_ALREADY_PENDING` (409; `pending_correction_id` in `fields`)
               - `VERIFY_OWN_RECORD` (403)
               - `OUT_OF_SCOPE` (403)
+              - `NO_ACTIVE_PLACEMENT` (422)
               - `FILE_TOO_LARGE` (413; `size_bytes` + `max_size_bytes` in `fields`)
               - `UNSUPPORTED_MEDIA_TYPE` (415; `mime` in `fields`)
               - `CURSOR_MISMATCH` (400)

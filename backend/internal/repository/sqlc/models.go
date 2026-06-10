@@ -74,6 +74,7 @@ type Attendance struct {
 	DeletedAt          *time.Time
 	SiteID             string
 	PositionID         string
+	CreatedBy          *string
 }
 
 type AttendanceCode struct {

@@ -198,7 +198,7 @@ export function EmployeesScreen() {
     {
       id: 'karyawan',
       header: t('colKaryawan'),
-      width: 230,
+      flex: 2,
       cell: (emp) => (
         <div className="flex items-center gap-[11px]">
           <Avatar initials={initials(emp.full_name)} size={34} />
@@ -214,7 +214,7 @@ export function EmployeesScreen() {
     {
       id: 'posisi',
       header: t('colPosisi'),
-      width: 170,
+      flex: 1.5,
       cell: (emp) => (
         <span className="text-[13px] text-text">{emp.current_position?.name ?? '—'}</span>
       ),
@@ -222,7 +222,7 @@ export function EmployeesScreen() {
     {
       id: 'liniLayanan',
       header: t('colLiniLayanan'),
-      width: 160,
+      flex: 1.5,
       cell: (emp) =>
         emp.current_service_line ? (
           <div className="flex items-center gap-[7px]">
@@ -236,7 +236,7 @@ export function EmployeesScreen() {
     {
       id: 'penempatan',
       header: t('colPenempatan'),
-      width: 170,
+      flex: 1.5,
       cell: (emp) => (
         <span className="text-[13px] text-text">{emp.current_client_company?.name ?? '—'}</span>
       ),
@@ -244,7 +244,7 @@ export function EmployeesScreen() {
     {
       id: 'status',
       header: t('colStatus'),
-      width: 104,
+      flex: 0.6,
       cell: (emp) => (
         <StatusBadge dot tone={statusTone[emp.status]}>
           {emp.status === EmployeeStatus.ACTIVE ? t('statusActive') : t('statusInactive')}
@@ -261,7 +261,7 @@ export function EmployeesScreen() {
     columns.push({
       id: 'actions',
       header: '',
-      width: 150,
+      flex: 0.6,
       cell: (emp) => {
         const active = emp.status === EmployeeStatus.ACTIVE;
         const label = active ? t('menuOffboard') : t('menuReactivate');

@@ -35,6 +35,11 @@ export interface Column<T> {
    * Fixed-width columns use `flex-shrink-0`; flex columns share remaining space.
    */
   width?: number;
+  /**
+   * Flex growth ratio when no `width` is set. Default 1 (same as `flex-1`).
+   * Use 0.5 for narrow columns (status, actions), 2+ for wide ones (name).
+   */
+  flex?: number;
   /** Horizontal alignment of header + cell content. Default: 'left'. */
   align?: 'left' | 'right' | 'center';
   /** Renders the cell for a given row datum. */
@@ -164,6 +169,7 @@ export function DataTable<T>({
 
   function renderHeaderCell(col: Column<T>) {
     const align = col.align ?? 'left';
+    const isFlex = !col.width;
     return (
       <div
         key={col.id}
@@ -171,9 +177,9 @@ export function DataTable<T>({
           'flex items-center px-4 py-[11px]',
           ALIGN_JUSTIFY[align],
           ALIGN_TEXT[align],
-          col.width ? 'shrink-0' : 'flex-1',
+          col.width && 'shrink-0',
         )}
-        style={col.width ? { width: col.width } : undefined}
+        style={col.width ? { width: col.width } : { flex: col.flex ?? 1 }}
       >
         <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-3">
           {col.header}
@@ -184,6 +190,7 @@ export function DataTable<T>({
 
   function renderDataCell(col: Column<T>, row: T) {
     const align = col.align ?? 'left';
+    const isFlex = !col.width;
     return (
       <div
         key={col.id}
@@ -191,9 +198,9 @@ export function DataTable<T>({
           'flex items-center px-4 py-3 text-[13px] text-text',
           ALIGN_JUSTIFY[align],
           ALIGN_TEXT[align],
-          col.width ? 'shrink-0' : 'flex-1',
+          col.width && 'shrink-0',
         )}
-        style={col.width ? { width: col.width } : undefined}
+        style={col.width ? { width: col.width } : { flex: col.flex ?? 1 }}
       >
         {col.cell(row)}
       </div>
@@ -236,7 +243,7 @@ export function DataTable<T>({
               : undefined
           }
           className={cn(
-            'flex border-b border-border-soft',
+            'flex border-b border-border-soft pr-4',
             interactive && 'cursor-pointer hover:bg-surface-2',
           )}
         >
@@ -285,7 +292,7 @@ export function DataTable<T>({
     >
       {/* THead */}
       <div className="sticky top-0 z-10 border-b border-border-soft bg-surface-2">
-        <div className="flex">
+        <div className="flex pr-4">
           {/* Select-all checkbox header */}
           {selectable && (
             <div className="flex w-11 shrink-0 items-center justify-center px-4 py-[11px]">

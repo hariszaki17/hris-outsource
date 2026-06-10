@@ -96,9 +96,14 @@ func (q *Queries) CreateClientCompany(ctx context.Context, arg CreateClientCompa
 
 const getClientCompanyByID = `-- name: GetClientCompanyByID :one
 SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
-       status, created_at, updated_at
+       status, created_at, updated_at,
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) AS has_leader
 FROM client_companies
-WHERE id = $1
+WHERE client_companies.id = $1
   AND deleted_at IS NULL
 `
 
@@ -114,6 +119,7 @@ type GetClientCompanyByIDRow struct {
 	Status      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	HasLeader   bool
 }
 
 func (q *Queries) GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error) {
@@ -131,24 +137,35 @@ func (q *Queries) GetClientCompanyByID(ctx context.Context, id string) (GetClien
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HasLeader,
 	)
 	return i, err
 }
 
 const listClientCompanies = `-- name: ListClientCompanies :many
 SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
-       status, created_at, updated_at
+       status, created_at, updated_at,
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) AS has_leader
 FROM client_companies
 WHERE deleted_at IS NULL
   AND ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR name ILIKE '%' || $2::text || '%')
   AND ($3::text IS NULL OR TRUE)
-  AND ($4::boolean IS NULL OR TRUE)
+  AND ($4::boolean IS NULL OR
+       EXISTS (
+         SELECT 1 FROM shift_leader_assignments sla
+         WHERE sla.client_company_id = client_companies.id
+           AND sla.unassigned_at IS NULL
+       ) = $4::boolean)
   AND (
         $5::timestamptz IS NULL
-        OR (created_at, id) < ($5::timestamptz, $6::text)
+        OR (client_companies.created_at, client_companies.id) < ($5::timestamptz, $6::text)
       )
-ORDER BY created_at DESC, id DESC
+ORDER BY client_companies.created_at DESC, client_companies.id DESC
 LIMIT $7
 `
 
@@ -174,11 +191,11 @@ type ListClientCompaniesRow struct {
 	Status      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	HasLeader   bool
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-// Filters: q (ILIKE name), status. service_line and has_leader filters accepted
-// but not applied at DB level (no placements/assignments table in Phase 3).
+// Filters: q (ILIKE name), status, service_line, has_leader.
 func (q *Queries) ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error) {
 	rows, err := q.db.Query(ctx, listClientCompanies,
 		arg.Status,
@@ -208,6 +225,7 @@ func (q *Queries) ListClientCompanies(ctx context.Context, arg ListClientCompani
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HasLeader,
 		); err != nil {
 			return nil, err
 		}

@@ -6,6 +6,8 @@ package attendance
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -46,6 +48,9 @@ func intPtrToI32Ptr(v *int) *int32 {
 	n := int32(*v)
 	return &n
 }
+
+func boolPtr(b bool) *bool { return &b }
+func int32Ptr(n int32) *int32 { return &n }
 
 func (r *AttendanceRepo) ListAttendance(ctx context.Context, f svc.AttendanceFilter) ([]att.Attendance, error) {
 	var exceptions *bool
@@ -108,6 +113,26 @@ func (r *AttendanceRepo) VerifyAttendance(ctx context.Context, tx pgx.Tx, id str
 	return mapAttendanceFromVerify(row), 1, nil
 }
 
+func (r *AttendanceRepo) VerifyAttendanceWithTimes(ctx context.Context, tx pgx.Tx, id string, checkInAt time.Time, checkOutAt *time.Time, status string, isLate bool, lateMinutes int, verifiedBy *string) (att.Attendance, int64, error) {
+	lateMin := int32(lateMinutes)
+	row, err := r.q.WithTx(tx).VerifyAttendanceWithTimes(ctx, sqlcgen.VerifyAttendanceWithTimesParams{
+		CheckInAt:   checkInAt,
+		CheckOutAt:  checkOutAt,
+		Status:      &status,
+		IsLate:      &isLate,
+		LateMinutes: &lateMin,
+		VerifiedBy:  verifiedBy,
+		ID:          id,
+	})
+	if err != nil {
+		if isNoRows(err) {
+			return att.Attendance{}, 0, nil
+		}
+		return att.Attendance{}, 0, err
+	}
+	return mapAttendanceFromVerify(sqlcgen.VerifyAttendanceRow(sqlcgen.VerifyAttendanceWithTimesRow(row))), 1, nil
+}
+
 func (r *AttendanceRepo) RejectAttendance(ctx context.Context, tx pgx.Tx, id string, rejectedBy *string, reason string) (att.Attendance, int64, error) {
 	rsn := reason
 	row, err := r.q.WithTx(tx).RejectAttendance(ctx, sqlcgen.RejectAttendanceParams{
@@ -139,6 +164,124 @@ func (r *AttendanceRepo) ApplyCorrectionToAttendance(ctx context.Context, tx pgx
 		return att.Attendance{}, mapErr(err)
 	}
 	return mapAttendanceFromApply(row), nil
+}
+
+func (r *AttendanceRepo) CreateManualAttendance(ctx context.Context, tx pgx.Tx, p svc.CreateManualAttendanceParams) (att.Attendance, error) {
+	lateMin := int32(p.LateMinutes)
+	var workedMin *int32
+	if p.WorkedMinutes != nil {
+		wm := int32(*p.WorkedMinutes)
+		workedMin = &wm
+	}
+	checkInAt := p.CheckInAt
+	row, err := r.q.WithTx(tx).CreateManualAttendance(ctx, sqlcgen.CreateManualAttendanceParams{
+		EmployeeID:         p.EmployeeID,
+		PlacementID:        p.PlacementID,
+		ScheduleID:         p.ScheduleID,
+		CompanyID:          p.CompanyID,
+		ServiceLine:        p.ServiceLine,
+		SiteID:             p.SiteID,
+		PositionID:         p.PositionID,
+		AttendanceCodeID:   p.AttendanceCodeID,
+		ShiftStartAt:       p.ShiftStartAt,
+		ShiftEndAt:         p.ShiftEndAt,
+		CheckInAt:          &checkInAt,
+		CheckOutAt:         p.CheckOutAt,
+		LatIn:              nil,
+		LngIn:              nil,
+		LatOut:             nil,
+		LngOut:             nil,
+		Wfo:                p.WFO,
+		IsLate:             p.IsLate,
+		LateMinutes:        lateMin,
+		WorkedMinutes:      workedMin,
+		InGeofence:         boolPtr(true),
+		InDistanceM:        int32Ptr(0),
+		OutGeofence:        nil,
+		OutDistanceM:       nil,
+		GeofenceRadiusM:    0,
+		Status:             p.Status,
+		VerificationStatus: p.VerificationStatus,
+		Flags:              p.Flags,
+		CreatedBy:          p.CreatedBy,
+	})
+	if err != nil {
+		return att.Attendance{}, mapErr(err)
+	}
+	return mapAttendanceFromCreate(row), nil
+}
+
+
+
+func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID string, refDate time.Time) (svc.ManualAutofillData, bool, error) {
+	refPG := pgtype.Date{Time: refDate, Valid: true}
+	row, err := r.q.GetManualAutofillData(ctx, sqlcgen.GetManualAutofillDataParams{
+		RefDate:    refPG,
+		EmployeeID: employeeID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return svc.ManualAutofillData{}, false, nil
+		}
+		return svc.ManualAutofillData{}, false, err
+	}
+	serviceLine := strings.ToLower(strings.ReplaceAll(row.ServiceLineName, " ", "_"))
+	var shiftStart, shiftEnd *time.Time
+	if row.ScheduleID != nil {
+		ss := row.ShiftStartAt
+		se := row.ShiftEndAt
+		shiftStart = &ss
+		shiftEnd = &se
+	}
+	return svc.ManualAutofillData{
+		PlacementID:  row.PlacementID,
+		CompanyID:    row.ClientCompanyID,
+		ServiceLine:  serviceLine,
+		SiteID:       row.SiteID,
+		PositionID:   row.PositionID,
+		EmployeeName: row.EmployeeName,
+		CompanyName:  row.CompanyName,
+		SiteName:     row.SiteName,
+		PositionName: row.PositionName,
+		ScheduleID:   row.ScheduleID,
+		ShiftStartAt: shiftStart,
+		ShiftEndAt:   shiftEnd,
+	}, true, nil
+}
+
+func (r *AttendanceRepo) GetActivePlacement(ctx context.Context, employeeID string) (svc.PlacementInfo, bool, error) {
+	row, err := r.q.GetActivePlacementForEmployee(ctx, employeeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return svc.PlacementInfo{}, false, nil
+		}
+		return svc.PlacementInfo{}, false, err
+	}
+	serviceLine := ""
+	if row.ServiceLineName != nil {
+		serviceLine = strings.ToLower(strings.ReplaceAll(*row.ServiceLineName, " ", "_"))
+	}
+	return svc.PlacementInfo{
+		PlacementID: row.ID,
+		CompanyID:   row.ClientCompanyID,
+		SiteID:      row.SiteID,
+		PositionID:  row.PositionID,
+		ServiceLine: serviceLine,
+	}, true, nil
+}
+
+func (r *AttendanceRepo) GetTodaySchedule(ctx context.Context, employeeID string, now time.Time) (string, time.Time, time.Time, bool, error) {
+	row, err := r.q.GetTodayScheduleForEmployee(ctx, sqlcgen.GetTodayScheduleForEmployeeParams{
+		EmployeeID: employeeID,
+		Now:        now,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", time.Time{}, time.Time{}, false, nil
+		}
+		return "", time.Time{}, time.Time{}, false, err
+	}
+	return row.ScheduleID, row.ShiftStartAt, row.ShiftEndAt, true, nil
 }
 
 // isNoRows reports whether the error is the :one "no rows" sentinel — used by the

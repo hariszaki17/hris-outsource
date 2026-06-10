@@ -14,18 +14,22 @@ export function Button({
 }: PressableProps & { label: string; loading?: boolean; variant?: Variant; className?: string }) {
   const isDisabled = disabled || loading;
   const base = variant === 'primary' ? 'bg-primary' : 'bg-surface border border-border';
-  const labelColor = variant === 'primary' ? 'text-surface' : 'text-text';
+  const labelStyle = {
+    color: variant === 'primary' ? color.surface : color.text,
+    fontSize: 14,
+    fontWeight: '600' as const,
+  };
   return (
     <Pressable
       disabled={isDisabled}
       accessibilityRole="button"
-      className={`flex-row items-center justify-center rounded-input px-5 py-3 ${base} ${isDisabled ? 'opacity-60' : ''} ${className ?? ''}`}
+      className={`flex-row items-center justify-center rounded-input px-4 py-2.5 ${base} ${isDisabled ? 'opacity-60' : ''} ${className ?? ''}`}
       {...props}
     >
       {loading ? (
         <ActivityIndicator color={variant === 'primary' ? color.surface : color.primary} />
       ) : (
-        <Text className={`${labelColor} font-semibold`}>{label}</Text>
+        <Text style={labelStyle}>{label}</Text>
       )}
     </Pressable>
   );

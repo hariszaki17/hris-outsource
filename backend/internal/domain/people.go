@@ -72,6 +72,7 @@ type EmployeeFilter struct {
 	Status          *string
 	Role            *string // filter by linked User role (E1): agent|shift_leader|hr_admin|super_admin
 	Assigned        *bool   // true/false against an active shift-leader assignment
+	ClientCompanyID *string // filter by current placement's client company ID
 	Limit           int
 	CursorCreatedAt *time.Time
 	CursorID        *string

@@ -79,6 +79,13 @@ func (f *fakeTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error {
 	return fn(&fakeTx{})
 }
 
+// fakeScheduleEntry holds an employee's schedule projection for manual create tests.
+type fakeScheduleEntry struct {
+	scheduleID string
+	shiftStart time.Time
+	shiftEnd   time.Time
+}
+
 // ---------------------------------------------------------------------------
 // shared helpers
 // ---------------------------------------------------------------------------
@@ -238,11 +245,16 @@ func (b *bodyReader) Close() error               { return nil }
 // ---------------------------------------------------------------------------
 
 type fakeAttendanceRepo struct {
-	records map[string]att.Attendance
+	records   map[string]att.Attendance
+	schedules map[string]fakeScheduleEntry // employeeID → schedule (shared across tests)
+	seq       int
 }
 
 func newFakeAttendanceRepo() *fakeAttendanceRepo {
-	return &fakeAttendanceRepo{records: map[string]att.Attendance{}}
+	return &fakeAttendanceRepo{
+		records:   map[string]att.Attendance{},
+		schedules: map[string]fakeScheduleEntry{},
+	}
 }
 
 func (r *fakeAttendanceRepo) ListAttendance(_ context.Context, f svc.AttendanceFilter) ([]att.Attendance, error) {
@@ -324,6 +336,26 @@ func (r *fakeAttendanceRepo) VerifyAttendance(_ context.Context, _ pgx.Tx, id st
 	return a, 1, nil
 }
 
+func (r *fakeAttendanceRepo) VerifyAttendanceWithTimes(_ context.Context, _ pgx.Tx, id string, checkInAt time.Time, _ *time.Time, status string, isLate bool, lateMinutes int, verifiedBy *string) (att.Attendance, int64, error) {
+	a, ok := r.records[id]
+	if !ok {
+		return att.Attendance{}, 0, domain.ErrNotFound
+	}
+	if !verifiable(a.VerificationStatus) {
+		return att.Attendance{}, 0, nil
+	}
+	a.CheckInAt = &checkInAt
+	a.VerificationStatus = att.VerificationVerified
+	a.Status = att.AttendanceStatus(status)
+	a.IsLate = isLate
+	a.LateMinutes = lateMinutes
+	a.VerifiedBy = verifiedBy
+	vt := fixedNow
+	a.VerifiedAt = &vt
+	r.records[id] = a
+	return a, 1, nil
+}
+
 func (r *fakeAttendanceRepo) RejectAttendance(_ context.Context, _ pgx.Tx, id string, rejectedBy *string, reason string) (att.Attendance, int64, error) {
 	a, ok := r.records[id]
 	if !ok {
@@ -371,6 +403,102 @@ func (r *fakeAttendanceRepo) ApplyCorrectionToAttendance(_ context.Context, _ pg
 	}
 	r.records[p.ID] = a
 	return a, nil
+}
+
+func (r *fakeAttendanceRepo) GetActivePlacement(_ context.Context, employeeID string) (svc.PlacementInfo, bool, error) {
+	if employeeID == empNoPlacement {
+		return svc.PlacementInfo{}, false, nil
+	}
+	return svc.PlacementInfo{
+		PlacementID: "SWP-PL-9999",
+		CompanyID:   cmpLed,
+		SiteID:      "SWP-SITE-001",
+		PositionID:  "SWP-POS-001",
+		ServiceLine: att.ServiceLineFacilityServices,
+	}, true, nil
+}
+
+func (r *fakeAttendanceRepo) GetTodaySchedule(_ context.Context, employeeID string, _ time.Time) (string, time.Time, time.Time, bool, error) {
+	s, ok := r.schedules[employeeID]
+	if !ok {
+		return "", time.Time{}, time.Time{}, false, nil
+	}
+	return s.scheduleID, s.shiftStart, s.shiftEnd, true, nil
+}
+
+func (r *fakeAttendanceRepo) CreateManualAttendance(_ context.Context, _ pgx.Tx, p svc.CreateManualAttendanceParams) (att.Attendance, error) {
+	r.seq++
+	id := "SWP-ATT-M" + strconv.Itoa(r.seq)
+	worked := p.WorkedMinutes
+	latMin := int32(p.LateMinutes)
+	flagsList := make([]att.Flag, len(p.Flags))
+	for i, f := range p.Flags {
+		flagsList[i] = att.Flag(f)
+	}
+	a := att.Attendance{
+		ID:                 id,
+		EmployeeID:         p.EmployeeID,
+		PlacementID:        p.PlacementID,
+		ScheduleID:         p.ScheduleID,
+		CompanyID:          p.CompanyID,
+		ServiceLine:        p.ServiceLine,
+		SiteID:             p.SiteID,
+		PositionID:         p.PositionID,
+		AttendanceCodeID:   p.AttendanceCodeID,
+		ShiftStartAt:       p.ShiftStartAt,
+		ShiftEndAt:         p.ShiftEndAt,
+		CheckInAt:          &p.CheckInAt,
+		CheckOutAt:         p.CheckOutAt,
+		WFO:                p.WFO,
+		IsLate:             p.IsLate,
+		LateMinutes:        int(latMin),
+		WorkedMinutes:      worked,
+		AutoClosed:         false,
+		Status:             att.AttendanceStatus(p.Status),
+		VerificationStatus: att.VerificationStatus(p.VerificationStatus),
+		Flags:              flagsList,
+		CreatedBy:          p.CreatedBy,
+		CreatedAt:          p.CreatedAt,
+		UpdatedAt:          p.UpdatedAt,
+	}
+	r.records[id] = a
+	return a, nil
+}
+
+func (r *fakeAttendanceRepo) GetManualAutofillData(_ context.Context, employeeID string, refDate time.Time) (svc.ManualAutofillData, bool, error) {
+	if employeeID == empNoPlacement {
+		return svc.ManualAutofillData{}, false, nil
+	}
+	siteName := "Site of " + cmpLed
+	posName := "Position of " + employeeID
+	data := svc.ManualAutofillData{
+		PlacementID:  "SWP-PL-9999",
+		CompanyID:    cmpLed,
+		ServiceLine:  att.ServiceLineFacilityServices,
+		SiteID:       "SWP-SITE-001",
+		PositionID:   "SWP-POS-001",
+		EmployeeName: "Agent " + employeeID,
+		CompanyName:  "Company " + cmpLed,
+		SiteName:     &siteName,
+		PositionName: &posName,
+	}
+	if s, ok := r.schedules[employeeID]; ok {
+		ss := s.shiftStart
+		se := s.shiftEnd
+		data.ScheduleID = &s.scheduleID
+		data.ShiftStartAt = &ss
+		data.ShiftEndAt = &se
+	}
+	return data, true, nil
+}
+
+// seedSchedule plants a schedule entry for a given employee (bypasses fake store).
+func (r *fakeAttendanceRepo) seedSchedule(employeeID string, ss, se time.Time) {
+	r.schedules[employeeID] = fakeScheduleEntry{
+		scheduleID: "SWP-SCH-9xxx",
+		shiftStart: ss,
+		shiftEnd:   se,
+	}
 }
 
 var _ svc.AttendanceRepository = (*fakeAttendanceRepo)(nil)
@@ -578,8 +706,11 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 		r.With(idem.Handler).Post("/attendance:bulk-reject", handler.BulkReject)
 		r.With(idem.Handler).Post("/corrections/{id}:approve", handler.ApproveCorrection)
 		r.With(idem.Handler).Post("/corrections/{id}:reject", handler.RejectCorrection)
-	})
-	// Correction CREATE: agent-inclusive group (mirrors server.go).
+	// F5.6 Manual attendance (HR-only).
+	r.Get("/attendance:manual-autofill", handler.ManualAutofill)
+	r.With(idem.Handler).Post("/attendance:manual-create", handler.ManualCreate)
+})
+// Correction CREATE: agent-inclusive group (mirrors server.go).
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 		r.With(idem.Handler).Post("/corrections", handler.CreateCorrection)
@@ -691,6 +822,8 @@ func hasFlag(fs []att.Flag, want att.Flag) bool {
 	}
 	return false
 }
+
+const empNoPlacement = "SWP-EMP-NOPL" // employee with no active placement (422 test)
 
 // silence unused in case a helper is dropped during edits.
 var _ = itoa

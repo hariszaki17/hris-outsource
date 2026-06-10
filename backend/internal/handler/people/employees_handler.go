@@ -32,11 +32,12 @@ func (h *Handler) ListEmployees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	filter := domain.EmployeeFilter{
-		Q:        queryStringPtr(q.Get("q")),
-		Status:   queryStringPtr(q.Get("status")),
-		Role:     queryStringPtr(q.Get("role")),
-		Assigned: queryBoolPtr(q.Get("assigned")),
-		Limit:    parseLimit(q.Get("limit")),
+		Q:               queryStringPtr(q.Get("q")),
+		Status:          queryStringPtr(q.Get("status")),
+		Role:            queryStringPtr(q.Get("role")),
+		Assigned:        queryBoolPtr(q.Get("assigned")),
+		ClientCompanyID: queryStringPtr(q.Get("client_company")),
+		Limit:           parseLimit(q.Get("limit")),
 	}
 
 	if cursor := q.Get("cursor"); cursor != "" {

@@ -130,6 +130,7 @@ type attendanceCols struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	CreatedBy          *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	EmployeeName       *string // only present on list/get (LEFT JOIN); nil otherwise
@@ -175,6 +176,7 @@ func mapAttendance(c attendanceCols) att.Attendance {
 		RejectedAt:         c.RejectedAt,
 		RejectReason:       c.RejectReason,
 		LastCorrectionID:   c.LastCorrectionID,
+		CreatedBy:          c.CreatedBy,
 		CreatedAt:          c.CreatedAt,
 		UpdatedAt:          c.UpdatedAt,
 		EmployeeName:       c.EmployeeName,
@@ -294,6 +296,22 @@ type correctionCols struct {
 	UpdatedAt                time.Time
 	RequesterName            *string
 	CompanyName              *string
+}
+
+
+
+func mapAttendanceFromCreate(r sqlcgen.CreateManualAttendanceRow) att.Attendance {
+	return mapAttendance(attendanceCols{
+		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
+		CompanyID: r.CompanyID, ServiceLine: r.ServiceLine, SiteID: r.SiteID, PositionID: r.PositionID, AttendanceCodeID: r.AttendanceCodeID,
+		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
+		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
+		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
+		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
+		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
+		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	})
 }
 
 func mapCorrection(c correctionCols) att.Correction {

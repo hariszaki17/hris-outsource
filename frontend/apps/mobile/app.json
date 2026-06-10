@@ -8,10 +8,21 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "id.synapsis.swp.hris"
+      "bundleIdentifier": "com.hariszaki17.swphris",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
     },
     "android": {
-      "package": "id.synapsis.swp.hris"
+      "package": "com.hariszaki17.swphris",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -32,11 +43,19 @@
         }
       ],
       "expo-notifications",
+      "expo-secure-store",
       "expo-status-bar",
-      "expo-secure-store"
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4426c8ea-de92-4a45-9593-a2617d4f29b4"
+      }
+    },
+    "owner": "hariszaki17"
   }
 }

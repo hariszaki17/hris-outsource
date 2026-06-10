@@ -54,8 +54,12 @@ import {
   type ScheduleGridSearch,
 } from '@/features/e4-scheduling/schedule-grid-screen.tsx';
 import { ShiftMastersScreen } from '@/features/e4-scheduling/shift-masters-screen.tsx';
-import { AttendanceDashboardScreen } from '@/features/e5-attendance/attendance-dashboard-screen.tsx';
+import {
+  AttendanceDashboardScreen,
+  type AttendanceDashboardSearch,
+} from '@/features/e5-attendance/attendance-dashboard-screen.tsx';
 import { AttendanceDetailScreen } from '@/features/e5-attendance/attendance-detail-screen.tsx';
+import { ManualAttendanceCreateScreen } from '@/features/e5-attendance/manual-attendance-create-screen.tsx';
 import { AttendanceVerificationScreen } from '@/features/e5-attendance/attendance-verification-screen.tsx';
 import {
   CorrectionsScreen,
@@ -495,6 +499,27 @@ const attendanceDashboardRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/attendance',
   component: AttendanceDashboardScreen,
+  validateSearch: (search: Record<string, unknown>): AttendanceDashboardSearch => {
+    const out: AttendanceDashboardSearch = {};
+    if (typeof search.q === 'string' && search.q) out.q = search.q;
+    if (
+      typeof search.tab === 'string' &&
+      ['all', 'present', 'late', 'absent'].includes(search.tab)
+    )
+      out.tab = search.tab as AttendanceDashboardSearch['tab'];
+    if (typeof search.company_id === 'string' && search.company_id) out.company_id = search.company_id;
+    if (typeof search.site_id === 'string' && search.site_id) out.site_id = search.site_id;
+    if (typeof search.position_id === 'string' && search.position_id) out.position_id = search.position_id;
+    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
+    if (typeof search.date_from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_from)) out.date_from = search.date_from;
+    if (typeof search.date_to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_to)) out.date_to = search.date_to;
+    return out;
+  },
+});
+const attendanceManualCreateRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/attendance/manual-create',
+  component: ManualAttendanceCreateScreen,
 });
 const attendanceVerificationRoute = createRoute({
   getParentRoute: () => authedRoute,
@@ -734,6 +759,7 @@ const routeTree = rootRoute.addChildren([
     scheduleRoute,
     shiftMastersRoute,
     attendanceDashboardRoute,
+    attendanceManualCreateRoute,
     attendanceVerificationRoute,
     attendanceDetailRoute,
     correctionsRoute,

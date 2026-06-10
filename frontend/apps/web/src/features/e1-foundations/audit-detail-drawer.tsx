@@ -30,7 +30,8 @@ import { useTranslation } from 'react-i18next';
 // ---------------------------------------------------------------------------
 
 /** Bahasa label for entity_type snake-case values (shared with screen). */
-function entityLabel(entityType: string): string {
+function entityLabel(entityType: string | null | undefined): string {
+  if (!entityType) return '—';
   switch (entityType) {
     case 'user':
       return 'Pengguna';
@@ -73,22 +74,34 @@ type DiffLine =
   | { kind: 'added'; key: string; value: unknown }
   | { kind: 'changed'; key: string; before: unknown; after: unknown };
 
-function computeDiff(before: Record<string, unknown>, after: Record<string, unknown>): DiffLine[] {
-  const allKeys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+/** Coerce a maybe-null/undefined/non-object snapshot into a plain record. */
+function asRecord(v: unknown): Record<string, unknown> {
+  return v != null && typeof v === 'object' && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};
+}
+
+function computeDiff(
+  before: Record<string, unknown> | null | undefined,
+  after: Record<string, unknown> | null | undefined,
+): DiffLine[] {
+  const b = asRecord(before);
+  const a = asRecord(after);
+  const allKeys = Array.from(new Set([...Object.keys(b), ...Object.keys(a)]));
   const lines: DiffLine[] = [];
   for (const key of allKeys) {
-    const inBefore = Object.prototype.hasOwnProperty.call(before, key);
-    const inAfter = Object.prototype.hasOwnProperty.call(after, key);
+    const inBefore = Object.prototype.hasOwnProperty.call(b, key);
+    const inAfter = Object.prototype.hasOwnProperty.call(a, key);
     if (inBefore && inAfter) {
-      if (jsonVal(before[key]) === jsonVal(after[key])) {
-        lines.push({ kind: 'equal', key, value: before[key] });
+      if (jsonVal(b[key]) === jsonVal(a[key])) {
+        lines.push({ kind: 'equal', key, value: b[key] });
       } else {
-        lines.push({ kind: 'changed', key, before: before[key], after: after[key] });
+        lines.push({ kind: 'changed', key, before: b[key], after: a[key] });
       }
     } else if (inBefore) {
-      lines.push({ kind: 'removed', key, value: before[key] });
+      lines.push({ kind: 'removed', key, value: b[key] });
     } else {
-      lines.push({ kind: 'added', key, value: after[key] });
+      lines.push({ kind: 'added', key, value: a[key] });
     }
   }
   return lines;
@@ -129,10 +142,22 @@ function DiffViewer({
   before,
   after,
 }: {
-  before: Record<string, unknown>;
-  after: Record<string, unknown>;
+  before: Record<string, unknown> | null | undefined;
+  after: Record<string, unknown> | null | undefined;
 }) {
+  const { t } = useTranslation();
   const lines = computeDiff(before, after);
+
+  // Generic empty-state: entries with no field-level changes (login, logout,
+  // read actions, or missing snapshots) have nothing to diff.
+  if (lines.length === 0) {
+    return (
+      <div className="rounded-[10px] border border-border-soft bg-surface-2 px-3.5 py-5 text-center">
+        <p className="text-[13px] font-medium text-text">{t('auditLog.noDiffTitle')}</p>
+        <p className="mt-1 text-[12px] text-text-3">{t('auditLog.noDiffBody')}</p>
+      </div>
+    );
+  }
 
   return (
     /*
@@ -234,9 +259,14 @@ export function AuditDetailDrawer({ entryId, open, onOpenChange }: AuditDetailDr
   // The Orval wrapper puts the actual body at `query.data?.data`.
   const entry = query.data?.data as AuditLogEntry | undefined;
 
-  // --- Build header title from entry fields ---
+  // --- Build header title from entry fields (each part optional → generic) ---
   const headerTitle = entry
-    ? `${entityLabel(entry.entity_type)} #${entry.entity_id} · ${entry.change_summary}`
+    ? [
+        `${entityLabel(entry.entity_type)}${entry.entity_id ? ` #${entry.entity_id}` : ''}`,
+        entry.change_summary || entry.action,
+      ]
+        .filter(Boolean)
+        .join(' · ')
     : t('auditLog.drawerTitle');
 
   const headerSubtitle = entry
@@ -252,7 +282,9 @@ export function AuditDetailDrawer({ entryId, open, onOpenChange }: AuditDetailDr
 
   function handleCopyJson() {
     if (!entry) return;
-    const json = JSON.stringify(entry.after, null, 2);
+    // Prefer the after-snapshot; fall back to the whole entry when absent so the
+    // copy action is never a no-op for change-less entries (login, logout, …).
+    const json = JSON.stringify(entry.after ?? entry, null, 2);
     navigator.clipboard.writeText(json).then(
       () => toast({ tone: 'success', title: t('auditLog.copiedToast') }),
       () => toast({ tone: 'error', title: t('auditLog.copyFailedToast') }),
@@ -342,7 +374,9 @@ export function AuditDetailDrawer({ entryId, open, onOpenChange }: AuditDetailDr
                   label={t('auditLog.metaEntitasTipe')}
                   value={entityLabel(entry.entity_type)}
                 />
-                <MetaRow label={t('auditLog.metaEntitasId')} value={entry.entity_id} mono />
+                {entry.entity_id && (
+                  <MetaRow label={t('auditLog.metaEntitasId')} value={entry.entity_id} mono />
+                )}
               </MetaCard>
             </div>
 
@@ -376,8 +410,8 @@ export function AuditDetailDrawer({ entryId, open, onOpenChange }: AuditDetailDr
                 </div>
               </div>
               <DiffViewer
-                before={entry.before as Record<string, unknown>}
-                after={entry.after as Record<string, unknown>}
+                before={entry.before as Record<string, unknown> | null | undefined}
+                after={entry.after as Record<string, unknown> | null | undefined}
               />
             </div>
 
@@ -387,23 +421,25 @@ export function AuditDetailDrawer({ entryId, open, onOpenChange }: AuditDetailDr
               <p className="text-[12px] leading-[1.5] text-warn-tx">{t('auditLog.maskedNote')}</p>
             </div>
 
-            {/* Deep link row — no-op, target screen is in a later epic */}
-            <button
-              type="button"
-              onClick={handleDeepLink}
-              className="flex w-full items-center justify-between rounded-[8px] bg-primary-soft px-3.5 py-3 text-left"
-            >
-              <div className="flex items-center gap-2 text-primary">
-                <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
-                <span className="text-[13px] font-medium">
-                  {t('auditLog.deepLinkLabel', {
-                    entity: entityLabel(entry.entity_type),
-                    id: entry.entity_id,
-                  })}
-                </span>
-              </div>
-              <ExternalLink className="size-3.5 text-primary" aria-hidden="true" />
-            </button>
+            {/* Deep link row — only when there's a source entity to link to */}
+            {entry.entity_id && (
+              <button
+                type="button"
+                onClick={handleDeepLink}
+                className="flex w-full items-center justify-between rounded-[8px] bg-primary-soft px-3.5 py-3 text-left"
+              >
+                <div className="flex items-center gap-2 text-primary">
+                  <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
+                  <span className="text-[13px] font-medium">
+                    {t('auditLog.deepLinkLabel', {
+                      entity: entityLabel(entry.entity_type),
+                      id: entry.entity_id,
+                    })}
+                  </span>
+                </div>
+                <ExternalLink className="size-3.5 text-primary" aria-hidden="true" />
+              </button>
+            )}
           </>
         )}
       </DrawerBody>

@@ -14,6 +14,8 @@
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+
+
 import { useListClientCompanies } from '@swp/api-client/e2';
 import {
   type Attendance,
@@ -30,12 +32,14 @@ import {
   DataTable,
   EmptyState,
   FilterSelect,
+  Input,
   SearchField,
   StatCard,
   StatusBadge,
 } from '@swp/ui';
-import { useNavigate, useSearch } from '@tanstack/react-router';
-import { CircleCheck, ClockAlert, TriangleAlert, Users } from 'lucide-react';
+import { formatDate } from '@swp/shared';
+import { useNavigate, useSearch, Link } from '@tanstack/react-router';
+import { CircleCheck, ClockAlert, Plus, TriangleAlert, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -52,6 +56,8 @@ export type AttendanceDashboardSearch = {
   company_id?: string;
   site_id?: string;
   position_id?: string;
+  date_from?: string;
+  date_to?: string;
 };
 
 function attendanceStatusTone(status: AttendanceStatus): StatusTone {
@@ -129,6 +135,7 @@ export function AttendanceDashboardScreen() {
   const search = useSearch({ strict: false }) as AttendanceDashboardSearch;
   const currentUser = useCurrentUser();
   const isShiftLeader = currentUser?.role === 'shift_leader';
+  const isStaff = !isShiftLeader && currentUser?.role !== 'agent';
 
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
 
@@ -152,6 +159,9 @@ export function AttendanceDashboardScreen() {
     company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     site_id: search.site_id || undefined,
     position_id: search.position_id || undefined,
+    // Date range filters
+    date_from: search.date_from || undefined,
+    date_to: search.date_to || undefined,
     // Status is driven by the outer tab strip (Semua/Hadir/Terlambat/Tidak Hadir).
     status: tabStatusMap[activeTab] ? [tabStatusMap[activeTab] as AttendanceStatus] : undefined,
   };
@@ -202,7 +212,7 @@ export function AttendanceDashboardScreen() {
     return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
 
-  const hasFilters = Boolean(search.q || search.company_id || search.site_id || search.position_id);
+  const hasFilters = Boolean(search.q || search.company_id || search.site_id || search.position_id || search.date_from || search.date_to);
 
   function setSearch(partial: Partial<AttendanceDashboardSearch>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -285,6 +295,19 @@ export function AttendanceDashboardScreen() {
       cell: (row) => <span className="text-[13px] text-text">{row.service_line}</span>,
     },
     {
+      id: 'date',
+      header: t('colDate'),
+      width: 110,
+      cell: (row) => {
+        const date = row.check_in_at ?? row.created_at;
+        return (
+          <span className="text-[13px] text-text">
+            {date ? formatDate(date, { dateStyle: 'medium' }) : t('colCheckInEmpty')}
+          </span>
+        );
+      },
+    },
+    {
       id: 'check_in_at',
       header: t('colCheckIn'),
       width: 130,
@@ -292,6 +315,22 @@ export function AttendanceDashboardScreen() {
         <span className="text-[13px] text-text">
           {row.check_in_at
             ? new Date(row.check_in_at).toLocaleTimeString('id-ID', {
+                timeZone: 'Asia/Jakarta',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : t('colCheckInEmpty')}
+        </span>
+      ),
+    },
+    {
+      id: 'check_out_at',
+      header: t('colCheckOut'),
+      width: 130,
+      cell: (row) => (
+        <span className="text-[13px] text-text">
+          {row.check_out_at
+            ? new Date(row.check_out_at).toLocaleTimeString('id-ID', {
                 timeZone: 'Asia/Jakarta',
                 hour: '2-digit',
                 minute: '2-digit',
@@ -380,6 +419,16 @@ export function AttendanceDashboardScreen() {
           <h1 className="text-3xl font-bold text-text">{t('dashTitle')}</h1>
           <p className="text-[13px] text-text-2">{t('dashSubtitle')}</p>
         </div>
+        {/* F5.6 — Manual attendance entry (admin/super, not shift_leader) */}
+        {isStaff && (
+          <Link
+            to="/attendance/manual-create"
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-[9px] text-[13px] font-semibold text-white hover:bg-primary-hov"
+          >
+            <Plus className="size-4" aria-hidden />
+            {t('manualCreateTitle')}
+          </Link>
+        )}
       </div>
 
       {/* Stat cards */}
@@ -427,25 +476,8 @@ export function AttendanceDashboardScreen() {
             onChange={(e) => setSearch({ q: e.target.value || undefined })}
           />
 
-          {/* Company filter — locked (disabled) for shift_leader; free for HR/super_admin */}
-          {isShiftLeader ? (
-            <span className="inline-flex items-center gap-[6px] rounded-lg border border-border bg-surface-2 px-[10px] py-[9px] text-[13px] text-text-2 opacity-70">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <title>lock</title>
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              {currentUser?.companyName ?? currentUser?.companyId ?? t('filterCompany')}
-            </span>
-          ) : (
+          {/* Company filter — hidden for shift_leader (scoped to their company server-side); free for HR/super_admin */}
+          {!isShiftLeader && (
             <FilterSelect
               aria-label={t('filterCompany')}
               value={search.company_id ?? ''}
@@ -490,6 +522,25 @@ export function AttendanceDashboardScreen() {
             ))}
           </FilterSelect>
 
+          {/* Date range filters */}
+          <Input
+            aria-label={t('filterDateFrom')}
+            type="date"
+            placeholder={t('filterDateFrom')}
+            value={search.date_from ?? ''}
+            onChange={(e) => setSearch({ date_from: e.target.value || undefined })}
+            className="w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+          />
+          <Input
+            aria-label={t('filterDateTo')}
+            type="date"
+            placeholder={t('filterDateTo')}
+            value={search.date_to ?? ''}
+            min={search.date_from ?? undefined}
+            onChange={(e) => setSearch({ date_to: e.target.value || undefined })}
+            className="w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+          />
+
           <div className="flex-1" />
           {hasFilters && (
             <button
@@ -501,6 +552,8 @@ export function AttendanceDashboardScreen() {
                   company_id: undefined,
                   site_id: undefined,
                   position_id: undefined,
+                  date_from: undefined,
+                  date_to: undefined,
                 })
               }
             >

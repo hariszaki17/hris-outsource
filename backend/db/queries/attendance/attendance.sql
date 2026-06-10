@@ -112,6 +112,33 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
           created_at, updated_at;
 
+-- name: VerifyAttendanceWithTimes :one
+-- Approve an exception record AND override check_in/check_out times (HR/SL
+-- fills actual times when verifying an ABSENT/INCOMPLETE record). The service
+-- reevaluates status/is_late/late_minutes before calling — those override nargs
+-- are COALESCEd so they can be left NULL (verify-only, no times mutation).
+UPDATE attendance
+SET verification_status = 'VERIFIED',
+    check_in_at         = sqlc.arg(check_in_at)::timestamptz,
+    check_out_at        = COALESCE(sqlc.narg(check_out_at)::timestamptz, check_out_at),
+    status              = COALESCE(sqlc.narg(status)::text, status),
+    is_late             = COALESCE(sqlc.narg(is_late)::boolean, is_late),
+    late_minutes        = COALESCE(sqlc.narg(late_minutes)::integer, late_minutes),
+    verified_by         = sqlc.arg(verified_by),
+    verified_at         = now(),
+    updated_at          = now()
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND verification_status IN ('PENDING','ESCALATED')
+RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
+          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
+          in_geofence, in_distance_m, out_geofence, out_distance_m,
+          geofence_radius_m, status, verification_status, flags, verified_by,
+          verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+          created_at, updated_at;
+
 -- name: RejectAttendance :one
 -- Reject an exception record (reason required). Same PENDING/ESCALATED guard.
 UPDATE attendance
@@ -158,3 +185,80 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
           created_at, updated_at;
+
+-- name: CreateManualAttendance :one
+-- HR/admin creates an attendance record for any agent (F5.6). Bypasses GPS/geofence.
+-- id allocated by column DEFAULT. flags includes MANUAL_ENTRY. Service pre-computes
+-- is_late, late_minutes, worked_minutes, status, verification_status. created_by is
+-- the SWP-EMP-* of the HR/admin who created the record.
+-- Returns the full row for the domain mapper.
+INSERT INTO attendance (
+    employee_id, placement_id, schedule_id, company_id, service_line,
+    site_id, position_id, attendance_code_id,
+    shift_start_at, shift_end_at,
+    check_in_at, check_out_at,
+    lat_in, lng_in, lat_out, lng_out,
+    wfo, is_late, late_minutes, worked_minutes,
+    in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
+    status, verification_status, flags,
+    created_by,
+    created_at, updated_at
+) VALUES (
+    sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.narg(schedule_id), sqlc.arg(company_id), sqlc.arg(service_line),
+    sqlc.arg(site_id), sqlc.arg(position_id), sqlc.narg(attendance_code_id),
+    sqlc.narg(shift_start_at), sqlc.narg(shift_end_at),
+    sqlc.arg(check_in_at), sqlc.narg(check_out_at),
+    sqlc.narg(lat_in), sqlc.narg(lng_in), sqlc.narg(lat_out), sqlc.narg(lng_out),
+    sqlc.arg(wfo), sqlc.arg(is_late), sqlc.arg(late_minutes), sqlc.narg(worked_minutes),
+    sqlc.arg(in_geofence), sqlc.arg(in_distance_m), sqlc.narg(out_geofence), sqlc.narg(out_distance_m), sqlc.arg(geofence_radius_m),
+    sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags)::text[],
+    sqlc.narg(created_by),
+    now(), now()
+) RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
+            site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+            check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+            photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
+            in_geofence, in_distance_m, out_geofence, out_distance_m,
+            geofence_radius_m, status, verification_status, flags, verified_by,
+            verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+            created_by,
+            created_at, updated_at;
+
+-- name: GetManualAutofillData :one
+-- Resolve the active placement + today's schedule for manual attendance (F5.6).
+-- Returns placement details and (if scheduled) the live schedule's shift window.
+-- Returns zero rows (pgx.ErrNoRows) when the employee has no active placement.
+SELECT
+    p.id       AS placement_id,
+    p.client_company_id,
+    COALESCE(sl.name, '') AS service_line_name,
+    p.site_id,
+    p.position_id,
+    e.full_name AS employee_name,
+    cc.name      AS company_name,
+    cs.name      AS site_name,
+    pos.name     AS position_name,
+    se.id       AS schedule_id,
+    ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
+    (((se.work_date + se.end_time::time)
+        + (CASE WHEN se.cross_midnight THEN interval '1 day' ELSE interval '0' END))
+        AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_end_at
+FROM placements p
+JOIN employees e  ON e.id = p.employee_id
+JOIN client_companies cc ON cc.id = p.client_company_id
+LEFT JOIN client_sites cs ON cs.id = p.site_id
+LEFT JOIN positions pos   ON pos.id = p.position_id
+LEFT JOIN service_lines sl ON sl.id = p.service_line_id
+LEFT JOIN schedule_entries se
+    ON se.employee_id = p.employee_id
+    AND se.work_date = (sqlc.arg(ref_date)::date)
+    AND se.deleted_at IS NULL
+    AND se.is_day_off = false
+    AND se.status <> 'CANCELLED_BY_LEAVE'
+    AND se.start_time IS NOT NULL
+    AND se.end_time   IS NOT NULL
+WHERE p.employee_id = sqlc.arg(employee_id)
+  AND p.deleted_at IS NULL
+  AND (sqlc.narg(ref_date)::date BETWEEN p.start_date AND p.end_date)
+  AND p.status = 'ACTIVE'
+LIMIT 1;

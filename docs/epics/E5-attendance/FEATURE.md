@@ -91,6 +91,7 @@ erDiagram
 | **F5.3** | Shift-Leader Verification (exceptions) | [attendance-verification.md](prds/attendance-verification.md) |
 | **F5.4** | Attendance Corrections | [attendance-corrections.md](prds/attendance-corrections.md) |
 | **F5.5** | Attendance Records & Dashboard | [attendance-records.md](prds/attendance-records.md) |
+| **F5.6** | Manual Attendance Entry | [manual-attendance.md](prds/manual-attendance.md) |
 
 ## 6. Platform / clients
 
@@ -233,6 +234,79 @@ flowchart LR
 ```
 
 **Entities:** reads `Attendance`, `AttendanceCode`. **Depends on:** F5.1–F5.4, E10 (export).
+
+---
+
+### F5.6 — Manual Attendance Entry (Buat Kehadiran Manual)
+
+HR/Shift-Leader creates attendance record for any employee who forgot clock-in or whose clock was not captured. Bypasses GPS/geofence entirely.
+
+**Page-based flow** (full-page form, not a modal):
+1. **Employee search** — type-ahead search selects target employee
+2. **Date picker** — select attendance date
+3. **Autofill** — server resolves placement + today's schedule (GET `:manual-autofill`); shows company, site, position, schedule times
+4. **Enter times** — check-in (required) + check-out (optional) datetime-local inputs
+5. **Optional note** — free-text reason
+6. **Submit** — POST `:manual-create`; redirects to attendance dashboard
+
+**Business rules:**
+- **MR-1:** server resolves employee's active placement; rejects with `422 NO_ACTIVE_PLACEMENT` if none.
+- **MR-2:** check_out_at >= check_in_at required; `400 INVALID_REQUEST` if violated.
+- **MR-3:** always created with `verification_status=PENDING` + `MANUAL_ENTRY` flag.
+- **MR-4:** if schedule exists for today, lateness/early evaluation runs against it (15 min grace); flags `LATE`/`EARLY` as applicable.
+- **MR-5:** no schedule → no lateness evaluation (unscheduled manual entry).
+- **MR-6:** geofence bypassed: `geofence_in = { inside: true, distance_m: 0, radius_m: 0 }`, `lat_in/lng_in = null`.
+- **MR-7:** `worked_minutes` computed server-side from check_in → check_out (0 if negative).
+- **MR-8:** `WFO = true` always (manual entry implies on-site).
+- **MR-9:** audit record written with source `manual_entry`.
+- **MR-10:** idempotency required (same `Idempotency-Key` + body → safe replay).
+- **MR-11:** `NOTE` optional, stored as `note` text.
+- **MR-12:** `created_by` set from JWT principal of the creating user (HR/SL), stored on `attendance.created_by`.
+- **MR-13:** shift leader scope: SL can create attendance only for employees whose active placement belongs to the SL's own company; `422 OUT_OF_SCOPE` if violated.
+
+**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position, service line) + today's schedule (schedule_id, shift_start_at, shift_end_at) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement.
+
+```mermaid
+flowchart TD
+    HR([HR/SL opens manual attendance page]) --> H1[Search/select employee]
+    H1 --> H2[Select date]
+    H2 --> H3[Autofill: GET :manual-autofill]
+    subgraph SYS_AF[Server: autofill]
+        H3 --> AF1{Active placement?}
+        AF1 -- No --> AF2[422 NO_ACTIVE_PLACEMENT]
+        AF1 -- Yes --> AF3[Resolve schedule for date]
+        AF3 --> AF4[Return placement + schedule info]
+    end
+    AF4 --> H4[HR reviews placement/schedule]
+    H4 --> H5[Enter check-in time + optional check-out / note]
+    H5 --> H6[Submit POST :manual-create]
+    subgraph SYS[Server: create]
+        H6 --> S1{SL creating outside own company?}
+        S1 -- Yes --> S1a[422 OUT_OF_SCOPE]
+        S1 -- No --> S2{Active placement?}
+        S2 -- No --> S3[422 NO_ACTIVE_PLACEMENT]
+        S2 -- Yes --> S4{check_out >= check_in?}
+        S4 -- No --> S5[400 INVALID_REQUEST]
+        S4 -- Yes --> S6[Resolve today's schedule]
+        S6 --> S7[Evaluate lateness vs shift start + 15 min grace]
+        S7 --> S8[Evaluate early clock-out vs shift end + 15 min grace]
+        S8 --> S9[Compute worked_minutes]
+        S9 --> S10[Create Attendance: PENDING + MANUAL_ENTRY flag]
+        S10 --> S11[Audit: source=manual_entry, created_by=actor]
+    end
+```
+
+**API:** `GET /attendance:manual-autofill` (autofill) + `POST /attendance:manual-create` (create, idempotency-wrapped).
+**Entities:** `Attendance` (create). **Depends on:** E3 (placement resolution), E4 (schedule lookup). `attendance.created_by` column (migration 00046).
+
+**Decisions:**
+- ✅ Geofence bypassed entirely — manual entry assumes the agent was on-site.
+- ✅ Always PENDING — another HR/leader must verify.
+- ✅ Shift leader allowed (scoped to own company) — actual practice requires SL to create attendance for missed check-ins; scope enforcement via MR-13.
+- ✅ Page-based flow, not modal — form has enough fields to warrant full page (employee search, date, placement card, schedule card, times, note, submit).
+- ✅ No `attendance_code_id` on manual entry — no code picker; the `MANUAL_ENTRY` flag covers the classification.
+- ✅ `created_by` traced from JWT principal — enables audit trail of who manually overrode clock-in.
+- ✅ PRD: [manual-attendance.md](prds/manual-attendance.md).
 
 ---
 

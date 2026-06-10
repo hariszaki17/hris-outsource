@@ -5,7 +5,7 @@ package domain
 import "time"
 
 // ClientCompany is the domain entity for a client company (F2.3 / ORG-01).
-// HasLeader and ActivePlacementCount are Phase-3 stubs (always false/0 until Phase 5).
+// HasLeader is derived from shift_leader_assignments. ActivePlacementCount is a Phase-3 stub.
 // SiteCount is wired to CountActiveSitesForCompany.
 type ClientCompany struct {
 	ID                   string
@@ -17,7 +17,7 @@ type ClientCompany struct {
 	Phone                *string
 	Email                *string
 	Status               string // "active" | "inactive" (DB lowercase)
-	HasLeader            bool   // TODO(Phase-5): wire to shift_leader assignment
+	HasLeader            bool   // derived from shift_leader_assignments
 	SiteCount            int    // derived from CountActiveSitesForCompany
 	ActivePlacementCount int    // TODO(Phase-5): wire to placements table
 	CreatedAt            time.Time

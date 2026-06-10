@@ -158,7 +158,7 @@ export function ClientCompaniesScreen() {
     {
       id: 'name',
       header: t('table.company'),
-      width: 320,
+      flex: 2,
       cell: (row) => (
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-surface-2 shrink-0">
@@ -180,7 +180,7 @@ export function ClientCompaniesScreen() {
     {
       id: 'has_leader',
       header: t('table.shiftLeader'),
-      width: 200,
+      flex: 1,
       cell: (row) => (
         <span className="text-[13px] text-text">
           {row.has_leader ? (
@@ -194,7 +194,7 @@ export function ClientCompaniesScreen() {
     {
       id: 'active_placement_count',
       header: t('table.placements'),
-      width: 130,
+      flex: 0.8,
       cell: (row) => (
         <span className="text-[13px] text-text">
           {row.active_placement_count != null
@@ -206,7 +206,7 @@ export function ClientCompaniesScreen() {
     {
       id: 'sites',
       header: t('table.sites'),
-      width: 130,
+      flex: 0.8,
       cell: (row) => (
         <div className="flex items-center gap-[6px]">
           <MapPin size={14} className="text-text-3 shrink-0" aria-hidden />
@@ -219,7 +219,7 @@ export function ClientCompaniesScreen() {
     {
       id: 'status',
       header: t('table.status'),
-      width: 120,
+      flex: 0.6,
       cell: (row) => {
         const tone: StatusTone = row.status === ClientCompanyStatus.ACTIVE ? 'ok' : 'bad';
         return (
@@ -237,13 +237,13 @@ export function ClientCompaniesScreen() {
     columns.push({
       id: 'actions',
       header: '',
-      width: 140,
       align: 'center',
+      flex: 0.6,
       cell: (row) =>
         row.status === ClientCompanyStatus.ACTIVE ? (
           <button
             type="button"
-            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-bad-tx hover:bg-bad-bg"
+            className="rounded-md px-3 py-1.5 text-[13px] font-medium bg-destructive text-destructive-foreground hover:opacity-90"
             onClick={() => setDeactivateTarget(row)}
           >
             {t('actions.deactivate')}

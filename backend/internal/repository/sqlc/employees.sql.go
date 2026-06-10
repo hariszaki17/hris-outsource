@@ -325,11 +325,15 @@ WHERE e.deleted_at IS NULL
         OR e.nip       ILIKE '%' || $4::text || '%'
       )
   AND (
-        $5::timestamptz IS NULL
-        OR (e.created_at, e.id) < ($5::timestamptz, $6::text)
+        $5::text IS NULL
+        OR cc.id = $5::text
+      )
+  AND (
+        $6::timestamptz IS NULL
+        OR (e.created_at, e.id) < ($6::timestamptz, $7::text)
       )
 ORDER BY e.created_at DESC, e.id DESC
-LIMIT $7
+LIMIT $8
 `
 
 type ListEmployeesParams struct {
@@ -337,6 +341,7 @@ type ListEmployeesParams struct {
 	Role            *string
 	Assigned        *bool
 	Q               *string
+	ClientCompany   *string
 	CursorCreatedAt *time.Time
 	CursorID        *string
 	RowLimit        int32
@@ -383,6 +388,7 @@ func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([
 		arg.Role,
 		arg.Assigned,
 		arg.Q,
+		arg.ClientCompany,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,

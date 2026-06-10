@@ -38,6 +38,7 @@ func (r *Repository) ListEmployees(ctx context.Context, f domain.EmployeeFilter)
 		Q:               f.Q,
 		Role:            f.Role,
 		Assigned:        f.Assigned,
+		ClientCompany:   f.ClientCompanyID,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,
 		RowLimit:        int32(f.Limit),

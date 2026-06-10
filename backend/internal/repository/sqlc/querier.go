@@ -198,6 +198,12 @@ type Querier interface {
 	CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveRequestWithIDParams) (CreateLeaveRequestWithIDRow, error)
 	// Allocates the SWP-LT id inline from the per-prefix sequence.
 	CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams) (CreateLeaveTypeRow, error)
+	// HR/admin creates an attendance record for any agent (F5.6). Bypasses GPS/geofence.
+	// id allocated by column DEFAULT. flags includes MANUAL_ENTRY. Service pre-computes
+	// is_late, late_minutes, worked_minutes, status, verification_status. created_by is
+	// the SWP-EMP-* of the HR/admin who created the record.
+	// Returns the full row for the domain mapper.
+	CreateManualAttendance(ctx context.Context, arg CreateManualAttendanceParams) (CreateManualAttendanceRow, error)
 	// Allocates the SWP-OTR id inline from the per-prefix sequence.
 	CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error)
 	// id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
@@ -332,6 +338,10 @@ type Querier interface {
 	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
 	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
+	// Resolve the active placement + today's schedule for manual attendance (F5.6).
+	// Returns placement details and (if scheduled) the live schedule's shift window.
+	// Returns zero rows (pgx.ErrNoRows) when the employee has no active placement.
+	GetManualAutofillData(ctx context.Context, arg GetManualAutofillDataParams) (GetManualAutofillDataRow, error)
 	// Single notification scoped to its recipient (scope=self).
 	GetNotification(ctx context.Context, arg GetNotificationParams) (Notification, error)
 	// E5 agent clock-in/out queries (F5.1 / SWP-ATT-*). The mobile agent flow:
@@ -486,8 +496,7 @@ type Querier interface {
 	// Filters: status, employee_id, request_type.
 	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ChangeRequest, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: q (ILIKE name), status. service_line and has_leader filters accepted
-	// but not applied at DB level (no placements/assignments table in Phase 3).
+	// Filters: q (ILIKE name), status, service_line, has_leader.
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
 	// GET /leave-grants/{id} consumptions[] embed.
 	ListConsumptionsForGrant(ctx context.Context, grantID string) ([]LeaveConsumption, error)
@@ -823,6 +832,11 @@ type Querier interface {
 	// Approve an exception record. Only PENDING/ESCALATED are verifiable; zero rows
 	// returned ⇒ terminal state (service emits 409 ALREADY_VERIFIED/REJECTED).
 	VerifyAttendance(ctx context.Context, arg VerifyAttendanceParams) (VerifyAttendanceRow, error)
+	// Approve an exception record AND override check_in/check_out times (HR/SL
+	// fills actual times when verifying an ABSENT/INCOMPLETE record). The service
+	// reevaluates status/is_late/late_minutes before calling — those override nargs
+	// are COALESCEd so they can be left NULL (verify-only, no times mutation).
+	VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAttendanceWithTimesParams) (VerifyAttendanceWithTimesRow, error)
 	// Expiry sweep: release dangling pending on an expired lot.
 	ZeroLotPending(ctx context.Context, id string) (ZeroLotPendingRow, error)
 }

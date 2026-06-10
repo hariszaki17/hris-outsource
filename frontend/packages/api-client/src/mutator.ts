@@ -5,6 +5,7 @@
  *   - auto Idempotency-Key (UUID v4) on mutations (C3 / CONVENTIONS §13)
  *   - 401 hook + typed ApiError on any non-2xx (B1)
  */
+import { uuid } from '@swp/shared';
 import { getConfig } from './config.ts';
 import { ApiError, parseErrorEnvelope } from './errors.ts';
 
@@ -23,7 +24,7 @@ export const customFetch = async <T>(url: string, options: RequestInit = {}): Pr
     headers.set('Content-Type', 'application/json');
   }
   if (MUTATION_METHODS.has(method) && !headers.has('Idempotency-Key')) {
-    headers.set('Idempotency-Key', crypto.randomUUID());
+    headers.set('Idempotency-Key', uuid());
   }
 
   const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;

@@ -1,4 +1,5 @@
 import '../global.css';
+import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -35,10 +36,22 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    Poppins: require('../assets/fonts/Poppins-Bold.ttf'),
+  });
+
   // Force-update gate (OTA) on launch — no-op in dev / until EAS Update is configured.
   useEffect(() => {
     void checkForJsUpdate();
   }, []);
+
+  if (!fontsLoaded) {
+    return (
+      <View className="flex-1 items-center justify-center bg-surface">
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   return (
     <AppProviders>

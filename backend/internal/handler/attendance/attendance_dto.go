@@ -14,7 +14,9 @@ import (
 // --- request DTOs ---
 
 type verifyRequest struct {
-	Note string `json:"note"`
+	Note       string  `json:"note"`
+	CheckInAt  *string `json:"check_in_at"`
+	CheckOutAt *string `json:"check_out_at"`
 }
 
 type rejectRequest struct {
@@ -31,6 +33,27 @@ type bulkRejectRequest struct {
 	Reason string   `json:"reason"`
 }
 
+
+// manualCreateRequest is the openapi ManualCreateRequest (F5.6).
+type manualCreateRequest struct {
+	EmployeeID  string  `json:"employee_id"`
+	CheckInAt   string  `json:"check_in_at"`
+	CheckOutAt  *string `json:"check_out_at"`
+	Note        string  `json:"note,omitempty"`
+}
+
+// autofillResponse is the response for GET /attendance:manual-autofill.
+type autofillResponse struct {
+	EmployeeName string  `json:"employee_name"`
+	CompanyName  string  `json:"company_name"`
+	SiteName     *string `json:"site_name"`
+	PositionName *string `json:"position_name"`
+	ServiceLine  string  `json:"service_line"`
+	// Schedule info (null when no schedule for the date).
+	ScheduleID   *string `json:"schedule_id"`
+	ShiftStartAt *string `json:"shift_start_at"`
+	ShiftEndAt   *string `json:"shift_end_at"`
+}
 // clockInRequest is the openapi ClockInRequest. wfo is a *bool so an omitted value
 // applies the spec default (true); employee_id is intentionally omitted — the agent is
 // always self (server fills from token).
@@ -117,6 +140,8 @@ type attendanceResponse struct {
 	RejectedAt       *string `json:"rejected_at"`
 	RejectReason     *string `json:"reject_reason"`
 	LastCorrectionID *string `json:"last_correction_id"`
+
+	CreatedBy *string `json:"created_by"`
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -206,6 +231,7 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		RejectedAt:         rfc3339Ptr(a.RejectedAt),
 		RejectReason:       a.RejectReason,
 		LastCorrectionID:   a.LastCorrectionID,
+		CreatedBy:          a.CreatedBy,
 		CreatedAt:          rfc3339(a.CreatedAt),
 		UpdatedAt:          rfc3339(a.UpdatedAt),
 	}

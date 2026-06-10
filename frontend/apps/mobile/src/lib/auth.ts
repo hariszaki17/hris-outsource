@@ -16,13 +16,17 @@ export const tokenStore = {
     accessToken = token;
   },
   /** Persist a full session after login. */
-  async setSession(access: string, refresh: string) {
+  async setSession(access: string, refresh: string | undefined) {
     accessToken = access;
-    await SecureStore.setItemAsync(REFRESH_KEY, refresh);
+    if (refresh) {
+      await SecureStore.setItemAsync(REFRESH_KEY, refresh);
+    }
   },
   /** Rotate just the stored refresh token (refresh endpoint may return a new one). */
-  async persistRefresh(refresh: string) {
-    await SecureStore.setItemAsync(REFRESH_KEY, refresh);
+  async persistRefresh(refresh: string | undefined) {
+    if (refresh) {
+      await SecureStore.setItemAsync(REFRESH_KEY, refresh);
+    }
   },
   getRefresh: () => SecureStore.getItemAsync(REFRESH_KEY),
   async clear() {
