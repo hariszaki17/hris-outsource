@@ -80,8 +80,8 @@ these touch the SHARED nginx, so run them deliberately:
   sudo cp deploy/nginx/hris.conf /etc/nginx/conf.d/hris.conf
   sudo nginx -t                 # MUST pass before reload
   sudo nginx -s reload          # zero-downtime; neighbour vhosts untouched
-  sudo certbot --nginx -d swp-hris.duckdns.org   # TLS for our host only
+  sudo certbot --nginx -d 103-103-23-210.sslip.io   # TLS for our host only
 
-Then verify: https://swp-hris.duckdns.org
+Then verify: https://103-103-23-210.sslip.io
 =========================================================================
 NEXT

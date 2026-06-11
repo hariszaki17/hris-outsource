@@ -1,4 +1,4 @@
-# HRIS staging deploy (VPS `103.103.23.210` · `swp-hris.duckdns.org`)
+# HRIS staging deploy (VPS `103.103.23.210` · `103-103-23-210.sslip.io`)
 
 Deploys the full stack **isolated** alongside the legacy `lumen-*` production on
 the shared box. **Footprint:** Postgres 16 · MinIO · Go API · Go worker (River) ·
@@ -12,7 +12,7 @@ web SPA. No Redis (River lives in Postgres). Mobile (Expo) is **not** server-dep
 - The legacy `lumen_mysql_prod` (our future E9 migration source) is never touched.
 
 ## Prereqs
-- DNS: `swp-hris.duckdns.org` → `103.103.23.210` (DuckDNS, done).
+- DNS: `103-103-23-210.sslip.io` → `103.103.23.210` (DuckDNS, done).
 - Repo cloned on the VPS; user in `docker` + `sudo` groups (✓ `mightymig`).
 
 ## Run
@@ -30,14 +30,14 @@ manual nginx/certbot steps.
 ```bash
 sudo cp deploy/nginx/hris.conf /etc/nginx/conf.d/hris.conf
 sudo nginx -t && sudo nginx -s reload          # zero downtime; neighbours untouched
-sudo certbot --nginx -d swp-hris.duckdns.org   # TLS for our host only
+sudo certbot --nginx -d 103-103-23-210.sslip.io   # TLS for our host only
 ```
 
 ## Verify after deploy (open items — confirm, don't assume)
 1. **API health** — liveness is `GET /healthz` (root-level, confirmed in
    `internal/server/server.go`); checked at `http://127.0.0.1:8090/healthz`.
 2. **MinIO presigned URLs** (E2 profile photo, E5 selfie) — the trickiest bit.
-   Browser hits `https://swp-hris.duckdns.org/hris-private/<key>?X-Amz-...`,
+   Browser hits `https://103-103-23-210.sslip.io/hris-private/<key>?X-Amz-...`,
    nginx proxies to `127.0.0.1:9100`. SigV4 signs host+path+query (not scheme),
    so the path-through vhost should validate — **but test an upload + fetch**. If
    it fails, tune `STORAGE_PUBLIC_ENDPOINT` / `STORAGE_USE_SSL` handling. Core app
