@@ -98,6 +98,13 @@ func (r *fakeChangeRequestRepo) GetEmployeeByID(_ context.Context, id string) (d
 	return e, nil
 }
 
+func (r *fakeChangeRequestRepo) GetEmployeeCompanyID(_ context.Context, employeeID string) (string, error) {
+	if e, ok := r.employees[employeeID]; ok && e.CurrentClientCompany != nil {
+		return e.CurrentClientCompany.ID, nil
+	}
+	return "", nil
+}
+
 func (r *fakeChangeRequestRepo) UpdateEmployee(_ context.Context, _ pgx.Tx, p peoplesvc.UpdateEmployeeParams) (domain.Employee, error) {
 	e, ok := r.employees[p.ID]
 	if !ok {
@@ -130,6 +137,8 @@ func (r *fakeChangeRequestRepo) ResolveChangeRequest(_ context.Context, _ pgx.Tx
 		return domain.ChangeRequest{}, domain.ErrNotFound
 	}
 	cr.Status = p.Status
+	cr.FieldResolutions = p.FieldResolutions
+	cr.BankPending = p.BankPending
 	cr.ResolvedAt = p.ResolvedAt
 	cr.ResolvedBy = p.ResolvedBy
 	cr.RejectionReason = p.RejectionReason
@@ -184,9 +193,11 @@ func newChangeRequestHarness(t *testing.T) *changeRequestHarness {
 		})
 	})
 
-	// RBAC group matching server.go change-requests slice: super_admin + hr_admin only.
+	// RBAC group matching server.go change-requests slice (2026-06-11 redesign):
+	// super_admin + hr_admin + shift_leader. Bank-field gating + company scope are
+	// enforced in the service, not the route.
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.Get("/change-requests", handler.ListPendingChangeRequests)
 		r.Get("/change-requests/{change_request_id}", handler.GetChangeRequest)
 		r.Post("/change-requests/{change_request_id}:approve", handler.ApproveChangeRequest)
@@ -237,6 +248,28 @@ func seedCREmployee(h *changeRequestHarness, id, phone, address string) domain.E
 		BankAccount: domain.BankAccount{BankName: "BNI", AccountNumber: "111222333", AccountHolderName: "CR Employee " + id},
 		CreatedAt:   now,
 		UpdatedAt:   now,
+	}
+	h.repo.addEmployee(e)
+	return e
+}
+
+// seedCREmployeeInCompany seeds an employee with a current client company so the
+// service's GetEmployeeCompanyID (→ GuardCompany) resolves a shift-leader's scope.
+func seedCREmployeeInCompany(h *changeRequestHarness, id, phone, companyID string) domain.Employee {
+	now := time.Now().UTC()
+	ph := phone
+	e := domain.Employee{
+		ID:                   id,
+		FullName:             "CR Employee " + id,
+		NIK:                  "NIK-CR-" + id,
+		NIP:                  "NIP-CR-" + id,
+		JoinAt:               now,
+		Status:               "active",
+		Phone:                &ph,
+		BankAccount:          domain.BankAccount{BankName: "BNI", AccountNumber: "111222333", AccountHolderName: "CR Employee " + id},
+		CurrentClientCompany: &domain.ClientCompanyRef{ID: companyID, Name: "Company " + companyID},
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	h.repo.addEmployee(e)
 	return e
@@ -564,23 +597,20 @@ func TestRejectChangeRequest_AlreadyResolved_409(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: RBAC — shift_leader and agent cannot access change-requests
+// Tests: RBAC — shift_leader is now admitted to the queue (2026-06-11 redesign);
+// agent is still rejected at the route.
 // ---------------------------------------------------------------------------
 
-func TestChangeRequestRBAC_ShiftLeader_403(t *testing.T) {
+func TestChangeRequestRBAC_ShiftLeader_RouteAdmits(t *testing.T) {
 	h := newChangeRequestHarness(t)
 
-	// shift_leader is not in the allowed group for change-requests.
+	// shift_leader is in the allowed group for change-requests now (company scope
+	// + bank gating are service-layer concerns, not route admission).
 	h.principal = auth.Principal{UserID: "SWP-USR-SL", Role: auth.RoleShiftLeader, CompanyID: "SWP-CMP-0021"}
 
 	rr := h.doJSON("GET", "/change-requests", nil)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("shift_leader GET /change-requests: expected 403, got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := decodeBody(t, rr)
-	errObj, _ := body["error"].(map[string]any)
-	if errObj["code"] != "FORBIDDEN" {
-		t.Errorf("error.code = %v, want FORBIDDEN", errObj["code"])
+	if rr.Code != http.StatusOK {
+		t.Fatalf("shift_leader GET /change-requests: expected 200 (route admits), got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -675,5 +705,92 @@ func TestCreateChangeRequest_EmptyChanges_400(t *testing.T) {
 	})
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("empty changes: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: shift-leader bank-split escalation — response shape over the wire
+// ---------------------------------------------------------------------------
+
+// A shift leader approving a MIXED (phone + bank) request in their own company
+// applies the non-bank field and escalates the bank field. The response must
+// carry status=PARTIALLY_APPROVED, bank_pending=true, resolved_at=null, and a
+// field_resolutions map flagging phone=APPLIED + bank_account=ESCALATED_TO_HR.
+func TestApproveChangeRequest_SLMixed_EscalationShape(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	const company = "SWP-CMP-0021"
+	emp := seedCREmployeeInCompany(h, "SWP-EMP-SL-MX", "+628100", company)
+	h.principal = auth.Principal{
+		UserID: "SWP-USR-SL", EmployeeID: "SWP-EMP-SL", Role: auth.RoleShiftLeader, CompanyID: company,
+	}
+
+	newPhone := "+628999000111"
+	seedPendingCR(h, "SWP-CR-SL-MX", emp.ID, domain.ChangeRequestChanges{
+		Phone: &newPhone,
+		BankAccount: &domain.BankAccount{
+			BankName: "BCA", AccountNumber: "9090", AccountHolderName: "CR Employee",
+		},
+	}, "MULTIPLE")
+
+	rr := h.doJSON("POST", "/change-requests/SWP-CR-SL-MX:approve", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+
+	if body["status"] != "PARTIALLY_APPROVED" {
+		t.Errorf("status = %v, want PARTIALLY_APPROVED", body["status"])
+	}
+	if body["bank_pending"] != true {
+		t.Errorf("bank_pending = %v, want true", body["bank_pending"])
+	}
+	// A partial apply is not finally resolved.
+	if body["resolved_at"] != nil {
+		t.Errorf("resolved_at = %v, want null on a partial apply", body["resolved_at"])
+	}
+
+	fr, ok := body["field_resolutions"].(map[string]any)
+	if !ok {
+		t.Fatalf("field_resolutions is not an object: %T", body["field_resolutions"])
+	}
+	phone, _ := fr["phone"].(map[string]any)
+	if phone["resolution"] != "APPLIED" {
+		t.Errorf("field_resolutions.phone.resolution = %v, want APPLIED", phone["resolution"])
+	}
+	bank, _ := fr["bank_account"].(map[string]any)
+	if bank["resolution"] != "ESCALATED_TO_HR" {
+		t.Errorf("field_resolutions.bank_account.resolution = %v, want ESCALATED_TO_HR", bank["resolution"])
+	}
+
+	// The non-bank field was applied to the employee; the bank field was not.
+	updated := h.repo.employees[emp.ID]
+	if updated.Phone == nil || *updated.Phone != newPhone {
+		t.Errorf("employee phone = %v, want applied %s", updated.Phone, newPhone)
+	}
+	if updated.BankAccount.AccountNumber == "9090" {
+		t.Error("bank account applied by SL — must be escalated, not applied")
+	}
+}
+
+// A shift leader out of the employee's company is rejected by the service guard
+// (403 OUT_OF_SCOPE) even though the route admits them.
+func TestApproveChangeRequest_SLOutOfCompany_403(t *testing.T) {
+	h := newChangeRequestHarness(t)
+	emp := seedCREmployeeInCompany(h, "SWP-EMP-SL-OOS", "+628100", "SWP-CMP-OWN")
+	h.principal = auth.Principal{
+		UserID: "SWP-USR-SL", EmployeeID: "SWP-EMP-SL", Role: auth.RoleShiftLeader, CompanyID: "SWP-CMP-OTHER",
+	}
+
+	newPhone := "+628222"
+	seedPendingCR(h, "SWP-CR-SL-OOS", emp.ID, domain.ChangeRequestChanges{Phone: &newPhone}, "PHONE")
+
+	rr := h.doJSON("POST", "/change-requests/SWP-CR-SL-OOS:approve", nil)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "OUT_OF_SCOPE" {
+		t.Errorf("error.code = %v, want OUT_OF_SCOPE", errObj["code"])
 	}
 }

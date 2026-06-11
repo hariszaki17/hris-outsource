@@ -6,6 +6,7 @@ package sqlcgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -29,6 +30,14 @@ type Querier interface {
 	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
 	// decidable; zero rows ⇒ terminal state (service emits 409).
 	ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error)
+	// Auto-close a STALE open record at clock-in time (F5.1 flexible check-in): the agent
+	// clocked in, never clocked out, and the checkout window has elapsed. check_out_at is
+	// stamped at the computed shift_end (NOT now — they did not actually work past it),
+	// auto_closed=true, the AUTO_CLOSED flag added, status INCOMPLETE, verification PENDING
+	// (enters the leader queue as an anomaly). Synchronous complement to the absence sweep,
+	// for users/companies the cron skips. Guarded by check_out_at IS NULL so a concurrent
+	// clock-out wins the race (yields no row → repo treats as already-closed, no-op).
+	AutoCloseAttendance(ctx context.Context, arg AutoCloseAttendanceParams) (string, error)
 	// group_by=day: group_key = ISO date, group_label = same ISO date.
 	BillableAggregateByDay(ctx context.Context, arg BillableAggregateByDayParams) ([]BillableAggregateByDayRow, error)
 	// E10 F10.3 billable-hours report (GET /reports/attendance-billable). Computed
@@ -107,6 +116,17 @@ type Querier interface {
 	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
+	// =====================================================================
+	// SuperAdminWidgets (DB-7) — admin-only dashboard block. Present ONLY when
+	// role=super_admin; the queries below are global (no scope param). Each backs one
+	// sub-widget of openapi schemas.SuperAdminWidgets.
+	// =====================================================================
+	// user_access.active_users: login accounts with status 'active' (00002_users).
+	CountActiveUsers(ctx context.Context) (int64, error)
+	// pending_grants.bank_approvals: change-requests with a bank change escalated to
+	// HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
+	// rbac.CanApproveBank / PARTIALLY_APPROVED).
+	CountBankApprovalsPending(ctx context.Context) (int64, error)
 	// Employment agreements ending within the next 30 days (HrDashboard).
 	CountExpiringAgreements30d(ctx context.Context, today pgtype.Date) (int64, error)
 	// Active/expiring placements ending within the next 30 days (inclusive of today).
@@ -119,6 +139,11 @@ type Querier interface {
 	// (per E4 Schedule) minus E7 public holidays." DISTINCT work_date guards against
 	// duplicate live rows; the NOT EXISTS holiday subquery excludes holiday dates.
 	CountLeaveDurationDays(ctx context.Context, arg CountLeaveDurationDaysParams) (int64, error)
+	// user_access.offboarded_30d: users disabled within the last 30 days (F2.7).
+	// The schema records offboarding as status='disabled' + a tokens_valid_after epoch
+	// bump (00038); updated_at carries the disable instant. We count disabled users
+	// whose tokens_valid_after (the revocation instant) falls in the last 30 days.
+	CountOffboardedUsers30d(ctx context.Context, nowTs time.Time) (int64, error)
 	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
 	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)
@@ -175,7 +200,7 @@ type Querier interface {
 	// Allocates the SWP-AC id inline from the per-prefix sequence.
 	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
 	// Allocates the SWP-CHG id inline from the per-prefix sequence.
-	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (ChangeRequest, error)
+	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (CreateChangeRequestRow, error)
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
 	// Insert a new agent/leader-filed correction in PENDING. company_id +
@@ -301,13 +326,16 @@ type Querier interface {
 	// verification_status for scope + state guards (omits joins; service re-reads for DTO).
 	GetAttendanceForUpdate(ctx context.Context, id string) (GetAttendanceForUpdateRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
-	GetChangeRequestByID(ctx context.Context, id string) (ChangeRequest, error)
+	GetChangeRequestByID(ctx context.Context, id string) (GetChangeRequestByIDRow, error)
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
 	// Single correction with denormalized requester/company names.
 	GetCorrection(ctx context.Context, id string) (GetCorrectionRow, error)
 	// Row-lock for approve/reject: reads status/company_id/proposed_* for scope + state
 	// guards + apply (omits joins; service re-reads for DTO).
 	GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error)
+	// current_* come from the employee's single non-terminal placement (INV-1 → at most
+	// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
+	// employee still resolves (current_* null).
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
@@ -487,6 +515,10 @@ type Querier interface {
 	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
 	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
+	// HR bank-escalation queue: rows whose bank change a shift leader partially
+	// applied and escalated. Backed by the change_requests_bank_pending_idx partial
+	// index; cursor page ordered by (submitted_at desc, id desc), fetch limit+1.
+	ListBankPendingChangeRequests(ctx context.Context, arg ListBankPendingChangeRequestsParams) ([]ListBankPendingChangeRequestsRow, error)
 	// E6 leave-calendar query (GET /leave-calendar). Returns leave entries overlapping
 	// a [from,to] date range, scoped by company / service-line / leave-type. The status
 	// filter is a text[] the service builds: APPROVED only when show_pending=false, else
@@ -494,7 +526,7 @@ type Querier interface {
 	ListCalendarEntries(ctx context.Context, arg ListCalendarEntriesParams) ([]ListCalendarEntriesRow, error)
 	// Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, employee_id, request_type.
-	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ChangeRequest, error)
+	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ListChangeRequestsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE name), status, service_line, has_leader.
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
@@ -683,6 +715,12 @@ type Querier interface {
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// org_rollups: per-service-line headcount (distinct placed employees) + active
+	// placement count, over non-terminal placements (mirrors CountActivePlacements).
+	// service_lines.name is free text ("Facility Services" / "Building Management" /
+	// "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
+	// the raw name so the mapping stays in Go (no enum in the schema).
+	OrgRollupsByServiceLine(ctx context.Context) ([]OrgRollupsByServiceLineRow, error)
 	// HR PATCH /leave-grants/{id}: adjust amount_days/expires_at/earmark (+ remark). The
 	// service guards amount_days >= consumed_days+pending_days (422) before calling. nargs
 	// left NULL keep the current value (COALESCE).
@@ -692,6 +730,11 @@ type Querier interface {
 	// Dashboard stat cards (C2SSLA): global placement aggregates over non-deleted
 	// placements. Optional company_id scopes the counts (shift-leader RBAC).
 	PlacementGlobalStats(ctx context.Context, companyID *string) (PlacementGlobalStatsRow, error)
+	// recent_audit: last sensitive admin actions, newest first (capped by row_limit ~8).
+	// The schema (00004_audit_log) stores actor_user_id/actor_role/action/entity_type/
+	// entity_id; the service composes actor_label/target_label from these (no
+	// human-name columns exist on audit_log).
+	RecentAuditEntries(ctx context.Context, rowLimit int32) ([]RecentAuditEntriesRow, error)
 	// EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
 	// forces a rotation on next login. Used by :regenerate-password.
 	RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error
@@ -704,9 +747,12 @@ type Querier interface {
 	// Move days into pending_days at SUBMIT (FIFO reserve). Never drives a lot negative:
 	// the service caps the delta at the lot's remaining before calling.
 	ReservePending(ctx context.Context, arg ReservePendingParams) (ReservePendingRow, error)
-	// Drives :approve (status='approved') and :reject (status='rejected').
-	// Sets resolved_at, resolved_by (optional), and rejection_reason (on reject).
-	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ChangeRequest, error)
+	// Drives :approve (status='approved'), :reject (status='rejected'), and the
+	// SL bank-split partial apply (status='partially_approved' + bank_pending=true,
+	// field_resolutions recording which non-bank fields the SL applied + who). For
+	// terminal resolutions resolved_at/resolved_by/rejection_reason are set; for a
+	// partial apply field_resolutions/bank_pending carry the in-between state.
+	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ResolveChangeRequestRow, error)
 	// Cancel/withdraw restore: return days to the balance (used - delta).
 	RestoreLeaveQuota(ctx context.Context, arg RestoreLeaveQuotaParams) (LeaveQuota, error)
 	// Reverse committed consumed_days at CANCEL-APPROVED / SHORTEN (paired with deleting
@@ -748,6 +794,10 @@ type Querier interface {
 	SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatusParams) (SetLeaveTypeStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetOvertimeRuleStatus(ctx context.Context, arg SetOvertimeRuleStatusParams) (SetOvertimeRuleStatusRow, error)
+	// Backfill: attach an agreement to a previously pending placement (awaiting_agreement).
+	// end_date is updated too so the service can persist the BR-1b PKWT auto-cap in the
+	// same write. awaiting_agreement flips to false once agreement_id is non-null.
+	SetPlacementAgreement(ctx context.Context, arg SetPlacementAgreementParams) (SetPlacementAgreementRow, error)
 	// Drives end/terminate/resign/transfer/supersede. status_changed_at=now().
 	SetPlacementLifecycle(ctx context.Context, arg SetPlacementLifecycleParams) (SetPlacementLifecycleRow, error)
 	SetPlacementPredecessor(ctx context.Context, arg SetPlacementPredecessorParams) error
@@ -787,6 +837,10 @@ type Querier interface {
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
+	// EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
+	// fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
+	// when the caller passes NULL, so partial patches don't clobber the other fields.
+	UpdateEmployeeSelfInstant(ctx context.Context, arg UpdateEmployeeSelfInstantParams) (UpdateEmployeeSelfInstantRow, error)
 	// The worker's lifecycle writer. Sets status + result fields; stamps started_at
 	// on RUNNING (once) and completed_at on the terminal states (DONE/FAILED).
 	UpdateExportJobStatus(ctx context.Context, arg UpdateExportJobStatusParams) (UpdateExportJobStatusRow, error)

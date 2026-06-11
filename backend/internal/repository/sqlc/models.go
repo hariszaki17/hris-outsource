@@ -129,16 +129,18 @@ type AuditLog struct {
 }
 
 type ChangeRequest struct {
-	ID              string
-	EmployeeID      string
-	Status          string
-	Changes         []byte
-	RequestType     string
-	Note            *string
-	SubmittedAt     time.Time
-	ResolvedAt      *time.Time
-	ResolvedBy      *string
-	RejectionReason *string
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+	FieldResolutions []byte
+	BankPending      bool
 }
 
 type ClientCompany struct {
@@ -198,6 +200,10 @@ type Employee struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	DeletedAt             *time.Time
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
 }
 
 type EmploymentAgreement struct {
@@ -512,7 +518,7 @@ type PayslipComponent struct {
 type Placement struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string

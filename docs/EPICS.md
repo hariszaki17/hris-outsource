@@ -22,7 +22,7 @@
 |---|---|
 | Tenancy | **Internal only.** Only SWP staff use the system. Client companies are *data*, not tenants/logins. |
 | Roles | super admin · HR/placement admin · **shift leader** · agent |
-| Placement | An agent placed at a **client company**, in a **service line**, for a **contract period**; tracked with history. |
+| Placement | An agent placed at a **client company**, in a **service line**, for a **contract period** (the employment agreement may be backfilled — optional at create, §8 2026-06-11); tracked with history. |
 | Shift leader | **1 per client company/placement.** Verifies attendance, approves OT & leave, manages roster, sees team dashboards. |
 | Shifts | A **work-shift master** (working hours + break) is admin-defined; the shift leader **picks from master** to schedule each agent. |
 | Service line | **Drives shift & attendance rules** (e.g. Parking = 24/7 rotating, Building Mgmt = office hours). |
@@ -74,7 +74,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E3 — Placement Management ⭐ (differentiator)
 **Goal:** place agents at client companies, in a service line, for a period; track history; assign the company's shift leader.
-**Features:** Agent placement (contract: agent + company + service line + period + terms) · Placement lifecycle/status · Re-placement & transfer with history · Shift-leader assignment (1 per company) · Company placement roster view.
+**Features:** Agent placement (agent + company + service line + period; employment agreement may be backfilled — optional at create, see §8 2026-06-11) · Placement lifecycle/status · Re-placement & transfer with history · Shift-leader assignment (1 per company) · Company placement roster view.
 **Entities:** Placement (≈ legacy `employee_contract`), ShiftLeaderAssignment.
 **Depends on:** E2
 
@@ -117,7 +117,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E10 — Reporting, Exports & Notifications (cross-cutting)
 **Goal:** operational reports + notifications across modules.
-**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending, attendance anomalies) · **shift-leader compliance notifications** (agent assigned a holiday shift; agent with no weekly rest / >6 consecutive workdays — §8 D3) · Approval inboxes.
+**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending, attendance anomalies, **profile change-request approved/rejected** — reject carries the reason, F2.1 EP-5c) · **shift-leader compliance notifications** (agent assigned a holiday shift; agent with no weekly rest / >6 consecutive workdays — §8 D3) · Approval inboxes.
 **Depends on:** spans E2–E8.
 
 ---
@@ -203,6 +203,13 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **D4 — E1 reconciliation flagged.** Manually setting `users.role = 'shift_leader'` is **no longer** how a leader is created, and the previously-documented "demoting a user auto-ends their E3 assignment" side-effect is **moot** under the derived model (role for field staff is emergent from the assignment). The **E1 `changeUserRole` spec must be reconciled**.
   - Related earlier same-day fixes folded in: **E2 `GET /client-companies`** is scoped to a shift_leader's own company; **E4 `GET /schedule`** auto-scopes to the leader's company.
   - See [E3 FEATURE §4], [E2 F2.3 PRD], [E1 FEATURE], [E4 FEATURE].
+- ✅ **Employment agreement is OPTIONAL at placement creation — "pending agreement" tracking model** *(resolved 2026-06-11 — supersedes E3 F3.1 BR-1, which made the agreement mandatory at create)* — operationally, an agent is frequently placed and **starts work before the PKWT/PKWTT is finalized** (the legal paperwork lags onboarding). So `agreement_id` becomes **optional and nullable** both on the placement-create request and on the `Placement` response model:
+  - **A — pending flag, not a lifecycle state.** A placement created without an agreement is flagged with a derived boolean **`awaiting_agreement` (= `agreement_id` is null)**. This is an **orthogonal compliance flag, NOT a new lifecycle state** — the F3.2 state machine is untouched; an `awaiting_agreement` placement can still be ACTIVE / PENDING_START / EXPIRING. List and roster endpoints gain an `?awaiting_agreement=true` filter so HR can work the pending-agreement backlog.
+  - **B — period validation only when an agreement is present.** The BR-1b period-within-agreement check (and the `422 PLACEMENT_OUTSIDE_CONTRACT` error + PKWT `end_date` auto-cap) **only runs when an `agreement_id` is supplied**. No agreement → no period check, and `end_date` may be open-ended.
+  - **C — backfill endpoint.** A pending agreement is attached later via **`POST /placements/{id}/agreement`** `{ agreement_id }`, which re-runs the BR-1b period validation / PKWT auto-cap and clears `awaiting_agreement`. `404` if the placement is unknown; `422 AGREEMENT_NOT_OWNED` if the agreement doesn't belong to the placement's agent.
+  - **D — renew/transfer propagate pending.** Renewing or transferring a placement that has no agreement produces a **successor that is also pending** (null `agreement_id` propagates; no auto-cap) until its own agreement is backfilled.
+  - **E — legal basis still required eventually.** Under alih-daya law the employment relationship is SWP↔agent, so a finalized PKWT/PKWTT is still mandatory for the *employment* — this decision only removes it as a **blocking precondition at the placement-create step**; `awaiting_agreement` exists precisely so the outstanding paperwork stays visible and gets closed.
+  - See [E3 F3.1 PRD agent-placement BR-1/BR-1b + new backfill BR], [E3 FEATURE §F3.1/§4], [E3 openapi `createPlacement` / `backfillPlacementAgreement`].
 
 **E4 — Shift & Scheduling**
 - ✅ Agent shift-swap / day-off requests: **deferred to post-v1** (v1 = leader-driven schedule edits only; F4.4 swaps drop from v1 scope)
@@ -261,5 +268,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 **E10 — Reporting & Notifications**
 - ✅ Billable = **verified-only** (consistent with E5)
 - Notifications all-on in v1 (mute non-critical later); billing math = **hours only** (rates applied outside the system) *(default)*
+- ✅ **Super Admin dashboard = HR cockpit + admin-only widgets (extends the dashboard D1 "same body, distinct label")** *(resolved 2026-06-11)* — the `super_admin` dashboard now **adds** an admin-only section to the shared `HrDashboard` payload, making it a **superset** rather than a relabel. Four widgets, all `super_admin`-scoped, each deep-linking into its owning epic: **(a) User & access** (active users · accounts pending provisioning · offboarded/disabled ≤30d — E2/F2.7); **(b) Recent audit feed** (last sensitive actions — E1 audit); **(c) Org rollups by service line** (headcount + active placements across Facility / Building / Parking — E3); **(d) Pending grants** (bank-account approval escalations + role-change requests awaiting super-admin action). Carried on `HrDashboard.admin` (present **only** for `super_admin`); the `hr_admin` payload is unchanged. See [F10.2 PRD DB-7], [E10 `openapi` `HrDashboard.admin`].
+- ✅ **Shift-leader dashboard is dual-surface (web + mobile)** *(resolved 2026-06-11)* — the existing `LeaderDashboard` payload now also backs a **mobile Beranda** (the shift leader is on-site, phone-first), at parity with the web team dashboard. **No new endpoint** — `GET /dashboards/me` already returns `LeaderDashboard` for `shift_leader`; this adds the mobile surface only. See [F10.2 PRD DB-8], [`.pen` frame `UMzuO`].
 
 **Deferred to the build/tech phase (not product):** auth session model (JWT vs server sessions) + token lifetimes + password policy; API pagination style; push provider (FCM/APNs); migration batch sizes/parallelism; audit & export storage/retention infrastructure; dashboard caching/freshness thresholds.

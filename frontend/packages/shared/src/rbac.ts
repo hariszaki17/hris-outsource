@@ -50,6 +50,10 @@ export const PERMISSIONS = [
   'employees.write',
   'change_requests.read',
   'change_requests.approve',
+  // Bank-account changes are HR-only even when a shift leader approves the rest of a request:
+  // the SL applies the non-bank fields and the bank field escalates to HR. This sub-permission
+  // gates that final bank approval (held by hr_admin/super_admin only). See E2 employee-profile.md.
+  'change_requests.approve.bank',
   'clients.read',
   'clients.write',
   'agreements.read',
@@ -121,6 +125,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   shift_leader: [
     'dashboard.view',
     'employees.read',
+    // Profile change requests route to the on-site shift leader (company scope) with HR fallback;
+    // the SL reviews/approves the non-bank fields, bank escalates to HR (no .approve.bank here).
+    'change_requests.read',
+    'change_requests.approve',
     'placements.read',
     'schedule.read',
     'schedule.write',

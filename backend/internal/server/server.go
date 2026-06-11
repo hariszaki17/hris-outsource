@@ -48,7 +48,8 @@ type Deps struct {
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
 	People               *peoplehttp.Handler
 	PeopleAgreements     *peoplehttp.AgreementHandler     // 04-03: agreements + attachments + file download
-	PeopleChangeRequests *peoplehttp.ChangeRequestHandler // 04-04: change-request HR approval queue
+	PeopleChangeRequests *peoplehttp.ChangeRequestHandler // 04-04: change-request approval queue (HR + shift-leader)
+	PeopleSelfProfile    *peoplehttp.SelfProfileHandler   // E2 F2.1: agent self-service profile (instant edit + photo upload)
 	// PLACEMENT slice (05-02): placements + lifecycle + shift-leader + roster (E3).
 	Placement *placementhttp.Handler
 	// SCHEDULING slice (06-02): shift masters + schedule grid + conflict engine (E4).
@@ -300,12 +301,16 @@ func New(d Deps) http.Handler {
 			// PEOPLE agreements slice end (04-03). 04-04 change-requests: append here.
 
 			// ---------------------------------------------------------------
-			// PEOPLE change-requests slice (04-04): HR approval queue for
+			// PEOPLE change-requests slice (04-04): approval queue for
 			// agent-submitted profile-change requests (E2 F2.1 EP-5 / PPL-03).
-			// x-rbac: hr_admin, super_admin — no shift_leader or agent access.
+			// x-rbac: hr_admin, super_admin, shift_leader (company_or_global) —
+			// shift leaders approve their own company's requests; the bank field
+			// gates on change_requests.approve.bank (HR/super only) and escalates
+			// (PARTIALLY_APPROVED) when a leader lacks it. Service enforces the
+			// company scope (rbac.GuardCompany) + bank gate (rbac.CanApproveBank).
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				// List + detail reads.
 				r.Get("/change-requests", d.PeopleChangeRequests.ListPendingChangeRequests)
 				r.Get("/change-requests/{change_request_id}", d.PeopleChangeRequests.GetChangeRequest)
@@ -321,6 +326,17 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}/change-requests", d.PeopleChangeRequests.CreateChangeRequest)
+			})
+
+			// Agent self-service PROFILE (E2 F2.1): instant-tier edit of own
+			// {address, app_language, photo} + presigned photo-upload init.
+			// x-rbac roles:[agent] scope:self — the service resolves the employee
+			// from the principal (GuardSelf). Approval-tier fields are rejected
+			// (FIELD_REQUIRES_APPROVAL) so the agent files a change request instead.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent))
+				r.Patch("/me/profile", d.PeopleSelfProfile.UpdateMyProfile)
+				r.Post("/me/profile/photo-upload-init", d.PeopleSelfProfile.InitProfilePhotoUpload)
 			})
 			// PEOPLE change-requests slice end (04-04). Phase 5+ appends after this line.
 
@@ -351,6 +367,8 @@ func New(d Deps) http.Handler {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.With(d.Idempotency.Handler).Post("/placements", d.Placement.CreatePlacement)
 				r.Patch("/placements/{id}", d.Placement.UpdatePlacement)
+				// Backfill the employment agreement onto a pending placement (awaiting_agreement).
+				r.With(d.Idempotency.Handler).Post("/placements/{id}/agreement", d.Placement.SetPlacementAgreement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:renew", d.Placement.RenewPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:transfer", d.Placement.TransferPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:end", d.Placement.EndPlacement)

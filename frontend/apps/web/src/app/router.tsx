@@ -1,14 +1,7 @@
-import { AgentAttendanceScreen } from '@/features/agent/me-attendance-screen.tsx';
-import { AgentCorrectionScreen } from '@/features/agent/me-correction-screen.tsx';
-import { AgentDashboardScreen } from '@/features/agent/me-dashboard-screen.tsx';
-import { AgentLeaveCreateScreen } from '@/features/agent/me-leave-create-screen.tsx';
-import { AgentLeaveScreen } from '@/features/agent/me-leave-screen.tsx';
+import { AgentAkunScreen } from '@/features/agent/me-akun-screen.tsx';
+import { AgentKehadiranScreen } from '@/features/agent/me-kehadiran-screen.tsx';
 import { AgentNotificationsScreen } from '@/features/agent/me-notifications-screen.tsx';
-import { AgentOvertimeCreateScreen } from '@/features/agent/me-overtime-create-screen.tsx';
-import { AgentOvertimeScreen } from '@/features/agent/me-overtime-screen.tsx';
-import { AgentPayslipScreen } from '@/features/agent/me-payslip-screen.tsx';
-import { AgentProfileScreen } from '@/features/agent/me-profile-screen.tsx';
-import { AgentScheduleScreen } from '@/features/agent/me-schedule-screen.tsx';
+import { AgentPengajuanScreen } from '@/features/agent/me-pengajuan-screen.tsx';
 import { ForgotPasswordScreen } from '@/features/auth/forgot-password-screen.tsx';
 import { LoginScreen } from '@/features/auth/login-screen.tsx';
 import { ResetPasswordScreen } from '@/features/auth/reset-password-screen.tsx';
@@ -437,6 +430,8 @@ const placementsRoute = createRoute({
       out.status = search.status;
     }
     if (typeof search.expiring_soon === 'boolean') out.expiring_soon = search.expiring_soon;
+    if (typeof search.awaiting_agreement === 'boolean')
+      out.awaiting_agreement = search.awaiting_agreement;
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
     return out;
   },
@@ -470,6 +465,8 @@ const companyRosterRoute = createRoute({
       out.status = search.status;
     }
     if (typeof search.include_history === 'boolean') out.include_history = search.include_history;
+    if (typeof search.awaiting_agreement === 'boolean')
+      out.awaiting_agreement = search.awaiting_agreement;
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
     return out;
   },
@@ -742,75 +739,49 @@ const settingsGeneralRoute = createRoute({
   component: SettingsGeneralScreen,
 });
 
-// Agent self-service (/me/*) — docs/eng/AGENT-WEB-ACCESS.md. Gated by `self.*` keys via the
-// authedRoute capability guard; rendered inside AppShell with the agent nav backbone.
-const meDashboardRoute = createRoute({
+// Agent self-service (/me/*) — docs/eng/AGENT-WEB-ACCESS.md. Three merged homes gated by `self.*`
+// keys via the authedRoute capability guard; rendered inside AppShell with the agent nav backbone:
+//   /me           Kehadiran (dashboard + attendance + schedule + live clock/clock-in-out)
+//   /me/pengajuan Pengajuan (leave + overtime request tabs)
+//   /me/akun      Akun (profile + payslip + tiered Ubah Profil)
+const meKehadiranRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/me',
-  component: AgentDashboardScreen,
+  component: AgentKehadiranScreen,
 });
-const meAttendanceRoute = createRoute({
+const mePengajuanRoute = createRoute({
   getParentRoute: () => authedRoute,
-  path: '/me/attendance',
-  component: AgentAttendanceScreen,
+  path: '/me/pengajuan',
+  component: AgentPengajuanScreen,
 });
-const meScheduleRoute = createRoute({
+const meAkunRoute = createRoute({
   getParentRoute: () => authedRoute,
-  path: '/me/schedule',
-  component: AgentScheduleScreen,
-});
-const meLeaveRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/leave',
-  component: AgentLeaveScreen,
-});
-const meLeaveNewRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/leave/new',
-  component: AgentLeaveCreateScreen,
-});
-const meOvertimeRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/overtime',
-  component: AgentOvertimeScreen,
-});
-const meOvertimeNewRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/overtime/new',
-  component: AgentOvertimeCreateScreen,
-});
-const meProfileRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/profile',
-  component: AgentProfileScreen,
-});
-const mePayslipRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/payslip',
-  component: AgentPayslipScreen,
+  path: '/me/akun',
+  component: AgentAkunScreen,
 });
 const meNotificationsRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/me/notifications',
   component: AgentNotificationsScreen,
 });
-interface MeCorrectionSearch {
-  attendanceId?: string;
-  date?: string;
-}
-const meCorrectionRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/me/correction',
-  component: AgentCorrectionScreen,
-  validateSearch: (search: Record<string, unknown>): MeCorrectionSearch => {
-    const out: MeCorrectionSearch = {};
-    if (typeof search.attendanceId === 'string' && search.attendanceId)
-      out.attendanceId = search.attendanceId;
-    if (typeof search.date === 'string' && search.date) out.date = search.date;
-    return out;
-  },
-});
 
+// Legacy /me/* paths kept as redirects so bookmarks/deep links survive the nav merge
+// (Plan §E). attendance/schedule → Kehadiran (/me); leave/overtime → Pengajuan; profile/payslip
+// → Akun. `beforeLoad` throws the redirect before any component renders.
+const meRedirect = (from: string, to: '/me' | '/me/pengajuan' | '/me/akun') =>
+  createRoute({
+    getParentRoute: () => authedRoute,
+    path: from,
+    beforeLoad: () => {
+      throw redirect({ to });
+    },
+  });
+const meAttendanceRedirectRoute = meRedirect('/me/attendance', '/me');
+const meScheduleRedirectRoute = meRedirect('/me/schedule', '/me');
+const meLeaveRedirectRoute = meRedirect('/me/leave', '/me/pengajuan');
+const meOvertimeRedirectRoute = meRedirect('/me/overtime', '/me/pengajuan');
+const meProfileRedirectRoute = meRedirect('/me/profile', '/me/akun');
+const mePayslipRedirectRoute = meRedirect('/me/payslip', '/me/akun');
 const routeTree = rootRoute.addChildren([
   loginRoute,
   forgotPasswordRoute,
@@ -862,18 +833,17 @@ const routeTree = rootRoute.addChildren([
     inboxRoute,
     reportsRoute,
     notificationsRoute,
-    // Agent self-service (/me/*)
-    meDashboardRoute,
-    meAttendanceRoute,
-    meScheduleRoute,
-    meLeaveRoute,
-    meLeaveNewRoute,
-    meOvertimeRoute,
-    meOvertimeNewRoute,
-    meProfileRoute,
-    mePayslipRoute,
+    // Agent self-service (/me/*) — three merged homes + legacy redirects.
+    meKehadiranRoute,
+    mePengajuanRoute,
+    meAkunRoute,
     meNotificationsRoute,
-    meCorrectionRoute,
+    meAttendanceRedirectRoute,
+    meScheduleRedirectRoute,
+    meLeaveRedirectRoute,
+    meOvertimeRedirectRoute,
+    meProfileRedirectRoute,
+    mePayslipRedirectRoute,
     settingsRoute.addChildren([
       settingsIndexRoute,
       usersRoute,

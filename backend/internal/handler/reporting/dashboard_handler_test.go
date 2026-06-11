@@ -74,6 +74,11 @@ func TestDashboard_HrAdminShape(t *testing.T) {
 		t.Errorf("attendance_anomalies_today = %v, want 8", d["attendance_anomalies_today"])
 	}
 
+	// admin block is OMITTED for hr_admin (C-6).
+	if _, present := d["admin"]; present {
+		t.Errorf("hr_admin payload must OMIT admin (C-6), got: %v", d["admin"])
+	}
+
 	// pending_approvals_panel — 4 rows with the EXACT openapi deep-link paths.
 	panel, ok := d["pending_approvals_panel"].([]any)
 	if !ok {
@@ -131,6 +136,120 @@ func TestDashboard_SuperAdminSameShapeDifferentLabel(t *testing.T) {
 	}
 	if len(panel) != 0 {
 		t.Errorf("panel = %d rows, want 0 (no pending counts)", len(panel))
+	}
+	// admin block PRESENT for super_admin (DB-7); empty admin data → empty arrays +
+	// zero counts (the empty-state variant, C-5), but the block + all four
+	// sub-widgets are present.
+	admin, ok := d["admin"].(map[string]any)
+	if !ok {
+		t.Fatalf("super_admin payload must include admin block (DB-7), got: %v", d["admin"])
+	}
+	for _, k := range []string{"user_access", "recent_audit", "org_rollups", "pending_grants"} {
+		if _, present := admin[k]; !present {
+			t.Errorf("admin.%s missing (required sub-widget)", k)
+		}
+	}
+	if _, ok := admin["recent_audit"].([]any); !ok {
+		t.Errorf("admin.recent_audit must be an array (present, not null): %v", admin["recent_audit"])
+	}
+	if _, ok := admin["org_rollups"].([]any); !ok {
+		t.Errorf("admin.org_rollups must be an array (present, not null): %v", admin["org_rollups"])
+	}
+}
+
+// TestDashboard_SuperAdminWidgets exercises the populated admin block (DB-7): the
+// four sub-widgets, the free-text service-line name → FACILITY|BUILDING|PARKING
+// enum mapping, and the audit actor/target label composition.
+func TestDashboard_SuperAdminWidgets(t *testing.T) {
+	h := newHarness(t, auth.RoleSuperAdmin, "", "SWP-EMP-9001")
+	h.dash.adminData = svc.SuperAdminWidgetsData{
+		ActiveUsers:          514,
+		OffboardedUsers30d:   7,
+		BankApprovalsPending: 3,
+		OrgRollups: []svc.OrgRollupRow{
+			{ServiceLineName: "Facility Services", Headcount: 312, ActivePlacements: 298},
+			{ServiceLineName: "Building Management", Headcount: 90, ActivePlacements: 88},
+			{ServiceLineName: "Parking", Headcount: 80, ActivePlacements: 80},
+			{ServiceLineName: "Catering (legacy)", Headcount: 5, ActivePlacements: 5}, // unknown → skipped
+		},
+		RecentAudit: []svc.AuditRow{
+			{ID: "SWP-AL-90412", ActorUserID: strp("SWP-USR-7"), ActorRole: strp("hr_admin"), Action: "ROLE_GRANTED", EntityType: "user", EntityID: "SWP-USR-42", CreatedAt: fixedNow},
+			{ID: "SWP-AL-90411", ActorUserID: nil, ActorRole: nil, Action: "PLACEMENT_EXPIRED", EntityType: "placement", EntityID: "SWP-PL-882", CreatedAt: fixedNow},
+		},
+	}
+
+	rr := h.do("GET", "/dashboards/me", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	admin, ok := dataObject(t, rr)["admin"].(map[string]any)
+	if !ok {
+		t.Fatalf("admin block missing")
+	}
+
+	ua := admin["user_access"].(map[string]any)
+	if ua["active_users"] != float64(514) || ua["offboarded_30d"] != float64(7) {
+		t.Errorf("user_access = %v, want active_users 514 / offboarded_30d 7", ua)
+	}
+	// pending_provisioning honest 0 (E2 §8 D1 auto-provision).
+	if ua["pending_provisioning"] != float64(0) {
+		t.Errorf("user_access.pending_provisioning = %v, want 0", ua["pending_provisioning"])
+	}
+
+	pg := admin["pending_grants"].(map[string]any)
+	if pg["bank_approvals"] != float64(3) {
+		t.Errorf("pending_grants.bank_approvals = %v, want 3", pg["bank_approvals"])
+	}
+	// role_requests honest 0 (no role-change-request table).
+	if pg["role_requests"] != float64(0) {
+		t.Errorf("pending_grants.role_requests = %v, want 0", pg["role_requests"])
+	}
+
+	// org_rollups: 3 mapped service lines (the unknown "Catering" line is skipped).
+	rollups := admin["org_rollups"].([]any)
+	if len(rollups) != 3 {
+		t.Fatalf("org_rollups = %d rows, want 3 (unknown line skipped)", len(rollups))
+	}
+	wantSL := map[string][2]float64{ // service_line → {headcount, active_placements}
+		"FACILITY": {312, 298},
+		"BUILDING": {90, 88},
+		"PARKING":  {80, 80},
+	}
+	for _, row := range rollups {
+		r := row.(map[string]any)
+		sl := r["service_line"].(string)
+		want, found := wantSL[sl]
+		if !found {
+			t.Errorf("unexpected org_rollups service_line %s", sl)
+			continue
+		}
+		if r["headcount"] != want[0] || r["active_placements"] != want[1] {
+			t.Errorf("org_rollups[%s] = %v, want headcount %v / active_placements %v", sl, r, want[0], want[1])
+		}
+	}
+
+	// recent_audit: newest-first, labels composed from the raw audit columns.
+	audit := admin["recent_audit"].([]any)
+	if len(audit) != 2 {
+		t.Fatalf("recent_audit = %d rows, want 2", len(audit))
+	}
+	first := audit[0].(map[string]any)
+	if first["id"] != "SWP-AL-90412" || first["action"] != "ROLE_GRANTED" {
+		t.Errorf("recent_audit[0] = %v, want id SWP-AL-90412 / action ROLE_GRANTED", first)
+	}
+	if first["actor_label"] != "SWP-USR-7 (hr_admin)" {
+		t.Errorf("recent_audit[0].actor_label = %v, want \"SWP-USR-7 (hr_admin)\"", first["actor_label"])
+	}
+	if first["target_label"] != "user SWP-USR-42" {
+		t.Errorf("recent_audit[0].target_label = %v, want \"user SWP-USR-42\"", first["target_label"])
+	}
+	if _, ok := first["at"].(string); !ok {
+		t.Errorf("recent_audit[0].at missing/not string: %v", first["at"])
+	}
+	// null actor → "Sistem".
+	second := audit[1].(map[string]any)
+	if second["actor_label"] != "Sistem" {
+		t.Errorf("recent_audit[1].actor_label = %v, want Sistem (null actor)", second["actor_label"])
 	}
 }
 

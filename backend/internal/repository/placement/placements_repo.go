@@ -44,6 +44,7 @@ func (r *PlacementRepo) ListPlacements(ctx context.Context, f domain.PlacementFi
 		Status:                f.Status,
 		StatusIn:              f.StatusIn,
 		EndDateLte:            ptrTimeToPgDate(f.EndDateLTE),
+		AwaitingAgreement:     f.AwaitingAgreement,
 		IncludeHistory:        f.IncludeHistory,
 		Q:                     f.Q,
 		CursorStatusChangedAt: f.CursorStatusChangedAt,
@@ -231,6 +232,20 @@ func (r *PlacementRepo) UpdatePlacementFields(ctx context.Context, tx pgx.Tx, p 
 		return domain.Placement{}, mapErr(err)
 	}
 	return mapPlacementFromUpdate(row), nil
+}
+
+// SetPlacementAgreement backfills agreement_id (and the period-capped end_date) on a
+// previously pending placement. Returns the updated placement (awaiting now false).
+func (r *PlacementRepo) SetPlacementAgreement(ctx context.Context, tx pgx.Tx, p svc.SetAgreementParams) (domain.Placement, error) {
+	row, err := r.q.WithTx(tx).SetPlacementAgreement(ctx, sqlcgen.SetPlacementAgreementParams{
+		AgreementID: p.AgreementID,
+		EndDate:     ptrTimeToPgDate(p.EndDate),
+		ID:          p.ID,
+	})
+	if err != nil {
+		return domain.Placement{}, mapErr(err)
+	}
+	return mapPlacementFromSetAgreement(row), nil
 }
 
 func (r *PlacementRepo) SetPlacementLifecycle(ctx context.Context, tx pgx.Tx, p svc.SetLifecycleParams) (domain.Placement, error) {

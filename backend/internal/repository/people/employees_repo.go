@@ -264,6 +264,8 @@ func (r *Repository) UpdateEmployee(ctx context.Context, tx pgx.Tx, p svc.Update
 		BankName:              nullStr(p.BankName),
 		BankAccountNumber:     nullStr(p.BankAccountNumber),
 		BankAccountHolderName: nullStr(p.BankAccountHolderName),
+		EmergencyContactName:  nullStr(p.EmergencyContactName),
+		EmergencyContactPhone: nullStr(p.EmergencyContactPhone),
 	})
 	if err != nil {
 		return domain.Employee{}, mapErr(err)
@@ -327,7 +329,7 @@ func mapEmployeeFromList(row sqlcgen.ListEmployeesRow) domain.Employee {
 }
 
 func mapEmployeeFromGetByID(row sqlcgen.GetEmployeeByIDRow) domain.Employee {
-	return domain.Employee{
+	emp := domain.Employee{
 		ID:                  row.ID,
 		UserID:              row.UserID,
 		FullName:            row.FullName,
@@ -348,12 +350,29 @@ func mapEmployeeFromGetByID(row sqlcgen.GetEmployeeByIDRow) domain.Employee {
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		EmergencyContact: domain.EmergencyContact{
+			Name:  derefStr(row.EmergencyContactName),
+			Phone: derefStr(row.EmergencyContactPhone),
+		},
+		AppLanguage:    row.AppLanguage,
+		PhotoObjectKey: row.PhotoObjectKey,
+		Status:         row.Status,
+		HasLogin:       row.UserID != nil,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+		CreatedBy:      row.CreatedBy,
 	}
+	// current_* come from the employee's non-terminal placement (null when unplaced).
+	if row.CurrentPositionID != nil {
+		emp.CurrentPosition = &domain.PositionRef{ID: *row.CurrentPositionID, Name: derefStr(row.CurrentPositionName)}
+	}
+	if row.CurrentServiceLineID != nil {
+		emp.CurrentServiceLine = &domain.ServiceLineRef{ID: *row.CurrentServiceLineID, Name: derefStr(row.CurrentServiceLineName)}
+	}
+	if row.CurrentClientCompanyID != nil {
+		emp.CurrentClientCompany = &domain.ClientCompanyRef{ID: *row.CurrentClientCompanyID, Name: derefStr(row.CurrentClientCompanyName)}
+	}
+	return emp
 }
 
 func mapEmployeeFromGetByNIK(row sqlcgen.GetEmployeeByNIKRow) domain.Employee {

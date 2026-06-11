@@ -54,9 +54,11 @@ type AgreementRef struct {
 }
 
 // CreatePlacementParams carries the fields for inserting a placement.
+// AgreementID is optional: nil = pending agreement (awaiting_agreement), in which
+// case the BR-1b period validation is skipped and end_date may be open-ended.
 type CreatePlacementParams struct {
 	EmployeeID      string
-	AgreementID     string
+	AgreementID     *string
 	ClientCompanyID string
 	SiteID          string
 	ServiceLineID   string
@@ -76,6 +78,14 @@ type UpdatePlacementParams struct {
 	PositionID string
 	EndDate    *time.Time
 	Notes      *string
+}
+
+// SetAgreementParams carries the backfill of an agreement onto a pending placement.
+// EndDate is the (possibly BR-1b auto-capped) end_date persisted alongside it.
+type SetAgreementParams struct {
+	ID          string
+	AgreementID *string
+	EndDate     *time.Time
 }
 
 // SetLifecycleParams drives end/terminate/resign/transfer/supersede.
@@ -120,6 +130,7 @@ type PlacementRepository interface {
 	// Writes (tx).
 	CreatePlacement(ctx context.Context, tx pgx.Tx, p CreatePlacementParams) (domain.Placement, error)
 	UpdatePlacementFields(ctx context.Context, tx pgx.Tx, p UpdatePlacementParams) (domain.Placement, error)
+	SetPlacementAgreement(ctx context.Context, tx pgx.Tx, p SetAgreementParams) (domain.Placement, error)
 	SetPlacementLifecycle(ctx context.Context, tx pgx.Tx, p SetLifecycleParams) (domain.Placement, error)
 	SetPlacementSuccessor(ctx context.Context, tx pgx.Tx, id string, successorID *string) error
 	InsertPlacementHistory(ctx context.Context, tx pgx.Tx, p PlacementHistoryParams) error
@@ -391,16 +402,25 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		return domain.Placement{}, apperr.Invalid(map[string]string{"site_id": "Lokasi bukan milik perusahaan ini."})
 	}
 
-	// Agreement belongs to employee + active.
-	ag, err := s.repo.GetAgreement(ctx, p.AgreementID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian tidak ditemukan."})
-	}
-	if err != nil {
-		return domain.Placement{}, apperr.Internal(err)
-	}
-	if ag.EmployeeID != p.EmployeeID {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian bukan milik karyawan ini."})
+	// Agreement is OPTIONAL. When present it must belong to the employee; when nil
+	// the placement is created "pending agreement" (awaiting_agreement) and the
+	// BR-1b period validation below is skipped.
+	var ag *AgreementRef
+	if p.AgreementID != nil && *p.AgreementID != "" {
+		fetched, agErr := s.repo.GetAgreement(ctx, *p.AgreementID)
+		if errors.Is(agErr, domain.ErrNotFound) {
+			return domain.Placement{}, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian tidak ditemukan."})
+		}
+		if agErr != nil {
+			return domain.Placement{}, apperr.Internal(agErr)
+		}
+		if fetched.EmployeeID != p.EmployeeID {
+			return domain.Placement{}, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian bukan milik karyawan ini."})
+		}
+		ag = &fetched
+	} else {
+		// Normalize empty-string to nil so the column stores NULL (awaiting_agreement).
+		p.AgreementID = nil
 	}
 
 	today := s.today()
@@ -413,16 +433,19 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		return domain.Placement{}, apperr.Invalid(map[string]string{"backdate_reason": "Alasan backdating wajib diisi."})
 	}
 
-	// 3. Agreement-period validation (BR-1b). Out-of-range START → 422; PKWT
-	// end past the agreement end → auto-cap + warning.
+	// 3. Agreement-period validation (BR-1b) — ONLY when an agreement is present.
+	// Out-of-range START → 422; PKWT end past the agreement end → auto-cap + warning.
+	// No agreement → skip the period check; end_date may be open-ended.
 	var warnings []string
-	if err := validateStartWithinAgreement(ag, p.StartDate); err != nil {
-		return domain.Placement{}, err
-	}
-	if ag.EndDate != nil && p.EndDate != nil && p.EndDate.After(*ag.EndDate) {
-		capped := *ag.EndDate
-		p.EndDate = &capped
-		warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
+	if ag != nil {
+		if err := validateStartWithinAgreement(*ag, p.StartDate); err != nil {
+			return domain.Placement{}, err
+		}
+		if ag.EndDate != nil && p.EndDate != nil && p.EndDate.After(*ag.EndDate) {
+			capped := *ag.EndDate
+			p.EndDate = &capped
+			warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
+		}
 	}
 
 	// 4. INV-1 service pre-check.
@@ -494,6 +517,76 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		}
 	}
 	return created, nil
+}
+
+// --- backfill agreement ---
+
+// SetAgreement attaches an employment agreement to a previously pending placement
+// (awaiting_agreement). Re-runs the BR-1b period validation: out-of-range start →
+// 422 PLACEMENT_OUTSIDE_CONTRACT; PKWT end past the agreement end → auto-cap +
+// warning. 404 if the placement is missing; 422 if the agreement is not owned by
+// the placement's agent. Returns the updated placement (awaiting now false).
+func (s *PlacementService) SetAgreement(ctx context.Context, placementID, agreementID string) (domain.Placement, error) {
+	cur, err := s.repo.GetPlacementByID(ctx, placementID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.Placement{}, apperr.NotFound()
+	}
+	if err != nil {
+		return domain.Placement{}, apperr.Internal(err)
+	}
+	if isTerminal(cur.LifecycleStatus) {
+		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
+	}
+
+	ag, err := s.repo.GetAgreement(ctx, agreementID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.Placement{}, apperr.Rule("RULE_VIOLATION", map[string]string{"agreement_id": "Perjanjian tidak ditemukan."})
+	}
+	if err != nil {
+		return domain.Placement{}, apperr.Internal(err)
+	}
+	if ag.EmployeeID != cur.EmployeeID {
+		return domain.Placement{}, apperr.Rule("RULE_VIOLATION", map[string]string{"agreement_id": "Perjanjian bukan milik karyawan ini."})
+	}
+
+	// BR-1b period validation (422 PLACEMENT_OUTSIDE_CONTRACT on out-of-range start).
+	if err := validateStartWithinAgreement(ag, cur.StartDate); err != nil {
+		return domain.Placement{}, err
+	}
+	// PKWT auto-cap: clamp the placement end_date to the agreement end.
+	endDate := cur.EndDate
+	var warnings []string
+	if ag.EndDate != nil && endDate != nil && endDate.After(*ag.EndDate) {
+		capped := *ag.EndDate
+		endDate = &capped
+		warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
+	}
+
+	var updated domain.Placement
+	agID := agreementID
+	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		var inErr error
+		updated, inErr = s.repo.SetPlacementAgreement(ctx, tx, SetAgreementParams{
+			ID:          placementID,
+			AgreementID: &agID,
+			EndDate:     endDate,
+		})
+		if inErr != nil {
+			return inErr
+		}
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.Action("placement.set_agreement"),
+			EntityType: "placement",
+			EntityID:   placementID,
+			Before:     map[string]any{"awaiting_agreement": true},
+			After:      map[string]any{"agreement_id": agID, "awaiting_agreement": false},
+		})
+	}); err != nil {
+		return domain.Placement{}, asAppErr(err)
+	}
+
+	updated.Warnings = append(updated.Warnings, warnings...)
+	return updated, nil
 }
 
 // --- update ---
@@ -737,9 +830,12 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		return TransferResult{}, apperr.Conflict("COMPANY_INACTIVE")
 	}
 
+	// Agreement: default to the predecessor's (may be nil = pending). An explicit
+	// new_agreement_id overrides; empty string is ignored. nil propagates cleanly so
+	// the successor of a pending placement is itself pending.
 	agreementID := cur.AgreementID
 	if p.NewAgreementID != nil && *p.NewAgreementID != "" {
-		agreementID = *p.NewAgreementID
+		agreementID = p.NewAgreementID
 	}
 	// Destination site defaults to the source site if same company, else use
 	// the source site only when company unchanged; otherwise the successor must
@@ -904,23 +1000,27 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 		return RenewResult{}, apperr.Rule("PLACEMENT_PERIOD_OVERLAP", map[string]string{"new_start_date": "Tanggal mulai harus setelah penempatan sebelumnya berakhir."})
 	}
 
+	// Agreement: default to the predecessor's (may be nil = pending). nil propagates
+	// so the renewal of a pending placement stays pending.
 	agreementID := cur.AgreementID
 	if p.NewAgreementID != nil && *p.NewAgreementID != "" {
-		agreementID = *p.NewAgreementID
+		agreementID = p.NewAgreementID
 	}
 	positionID := cur.PositionID
 	if p.NewPositionID != nil && *p.NewPositionID != "" {
 		positionID = *p.NewPositionID
 	}
 
-	// PKWT auto-cap on new_end_date.
+	// PKWT auto-cap on new_end_date — ONLY when an agreement is present.
 	var warnings []string
 	endDate := p.NewEndDate
-	if ag, agErr := s.repo.GetAgreement(ctx, agreementID); agErr == nil {
-		if ag.EndDate != nil && endDate != nil && endDate.After(*ag.EndDate) {
-			capped := *ag.EndDate
-			endDate = &capped
-			warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
+	if agreementID != nil {
+		if ag, agErr := s.repo.GetAgreement(ctx, *agreementID); agErr == nil {
+			if ag.EndDate != nil && endDate != nil && endDate.After(*ag.EndDate) {
+				capped := *ag.EndDate
+				endDate = &capped
+				warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
+			}
 		}
 	}
 

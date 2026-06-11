@@ -37,8 +37,15 @@ tags:
       Employee picker per §18 — listing fields are picker-shaped.
   - name: change-requests
     description: |
-      Agent-initiated change-requests (HR approval queue). Agent can edit only
-      phone, address, bank per E2 §8 lock; statutory fields stay HR-only.
+      Agent-initiated change-requests (approval queue, routed to the agent's
+      shift leader with HR fallback). Approval-tier fields: phone,
+      emergency_contact, bank. Statutory fields stay HR-only; bank approval
+      additionally needs `change_requests.approve.bank` (HR-only).
+  - name: self-service
+    description: |
+      Agent self-service on their own record (`/me/*`). Instant-tier profile
+      edits (address, app_language, photo) apply immediately with no approval;
+      approval-tier fields go through `change-requests` instead.
   - name: agreements
     description: |
       Employment agreements (PKWT/PKWTT) — the legal SWP↔agent relationship
@@ -545,12 +552,16 @@ paths:
       tags: [change-requests, employees]
       summary: Agent submits a profile-change request (EP-5)
       description: |
-        Mobile-only flow. Agent can request changes to **phone, address, or
-        bank_account** (E2 §8 lock). Statutory fields (NIK, NPWP, full_name)
-        are blocked — sending them returns `FIELD_NOT_EDITABLE` (422).
+        Approval-tier self-edit (web + mobile). Agent can request changes to
+        **phone, emergency_contact, or bank_account**. Statutory fields (NIK,
+        NPWP, full_name) are blocked — sending them returns `FIELD_NOT_EDITABLE`
+        (422). Instant-tier fields (`address`, `app_language`, photo) must NOT
+        be sent here — they apply immediately via `PATCH /me/profile` and
+        return `FIELD_REQUIRES_APPROVAL` only in the reverse direction.
 
-        The request is queued for HR approval; the resulting `ChangeRequest`
-        has `status=PENDING` and ID prefix `SWP-CHG-`.
+        The request is queued for approval (shift leader for the agent's
+        company, HR fallback); the resulting `ChangeRequest` has
+        `status=PENDING` and ID prefix `SWP-CHG-`.
       x-rbac:
         roles: [agent]
         scope: self
@@ -666,7 +677,7 @@ paths:
             from the fields present in the request body.
           schema:
             type: string
-            enum: [PHONE, ADDRESS, BANK_ACCOUNT, MULTIPLE]
+            enum: [PHONE, EMERGENCY_CONTACT, BANK_ACCOUNT, MULTIPLE]
         - in: query
           name: q
           description: Free-text search on submitter name / NIP.
@@ -696,13 +707,20 @@ paths:
     get:
       operationId: getChangeRequest
       tags: [change-requests]
-      summary: HR views change-request detail (old → new diff)
+      summary: View change-request detail (old → new diff + per-field resolutions)
       description: |
         Detail of a single change request including the old → new diff per
-        field; powers the HR review modal.
+        field and the `field_resolutions` map; powers the review modal for HR
+        **and shift leaders** (company-scoped). A shift leader sees the bank
+        row but can only approve it if they hold `change_requests.approve.bank`
+        (HR-only) — otherwise it surfaces as "Perlu HR" / escalated.
       x-rbac:
-        roles: [hr_admin, super_admin, agent]
+        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: company_or_global
+      x-design-screens:
+        - MdhFZ   # E2 · Change-request review (per-field diff + resolutions)
+        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
+        - jg8zl   # E2 · Reject change-request modal (reason required)
       responses:
         '200':
           description: Change-request detail with diff.
@@ -746,24 +764,72 @@ paths:
     post:
       operationId: approveChangeRequest
       tags: [change-requests]
-      summary: HR approves a change request — applies the change
+      summary: Approve a change request — applies the change (bank-split aware)
       description: |
         On approve, the requested values are atomically written to the
         Employee record (audit log captures the actor + before/after).
         Idempotent via Idempotency-Key.
+
+        **Approver routing & bank split.** Shift leaders (company-scoped) and
+        HR/super-admin may approve. The `bank_account` field additionally
+        requires the `change_requests.approve.bank` permission (HR/super-admin
+        only). When a shift leader approves a **mixed** request (bank +
+        non-bank):
+        - the non-bank fields are applied now (`field_resolutions[*]=APPLIED`),
+        - the `bank_account` field is escalated
+          (`field_resolutions.bank_account=ESCALATED_TO_HR`, `bank_pending=true`),
+        - the request moves to `PARTIALLY_APPROVED`.
+
+        HR then approves again to finalize the bank field → `APPROVED`. A
+        bank-only request approved by a leader without the bank permission is
+        escalated, not applied. On approve the agent is notified
+        (`CHANGE_REQUEST_APPROVED`, listing the applied fields and whether it
+        was partial — see E10 `NotificationKind`).
       x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - MdhFZ   # E2 · Change-request review (approve / partial-approve)
+        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
+        - jg8zl   # E2 · Reject change-request modal (reason required)
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       responses:
         '200':
-          description: Approved & applied.
+          description: |
+            Approved & applied. When a shift leader approved a mixed request,
+            the response carries `status=PARTIALLY_APPROVED` + `bank_pending=true`
+            with the bank field escalated in `field_resolutions`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ChangeRequest' }
+              examples:
+                fully_approved:
+                  summary: HR approves all fields
+                  value:
+                    id: SWP-CHG-2117
+                    employee_id: SWP-EMP-1042
+                    status: APPROVED
+                    bank_pending: false
+                sl_partial:
+                  summary: Shift leader applies phone, bank escalates to HR
+                  value:
+                    id: SWP-CHG-2117
+                    employee_id: SWP-EMP-1042
+                    status: PARTIALLY_APPROVED
+                    bank_pending: true
+                    field_resolutions:
+                      phone: { resolution: APPLIED, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
+                      bank_account: { resolution: ESCALATED_TO_HR, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
         '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: |
+            Forbidden — leader out of company scope (`OUT_OF_SCOPE`), or the
+            bank field requires `change_requests.approve.bank` which the caller
+            lacks (the UI escalates instead of calling approve in that case).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: Already resolved (APPROVED or REJECTED).
@@ -780,15 +846,19 @@ paths:
     post:
       operationId: rejectChangeRequest
       tags: [change-requests]
-      summary: HR rejects a change request (reason required — Wave-1 ModalReject)
+      summary: Reject a change request (reason required — Wave-1 ModalReject)
       description: |
         Reject with a required free-text `reason` (Wave-1 ModalReject
-        pattern). The Employee record is **not** modified. Submitter is
-        notified (CONVENTIONS §16.2 row "HR change-request submitted" extends
-        to "resolved").
+        pattern). The Employee record is **not** modified. Shift leaders
+        (company-scoped) and HR/super-admin may reject. The agent is notified
+        with the reason (`CHANGE_REQUEST_REJECTED` — see E10 `NotificationKind`).
       x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - jg8zl   # E2 · Reject change-request modal (reason required)
+        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
+        - MdhFZ   # E2 · Change-request review
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
       requestBody:
@@ -823,6 +893,149 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # --- Agent self-service (instant-tier) ----------------------------------
+
+  /me/profile:
+    patch:
+      operationId: updateMyProfile
+      tags: [self-service, employees]
+      summary: Agent edits own instant-tier profile fields
+      description: |
+        Instant self-edit of the caller's own employee record — **no
+        approval**. Only the instant-tier fields are accepted: `address`,
+        `app_language`, and `photo_object_key` (the `object_key` from a prior
+        `POST /me/profile/photo-upload-init`, after the file was PUT to the
+        presigned URL). The change is written immediately and audited; no
+        notification is dispatched.
+
+        Approval-tier fields (`phone`, `emergency_contact`, `bank_account`)
+        are rejected here with `FIELD_REQUIRES_APPROVAL` (422) — the agent
+        must use `POST /employees/{id}/change-requests` for those. The employee
+        is resolved from the authenticated principal (self scope); there is no
+        path id.
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - l2BKa   # Agen · Ubah Profil (tiered instant-edit form)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelfProfileUpdate' }
+            examples:
+              address_and_language:
+                summary: Agent updates address + switches UI to English
+                value:
+                  address: "Jl. Melati 12, Jakarta Selatan"
+                  app_language: en
+              new_photo:
+                summary: Agent applies a freshly uploaded photo
+                value:
+                  photo_object_key: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
+      responses:
+        '200':
+          description: Applied immediately — returns the updated employee.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Employee' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: |
+            An approval-tier field was sent (`FIELD_REQUIRES_APPROVAL`), or the
+            `photo_object_key` does not match a key issued to this employee.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                requires_approval:
+                  value:
+                    error:
+                      code: FIELD_REQUIRES_APPROVAL
+                      message: "Perubahan nomor telepon memerlukan persetujuan. Gunakan Ajukan Perubahan."
+                      fields:
+                        phone: "Field ini memerlukan persetujuan dan tidak dapat diubah langsung."
+                      request_id: req_01J8XK7Q1
+
+  /me/profile/photo-upload-init:
+    post:
+      operationId: initProfilePhotoUpload
+      tags: [self-service, employees]
+      summary: Start a profile-photo upload — returns a presigned PUT ticket
+      description: |
+        Initializes a direct-to-storage photo upload for the caller's own
+        profile photo. Returns an `UploadTicket` (presigned PUT URL +
+        server-generated `object_key` + size cap). The client PUTs the image
+        bytes to `upload_url` with the pinned `Content-Type`, then calls
+        `PATCH /me/profile { photo_object_key }` to apply it.
+
+        Content-type allowlist: `image/jpeg`, `image/png`, `image/webp`. The
+        size cap (`max_bytes`) and content type are baked into the presigned
+        signature, so an oversized or wrong-type upload fails at the storage
+        layer. Same pattern is reused by E5 attendance selfies.
+      x-rbac:
+        roles: [agent]
+        scope: self
+      x-design-screens:
+        - l2BKa   # Agen · Ubah Profil (photo picker)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content_type]
+              properties:
+                content_type:
+                  type: string
+                  enum: [image/jpeg, image/png, image/webp]
+                  description: MIME type of the photo to upload (pinned into the presign).
+                content_length:
+                  type: integer
+                  description: |
+                    Optional declared byte size, validated against `max_bytes`
+                    before issuing the ticket. The signature enforces the cap
+                    regardless.
+            examples:
+              jpeg:
+                value:
+                  content_type: image/jpeg
+                  content_length: 482310
+      responses:
+        '200':
+          description: Presigned upload ticket.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadTicket' }
+              examples:
+                ticket:
+                  value:
+                    upload_url: "https://storage.swp.example.com/hris-private/profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg?X-Amz-Signature=..."
+                    object_key: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
+                    expires_at: "2026-06-11T03:25:00Z"
+                    max_bytes: 5242880
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: |
+            Disallowed content type, or declared `content_length` exceeds
+            `max_bytes`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                too_large:
+                  value:
+                    error:
+                      code: UPLOAD_TOO_LARGE
+                      message: "Ukuran foto melebihi batas 5 MB."
+                      fields:
+                        content_length: "5242880 byte adalah batas maksimum."
+                      request_id: req_01J8XK7Q2
 
   # =====================================================================
   # EMPLOYMENT AGREEMENTS (F2.2)
@@ -2756,6 +2969,40 @@ components:
         mime: { type: string }
         uploaded_at: { type: string, format: date-time }
 
+    UploadTicket:
+      type: object
+      description: |
+        Presigned direct-upload ticket for private object storage. The client
+        PUTs the file bytes to `upload_url` with the pinned `Content-Type`,
+        respecting `max_bytes`, then references the returned `object_key` in
+        the follow-up write (e.g. `PATCH /me/profile { photo_object_key }`).
+        Server generates the key (the client never picks it). Reusable across
+        epics — E5 attendance selfies use the same pattern
+        (`attendance-selfies/...` namespace).
+      required: [upload_url, object_key, expires_at, max_bytes]
+      properties:
+        upload_url:
+          type: string
+          format: uri
+          description: |
+            Short-TTL presigned PUT URL. The `Content-Type` is pinned and a
+            `content-length-range` size cap is enforced by the signature — a
+            mismatch fails the upload at the storage layer.
+        object_key:
+          type: string
+          description: |
+            Server-generated storage key (e.g.
+            `profile-photos/{employee_id}/{ulid}.jpg`). Opaque to the client.
+          example: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
+        expires_at:
+          type: string
+          format: date-time
+          description: When `upload_url` stops being valid (presign TTL, ~5 min).
+        max_bytes:
+          type: integer
+          description: Maximum allowed object size in bytes (size cap mirrored in the signature).
+          example: 5242880
+
     # ---- ID types (string aliases with SWP-* prefix per §4) -------------
 
     EmployeeId:
@@ -2812,6 +3059,24 @@ components:
         account_number: { type: string, example: "1234567890" }
         account_holder_name: { type: string, example: Budi Santoso }
 
+    EmergencyContact:
+      type: object
+      description: |
+        Agent's emergency contact (name + phone). Agent-editable via
+        change-request (approval tier) — NOT instant, since HR verifies the
+        next-of-kin record.
+      properties:
+        name: { type: string, maxLength: 200, example: Siti Santoso }
+        phone: { type: string, example: "+62-812-7766-5544" }
+
+    AppLanguage:
+      type: string
+      enum: [id, en]
+      default: id
+      description: |
+        Agent's preferred UI language (Bahasa default). Self-editable
+        instantly via `PATCH /me/profile` — no approval.
+
     Gender:
       type: string
       enum: [MALE, FEMALE]
@@ -2860,7 +3125,29 @@ components:
         email_personal: { type: string, format: email }
         address:
           type: string
-          description: Agent-editable via change-request.
+          description: |
+            Tier: **instant** self-edit via `PATCH /me/profile` (no approval).
+            Also HR-editable.
+        emergency_contact:
+          allOf: [{ $ref: '#/components/schemas/EmergencyContact' }]
+          description: |
+            Tier: **approval** — agent-editable only via change-request
+            (`POST /employees/{id}/change-requests`), not instant.
+        app_language:
+          allOf: [{ $ref: '#/components/schemas/AppLanguage' }]
+          description: |
+            Tier: **instant** self-edit via `PATCH /me/profile` (no approval).
+        photo_url:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
+          description: |
+            Short-TTL presigned GET URL for the agent's profile photo (private
+            object storage). Read-only — never written directly. The agent sets
+            a new photo by uploading to the presigned PUT from
+            `POST /me/profile/photo-upload-init`, then passing the returned
+            `object_key` to `PATCH /me/profile` (tier: **instant**).
         npwp:
           type: string
           description: HR-only edit. Indonesian tax ID. May be null for non-PKP agents.
@@ -2868,7 +3155,9 @@ components:
         bpjs_ketenagakerjaan: { type: string }
         bank_account:
           allOf: [{ $ref: '#/components/schemas/BankAccount' }]
-          description: Agent-editable via change-request.
+          description: |
+            Tier: **approval** — agent-editable only via change-request, not
+            instant.
         status: { $ref: '#/components/schemas/EmployeeStatus' }
         temp_password:
           type: string
@@ -2940,17 +3229,54 @@ components:
             Optional secondary login email for the auto-provisioned User;
             unique system-wide when present (D2, EP-2).
 
+    SelfProfileUpdate:
+      type: object
+      description: |
+        Body for `PATCH /me/profile` — instant-tier self-edit only. All fields
+        optional; only present fields are updated. Approval-tier fields
+        (phone, emergency_contact, bank_account) are NOT accepted here and
+        return `FIELD_REQUIRES_APPROVAL` (422).
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        address: { type: string }
+        app_language: { $ref: '#/components/schemas/AppLanguage' }
+        photo_object_key:
+          type: string
+          description: |
+            `object_key` returned by `POST /me/profile/photo-upload-init`,
+            after the bytes were PUT to the presigned URL. Must belong to the
+            caller's own key namespace.
+          example: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
+
     # ---- ChangeRequest --------------------------------------------------
 
     ChangeRequestStatus:
       type: string
-      enum: [PENDING, APPROVED, REJECTED]
+      enum: [PENDING, APPROVED, REJECTED, PARTIALLY_APPROVED]
+      description: |
+        `PARTIALLY_APPROVED` — a shift leader applied the non-bank fields but
+        the request still has a `bank_account` change pending HR escalation
+        (`bank_pending=true`). HR finalizes the bank field to move it to
+        `APPROVED`. SL lacks `change_requests.approve.bank`, so a mixed
+        (bank + non-bank) request resolves to this intermediate state.
+
+    FieldResolution:
+      type: string
+      enum: [PENDING, APPLIED, ESCALATED_TO_HR]
+      description: |
+        Per-field resolution within a change request. `APPLIED` — written to
+        the Employee record (records who applied it). `ESCALATED_TO_HR` — the
+        bank field a shift leader could not approve; routed to the HR bank
+        queue. `PENDING` — not yet acted on.
 
     ChangeRequest:
       type: object
       description: |
-        Agent's profile-change request awaiting HR approval (EP-5). Only the
-        whitelisted fields can be changed: `phone`, `address`, `bank_account`.
+        Agent's profile-change request awaiting approval. Whitelisted
+        (approval-tier) fields: `phone`, `emergency_contact`, `bank_account`.
+        Instant-tier fields (`address`, `app_language`, photo) never appear
+        here — they apply immediately via `PATCH /me/profile`.
       required: [id, employee_id, status, submitted_at, changes]
       properties:
         id: { $ref: '#/components/schemas/ChangeRequestId' }
@@ -2971,14 +3297,44 @@ components:
           description: Free-text note from the agent at submission.
         changes:
           type: object
-          description: Only the agent-editable subset.
+          description: Only the approval-tier subset.
           properties:
             phone: { type: string }
-            address: { type: string }
+            emergency_contact: { $ref: '#/components/schemas/EmergencyContact' }
             bank_account: { $ref: '#/components/schemas/BankAccount' }
+        field_resolutions:
+          type: object
+          readOnly: true
+          description: |
+            Per-field resolution map (keys match `changes`), recording which
+            fields a shift leader already applied and which bank field was
+            escalated to HR. Drives the partial-approval flow. Empty until the
+            first approval action.
+          additionalProperties:
+            type: object
+            properties:
+              resolution: { $ref: '#/components/schemas/FieldResolution' }
+              resolved_by:
+                allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
+                nullable: true
+              resolved_at:
+                type: [string, "null"]
+                format: date-time
+          example:
+            phone: { resolution: APPLIED, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
+            bank_account: { resolution: ESCALATED_TO_HR, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
+        bank_pending:
+          type: boolean
+          readOnly: true
+          default: false
+          description: |
+            Denormalized flag — `true` when a `bank_account` change is still
+            awaiting HR (escalated by a shift leader who lacks
+            `change_requests.approve.bank`). Drives the HR bank-escalation
+            queue (partial index).
         request_type:
           type: string
-          enum: [PHONE, ADDRESS, BANK_ACCOUNT, MULTIPLE]
+          enum: [PHONE, EMERGENCY_CONTACT, BANK_ACCOUNT, MULTIPLE]
           description: Derived from which fields are in `changes`; used by HR filters.
 
     ChangeRequestCreate:
@@ -2991,14 +3347,16 @@ components:
           minProperties: 1
           properties:
             phone: { type: string }
-            address: { type: string }
+            emergency_contact: { $ref: '#/components/schemas/EmergencyContact' }
             bank_account: { $ref: '#/components/schemas/BankAccount' }
           additionalProperties: false
         note: { type: string, maxLength: 500 }
 
     ChangeRequestDetail:
       type: object
-      description: HR review detail — embeds submitter summary + per-field diff.
+      description: |
+        Review detail (HR or shift leader) — embeds submitter summary +
+        per-field diff + per-field resolutions.
       required: [id, employee, status, submitted_at, diff]
       properties:
         id: { $ref: '#/components/schemas/ChangeRequestId' }
@@ -3020,6 +3378,27 @@ components:
           type: [string, "null"]
         note:
           type: [string, "null"]
+        bank_pending:
+          type: boolean
+          readOnly: true
+          default: false
+          description: |
+            `true` when a bank change is still awaiting HR escalation (a shift
+            leader applied the non-bank fields). See `ChangeRequest.bank_pending`.
+        field_resolutions:
+          type: object
+          readOnly: true
+          description: Per-field resolution map — see `ChangeRequest.field_resolutions`.
+          additionalProperties:
+            type: object
+            properties:
+              resolution: { $ref: '#/components/schemas/FieldResolution' }
+              resolved_by:
+                allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
+                nullable: true
+              resolved_at:
+                type: [string, "null"]
+                format: date-time
         diff:
           type: object
           description: Per-field old → new diff.

@@ -19,9 +19,9 @@ export function uuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
-    // RFC 4122 version 4
-    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+    // RFC 4122 version 4 — indices are in-bounds for the fixed 16-byte array.
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80; // variant 10
     return hex(bytes);
   }
 
@@ -35,7 +35,7 @@ export function uuid(): string {
 function hex(bytes: Uint8Array): string {
   const parts: string[] = [];
   for (let i = 0; i < bytes.length; i++) {
-    parts.push(bytes[i].toString(16).padStart(2, '0'));
+    parts.push(bytes[i]!.toString(16).padStart(2, '0'));
   }
   return [
     parts.slice(0, 4).join(''),

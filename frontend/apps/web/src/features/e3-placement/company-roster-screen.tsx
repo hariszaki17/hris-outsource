@@ -60,6 +60,7 @@ export type CompanyRosterSearch = {
   service_line_id?: string;
   status?: PlacementLifecycleStatus;
   include_history?: boolean;
+  awaiting_agreement?: boolean;
   cursor?: string;
 };
 
@@ -122,6 +123,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
     service_line_id: search.service_line_id || undefined,
     status: search.status || undefined,
     include_history: search.include_history || undefined,
+    awaiting_agreement: search.awaiting_agreement || undefined,
     cursor: search.cursor,
   };
 
@@ -132,7 +134,9 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
   const summary = rosterData?.summary;
   const shiftLeader = rosterData?.current_shift_leader;
 
-  const hasFilters = Boolean(search.q || search.service_line_id || search.status);
+  const hasFilters = Boolean(
+    search.q || search.service_line_id || search.status || search.awaiting_agreement,
+  );
 
   // ---------------------------------------------------------------------------
   // Navigation helpers
@@ -251,11 +255,18 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
     {
       id: 'status',
       header: t('rosterColStatus'),
-      width: 140,
+      width: 180,
       cell: (pl) => (
-        <StatusBadge dot tone={lifecycleTone[pl.lifecycle_status]}>
-          {t(`lifecycle.${pl.lifecycle_status}`)}
-        </StatusBadge>
+        <div className="flex flex-wrap items-center gap-[6px]">
+          <StatusBadge dot tone={lifecycleTone[pl.lifecycle_status]}>
+            {t(`lifecycle.${pl.lifecycle_status}`)}
+          </StatusBadge>
+          {pl.awaiting_agreement && (
+            <StatusBadge dot tone="warn">
+              {t('awaitingAgreementBadge')}
+            </StatusBadge>
+          )}
+        </div>
       ),
     },
   ];
@@ -459,16 +470,33 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
             </FilterSelect>
           </div>
 
-          {/* Include history toggle — from .pen "Sertakan riwayat" */}
-          <div className="flex items-center gap-[8px]">
-            <span className="text-[13px] font-medium text-text-2">{t('filterIncludeHistory')}</span>
-            <Toggle
-              checked={Boolean(search.include_history)}
-              onCheckedChange={(v) =>
-                setSearch({ include_history: v || undefined, cursor: undefined })
-              }
-              aria-label={t('filterIncludeHistory')}
-            />
+          <div className="flex items-center gap-[16px]">
+            {/* Awaiting-agreement toggle — drives the awaiting_agreement query filter. */}
+            <div className="flex items-center gap-[8px]">
+              <span className="text-[13px] font-medium text-text-2">
+                {t('filterAwaitingAgreement')}
+              </span>
+              <Toggle
+                checked={Boolean(search.awaiting_agreement)}
+                onCheckedChange={(v) =>
+                  setSearch({ awaiting_agreement: v || undefined, cursor: undefined })
+                }
+                aria-label={t('filterAwaitingAgreement')}
+              />
+            </div>
+            {/* Include history toggle — from .pen "Sertakan riwayat" */}
+            <div className="flex items-center gap-[8px]">
+              <span className="text-[13px] font-medium text-text-2">
+                {t('filterIncludeHistory')}
+              </span>
+              <Toggle
+                checked={Boolean(search.include_history)}
+                onCheckedChange={(v) =>
+                  setSearch({ include_history: v || undefined, cursor: undefined })
+                }
+                aria-label={t('filterIncludeHistory')}
+              />
+            </div>
           </div>
         </div>
 

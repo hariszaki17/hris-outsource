@@ -17,10 +17,21 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
+)
+
+// Per-field resolution status values stored in change_requests.field_resolutions
+// (domain.FieldResolution.Status, lowercase). The DTO uppercases them to the wire
+// FieldResolution enum (APPLIED | ESCALATED_TO_HR | PENDING).
+const (
+	resolutionApplied   = "applied"
+	resolutionEscalated = "escalated_to_hr"
 )
 
 // ChangeRequestRepository is the data dependency for the change-requests service.
@@ -30,6 +41,10 @@ type ChangeRequestRepository interface {
 	ListChangeRequests(ctx context.Context, f domain.ChangeRequestFilter) ([]domain.ChangeRequest, error)
 	GetChangeRequestByID(ctx context.Context, id string) (domain.ChangeRequest, error)
 	GetEmployeeByID(ctx context.Context, id string) (domain.Employee, error)
+	// GetEmployeeCompanyID returns the employee's current (non-terminal) client
+	// company id for shift-leader company-scope routing. Returns "" (not an
+	// error) when the employee has no active placement.
+	GetEmployeeCompanyID(ctx context.Context, employeeID string) (string, error)
 	// Writes in tx.
 	UpdateEmployee(ctx context.Context, tx pgx.Tx, p UpdateEmployeeParams) (domain.Employee, error)
 	ResolveChangeRequest(ctx context.Context, tx pgx.Tx, p ResolveChangeRequestParams) (domain.ChangeRequest, error)
@@ -47,19 +62,24 @@ type CreateChangeRequestParams struct {
 }
 
 // ResolveChangeRequestParams carries fields for the ResolveChangeRequest repo call.
+// FieldResolutions/BankPending drive the SL bank-split partial-apply
+// (status='partially_approved'); they are zero/nil for a plain approve or reject.
 type ResolveChangeRequestParams struct {
-	ID              string
-	Status          string
-	ResolvedAt      *time.Time
-	ResolvedBy      *string
-	RejectionReason *string
+	ID               string
+	Status           string
+	FieldResolutions map[string]domain.FieldResolution
+	BankPending      bool
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
 }
 
 // ChangeRequestService implements the change-request HR-approval queue.
 type ChangeRequestService struct {
-	repo ChangeRequestRepository
-	txm  TxRunner // reuse TxRunner defined in employees_service.go
-	now  Clock    // reuse Clock defined in employees_service.go
+	repo     ChangeRequestRepository
+	txm      TxRunner        // reuse TxRunner defined in employees_service.go
+	now      Clock           // reuse Clock defined in employees_service.go
+	notifier jobs.Dispatcher // E10 notify seam (nil-safe in unit tests)
 }
 
 // NewChangeRequestService wires the service with its dependencies.
@@ -69,6 +89,11 @@ func NewChangeRequestService(repo ChangeRequestRepository, txm TxRunner) *Change
 
 // SetClock overrides the time source (tests only).
 func (s *ChangeRequestService) SetClock(c Clock) { s.now = c }
+
+// SetNotifier wires the E10 notification dispatcher (mirrors LeaveService).
+// Additive + nil-safe: jobs.Dispatch no-ops when the notifier is nil, so unit
+// tests constructed without it keep passing. main.go injects the River client.
+func (s *ChangeRequestService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
 
 // crPageCursor is the opaque JSON payload encoded into the cursor string.
 // Uses (submitted_at, id) to match the change_requests index.
@@ -144,14 +169,24 @@ func (s *ChangeRequestService) GetChangeRequestDetail(ctx context.Context, id st
 	}, nil
 }
 
-// ApproveChangeRequest approves a pending change request.
-//   - Loads CR; if status != "pending" → 409 CONFLICT.
-//   - InTx: builds UpdateEmployeeParams from current employee overlaid with the
-//     whitelisted changed fields (phone/address/bank_account ONLY — statutory
-//     fields NIK/NIP/join_at are never touched).
-//   - Calls repo.UpdateEmployee + repo.ResolveChangeRequest + audit.
-//   - Returns the updated ChangeRequest (200).
-func (s *ChangeRequestService) ApproveChangeRequest(ctx context.Context, id, actor string) (domain.ChangeRequest, error) {
+// ApproveChangeRequest approves a pending (or partially-approved) change request.
+//
+// Approver routing (2026-06-11 redesign): shift leaders (company-scoped) and
+// HR/super-admin may approve. The bank_account field additionally requires
+// rbac.CanApproveBank (HR/super-admin only). When a shift leader approves a
+// MIXED request (bank + non-bank), the non-bank fields are applied now and the
+// bank field is escalated to HR (status → PARTIALLY_APPROVED, bank_pending=true,
+// field_resolutions records who applied/escalated each field). HR then approves
+// the partially-approved request to finalize the bank field → APPROVED.
+//
+//   - Loads CR; status must be "pending" or "partially_approved" (else 409).
+//   - GuardCompany(emp.company) — a leader out of company scope → 403.
+//   - InTx: applies the resolvable fields to the employee, resolves the CR,
+//     audits, and dispatches the applied/partial approval notification.
+//
+// actorEmp is the resolver's SWP-EMP id (recorded in field_resolutions);
+// actorUser is the SWP-USR id (audit resolved_by + notification actor).
+func (s *ChangeRequestService) ApproveChangeRequest(ctx context.Context, id, actorUser, actorEmp string) (domain.ChangeRequest, error) {
 	cr, err := s.repo.GetChangeRequestByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.ChangeRequest{}, apperr.NotFound()
@@ -160,11 +195,11 @@ func (s *ChangeRequestService) ApproveChangeRequest(ctx context.Context, id, act
 		return domain.ChangeRequest{}, apperr.Internal(err)
 	}
 
-	if cr.Status != "pending" {
+	if cr.Status != "pending" && cr.Status != "partially_approved" {
 		return domain.ChangeRequest{}, apperr.Conflict("CONFLICT")
 	}
 
-	// Load the current employee to get all fields for UpdateEmployeeParams.
+	// Load the current employee (all fields for UpdateEmployeeParams + company scope).
 	emp, err := s.repo.GetEmployeeByID(ctx, cr.EmployeeID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return domain.ChangeRequest{}, apperr.NotFound()
@@ -173,62 +208,141 @@ func (s *ChangeRequestService) ApproveChangeRequest(ctx context.Context, id, act
 		return domain.ChangeRequest{}, apperr.Internal(err)
 	}
 
-	// Build UpdateEmployeeParams: start with current employee values, overlay whitelisted changes.
-	params := buildApproveParams(emp, cr.Changes)
+	// Shift-leader company scope: derive the employee's current client company and
+	// enforce GuardCompany (HR/super pass through). Hidden as 403 OUT_OF_SCOPE.
+	companyID, cerr := s.repo.GetEmployeeCompanyID(ctx, cr.EmployeeID)
+	if cerr != nil {
+		return domain.ChangeRequest{}, apperr.Internal(cerr)
+	}
+	if serr := rbac.GuardCompany(ctx, companyID); serr != nil {
+		return domain.ChangeRequest{}, serr
+	}
 
-	// Record before-state for the audit diff.
-	beforeSnap := buildBeforeSnap(cr.Changes, emp)
+	// Decide which fields this actor may apply now vs escalate. Only the bank
+	// field gates on CanApproveBank; phone/emergency_contact always apply.
+	canBank := rbac.CanApproveBank(ctx)
+	bankRequested := cr.Changes.BankAccount != nil
+	escalateBank := bankRequested && !canBank
 
+	// Build the overlay of applicable fields. When escalating the bank field, it is
+	// NOT written to the employee — only phone/emergency_contact are applied.
+	apply := cr.Changes
+	if escalateBank {
+		apply.BankAccount = nil
+	}
+
+	// Carry forward any prior resolutions (HR finalizing a partial request).
+	resolutions := map[string]domain.FieldResolution{}
+	for k, v := range cr.FieldResolutions {
+		resolutions[k] = v
+	}
 	now := s.now()
+	stamp := func(field string, status string) {
+		resolutions[field] = domain.FieldResolution{Status: status, ResolvedBy: actorEmp, ResolvedAt: &now}
+	}
+
+	// Determine the resolved status + bank_pending.
+	status := "approved"
+	bankPending := false
+	if escalateBank {
+		status = "partially_approved"
+		bankPending = true
+	}
+
+	params := buildApproveParams(emp, apply)
+	beforeSnap := buildBeforeSnap(apply, emp)
+
 	var resolved domain.ChangeRequest
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		// Apply the whitelisted fields to the employee.
-		if _, inErr := s.repo.UpdateEmployee(ctx, tx, params); inErr != nil {
-			return inErr
+		// Apply the resolvable (non-escalated) fields to the employee. Skip the
+		// write entirely when nothing is applied (a bank-only escalation).
+		if hasApplicableField(apply) {
+			if _, inErr := s.repo.UpdateEmployee(ctx, tx, params); inErr != nil {
+				return inErr
+			}
 		}
 
-		// Resolve the change request.
+		// Record per-field resolutions: applied fields → applied; the escalated
+		// bank field → escalated_to_hr.
+		if apply.Phone != nil {
+			stamp("phone", resolutionApplied)
+		}
+		if apply.EmergencyContact != nil {
+			stamp("emergency_contact", resolutionApplied)
+		}
+		if apply.BankAccount != nil {
+			stamp("bank_account", resolutionApplied)
+		}
+		if escalateBank {
+			stamp("bank_account", resolutionEscalated)
+		}
+
+		rp := ResolveChangeRequestParams{
+			ID:               id,
+			Status:           status,
+			FieldResolutions: resolutions,
+			BankPending:      bankPending,
+		}
+		// Terminal resolutions stamp resolved_at/resolved_by; a partial apply leaves
+		// them nil (the request is not yet finally resolved).
+		if status == "approved" {
+			rp.ResolvedAt = &now
+			rp.ResolvedBy = &actorUser
+		}
+
 		var inErr error
-		resolved, inErr = s.repo.ResolveChangeRequest(ctx, tx, ResolveChangeRequestParams{
-			ID:         id,
-			Status:     "approved",
-			ResolvedAt: &now,
-			ResolvedBy: &actor,
-		})
+		resolved, inErr = s.repo.ResolveChangeRequest(ctx, tx, rp)
 		if inErr != nil {
 			return inErr
 		}
 
-		// Audit: capture what changed on the employee.
-		afterSnap := buildAfterSnap(cr.Changes)
 		if err := audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.Action("change_request.approve"),
 			EntityType: "change_request",
 			EntityID:   id,
 			Before:     beforeSnap,
-			After:      afterSnap,
+			After:      buildAfterSnap(apply),
 		}); err != nil {
 			return err
 		}
 
-		// STUB: notification dispatch on CR resolution is DEFERRED.
-		// When E11 Notifications is implemented, enqueue a NotificationArgs job here:
-		//   jobs.Client.EnqueueTx(tx, &NotificationArgs{EmployeeID: cr.EmployeeID, Type: "change_request.approved"})
+		// E10: notify the submitter. The body lists the applied fields and flags a
+		// partial approval (bank escalated to HR).
+		title := "Pengajuan perubahan disetujui"
+		body := "Pengajuan perubahan data Anda disetujui."
+		if escalateBank {
+			title = "Pengajuan perubahan disetujui sebagian"
+			body = "Sebagian data Anda telah diperbarui; perubahan rekening menunggu persetujuan HR."
+		}
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifChangeRequestApproved),
+			RecipientID:      cr.EmployeeID,
+			Title:            title,
+			Body:             body,
+			DeepLinkEpic:     "E2",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/change-requests/" + id,
+			ActorID:          actorUser,
+			IsCritical:       false,
+		}); derr != nil {
+			return derr
+		}
 		return nil
 	}); err != nil {
-		return domain.ChangeRequest{}, apperr.Internal(err)
+		return domain.ChangeRequest{}, asCRAppErr(err)
 	}
 
 	return resolved, nil
 }
 
-// RejectChangeRequest rejects a pending change request.
+// RejectChangeRequest rejects a pending or partially-approved change request.
 //   - Validates reason len 3..500 → 400 INVALID_REQUEST.
-//   - Loads CR; if status != "pending" → 409 CONFLICT.
-//   - InTx: ResolveChangeRequest(status=rejected, reason) + audit.
+//   - Loads CR; if status is terminal → 409 CONFLICT.
+//   - GuardCompany(emp.company) — a leader out of company scope → 403.
+//   - InTx: ResolveChangeRequest(status=rejected, reason) + audit + notify.
 //   - Employee is NOT modified.
-//   - Returns the updated ChangeRequest (200).
-func (s *ChangeRequestService) RejectChangeRequest(ctx context.Context, id, reason, actor string) (domain.ChangeRequest, error) {
+//   - Returns the updated ChangeRequest (200). actorUser is the resolver SWP-USR id.
+func (s *ChangeRequestService) RejectChangeRequest(ctx context.Context, id, reason, actorUser string) (domain.ChangeRequest, error) {
 	// Validate reason: required, min 3 chars, max 500.
 	reason = strings.TrimSpace(reason)
 	if len(reason) < 3 {
@@ -250,20 +364,33 @@ func (s *ChangeRequestService) RejectChangeRequest(ctx context.Context, id, reas
 		return domain.ChangeRequest{}, apperr.Internal(err)
 	}
 
-	if cr.Status != "pending" {
+	if cr.Status != "pending" && cr.Status != "partially_approved" {
 		return domain.ChangeRequest{}, apperr.Conflict("CONFLICT")
 	}
 
+	// Shift-leader company scope (mirrors approve): a leader may reject only their
+	// own company's requests; HR/super pass through.
+	companyID, cerr := s.repo.GetEmployeeCompanyID(ctx, cr.EmployeeID)
+	if cerr != nil {
+		return domain.ChangeRequest{}, apperr.Internal(cerr)
+	}
+	if serr := rbac.GuardCompany(ctx, companyID); serr != nil {
+		return domain.ChangeRequest{}, serr
+	}
+
+	prevStatus := cr.Status
 	now := s.now()
 	var resolved domain.ChangeRequest
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		var inErr error
 		resolved, inErr = s.repo.ResolveChangeRequest(ctx, tx, ResolveChangeRequestParams{
-			ID:              id,
-			Status:          "rejected",
-			ResolvedAt:      &now,
-			ResolvedBy:      &actor,
-			RejectionReason: &reason,
+			ID:               id,
+			Status:           "rejected",
+			FieldResolutions: cr.FieldResolutions, // preserve any prior partial resolutions
+			BankPending:      false,               // rejecting clears the escalation flag
+			ResolvedAt:       &now,
+			ResolvedBy:       &actorUser,
+			RejectionReason:  &reason,
 		})
 		if inErr != nil {
 			return inErr
@@ -273,17 +400,29 @@ func (s *ChangeRequestService) RejectChangeRequest(ctx context.Context, id, reas
 			Action:     audit.Action("change_request.reject"),
 			EntityType: "change_request",
 			EntityID:   id,
-			Before:     map[string]any{"status": "pending", "employee_id": cr.EmployeeID},
-			After:      map[string]any{"status": "rejected", "rejection_reason": reason, "resolved_by": actor},
+			Before:     map[string]any{"status": prevStatus, "employee_id": cr.EmployeeID},
+			After:      map[string]any{"status": "rejected", "rejection_reason": reason, "resolved_by": actorUser},
 		}); err != nil {
 			return err
 		}
 
-		// STUB: notification dispatch on CR resolution is DEFERRED.
-		// When E11 Notifications is implemented, enqueue a NotificationArgs job here.
+		// E10: notify the submitter their request was rejected, carrying the reason.
+		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+			NotifKind:        string(reportingdom.NotifChangeRequestRejected),
+			RecipientID:      cr.EmployeeID,
+			Title:            "Pengajuan perubahan ditolak",
+			Body:             "Pengajuan perubahan data Anda ditolak: " + reason,
+			DeepLinkEpic:     "E2",
+			DeepLinkEntityID: id,
+			DeepLinkPath:     "/change-requests/" + id,
+			ActorID:          actorUser,
+			IsCritical:       false,
+		}); derr != nil {
+			return derr
+		}
 		return nil
 	}); err != nil {
-		return domain.ChangeRequest{}, apperr.Internal(err)
+		return domain.ChangeRequest{}, asCRAppErr(err)
 	}
 
 	return resolved, nil
@@ -366,16 +505,16 @@ func (s *ChangeRequestService) CreateChangeRequest(ctx context.Context, employee
 }
 
 // deriveRequestType inspects the whitelisted change fields and returns the DB
-// request_type (PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE). Returns a 422 INVALID if
-// no field is present (the DTO's additionalProperties:false already blocks
-// statutory fields, so unknown fields never reach here).
+// request_type (PHONE|EMERGENCY_CONTACT|BANK_ACCOUNT|MULTIPLE). Returns a 422
+// INVALID if no field is present (the DTO's additionalProperties:false already
+// blocks statutory + instant-tier fields, so unknown fields never reach here).
 func deriveRequestType(c domain.ChangeRequestChanges) (string, error) {
 	var present []string
 	if c.Phone != nil {
 		present = append(present, "PHONE")
 	}
-	if c.Address != nil {
-		present = append(present, "ADDRESS")
+	if c.EmergencyContact != nil {
+		present = append(present, "EMERGENCY_CONTACT")
 	}
 	if c.BankAccount != nil {
 		present = append(present, "BANK_ACCOUNT")
@@ -392,6 +531,23 @@ func deriveRequestType(c domain.ChangeRequestChanges) (string, error) {
 	}
 }
 
+// hasApplicableField reports whether the overlay carries at least one field to
+// write to the employee (so a bank-only escalation skips the employee update).
+func hasApplicableField(c domain.ChangeRequestChanges) bool {
+	return c.Phone != nil || c.EmergencyContact != nil || c.BankAccount != nil
+}
+
+// asCRAppErr returns err unchanged when it is already an *apperr.Error (so
+// GuardCompany/repo app errors surface with their status), otherwise wraps it as
+// a 500. Mirrors the leave service's asAppErr seam.
+func asCRAppErr(err error) error {
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		return ae
+	}
+	return apperr.Internal(err)
+}
+
 // --- private helpers ---
 
 // buildDiff constructs the per-field old→new diff map for the detail response.
@@ -405,10 +561,14 @@ func buildDiff(changes domain.ChangeRequestChanges, emp domain.Employee) map[str
 			New: changes.Phone,
 		}
 	}
-	if changes.Address != nil {
-		diff["address"] = domain.ChangeRequestFieldDiff{
-			Old: emp.Address,
-			New: changes.Address,
+	if changes.EmergencyContact != nil {
+		var oldEC any
+		if emp.EmergencyContact.Name != "" || emp.EmergencyContact.Phone != "" {
+			oldEC = emp.EmergencyContact
+		}
+		diff["emergency_contact"] = domain.ChangeRequestFieldDiff{
+			Old: oldEC,
+			New: changes.EmergencyContact,
 		}
 	}
 	if changes.BankAccount != nil {
@@ -426,7 +586,7 @@ func buildDiff(changes domain.ChangeRequestChanges, emp domain.Employee) map[str
 }
 
 // buildApproveParams starts with the current employee fields and overlays the
-// whitelisted changed fields (phone/address/bank_account only).
+// applicable changed fields (phone/emergency_contact/bank_account only).
 func buildApproveParams(emp domain.Employee, changes domain.ChangeRequestChanges) UpdateEmployeeParams {
 	p := UpdateEmployeeParams{
 		ID:                    emp.ID,
@@ -446,14 +606,17 @@ func buildApproveParams(emp domain.Employee, changes domain.ChangeRequestChanges
 		BankName:              emp.BankAccount.BankName,
 		BankAccountNumber:     emp.BankAccount.AccountNumber,
 		BankAccountHolderName: emp.BankAccount.AccountHolderName,
+		EmergencyContactName:  emp.EmergencyContact.Name,
+		EmergencyContactPhone: emp.EmergencyContact.Phone,
 	}
 
-	// Overlay whitelisted fields.
+	// Overlay applicable fields.
 	if changes.Phone != nil {
 		p.Phone = *changes.Phone
 	}
-	if changes.Address != nil {
-		p.Address = *changes.Address
+	if changes.EmergencyContact != nil {
+		p.EmergencyContactName = changes.EmergencyContact.Name
+		p.EmergencyContactPhone = changes.EmergencyContact.Phone
 	}
 	if changes.BankAccount != nil {
 		p.BankName = changes.BankAccount.BankName
@@ -470,8 +633,11 @@ func buildBeforeSnap(changes domain.ChangeRequestChanges, emp domain.Employee) m
 	if changes.Phone != nil {
 		snap["phone"] = emp.Phone
 	}
-	if changes.Address != nil {
-		snap["address"] = emp.Address
+	if changes.EmergencyContact != nil {
+		snap["emergency_contact"] = map[string]any{
+			"name":  emp.EmergencyContact.Name,
+			"phone": emp.EmergencyContact.Phone,
+		}
 	}
 	if changes.BankAccount != nil {
 		snap["bank_account"] = map[string]any{
@@ -489,8 +655,11 @@ func buildAfterSnap(changes domain.ChangeRequestChanges) map[string]any {
 	if changes.Phone != nil {
 		snap["phone"] = *changes.Phone
 	}
-	if changes.Address != nil {
-		snap["address"] = *changes.Address
+	if changes.EmergencyContact != nil {
+		snap["emergency_contact"] = map[string]any{
+			"name":  changes.EmergencyContact.Name,
+			"phone": changes.EmergencyContact.Phone,
+		}
 	}
 	if changes.BankAccount != nil {
 		snap["bank_account"] = map[string]any{

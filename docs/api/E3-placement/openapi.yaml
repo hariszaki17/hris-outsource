@@ -100,6 +100,15 @@ paths:
           in: query
           description: Filter by the parent employment agreement (E2).
           schema: { type: string, example: SWP-AG-882 }
+        - name: awaiting_agreement
+          in: query
+          description: |
+            Compliance filter. When `true`, returns only placements created
+            without an employment agreement yet (`agreement_id` null /
+            `awaiting_agreement = true`) — the "pending agreement" backlog
+            (BR-1, EPICS §8 2026-06-11). When `false`, only placements that
+            already have an agreement. Omit for both.
+          schema: { type: boolean }
         - name: expiring_within_days
           in: query
           description: |
@@ -179,8 +188,19 @@ paths:
           frontend can render the "End or Transfer existing?" prompt
           (PRD F3.1 Gherkin "Block double-booking").
 
+        **Employment agreement is optional at create** (EPICS §8 2026-06-11,
+        supersedes the original BR-1 mandatory rule). If `agreement_id` is
+        omitted, the placement is created **awaiting agreement**
+        (`awaiting_agreement: true`) — the agent can start work before the
+        PKWT/PKWTT is finalized; the agreement is backfilled later via
+        `POST /placements/{id}/agreement`. `awaiting_agreement` is an
+        orthogonal compliance flag, **not** a lifecycle state. No period /
+        contract validation runs when no agreement is supplied, and
+        `end_date` may be open-ended.
+
         **Business-rule validations (`422`):**
-        - `PLACEMENT_OUTSIDE_CONTRACT` — period falls outside `agreement_id` validity.
+        - `PLACEMENT_OUTSIDE_CONTRACT` — **only when `agreement_id` is
+          supplied** — period falls outside the agreement's validity.
           For `PKWT` the server **auto-caps** `end_date` to the agreement end
           (BR-1b) — response is `201` with `auto_capped: true` and a warning;
           only an explicitly out-of-range *start* triggers 422.
@@ -217,6 +237,19 @@ paths:
                   start_date: '2026-06-03'
                   end_date: '2026-12-31'
                   notes: 'Replacement for Andi (resigned).'
+              pendingAgreement:
+                summary: |
+                  Placement created WITHOUT an agreement yet — agent starts
+                  work before the PKWT is finalized (awaiting_agreement: true).
+                  No period/contract check runs; end_date left open-ended.
+                value:
+                  employee_id: SWP-EMP-1042
+                  client_company_id: SWP-CMP-014
+                  site_id: SWP-SITE-501
+                  service_line_id: SWP-SVC-003
+                  position_id: SWP-POS-021
+                  start_date: '2026-06-09'
+                  notes: 'Mulai bertugas; PKWT menyusul (perjanjian akan dilampirkan kemudian).'
               future:
                 summary: Future-dated (PENDING_START) placement
                 value:
@@ -325,6 +358,110 @@ paths:
         scope: global
       x-design-screens:
         - g3OzZz  # Buat Penempatan create form
+      x-idempotent: true
+
+  /placements/{id}/agreement:
+    parameters:
+      - $ref: '#/components/parameters/PlacementId'
+    post:
+      operationId: backfillPlacementAgreement
+      tags: [placements]
+      summary: Attach (backfill) the employment agreement to a pending placement (AP-2)
+      description: |
+        Attaches an `agreement_id` to a placement that was created
+        **awaiting agreement** (EPICS §8 2026-06-11; BR-1 supersession).
+        Clears the `awaiting_agreement` flag and re-runs the
+        period-within-agreement validation:
+          - `PLACEMENT_OUTSIDE_CONTRACT` (422) if the start lies outside the
+            agreement validity.
+          - For `PKWT`, an out-of-range `end_date` is **auto-capped** to the
+            agreement end (BR-1b) — `200` with
+            `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]`.
+
+        Returns the updated placement with `awaiting_agreement: false`.
+
+        Idempotent re-attachment of the **same** agreement is a no-op `200`.
+        A placement that already has an agreement (not awaiting) is rejected
+        `422` (`error.code: AGREEMENT_ALREADY_SET`); use `:renew`/`:transfer`
+        to move an agreement.
+
+        Requires `Idempotency-Key`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlacementAgreementBackfillRequest'
+            examples:
+              backfill:
+                summary: Attach the finalized PKWT to a pending placement
+                value:
+                  agreement_id: SWP-AG-882
+      responses:
+        '200':
+          description: |
+            Agreement attached; `awaiting_agreement` now false. May include
+            `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]` (BR-1b).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Placement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            `NOT_FOUND` — no placement with this `id`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: "`TERMINAL_STATE_IMMUTABLE` — placement is in a terminal state."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: |
+            Semantic validation failure. Specific `error.code`:
+              - `PLACEMENT_OUTSIDE_CONTRACT` — placement start lies outside
+                the agreement validity (same check as create, BR-1b).
+              - `AGREEMENT_NOT_OWNED` — the agreement does not belong to the
+                placement's agent (`employee_id`).
+              - `AGREEMENT_ALREADY_SET` — placement already has an agreement
+                (not awaiting); nothing to backfill.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notOwned:
+                  summary: Agreement belongs to a different agent
+                  value:
+                    error:
+                      code: AGREEMENT_NOT_OWNED
+                      message: 'Perjanjian kerja bukan milik agen pada penempatan ini.'
+                      fields:
+                        agreement_id: 'Milik agen lain (SWP-EMP-0917).'
+                      request_id: req_01J5XK22YRE
+                outsideContract:
+                  summary: Period outside the attached agreement
+                  value:
+                    error:
+                      code: PLACEMENT_OUTSIDE_CONTRACT
+                      message: 'Periode penempatan di luar masa berlaku perjanjian kerja.'
+                      fields:
+                        start_date: 'Sebelum perjanjian dimulai (2026-06-15).'
+                      details:
+                        agreement_id: SWP-AG-882
+                        agreement_type: PKWT
+                        agreement_start: '2026-06-15'
+                        agreement_end: '2027-06-14'
+                      request_id: req_01J5XK22YRF
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - pFR79   # Lampirkan perjanjian action on Detail Penempatan
       x-idempotent: true
 
   /placements/{id}:
@@ -1198,6 +1335,14 @@ paths:
           in: query
           description: Period overlap filter — upper bound.
           schema: { type: string, format: date }
+        - name: awaiting_agreement
+          in: query
+          description: |
+            Compliance filter — when `true`, only roster rows whose placement
+            has no employment agreement yet (`awaiting_agreement = true`).
+            When `false`, only rows with an agreement. Omit for both.
+            (BR-1, EPICS §8 2026-06-11.)
+          schema: { type: boolean }
         - name: q
           in: query
           description: Free-text search on agent name / agent ID / position name.
@@ -1521,13 +1666,13 @@ components:
       required:
         - id
         - employee_id
-        - agreement_id
         - client_company_id
         - site_id
         - service_line_id
         - position_id
         - start_date
         - lifecycle_status
+        - awaiting_agreement
         - created_at
         - updated_at
       properties:
@@ -1547,15 +1692,33 @@ components:
         agreement_id:
           type: string
           pattern: '^SWP-AG-\d+$'
+          nullable: true
           description: |
             Cross-epic — references E2 Employment Agreement (`PKWT`/`PKWTT`).
-            Placement period MUST sit within this agreement's validity
-            (BR-1b; PKWT auto-cap applies).
+            **Optional / nullable** (EPICS §8 2026-06-11, supersedes BR-1):
+            null means the placement is *awaiting agreement* — see
+            `awaiting_agreement`. When set, the placement period MUST sit
+            within this agreement's validity (BR-1b; PKWT auto-cap applies).
+            Backfilled via `POST /placements/{id}/agreement`.
           example: SWP-AG-882
+        awaiting_agreement:
+          type: boolean
+          readOnly: true
+          description: |
+            Derived compliance flag — `true` exactly when `agreement_id` is
+            null (the placement was created before the PKWT/PKWTT was
+            finalized). It is an **orthogonal compliance flag, NOT a
+            lifecycle state** (the F3.2 state machine is unaffected): an
+            `awaiting_agreement` placement can be ACTIVE / PENDING_START /
+            EXPIRING, etc. Cleared by backfilling the agreement via
+            `POST /placements/{id}/agreement`. Surfaced as a roster/list
+            filter (`?awaiting_agreement=true`) for the pending backlog.
+          example: false
         agreement_type:
           type: string
+          nullable: true
           enum: [PKWT, PKWTT]
-          description: Denormalized for display.
+          description: Denormalized for display. Null while awaiting agreement.
         client_company_id:
           type: string
           pattern: '^SWP-CMP-\d+$'
@@ -1667,6 +1830,7 @@ components:
         employee_id: SWP-EMP-1042
         employee_name: 'Budi Santoso'
         agreement_id: SWP-AG-882
+        awaiting_agreement: false
         agreement_type: PKWT
         client_company_id: SWP-CMP-014
         client_company_name: 'Plaza Senayan'
@@ -1711,7 +1875,6 @@ components:
       type: object
       required:
         - employee_id
-        - agreement_id
         - client_company_id
         - site_id
         - service_line_id
@@ -1725,11 +1888,19 @@ components:
         agreement_id:
           type: string
           pattern: '^SWP-AG-\d+$'
+          nullable: true
           description: |
-            Must be an `ACTIVE` SWP-AG-* belonging to `employee_id`.
-            Placement period must lie within the agreement validity (BR-1b);
-            for PKWT, an out-of-range `end_date` is auto-capped to the
-            agreement end and surfaces as `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]`.
+            **Optional** (EPICS §8 2026-06-11, supersedes the original BR-1
+            mandatory rule). If omitted, the placement is created *awaiting
+            agreement* (`awaiting_agreement: true`) — the agent can start work
+            before the PKWT/PKWTT is finalized; attach it later via
+            `POST /placements/{id}/agreement`. **No period / contract
+            validation runs when omitted.**
+            When supplied, must be an `ACTIVE` SWP-AG-* belonging to
+            `employee_id`; the placement period must lie within the agreement
+            validity (BR-1b); for PKWT, an out-of-range `end_date` is
+            auto-capped to the agreement end and surfaces as
+            `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]`.
         client_company_id:
           type: string
           pattern: '^SWP-CMP-\d+$'
@@ -1768,6 +1939,24 @@ components:
           type: string
           nullable: true
           maxLength: 2000
+
+    PlacementAgreementBackfillRequest:
+      type: object
+      description: |
+        Body for `POST /placements/{id}/agreement` — attaches the employment
+        agreement to a placement created awaiting one (EPICS §8 2026-06-11).
+      required:
+        - agreement_id
+      properties:
+        agreement_id:
+          type: string
+          pattern: '^SWP-AG-\d+$'
+          description: |
+            The finalized `SWP-AG-*` to attach. Must be an `ACTIVE` agreement
+            belonging to the placement's agent (`employee_id`) — otherwise
+            `422 AGREEMENT_NOT_OWNED`. Triggers the BR-1b period check /
+            PKWT auto-cap.
+          example: SWP-AG-882
 
     PlacementPatchRequest:
       type: object
@@ -1892,8 +2081,10 @@ components:
           type: string
           pattern: '^SWP-AG-\d+$'
           description: |
-            Defaults to the predecessor's `agreement_id` if omitted.
-            Required if the agent has moved to a new agreement (e.g.
+            Defaults to the predecessor's `agreement_id` if omitted (so if the
+            predecessor was *awaiting agreement* the successor is created
+            awaiting too — null propagates, no auto-cap; EPICS §8 2026-06-11).
+            Provide a value if the agent has moved to a new agreement (e.g.
             PKWT renewed).
           nullable: true
         transfer_reason:
@@ -1959,7 +2150,9 @@ components:
           pattern: '^SWP-AG-\d+$'
           nullable: true
           description: |
-            Defaults to the predecessor's `agreement_id`. Provide a new
+            Defaults to the predecessor's `agreement_id`. If the predecessor
+            was *awaiting agreement*, the successor is created awaiting too
+            (null propagates, no auto-cap; EPICS §8 2026-06-11). Provide a new
             one if PKWT was renewed in E2.
         new_position_id:
           type: string

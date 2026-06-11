@@ -6,12 +6,12 @@
 //     InTx) + fakeTxRunner,
 //   - in-memory fake repos implementing the reporting service ports
 //     (svc.NotificationRepository + svc.DashboardRepository + svc.BillableRepository
-//     + svc.ExportRepository) over shared mutable maps/counters,
+//   - svc.ExportRepository) over shared mutable maps/counters,
 //   - a recording fakeJobs (svc.Jobs) whose EnqueueTx captures the args so the
 //     export tests assert exactly one ReportExportArgs was enqueued in the export
 //     tx (transactional outbox),
 //   - newHarness(role, company, employee) that builds the REAL reporting services
-//     + handler.Handler and mounts them on a chi.Router at the SAME router
+//   - handler.Handler and mounts them on a chi.Router at the SAME router
 //     positions as server.go (notifications: all 4 roles; dashboard: all 4;
 //     billable + exports: super/hr/leader) with stubIdempotency on the action
 //     endpoints + a mutable-principal closure middleware (swap role/company/
@@ -64,6 +64,7 @@ func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag,
 func (f *fakeTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 	panic("fakeTx: Query not implemented")
 }
+
 // QueryRow serves audit.RecordReturningID (the export tx INSERT ... RETURNING id):
 // it returns a fake row that scans a deterministic SWP-AL id into the single
 // *string destination, so the export-job audit_log_entry_id is captured honestly
@@ -85,6 +86,7 @@ func (r *fakeRow) Scan(dest ...any) error {
 }
 
 var _ pgx.Row = (*fakeRow)(nil)
+
 func (f *fakeTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
 	panic("fakeTx: CopyFrom not implemented")
 }
@@ -398,6 +400,7 @@ type fakeDashboardRepo struct {
 	agentLeave  int
 	agentOT     int
 	unread      int
+	adminData   svc.SuperAdminWidgetsData
 }
 
 func newFakeDashboardRepo() *fakeDashboardRepo {
@@ -430,6 +433,10 @@ func (r *fakeDashboardRepo) AgentPending(_ context.Context, _ string) (svc.Agent
 
 func (r *fakeDashboardRepo) CountUnread(_ context.Context, _ []string) (int, error) {
 	return r.unread, nil
+}
+
+func (r *fakeDashboardRepo) SuperAdminWidgets(_ context.Context, _ time.Time, _ int) (svc.SuperAdminWidgetsData, error) {
+	return r.adminData, nil
 }
 
 var _ svc.DashboardRepository = (*fakeDashboardRepo)(nil)

@@ -121,9 +121,8 @@ func (h *ChangeRequestHandler) ApproveChangeRequest(w http.ResponseWriter, r *ht
 	id := chi.URLParam(r, "change_request_id")
 
 	principal, _ := auth.PrincipalFrom(r.Context())
-	actor := principal.UserID
 
-	cr, err := h.svc.ApproveChangeRequest(r.Context(), id, actor)
+	cr, err := h.svc.ApproveChangeRequest(r.Context(), id, principal.UserID, principal.EmployeeID)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -147,9 +146,8 @@ func (h *ChangeRequestHandler) RejectChangeRequest(w http.ResponseWriter, r *htt
 	}
 
 	principal, _ := auth.PrincipalFrom(r.Context())
-	actor := principal.UserID
 
-	cr, err := h.svc.RejectChangeRequest(r.Context(), id, req.Reason, actor)
+	cr, err := h.svc.RejectChangeRequest(r.Context(), id, req.Reason, principal.UserID)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

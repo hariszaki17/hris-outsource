@@ -542,6 +542,102 @@ export async function getChangeRequestStatus(id: string): Promise<string | null>
 }
 
 /**
+ * getChangeRequestBankPending — return whether a change request's denormalized
+ * bank_pending flag is set (drives the HR bank-escalation queue), or null if not found.
+ */
+export async function getChangeRequestBankPending(id: string): Promise<boolean | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ bank_pending: boolean }>(
+      'SELECT bank_pending FROM change_requests WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.bank_pending ?? null;
+  });
+}
+
+/**
+ * getEmployeeEmergencyContact — return the emergency_contact_{name,phone} columns
+ * for an employee, or null if not found. Used to assert an EMERGENCY_CONTACT
+ * change-request was applied to the employee on approval.
+ */
+export async function getEmployeeEmergencyContact(
+  id: string,
+): Promise<{ name: string | null; phone: string | null } | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{
+      emergency_contact_name: string | null;
+      emergency_contact_phone: string | null;
+    }>(
+      'SELECT emergency_contact_name, emergency_contact_phone FROM employees WHERE id = $1',
+      [id],
+    );
+    if (res.rows.length === 0) return null;
+    return { name: res.rows[0].emergency_contact_name, phone: res.rows[0].emergency_contact_phone };
+  });
+}
+
+/**
+ * getEmployeeBankAccountNumber — return the bank_account_number column for an employee,
+ * or null if not set / not found. Used to assert the bank field was (not) yet applied.
+ */
+export async function getEmployeeBankAccountNumber(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ bank_account_number: string | null }>(
+      'SELECT bank_account_number FROM employees WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.bank_account_number ?? null;
+  });
+}
+
+/**
+ * getEmployeeAddress — return the address column for an employee, or null if not found.
+ * Used to assert the instant-tier address edit (PATCH /me/profile) was applied.
+ */
+export async function getEmployeeAddress(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ address: string | null }>(
+      'SELECT address FROM employees WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.address ?? null;
+  });
+}
+
+/**
+ * getEmployeePhotoObjectKey — return the photo_object_key column for an employee, or
+ * null if not set / not found. Used to assert the photo presign→PUT→apply flow wrote
+ * a key in the employee's own profile-photos namespace.
+ */
+export async function getEmployeePhotoObjectKey(id: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ photo_object_key: string | null }>(
+      'SELECT photo_object_key FROM employees WHERE id = $1',
+      [id],
+    );
+    return res.rows[0]?.photo_object_key ?? null;
+  });
+}
+
+/**
+ * countNotificationsByKindForEmployee — count notifications of a given kind whose
+ * recipient_id is the employee id. Used to assert the un-stubbed CHANGE_REQUEST_APPROVED
+ * / CHANGE_REQUEST_REJECTED notifications were dispatched to the submitter.
+ */
+export async function countNotificationsByKindForEmployee(
+  employeeId: string,
+  kind: string,
+): Promise<number> {
+  return withClient(async (client) => {
+    const res = await client.query<{ cnt: string }>(
+      'SELECT COUNT(*) AS cnt FROM notifications WHERE recipient_id = $1 AND kind = $2',
+      [employeeId, kind],
+    );
+    return parseInt(res.rows[0]?.cnt ?? '0', 10);
+  });
+}
+
+/**
  * getSiteByName — return the id of a site by name within a company, or null if not found.
  */
 export async function getSiteByName(

@@ -75,6 +75,12 @@ type clientCompanyRef struct {
 	Name string `json:"name"`
 }
 
+// emergencyContactResp is the flat emergency_contact object in the Employee response.
+type emergencyContactResp struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
 // employeeResponse is the Employee object per the E2 OpenAPI spec.
 // All JSON keys are snake_case. Status is uppercased (ACTIVE/INACTIVE) at this boundary.
 // current_position, current_service_line, current_client_company are always null in Phase 4.
@@ -94,8 +100,9 @@ type employeeResponse struct {
 	NPWP                 *string           `json:"npwp"`
 	BPJSKesehatan        *string           `json:"bpjs_kesehatan"`
 	BPJSKetenagakerjaan  *string           `json:"bpjs_ketenagakerjaan"`
-	BankAccount          *bankAccountResp  `json:"bank_account"`
-	Status               string            `json:"status"` // ACTIVE | INACTIVE
+	BankAccount          *bankAccountResp      `json:"bank_account"`
+	EmergencyContact     *emergencyContactResp `json:"emergency_contact"`
+	Status               string                `json:"status"` // ACTIVE | INACTIVE
 	HasLogin             bool              `json:"has_login"`
 	CurrentPosition      *positionRef      `json:"current_position"`
 	CurrentServiceLine   *serviceLineRef   `json:"current_service_line"`
@@ -155,6 +162,14 @@ func toEmployeeResponse(e domain.Employee) employeeResponse {
 		BankName:          e.BankAccount.BankName,
 		AccountNumber:     e.BankAccount.AccountNumber,
 		AccountHolderName: e.BankAccount.AccountHolderName,
+	}
+
+	// emergency_contact: null when both fields are empty; otherwise populate.
+	if e.EmergencyContact.Name != "" || e.EmergencyContact.Phone != "" {
+		resp.EmergencyContact = &emergencyContactResp{
+			Name:  e.EmergencyContact.Name,
+			Phone: e.EmergencyContact.Phone,
+		}
 	}
 
 	return resp

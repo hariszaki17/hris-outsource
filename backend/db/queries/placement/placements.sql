@@ -20,7 +20,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -36,6 +37,7 @@ WHERE p.deleted_at IS NULL
   AND (sqlc.narg(status)::text          IS NULL OR p.lifecycle_status  = sqlc.narg(status)::text)
   AND (sqlc.narg(status_in)::text[]     IS NULL OR p.lifecycle_status  = ANY(sqlc.narg(status_in)::text[]))
   AND (sqlc.narg(end_date__lte)::date   IS NULL OR (p.end_date IS NOT NULL AND p.end_date <= sqlc.narg(end_date__lte)::date))
+  AND (sqlc.narg(awaiting_agreement)::boolean IS NULL OR (p.agreement_id IS NULL) = sqlc.narg(awaiting_agreement)::boolean)
   AND (
         sqlc.arg(include_history)::boolean
         OR p.lifecycle_status NOT IN ('ENDED','TRANSFERRED','TERMINATED','RESIGNED','SUPERSEDED')
@@ -67,7 +69,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -113,7 +116,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -147,7 +151,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 JOIN chain ch                     ON ch.id  = p.id
 LEFT JOIN employees e             ON e.id   = p.employee_id
@@ -171,7 +176,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -190,7 +196,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
-       p.backdate_reason, p.created_by, p.created_at, p.updated_at
+       p.backdate_reason, p.created_by, p.created_at, p.updated_at,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 WHERE p.employee_id = sqlc.arg(employee_id)
   AND p.client_company_id = sqlc.arg(client_company_id)
@@ -205,7 +212,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
-       p.backdate_reason, p.created_by, p.created_at, p.updated_at
+       p.backdate_reason, p.created_by, p.created_at, p.updated_at,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 WHERE p.employee_id = sqlc.arg(employee_id)
   AND p.deleted_at IS NULL
@@ -219,7 +227,7 @@ INSERT INTO placements (
     backdate_reason, created_by
 ) VALUES (
     sqlc.arg(employee_id),
-    sqlc.arg(agreement_id),
+    sqlc.narg(agreement_id),
     sqlc.arg(client_company_id),
     sqlc.arg(site_id),
     sqlc.arg(service_line_id),
@@ -237,7 +245,26 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at;
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement;
+
+-- name: SetPlacementAgreement :one
+-- Backfill: attach an agreement to a previously pending placement (awaiting_agreement).
+-- end_date is updated too so the service can persist the BR-1b PKWT auto-cap in the
+-- same write. awaiting_agreement flips to false once agreement_id is non-null.
+UPDATE placements
+SET agreement_id = sqlc.arg(agreement_id),
+    end_date     = sqlc.narg(end_date),
+    updated_at   = now()
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+RETURNING id, employee_id, agreement_id, client_company_id, site_id,
+          service_line_id, position_id, start_date, end_date,
+          notes,
+          lifecycle_status, status_changed_at, ended_reason, ended_at,
+          termination_reason, resign_at, predecessor_id, successor_id,
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement;
 
 -- name: UpdatePlacementFields :one
 -- Limited-field PATCH (position_id, end_date, notes).
@@ -252,7 +279,8 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at;
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement;
 
 -- name: SetPlacementLifecycle :one
 -- Drives end/terminate/resign/transfer/supersede. status_changed_at=now().
@@ -271,7 +299,8 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at;
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement;
 
 -- name: EndPlacementsForEmployee :many
 -- Offboard cascade (OB-1): end every non-terminal placement of an employee.
@@ -308,7 +337,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -321,6 +351,7 @@ WHERE p.client_company_id = sqlc.arg(client_company_id)
   AND (sqlc.narg(service_line_id)::text IS NULL OR p.service_line_id  = sqlc.narg(service_line_id)::text)
   AND (sqlc.narg(status)::text          IS NULL OR p.lifecycle_status = sqlc.narg(status)::text)
   AND (sqlc.narg(status_in)::text[]     IS NULL OR p.lifecycle_status = ANY(sqlc.narg(status_in)::text[]))
+  AND (sqlc.narg(awaiting_agreement)::boolean IS NULL OR (p.agreement_id IS NULL) = sqlc.narg(awaiting_agreement)::boolean)
   AND (
         sqlc.arg(include_history)::boolean
         OR p.lifecycle_status NOT IN ('ENDED','TRANSFERRED','TERMINATED','RESIGNED','SUPERSEDED')

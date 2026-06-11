@@ -78,8 +78,8 @@ export function Modal({ open, onOpenChange, size = 'md', children, className }: 
             'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
             // panel shell
             'flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-overlay',
-            // responsive clamp so we never overflow small viewports
-            'max-w-[calc(100vw-2rem)]',
+            // responsive clamp so we never overflow small viewports (width AND height)
+            'max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)]',
             sizeClass[size],
             className,
           )}
@@ -114,7 +114,7 @@ export function ModalHeader({
   closeLabel = 'Tutup',
 }: ModalHeaderProps) {
   return (
-    <div className="flex items-center justify-between border-b border-border-soft px-5 py-4">
+    <div className="flex shrink-0 items-center justify-between border-b border-border-soft px-5 py-4">
       {/* Left: icon circle + title */}
       <div className="flex items-center gap-3">
         {/* IconCircle */}
@@ -158,7 +158,13 @@ export interface ModalBodyProps {
 }
 
 export function ModalBody({ children, className }: ModalBodyProps) {
-  return <div className={cn('flex flex-col gap-3.5 px-5 py-5', className)}>{children}</div>;
+  return (
+    <div
+      className={cn('flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-5', className)}
+    >
+      {children}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +180,7 @@ export function ModalFooter({ children, className }: ModalFooterProps) {
   return (
     <div
       className={cn(
-        'flex justify-end gap-2 border-t border-border-soft bg-surface-2 px-5 py-3.5',
+        'flex shrink-0 justify-end gap-2 border-t border-border-soft bg-surface-2 px-5 py-3.5',
         className,
       )}
     >

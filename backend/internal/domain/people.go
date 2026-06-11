@@ -14,6 +14,16 @@ type BankAccount struct {
 	AccountHolderName string `json:"account_holder_name"`
 }
 
+// EmergencyContact holds the emergency-contact fields stored on an employee.
+// JSON tags mirror BankAccount's rationale: when embedded as `any` in the change
+// request diff (changeRequestFieldDiffResp.New / .Old) the serialized keys must
+// match what the FE formatDiffValue() expects (snake_case). Editing emergency
+// contact is approval-tier (routed via a change request).
+type EmergencyContact struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
 // Employee is the domain entity for an SWP employee (F2.1 / EP-*).
 //
 // HasLogin is derived (UserID != nil), never stored.
@@ -36,8 +46,18 @@ type Employee struct {
 	BPJSKesehatan       *string
 	BPJSKetenagakerjaan *string
 	BankAccount         BankAccount // flat columns; empty strings = not set
-	Status              string      // "active" | "inactive" (DB lowercase)
-	HasLogin            bool        // derived: UserID != nil
+	// EmergencyContact holds the flat emergency_contact_{name,phone} columns
+	// (empty strings = not set). Edited via an approval-tier change request.
+	EmergencyContact EmergencyContact
+	// AppLanguage is the agent's UI language preference ("id" default | "en");
+	// instant-tier self edit (PATCH /me/profile).
+	AppLanguage string
+	// PhotoObjectKey is the server-built key into the MinIO private bucket
+	// (profile-photos/{employee_id}/{ulid}.{ext}); nil = no photo. The presigned
+	// GET photo_url is derived at the DTO boundary, never stored.
+	PhotoObjectKey *string
+	Status         string // "active" | "inactive" (DB lowercase)
+	HasLogin       bool   // derived: UserID != nil
 	// Phase-5 stubs — always nil until placements table is wired.
 	CurrentPosition      *PositionRef
 	CurrentServiceLine   *ServiceLineRef
@@ -152,27 +172,47 @@ type Attachment struct {
 // --- Change Requests (EP-5 HR approval queue) ---
 
 // ChangeRequestChanges holds the whitelisted fields that can be proposed via
-// a change request: phone, address, bank_account. All are optional.
+// a change request: phone, emergency_contact, bank_account. All are optional.
+// (address moved to instant-tier self apply; emergency_contact is the new
+// approval-tier field — 2026-06-11 redesign.)
 type ChangeRequestChanges struct {
-	Phone       *string      `json:"phone,omitempty"`
-	Address     *string      `json:"address,omitempty"`
-	BankAccount *BankAccount `json:"bank_account,omitempty"`
+	Phone            *string           `json:"phone,omitempty"`
+	EmergencyContact *EmergencyContact `json:"emergency_contact,omitempty"`
+	BankAccount      *BankAccount      `json:"bank_account,omitempty"`
+}
+
+// FieldResolution records how one field of a change request was resolved during
+// the shift-leader bank-split flow: who applied it (or escalated it) and when.
+// Stored per field in change_requests.field_resolutions (jsonb).
+type FieldResolution struct {
+	Status     string     `json:"status"`                // "applied" | "escalated_to_hr" | "rejected"
+	ResolvedBy string     `json:"resolved_by,omitempty"` // SWP-EMP-<N> of the resolver
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 }
 
 // ChangeRequest is the domain entity for a change_requests row.
-// Status is the DB lowercase value ("pending"|"approved"|"rejected") — uppercased only at DTO boundary.
-// RequestType is stored uppercase as a DB CHECK: PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE.
+// Status is the DB lowercase value ("pending"|"approved"|"rejected"|"partially_approved")
+// — uppercased only at DTO boundary.
+// RequestType is stored uppercase as a DB CHECK: PHONE|EMERGENCY_CONTACT|BANK_ACCOUNT|MULTIPLE.
 type ChangeRequest struct {
 	ID              string
 	EmployeeID      string
-	Status          string // "pending" | "approved" | "rejected" (DB lowercase)
+	Status          string // "pending" | "approved" | "rejected" | "partially_approved" (DB lowercase)
 	SubmittedAt     time.Time
 	ResolvedAt      *time.Time
 	ResolvedBy      *string // SWP-EMP-<N> of resolving HR user
 	RejectionReason *string
 	Note            *string
 	Changes         ChangeRequestChanges // deserialized from jsonb
-	RequestType     string               // PHONE | ADDRESS | BANK_ACCOUNT | MULTIPLE
+	RequestType     string               // PHONE | EMERGENCY_CONTACT | BANK_ACCOUNT | MULTIPLE
+	// FieldResolutions records per-field resolution in the SL bank-split flow,
+	// keyed by field name ("phone","emergency_contact","bank_account").
+	// Empty until a shift leader partially applies a mixed request.
+	FieldResolutions map[string]FieldResolution
+	// BankPending is the denormalized flag (DB column) backing the HR
+	// bank-escalation queue: true when an SL applied the non-bank fields and a
+	// bank change still awaits HR (status = partially_approved).
+	BankPending bool
 }
 
 // ChangeRequestDetail is a value object combining a ChangeRequest with the employee
@@ -180,7 +220,7 @@ type ChangeRequest struct {
 type ChangeRequestDetail struct {
 	ChangeRequest
 	Employee EmployeeRef
-	Diff     map[string]ChangeRequestFieldDiff // keyed by field name: "phone", "address", "bank_account"
+	Diff     map[string]ChangeRequestFieldDiff // keyed by field name: "phone", "emergency_contact", "bank_account"
 }
 
 // EmployeeRef is the compact employee reference embedded in ChangeRequestDetail.

@@ -244,7 +244,8 @@ Remaining masters → components:
 
 ### E10 — Reporting & Notifications ✅  · web container `JifD6`
 - [x] Reconciled against live `.pen` *(HR row: dashboard/billable/export-modal/notif-center/super-admin; SL dashboard; export + notif + dashboard-empty showcases)*
-- [x] Dashboards (F10.2) — role-branched `useGetMyDashboard` union: HR (`ETi5H`) · **Super Admin** (`DhzyL`, same data + label, D1) · SL team (`RiSPW`) · agent-fallback · `→ features/e10-reporting/dashboard-screen.tsx` · route `/` (replaces placeholder)
+- [x] Dashboards (F10.2) — role-branched `useGetMyDashboard` union: HR (`ETi5H`) · SL team (`RiSPW`) · agent-fallback · `→ features/e10-reporting/dashboard-screen.tsx` · route `/`
+  - [ ] **Super Admin superset (DB-7, 2026-06-11)** — `DhzyL` becomes HR cockpit **+ admin widgets** (users & access · recent audit · org rollups by service line · pending grants) from `HrDashboard.admin`; render only when `role==='super_admin'`. `.pen` frame enhancement pending (renderer issue this session — finish in a clean design session).
 - [x] **Approval-inbox panel** ("Perlu Tindakan") + empty (`biFs5`) + filtered-zero (`elJj3`) · `→ approval-inbox-panel.tsx`
 - [x] Notification center (F10.1) + filters + **mark-read transition** (optimistic + toast) + mark-all + empty (`P2CO7C`) + stale-link note · `→ notifications-screen.tsx` (uses `NotifCard`) · frames `i0qW8`,`R0d1wC` · route `/notifications`
 - [x] Attendance/billable report (F10.3) + summary KPIs + per-row table + **pending-records callout** (verified-only) + export entry · `→ billable-report-screen.tsx` · frame `EF8AZ` · route `/reports`
@@ -267,7 +268,7 @@ Remaining masters → components:
 - [ ] E6 mobile: agent leave request + status (F6.2) · **SL leave queue + detail**
 - [ ] E7 mobile: agent OT request/confirm (F7.2) + OT detail bottom-sheet · **SL OT approval**
 - [ ] E8 mobile: agent payslip history + summary (F8.1)
-- [ ] E10 mobile: agent Beranda/dashboard + empty · **SL dashboard + notifications + combined inbox** · SLMobileNav (`fdVo7`)
+- [ ] E10 mobile: agent Beranda/dashboard + empty · **SL Beranda** (`UMzuO`, DB-8 — reuses `LeaderDashboard` from `useGetMyDashboard`, no new endpoint) + notifications + combined inbox · SLMobileNav (`fdVo7`)
 
 ---
 

@@ -165,6 +165,7 @@ func (r *ShiftLeaderRepo) RosterForCompany(ctx context.Context, f domain.Placeme
 		ServiceLineID:         f.ServiceLineID,
 		Status:                f.Status,
 		StatusIn:              f.StatusIn,
+		AwaitingAgreement:     f.AwaitingAgreement,
 		IncludeHistory:        f.IncludeHistory,
 		CursorStatusChangedAt: f.CursorStatusChangedAt,
 		CursorID:              f.CursorID,
@@ -238,7 +239,8 @@ func mapAssignmentFromList(row sqlcgen.ListShiftLeaderAssignmentsRow) domain.Shi
 func mapPlacementFromRoster(row sqlcgen.RosterForCompanyRow) domain.Placement {
 	p := placementCore{
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
-		ClientCompanyID: row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
+		AwaitingAgreement: row.AwaitingAgreement,
+		ClientCompanyID:   row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
 		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,

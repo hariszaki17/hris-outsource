@@ -59,6 +59,7 @@ export type PlacementsSearch = {
   service_line_id?: string;
   status?: PlacementLifecycleStatus;
   expiring_soon?: boolean;
+  awaiting_agreement?: boolean;
   cursor?: string;
 };
 
@@ -120,6 +121,7 @@ export function PlacementsScreen() {
     company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     service_line_id: search.service_line_id || undefined,
     status: search.status || undefined,
+    awaiting_agreement: search.awaiting_agreement || undefined,
     cursor: search.cursor,
   };
 
@@ -151,7 +153,11 @@ export function PlacementsScreen() {
   const rows = (page?.data ?? []) as Placement[];
 
   const hasFilters = Boolean(
-    search.q || search.company_id || search.service_line_id || search.status,
+    search.q ||
+      search.company_id ||
+      search.service_line_id ||
+      search.status ||
+      search.awaiting_agreement,
   );
 
   // ---------------------------------------------------------------------------
@@ -199,7 +205,9 @@ export function PlacementsScreen() {
         pl.service_line_name ? (
           <div className="flex items-center gap-[7px]">
             <span className="size-[7px] rounded-full bg-info-tx shrink-0" aria-hidden />
-            <span className="whitespace-nowrap text-[13px] text-text-2">{pl.service_line_name}</span>
+            <span className="whitespace-nowrap text-[13px] text-text-2">
+              {pl.service_line_name}
+            </span>
           </div>
         ) : (
           <span className="text-[13px] text-text-3">—</span>
@@ -230,15 +238,21 @@ export function PlacementsScreen() {
     {
       id: 'status',
       header: t('colStatus'),
-      width: 140,
+      width: 180,
       cell: (pl) => (
-        <StatusBadge dot tone={lifecycleTone[pl.lifecycle_status]}>
-          {t(`lifecycle.${pl.lifecycle_status}`)}
-        </StatusBadge>
+        <div className="flex flex-wrap items-center gap-[6px]">
+          <StatusBadge dot tone={lifecycleTone[pl.lifecycle_status]}>
+            {t(`lifecycle.${pl.lifecycle_status}`)}
+          </StatusBadge>
+          {pl.awaiting_agreement && (
+            <StatusBadge dot tone="warn">
+              {t('awaitingAgreementBadge')}
+            </StatusBadge>
+          )}
+        </div>
       ),
     },
   ];
-
 
   // ---------------------------------------------------------------------------
   // Error state
@@ -379,16 +393,32 @@ export function PlacementsScreen() {
               </div>
             )}
           </div>
-          {/* Expiring-soon toggle — from .pen C2SSLA "Akan berakhir" toggle */}
-          <div className="flex items-center gap-[8px]">
-            <span className="text-[13px] font-medium text-text-2">{t('filterExpiringSoon')}</span>
-            <Toggle
-              checked={expiringOn}
-              onCheckedChange={(v) =>
-                setSearch({ expiring_soon: v || undefined, cursor: undefined })
-              }
-              aria-label={t('filterExpiringSoon')}
-            />
+          <div className="flex items-center gap-[16px]">
+            {/* Awaiting-agreement toggle — drives the awaiting_agreement query filter
+                (the "menunggu perjanjian" backlog, EPICS §8 2026-06-11). */}
+            <div className="flex items-center gap-[8px]">
+              <span className="text-[13px] font-medium text-text-2">
+                {t('filterAwaitingAgreement')}
+              </span>
+              <Toggle
+                checked={Boolean(search.awaiting_agreement)}
+                onCheckedChange={(v) =>
+                  setSearch({ awaiting_agreement: v || undefined, cursor: undefined })
+                }
+                aria-label={t('filterAwaitingAgreement')}
+              />
+            </div>
+            {/* Expiring-soon toggle — from .pen C2SSLA "Akan berakhir" toggle */}
+            <div className="flex items-center gap-[8px]">
+              <span className="text-[13px] font-medium text-text-2">{t('filterExpiringSoon')}</span>
+              <Toggle
+                checked={expiringOn}
+                onCheckedChange={(v) =>
+                  setSearch({ expiring_soon: v || undefined, cursor: undefined })
+                }
+                aria-label={t('filterExpiringSoon')}
+              />
+            </div>
           </div>
         </div>
 

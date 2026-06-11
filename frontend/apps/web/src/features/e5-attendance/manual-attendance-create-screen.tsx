@@ -10,7 +10,18 @@ import { useListEmployees } from '@swp/api-client/e2';
 import { Button, FormField, Input, useToast } from '@swp/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowLeft, Building2, CalendarClock, Clock, Info, MapPin, Search, TriangleAlert, User, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  Building2,
+  CalendarClock,
+  Clock,
+  Info,
+  MapPin,
+  Search,
+  TriangleAlert,
+  User,
+  Users,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -75,12 +86,14 @@ export function ManualAttendanceCreateScreen() {
     { limit: 50, q: employeeSearch || undefined },
     { query: { enabled: employeeSearch.length > 0, staleTime: 30_000 } },
   );
-  const employeeRows = ((employeesQuery.data?.data as { data?: EmployeeOption[] } | undefined)?.data ?? []);
+  const employeeRows =
+    (employeesQuery.data?.data as { data?: EmployeeOption[] } | undefined)?.data ?? [];
 
   // Autofill fetch — only when both employee + date are selected
-  const autofillUrl = employeeSelected && selectedDate
-    ? `/attendance:manual-autofill?employee_id=${encodeURIComponent(selectedEmployeeId)}&date=${selectedDate}`
-    : null;
+  const autofillUrl =
+    employeeSelected && selectedDate
+      ? `/attendance:manual-autofill?employee_id=${encodeURIComponent(selectedEmployeeId)}&date=${selectedDate}`
+      : null;
 
   // Returns AutofillData on success, or `null` when the employee has no active
   // placement covering the chosen date (NO_ACTIVE_PLACEMENT, 404/422). `null` is a
@@ -176,20 +189,28 @@ export function ManualAttendanceCreateScreen() {
           {/* Section: Karyawan & Tanggal — no overflow-hidden so the search dropdown isn't clipped */}
           <div className="rounded-xl bg-surface border border-border">
             <div className="px-5 pt-[18px] pb-3 border-b border-border-soft flex flex-col gap-[2px]">
-              <span className="text-[15px] font-semibold text-text">{t('manualSelectEmployee')}</span>
+              <span className="text-[15px] font-semibold text-text">
+                {t('manualSelectEmployee')}
+              </span>
               <span className="text-[12px] text-text-2">{t('manualCreateDesc')}</span>
             </div>
             <div className="flex flex-col gap-[14px] p-5">
               <div className="flex gap-[14px]">
                 {/* Employee */}
                 <div className="flex-1 flex flex-col gap-1.5">
-                  <label className="text-[13px] font-medium text-text-2">{t('manualSelectEmployee')} *</label>
+                  <span className="text-[13px] font-medium text-text-2">
+                    {t('manualSelectEmployee')} *
+                  </span>
                   {selectedEmployee ? (
                     <div className="flex items-center justify-between rounded-md border border-border bg-surface-2 px-3 py-2">
                       <div className="flex min-w-0 items-center gap-2">
                         <User className="size-4 shrink-0 text-text-3" />
-                        <span className="truncate text-[13px] font-medium text-text">{selectedEmployee.full_name}</span>
-                        <span className="shrink-0 font-mono text-[11px] text-text-3">{selectedEmployee.id}</span>
+                        <span className="truncate text-[13px] font-medium text-text">
+                          {selectedEmployee.full_name}
+                        </span>
+                        <span className="shrink-0 font-mono text-[11px] text-text-3">
+                          {selectedEmployee.id}
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -227,7 +248,9 @@ export function ManualAttendanceCreateScreen() {
                               >
                                 <User className="size-4 shrink-0 text-text-3" />
                                 <span className="truncate">{emp.full_name}</span>
-                                <span className="ml-auto shrink-0 font-mono text-[11px] text-text-3">{emp.id}</span>
+                                <span className="ml-auto shrink-0 font-mono text-[11px] text-text-3">
+                                  {emp.id}
+                                </span>
                               </button>
                             ))
                           )}
@@ -238,7 +261,11 @@ export function ManualAttendanceCreateScreen() {
                 </div>
 
                 {/* Date */}
-                <FormField htmlFor="manual-date" label={`${t('manualCreateDate')} *`} className="flex-1">
+                <FormField
+                  htmlFor="manual-date"
+                  label={`${t('manualCreateDate')} *`}
+                  className="flex-1"
+                >
                   <Input
                     id="manual-date"
                     type="date"
@@ -259,7 +286,11 @@ export function ManualAttendanceCreateScreen() {
             </div>
             <div className="flex flex-col gap-[14px] p-5">
               <div className="flex gap-[14px]">
-                <FormField htmlFor="manual-checkin" label={`${t('manualCheckInAt')} *`} className="flex-1">
+                <FormField
+                  htmlFor="manual-checkin"
+                  label={`${t('manualCheckInAt')} *`}
+                  className="flex-1"
+                >
                   <Input
                     id="manual-checkin"
                     type="datetime-local"
@@ -268,7 +299,11 @@ export function ManualAttendanceCreateScreen() {
                     required
                   />
                 </FormField>
-                <FormField htmlFor="manual-checkout" label={t('manualCheckOutAt')} className="flex-1">
+                <FormField
+                  htmlFor="manual-checkout"
+                  label={t('manualCheckOutAt')}
+                  className="flex-1"
+                >
                   <Input
                     id="manual-checkout"
                     type="datetime-local"
@@ -304,7 +339,9 @@ export function ManualAttendanceCreateScreen() {
           <div className="rounded-xl bg-surface border border-border overflow-hidden">
             <div className="px-5 pt-4 pb-3 border-b border-border-soft flex items-center gap-2">
               <CalendarClock size={16} className="text-primary shrink-0" aria-hidden />
-              <span className="text-[14px] font-semibold text-text">{t('manualPlacementSummary')}</span>
+              <span className="text-[14px] font-semibold text-text">
+                {t('manualPlacementSummary')}
+              </span>
             </div>
             <div className="p-5">
               {!employeeSelected && (
@@ -333,23 +370,45 @@ export function ManualAttendanceCreateScreen() {
                 <div className="rounded-lg border border-warning-bd bg-warning-bg/40 px-4 py-3">
                   <div className="mb-1 flex items-center gap-2">
                     <TriangleAlert size={15} className="text-warning shrink-0" aria-hidden />
-                    <span className="text-[13px] font-semibold text-warning">{t('manualNoPlacementTitle')}</span>
+                    <span className="text-[13px] font-semibold text-warning">
+                      {t('manualNoPlacementTitle')}
+                    </span>
                   </div>
-                  <p className="text-[12px] text-text-2 leading-relaxed">{t('manualNoPlacementBody')}</p>
+                  <p className="text-[12px] text-text-2 leading-relaxed">
+                    {t('manualNoPlacementBody')}
+                  </p>
                 </div>
               )}
 
               {employeeSelected && autofillQuery.data && (
                 <div className="flex flex-col gap-3">
-                  <InfoRow icon={Building2} label={t('companyName', { ns: 'common' })} value={autofillQuery.data.company_name} />
-                  <InfoRow icon={MapPin} label={t('site_name', { ns: 'common' })} value={autofillQuery.data.site_name ?? '-'} />
-                  <InfoRow icon={Users} label={t('position_name', { ns: 'common' })} value={autofillQuery.data.position_name ?? '-'} />
-                  <InfoRow icon={Clock} label="Lini Layanan" value={t(`serviceLine.${autofillQuery.data.service_line}` as any)} />
+                  <InfoRow
+                    icon={Building2}
+                    label={t('companyName', { ns: 'common' })}
+                    value={autofillQuery.data.company_name}
+                  />
+                  <InfoRow
+                    icon={MapPin}
+                    label={t('site_name', { ns: 'common' })}
+                    value={autofillQuery.data.site_name ?? '-'}
+                  />
+                  <InfoRow
+                    icon={Users}
+                    label={t('position_name', { ns: 'common' })}
+                    value={autofillQuery.data.position_name ?? '-'}
+                  />
+                  <InfoRow
+                    icon={Clock}
+                    label="Lini Layanan"
+                    value={t(`serviceLine.${autofillQuery.data.service_line}` as never)}
+                  />
 
                   {/* Schedule */}
                   {autofillQuery.data.schedule_id ? (
                     <div className="mt-1 rounded-lg border border-border bg-brand-bg/30 px-4 py-3">
-                      <p className="mb-2 text-[13px] font-medium text-brand">{t('manualAutofillScheduleFound')}</p>
+                      <p className="mb-2 text-[13px] font-medium text-brand">
+                        {t('manualAutofillScheduleFound')}
+                      </p>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <span className="text-[11px] text-text-3">{t('manualShiftStart')}</span>
@@ -376,9 +435,13 @@ export function ManualAttendanceCreateScreen() {
                     <div className="mt-1 rounded-lg border border-info-bd bg-info-bg px-4 py-3">
                       <div className="mb-1 flex items-center gap-2">
                         <Info size={15} className="text-info-tx shrink-0" aria-hidden />
-                        <span className="text-[13px] font-semibold text-info-tx">{t('manualExistingTitle')}</span>
+                        <span className="text-[13px] font-semibold text-info-tx">
+                          {t('manualExistingTitle')}
+                        </span>
                       </div>
-                      <p className="mb-3 text-[12px] text-info-tx leading-relaxed">{t('manualExistingBody')}</p>
+                      <p className="mb-3 text-[12px] text-info-tx leading-relaxed">
+                        {t('manualExistingBody')}
+                      </p>
                       <Button
                         type="button"
                         variant="secondary"
@@ -402,7 +465,9 @@ export function ManualAttendanceCreateScreen() {
           <div className="rounded-xl bg-info-bg border border-info-bd overflow-hidden p-4 flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <Info size={16} className="text-info-tx shrink-0" aria-hidden />
-              <span className="text-[13px] font-semibold text-info-tx">{t('manualGuidelineTitle')}</span>
+              <span className="text-[13px] font-semibold text-info-tx">
+                {t('manualGuidelineTitle')}
+              </span>
             </div>
             <p className="text-[11px] text-info-tx leading-relaxed">{t('manualGuidelineBody')}</p>
           </div>
@@ -435,7 +500,11 @@ export function ManualAttendanceCreateScreen() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function InfoRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+}: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
   return (
     <div className="flex items-center gap-2">
       <Icon className="size-3.5 shrink-0 text-text-3" />
@@ -450,5 +519,9 @@ function InfoRow({ icon: Icon, label, value }: { icon: React.ComponentType<{ cla
 function formatShiftTime(rfc3339: string | null): string {
   if (!rfc3339) return '-';
   const d = new Date(rfc3339);
-  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+  return d.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
 }

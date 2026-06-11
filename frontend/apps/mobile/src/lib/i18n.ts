@@ -37,7 +37,8 @@ const mobileCopy = {
       submit: 'Kirim Tautan Reset',
       backToLogin: 'Kembali ke Masuk',
       sentTitle: 'Periksa email Anda',
-      sentBody: 'Jika {{email}} terdaftar, kami baru saja mengirim tautan reset. Tautan berlaku 30 menit.',
+      sentBody:
+        'Jika {{email}} terdaftar, kami baru saja mengirim tautan reset. Tautan berlaku 30 menit.',
       resendNotReceived: 'Tidak menerima email?',
       resendAction: 'Kirim ulang',
       newPasswordLabel: 'Kata sandi baru',
@@ -217,6 +218,28 @@ const mobileCopy = {
       success: 'Perubahan diajukan. Menunggu persetujuan HR.',
       noChange: 'Tidak ada perubahan.',
       error: 'Gagal mengajukan perubahan. Coba lagi.',
+    },
+    // ── Shift Leader Beranda (DB-8 · F10.2 · frame UMzuO) ────────────────────────────
+    leaderBeranda: {
+      title: 'Beranda',
+      tabTitle: 'Beranda',
+      // Section 1 — Hari Ini
+      sectionToday: 'Hari Ini',
+      statShifts: 'Total Shift',
+      statClockedIn: 'Hadir',
+      statLate: 'Terlambat',
+      statAbsent: 'Absen',
+      pendingVerif: 'Menunggu verifikasi: {{count}}',
+      noVerifPending: 'Tidak ada verifikasi tertunda.',
+      // Section 2 — Perlu Tindakan
+      sectionAction: 'Perlu Tindakan',
+      actionVerifAttendance: 'Verifikasi Kehadiran',
+      actionApproveLeave: 'Persetujuan Cuti',
+      actionApproveOT: 'Persetujuan Lembur',
+      actionEmpty: 'Tidak ada tindakan yang diperlukan.',
+      // Section 3 — Peringatan Jadwal
+      sectionAlerts: 'Peringatan Jadwal',
+      alertsEmpty: 'Tidak ada peringatan jadwal.',
     },
   },
   en: {
@@ -429,6 +452,28 @@ const mobileCopy = {
       success: 'Change requested. Awaiting HR approval.',
       noChange: 'No changes.',
       error: 'Failed to request change. Try again.',
+    },
+    // ── Shift Leader Beranda (DB-8 · F10.2 · frame UMzuO) ────────────────────────────
+    leaderBeranda: {
+      title: 'Home',
+      tabTitle: 'Home',
+      // Section 1 — Today
+      sectionToday: 'Today',
+      statShifts: 'Total Shifts',
+      statClockedIn: 'Present',
+      statLate: 'Late',
+      statAbsent: 'Absent',
+      pendingVerif: 'Awaiting verification: {{count}}',
+      noVerifPending: 'No pending verifications.',
+      // Section 2 — Action Required
+      sectionAction: 'Action Required',
+      actionVerifAttendance: 'Verify Attendance',
+      actionApproveLeave: 'Approve Leave',
+      actionApproveOT: 'Approve Overtime',
+      actionEmpty: 'No actions required.',
+      // Section 3 — Schedule Alerts
+      sectionAlerts: 'Schedule Alerts',
+      alertsEmpty: 'No schedule alerts.',
     },
   },
 } as const;

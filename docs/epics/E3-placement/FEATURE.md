@@ -29,7 +29,7 @@ Make **placement a first-class entity** (in the legacy system it was just a stri
 ```mermaid
 erDiagram
     EMPLOYEE ||--o{ EMPLOYMENT_AGREEMENT : "employed under"
-    EMPLOYMENT_AGREEMENT ||--o{ PLACEMENT : "designated via"
+    EMPLOYMENT_AGREEMENT |o--o{ PLACEMENT : "designated via (optional; backfillable)"
     CLIENT_COMPANY ||--o{ PLACEMENT : "hosts"
     CLIENT_COMPANY ||--|{ SITE : "has one or more"
     SITE ||--o{ PLACEMENT : "located at"
@@ -51,7 +51,7 @@ erDiagram
     PLACEMENT {
         bigint id PK
         bigint employee_id FK
-        bigint employment_agreement_id FK
+        bigint employment_agreement_id FK "nullable; null = awaiting agreement (backfillable)"
         bigint client_company_id FK
         bigint site_id FK "required; site.client_company_id = client_company_id"
         bigint service_line_id FK
@@ -59,6 +59,7 @@ erDiagram
         date start_date
         date end_date "null = open-ended"
         string status
+        boolean awaiting_agreement "derived: employment_agreement_id is null"
         string ended_reason
         bigint predecessor_id FK "renewal or transfer chain"
         bigint created_by FK
@@ -73,7 +74,7 @@ erDiagram
     }
 ```
 
-> **Employment vs placement (Indonesian labor law):** In outsourcing (alih daya), the employment relationship is between the agent and **SWP**, not the client. So the **EmploymentAgreement** (`PKWT` fixed-term / `PKWTT` indefinite) lives at the employee↔SWP level (modeled in E2), and a **Placement** is only a *work designation* to a client site. A placement references its employment agreement; for `PKWT` the placement period must fall within the agreement's validity, while `PKWTT` agreements allow **open-ended** placements.
+> **Employment vs placement (Indonesian labor law):** In outsourcing (alih daya), the employment relationship is between the agent and **SWP**, not the client. So the **EmploymentAgreement** (`PKWT` fixed-term / `PKWTT` indefinite) lives at the employee↔SWP level (modeled in E2), and a **Placement** is only a *work designation* to a client site. A placement **may** reference its employment agreement, but the reference is **optional at create and backfillable** *(EPICS §8 2026-06-11)* — an agent often starts work before the PKWT/PKWTT is finalized, so a placement created without one is flagged `awaiting_agreement` until it is attached. When an agreement **is** present, for `PKWT` the placement period must fall within the agreement's validity, while `PKWTT` agreements allow **open-ended** placements; when none is present the period check is skipped and the placement may be open-ended.
 
 **Invariants (confirmed 2026-05-29; INV-2/3/4 + INV-5 revised 2026-06-03 for client sites — see §7):**
 - **INV-1:** an agent has **at most one *active* placement** at any moment (no split/multi-site agents). ✅
@@ -97,22 +98,25 @@ erDiagram
 
 ### F3.1 — Agent Placement (create & activate)
 
-HR admin places an agent at a client company, in a service line, for a contract period, referencing the agent's employment agreement (PKWT/PKWTT) and selecting the per-placement position. Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
+HR admin places an agent at a client company, in a service line, for a contract period, **optionally** referencing the agent's employment agreement (PKWT/PKWTT) and selecting the per-placement position. The **employment agreement is optional at create and may be backfilled** *(2026-06-11, EPICS §8 — supersedes the prior mandatory rule)*: a placement created without one is flagged `awaiting_agreement` and the agreement is attached later (re-running the period validation). Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         A1([Start: new placement]) --> A2[Select agent]
         A2 --> A3[Select client company + service line]
-        A3 --> A4[Set period + position<br/>PKWT ref, dates]
-        A4 --> A7[Submit placement]
+        A3 --> A4[Set period + position<br/>dates]
+        A4 --> A5{Employment agreement<br/>finalized yet?}
+        A5 -- Yes --> A4b[Attach agreement<br/>PKWT/PKWTT ref]
+        A5 -- "No (paperwork pending)" --> A7
+        A4b --> A7[Submit placement]
         A6[Resolve existing:<br/>end or transfer] --> A4
     end
     subgraph SYS[System]
         A7 --> S1{Valid? dates, company active,<br/>no overlapping active placement}
         S1 -- Invalid: overlap --> S2[Block: agent already placed] --> A6
         S1 -- Invalid: data --> S3[Show field errors] --> A4
-        S1 -- Valid --> S4[Create Placement = Draft]
+        S1 -- Valid --> S4[Create Placement = Draft<br/>awaiting_agreement = true if no agreement<br/>period check BR-1b only if agreement set]
         S4 --> S5{Start date <= today?}
         S5 -- Yes --> S6[Status = Active]
         S5 -- No --> S7[Status = Scheduled<br/>activate on start date]
@@ -257,6 +261,9 @@ flowchart LR
 
 ## 7. Decisions & open questions
 
+**Resolved (2026-06-11 — employment agreement optional at placement create, EPICS §8):**
+- ✅ **`employment_agreement_id` is optional at create and backfillable** — supersedes the prior mandatory rule (F3.1 BR-1). An agent may be placed and start work before the PKWT/PKWTT is finalized; a placement created without an agreement is flagged **`awaiting_agreement`** (derived, = the reference is null) — an **orthogonal compliance flag, not a lifecycle state** (the F3.2 state machine is unchanged). The period-within-agreement check (BR-1b) and PKWT auto-cap run **only when an agreement is present**; otherwise the period is unconstrained and `end_date` may be open-ended. The agreement is attached later via a **backfill** action (`POST /placements/{id}/agreement`), which re-runs BR-1b; **renew/transfer of a pending placement propagates the pending flag** to the successor (no auto-cap). A finalized agreement remains legally required for the employment overall (alih-daya) — only the placement-create precondition is relaxed. → F3.1 BR-1 / BR-1b / BR-10, [agent-placement.md](prds/agent-placement.md), [EPICS §8](../../EPICS.md) 2026-06-11.
+
 **Resolved (2026-06-08 — shift-leader identity model shipped):**
 - ✅ **Derived role/scope.** A shift leader is an Employee with an active `shift_leader_assignments` row (keyed by `employee_id`); the auth role + single-company scope are **derived at request time** by server middleware from that assignment, **not stored on `users`** — consistent with INV-2/3/4. Reassign/revoke is effective on the next request (no re-login). → [F3.4](prds/shift-leader-assignment.md) SL-10.
 - ✅ **Single entry point** = the client-company detail **"Pemimpin Shift" tab** (E2 [F2.3](../E2-identity/prds/client-company-directory.md)); the placement-detail shift-leader card is **read-only** and links there, and the F3.5 roster "Ganti" action links to the same tab. → F3.4 SL-11.
@@ -281,7 +288,7 @@ flowchart LR
 - ✅ **1-day buffer** between placements — no overlap, no same-day handover. → F3.1 / PRD BR-2
 - ✅ **Position** comes from master data (E2) but is set **per placement**, so the same agent may hold a different position at a different company.
 - ✅ **Backdating** allowed for **HR admin** (with reason + audit), not Super Admin only.
-- ✅ **Employment agreement (PKWT/PKWTT)** is separate from placement and tied to SWP↔employee (E2); placement `end_date` may be open-ended (PKWTT) and, for PKWT, must sit within the agreement period.
+- ✅ **Employment agreement (PKWT/PKWTT)** is separate from placement and tied to SWP↔employee (E2); placement `end_date` may be open-ended (PKWTT) and, for PKWT, must sit within the agreement period *(2026-06-11: the agreement reference is now **optional at create** — this period constraint applies **only when an agreement is present**; see the 2026-06-11 decision above)*.
 
 **Resolved (round 2):**
 - ✅ **Service line** → **manual classification** later, after SWP confirms (no inference for now). → [DATA-MAPPING.md](DATA-MAPPING.md) G-1.

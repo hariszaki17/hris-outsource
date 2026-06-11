@@ -3,7 +3,7 @@
  *
  * Smoke test — proves the harness boots and the REAL FE dev server is reachable.
  * Does NOT log in or call the API; merely navigates to /login and verifies that
- * the real login screen (with its #email input) is rendered.
+ * the real login screen (with its #identifier input) is rendered.
  *
  * Because VITE_ENABLE_MSW=false in playwright.config.ts, the browser will NOT
  * activate any service worker. The form being present is sufficient proof that
@@ -20,7 +20,7 @@ test('harness boots: real FE dev server reaches the login screen', async ({ page
 
   // The login screen (login-screen.tsx) renders id="email" and id="password".
   // Their presence proves the real app bundle is loaded.
-  await expect(page.locator('#email')).toBeVisible();
+  await expect(page.locator('#identifier')).toBeVisible();
   await expect(page.locator('#password')).toBeVisible();
 
   // Verify no MSW service-worker banner is present (MSW logs to console when

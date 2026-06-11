@@ -7,6 +7,7 @@ package sqlcgen
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -72,6 +73,43 @@ func (q *Queries) CountActivePlacements(ctx context.Context) (int64, error) {
 	return total, err
 }
 
+const countActiveUsers = `-- name: CountActiveUsers :one
+
+SELECT count(*)::bigint AS total
+FROM users
+WHERE deleted_at IS NULL
+  AND status = 'active'
+`
+
+// =====================================================================
+// SuperAdminWidgets (DB-7) — admin-only dashboard block. Present ONLY when
+// role=super_admin; the queries below are global (no scope param). Each backs one
+// sub-widget of openapi schemas.SuperAdminWidgets.
+// =====================================================================
+// user_access.active_users: login accounts with status 'active' (00002_users).
+func (q *Queries) CountActiveUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveUsers)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
+const countBankApprovalsPending = `-- name: CountBankApprovalsPending :one
+SELECT count(*)::bigint AS total
+FROM change_requests
+WHERE bank_pending
+`
+
+// pending_grants.bank_approvals: change-requests with a bank change escalated to
+// HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
+// rbac.CanApproveBank / PARTIALLY_APPROVED).
+func (q *Queries) CountBankApprovalsPending(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countBankApprovalsPending)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const countExpiringAgreements30d = `-- name: CountExpiringAgreements30d :one
 SELECT count(*)::bigint AS expiring
 FROM employment_agreements
@@ -112,6 +150,25 @@ func (q *Queries) CountExpiringPlacements30d(ctx context.Context, arg CountExpir
 	var expiring int64
 	err := row.Scan(&expiring)
 	return expiring, err
+}
+
+const countOffboardedUsers30d = `-- name: CountOffboardedUsers30d :one
+SELECT count(*)::bigint AS total
+FROM users
+WHERE deleted_at IS NULL
+  AND status = 'disabled'
+  AND tokens_valid_after >= ($1::timestamptz - INTERVAL '30 days')
+`
+
+// user_access.offboarded_30d: users disabled within the last 30 days (F2.7).
+// The schema records offboarding as status='disabled' + a tokens_valid_after epoch
+// bump (00038); updated_at carries the disable instant. We count disabled users
+// whose tokens_valid_after (the revocation instant) falls in the last 30 days.
+func (q *Queries) CountOffboardedUsers30d(ctx context.Context, nowTs time.Time) (int64, error) {
+	row := q.db.QueryRow(ctx, countOffboardedUsers30d, nowTs)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
 }
 
 const countPendingAttendanceVerify = `-- name: CountPendingAttendanceVerify :one
@@ -276,4 +333,97 @@ func (q *Queries) LeaderTodayStatus(ctx context.Context, arg LeaderTodayStatusPa
 		&i.PendingVerifications,
 	)
 	return i, err
+}
+
+const orgRollupsByServiceLine = `-- name: OrgRollupsByServiceLine :many
+SELECT
+    sl.name                                  AS service_line_name,
+    count(DISTINCT p.employee_id)::bigint     AS headcount,
+    count(*)::bigint                          AS active_placements
+FROM placements p
+JOIN service_lines sl ON sl.id = p.service_line_id
+WHERE p.deleted_at IS NULL
+  AND p.lifecycle_status IN ('ACTIVE','EXTENDED','EXPIRING','PENDING_START')
+GROUP BY sl.id, sl.name
+ORDER BY sl.name
+`
+
+type OrgRollupsByServiceLineRow struct {
+	ServiceLineName  string
+	Headcount        int64
+	ActivePlacements int64
+}
+
+// org_rollups: per-service-line headcount (distinct placed employees) + active
+// placement count, over non-terminal placements (mirrors CountActivePlacements).
+// service_lines.name is free text ("Facility Services" / "Building Management" /
+// "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
+// the raw name so the mapping stays in Go (no enum in the schema).
+func (q *Queries) OrgRollupsByServiceLine(ctx context.Context) ([]OrgRollupsByServiceLineRow, error) {
+	rows, err := q.db.Query(ctx, orgRollupsByServiceLine)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OrgRollupsByServiceLineRow{}
+	for rows.Next() {
+		var i OrgRollupsByServiceLineRow
+		if err := rows.Scan(&i.ServiceLineName, &i.Headcount, &i.ActivePlacements); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recentAuditEntries = `-- name: RecentAuditEntries :many
+SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, created_at
+FROM audit_log
+ORDER BY created_at DESC, id DESC
+LIMIT $1
+`
+
+type RecentAuditEntriesRow struct {
+	ID          string
+	ActorUserID *string
+	ActorRole   *string
+	Action      string
+	EntityType  string
+	EntityID    string
+	CreatedAt   time.Time
+}
+
+// recent_audit: last sensitive admin actions, newest first (capped by row_limit ~8).
+// The schema (00004_audit_log) stores actor_user_id/actor_role/action/entity_type/
+// entity_id; the service composes actor_label/target_label from these (no
+// human-name columns exist on audit_log).
+func (q *Queries) RecentAuditEntries(ctx context.Context, rowLimit int32) ([]RecentAuditEntriesRow, error) {
+	rows, err := q.db.Query(ctx, recentAuditEntries, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecentAuditEntriesRow{}
+	for rows.Next() {
+		var i RecentAuditEntriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.ActorRole,
+			&i.Action,
+			&i.EntityType,
+			&i.EntityID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

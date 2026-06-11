@@ -15,7 +15,7 @@ import (
 
 type placementWriteRequest struct {
 	EmployeeID      string  `json:"employee_id"`
-	AgreementID     string  `json:"agreement_id"`
+	AgreementID     *string `json:"agreement_id,omitempty"` // optional: nil/"" → pending agreement
 	ClientCompanyID string  `json:"client_company_id"`
 	SiteID          string  `json:"site_id"`
 	ServiceLineID   string  `json:"service_line_id"`
@@ -39,6 +39,11 @@ type placementPatchRequest struct {
 	LifecycleStatus *string `json:"lifecycle_status"`
 	PredecessorID   *string `json:"predecessor_id"`
 	SuccessorID     *string `json:"successor_id"`
+}
+
+// setAgreementRequest is the body of POST /placements/{id}/agreement (backfill).
+type setAgreementRequest struct {
+	AgreementID string `json:"agreement_id"`
 }
 
 type transferRequest struct {
@@ -86,8 +91,9 @@ type placementResponse struct {
 	ID                string   `json:"id"`
 	EmployeeID        string   `json:"employee_id"`
 	EmployeeName      *string  `json:"employee_name"`
-	AgreementID       string   `json:"agreement_id"`
+	AgreementID       *string  `json:"agreement_id"`
 	AgreementType     *string  `json:"agreement_type"`
+	AwaitingAgreement bool     `json:"awaiting_agreement"`
 	ClientCompanyID   string   `json:"client_company_id"`
 	ClientCompanyName *string  `json:"client_company_name"`
 	SiteID            string   `json:"site_id"`
@@ -197,6 +203,7 @@ func toPlacementResponse(p domain.Placement, today time.Time) placementResponse 
 		EmployeeName:      p.EmployeeName,
 		AgreementID:       p.AgreementID,
 		AgreementType:     p.AgreementType,
+		AwaitingAgreement: p.AwaitingAgreement,
 		ClientCompanyID:   p.ClientCompanyID,
 		ClientCompanyName: p.ClientCompanyName,
 		SiteID:            p.SiteID,

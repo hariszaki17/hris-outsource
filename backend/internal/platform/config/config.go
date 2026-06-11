@@ -15,13 +15,14 @@ type Config struct {
 	ServiceName string `env:"SERVICE_NAME" envDefault:"hris-api"`
 	LogLevel    string `env:"LOG_LEVEL" envDefault:"info"`
 
-	HTTP   HTTP
-	DB     DB
-	Auth   Auth
-	Crypto Crypto
-	OTel   OTel
-	Rate   Rate
-	Cron   Cron
+	HTTP    HTTP
+	DB      DB
+	Auth    Auth
+	Crypto  Crypto
+	OTel    OTel
+	Rate    Rate
+	Cron    Cron
+	Storage Storage
 }
 
 // Cron configures the in-process single-binary cron jobs (E5 absence-sweep). A
@@ -76,6 +77,31 @@ type Crypto struct {
 
 type OTel struct {
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+}
+
+// Storage configures the S3-compatible object store (MinIO in dev) behind a
+// single PRIVATE bucket. The API never proxies bytes: it hands clients short-TTL
+// presigned URLs (internal/platform/storage). First consumer is E2 profile
+// photos; E5 attendance selfies reuse the same client.
+type Storage struct {
+	// Endpoint is the host:port the API uses to reach the store (no scheme).
+	Endpoint string `env:"STORAGE_ENDPOINT" envDefault:"localhost:9000"`
+	// PublicEndpoint, when set, rewrites the host of presigned URLs so a browser
+	// can reach the store directly (e.g. when the API talks to MinIO over an
+	// internal docker host but the SPA runs on localhost). Empty = use Endpoint.
+	PublicEndpoint string `env:"STORAGE_PUBLIC_ENDPOINT"`
+	// AccessKey / SecretKey are the store credentials.
+	AccessKey string `env:"STORAGE_ACCESS_KEY" envDefault:"minioadmin"`
+	SecretKey string `env:"STORAGE_SECRET_KEY" envDefault:"minioadmin"`
+	// Bucket is the single private bucket all namespaces live under.
+	Bucket string `env:"STORAGE_BUCKET" envDefault:"hris-private"`
+	// UseSSL toggles https for the store endpoint (false in dev).
+	UseSSL bool `env:"STORAGE_USE_SSL" envDefault:"false"`
+	// PresignTTL is how long presigned PUT/GET URLs stay valid (kept short).
+	PresignTTL time.Duration `env:"STORAGE_PRESIGN_TTL" envDefault:"5m"`
+	// MaxUploadBytes caps a single upload; pinned into the presigned PUT's
+	// content-length-range so the store itself rejects oversize bodies.
+	MaxUploadBytes int64 `env:"STORAGE_MAX_UPLOAD_BYTES" envDefault:"5242880"` // 5 MiB
 }
 
 type Rate struct {

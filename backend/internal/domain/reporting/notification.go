@@ -13,7 +13,7 @@ import "time"
 
 // NotificationKind is the notification event kind, pinned BYTE-FOR-BYTE to openapi
 // schemas.NotificationKind (the app owns the enum; the notifications.kind column
-// has NO CHECK so new kinds need no migration). All 19 v1 kinds below.
+// has NO CHECK so new kinds need no migration). All 21 v1 kinds below.
 type NotificationKind string
 
 const (
@@ -31,6 +31,8 @@ const (
 	NotifAttendanceCorrectionSubmitted NotificationKind = "ATTENDANCE_CORRECTION_SUBMITTED"
 	NotifAttendanceAutoClosed          NotificationKind = "ATTENDANCE_AUTO_CLOSED"
 	NotifHRChangeRequestSubmitted      NotificationKind = "HR_CHANGE_REQUEST_SUBMITTED"
+	NotifChangeRequestApproved         NotificationKind = "CHANGE_REQUEST_APPROVED"
+	NotifChangeRequestRejected         NotificationKind = "CHANGE_REQUEST_REJECTED"
 	NotifAgreementExpiring             NotificationKind = "AGREEMENT_EXPIRING"
 	NotifPlacementExpiring             NotificationKind = "PLACEMENT_EXPIRING"
 	NotifPlacementLeaderChanged        NotificationKind = "PLACEMENT_LEADER_CHANGED"

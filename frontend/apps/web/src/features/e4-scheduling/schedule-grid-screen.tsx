@@ -25,6 +25,12 @@ import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { useCompanyOptions } from '@/lib/use-company-options.ts';
 import {
+  type CompanyRosterResponse,
+  type GetCompanyRosterParams,
+  type Placement,
+  useGetCompanyRoster,
+} from '@swp/api-client/e3';
+import {
   type ListScheduleParams,
   type ScheduleEntry,
   ScheduleEntryStatus,
@@ -43,7 +49,7 @@ import {
   type AgentRow,
   type RowCompliance,
   addDays,
-  buildAgentRows,
+  buildAgentRowsFromRoster,
   buildHolidayMaps,
   computeCompliance,
   currentJakartaIso,
@@ -181,7 +187,18 @@ export function ScheduleGridScreen() {
     ? (scheduleQuery.data?.data as unknown as ScheduleEntry[])
     : entries;
 
-  const agentRows = React.useMemo(() => buildAgentRows(flatEntries), [flatEntries]);
+  // ---- Roster query (active placements) — drives visible rows even with zero entries ----
+  const rosterParams: GetCompanyRosterParams = { limit: 200 };
+  const rosterQuery = useGetCompanyRoster(companyId!, rosterParams, {
+    query: { enabled: !!companyId, staleTime: 30_000 },
+  });
+  const rosterPlacements: Placement[] =
+    (rosterQuery.data?.data as CompanyRosterResponse | undefined)?.placements ?? [];
+
+  const agentRows = React.useMemo(
+    () => buildAgentRowsFromRoster(rosterPlacements, flatEntries),
+    [rosterPlacements, flatEntries],
+  );
 
   // ---- Holiday calendar (EPICS §8 D1) — classification only, never suppresses shifts ----
   // The week may straddle a year boundary; fetch both years (react-query dedupes equal keys).
@@ -276,7 +293,7 @@ export function ScheduleGridScreen() {
   };
 
   // ---- Error handling ----
-  const queryError = scheduleQuery.error;
+  const queryError = rosterQuery.error ?? scheduleQuery.error;
   const errorKind = queryError ? classifyError(queryError).kind : null;
 
   // ---------------------------------------------------------------------------
@@ -337,20 +354,6 @@ export function ScheduleGridScreen() {
       </div>
     );
   };
-
-  // ---------------------------------------------------------------------------
-  // Legend items
-  // ---------------------------------------------------------------------------
-
-  const legendItems = [
-    { dot: 'bg-accent-gold', label: t('legend.pagi') },
-    { dot: 'bg-accent-blue', label: t('legend.siang') },
-    { dot: 'bg-text-3', label: t('legend.malam') },
-    { dot: 'bg-accent-gold', label: t('legend.buildingDay') },
-    { dot: 'bg-accent-gold', label: t('legend.cleaning') },
-    { dot: 'bg-border', label: t('legend.off') },
-    { dot: 'bg-warn-bg border border-warn-bd', label: t('legend.cuti') },
-  ];
 
   // ---------------------------------------------------------------------------
   // JSX
@@ -423,16 +426,6 @@ export function ScheduleGridScreen() {
         <p className="text-xs font-medium text-ok-tx">{t('banner.autoPublish')}</p>
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-4">
-        {legendItems.map((item) => (
-          <div key={item.label} className="flex items-center gap-1.5">
-            <span aria-hidden className={`size-2.5 rounded-full ${item.dot}`} />
-            <span className="text-xs text-text-2">{item.label}</span>
-          </div>
-        ))}
-      </div>
-
       {/* No company selected */}
       {!companyId && (
         <EmptyState
@@ -443,7 +436,7 @@ export function ScheduleGridScreen() {
       )}
 
       {/* Loading skeleton */}
-      {companyId && scheduleQuery.isLoading && (
+      {companyId && (scheduleQuery.isLoading || rosterQuery.isLoading) && (
         <div className="flex flex-col gap-0 overflow-hidden rounded-xl border border-border bg-surface">
           <div className="flex border-b border-border bg-surface-2 px-4 py-3">
             <span className="text-xs font-semibold uppercase tracking-wide text-text-3">
@@ -458,24 +451,36 @@ export function ScheduleGridScreen() {
       )}
 
       {/* Error */}
-      {companyId && !scheduleQuery.isLoading && scheduleQuery.isError && (
-        <StateView
-          kind={errorKind === 'forbidden' ? 'no-permission' : 'error'}
-          title={
-            errorKind === 'forbidden' ? t('error.noPermissionTitle') : t('error.loadFailedTitle')
-          }
-          description={
-            errorKind === 'forbidden' ? t('error.noPermissionDesc') : t('error.loadFailedDesc')
-          }
-          onRetry={errorKind !== 'forbidden' ? () => scheduleQuery.refetch() : undefined}
-          retryLabel={t('error.retry')}
-        />
-      )}
+      {companyId &&
+        !scheduleQuery.isLoading &&
+        !rosterQuery.isLoading &&
+        (scheduleQuery.isError || rosterQuery.isError) && (
+          <StateView
+            kind={errorKind === 'forbidden' ? 'no-permission' : 'error'}
+            title={
+              errorKind === 'forbidden' ? t('error.noPermissionTitle') : t('error.loadFailedTitle')
+            }
+            description={
+              errorKind === 'forbidden' ? t('error.noPermissionDesc') : t('error.loadFailedDesc')
+            }
+            onRetry={
+              errorKind !== 'forbidden'
+                ? () => {
+                    scheduleQuery.refetch();
+                    rosterQuery.refetch();
+                  }
+                : undefined
+            }
+            retryLabel={t('error.retry')}
+          />
+        )}
 
       {/* Empty — company selected but no placements */}
       {companyId &&
         !scheduleQuery.isLoading &&
+        !rosterQuery.isLoading &&
         !scheduleQuery.isError &&
+        !rosterQuery.isError &&
         agentRows.length === 0 && (
           <EmptyState
             variant="fresh"
@@ -487,7 +492,9 @@ export function ScheduleGridScreen() {
       {/* Roster-compliance summary (EPICS §8 D3) — only when something needs attention */}
       {companyId &&
         !scheduleQuery.isLoading &&
+        !rosterQuery.isLoading &&
         !scheduleQuery.isError &&
+        !rosterQuery.isError &&
         agentRows.length > 0 &&
         (complianceSummary.agentsNoRest > 0 || complianceSummary.holidayShifts > 0) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-warn-bd bg-warn-bg px-3 py-2.5">
@@ -511,175 +518,180 @@ export function ScheduleGridScreen() {
         )}
 
       {/* Grid */}
-      {companyId && !scheduleQuery.isLoading && !scheduleQuery.isError && agentRows.length > 0 && (
-        <div
-          ref={popoverContainerRef}
-          className="relative overflow-hidden rounded-xl border border-border bg-surface"
-        >
-          {/* Grid table — flex-based to match .pen grid layout */}
-          <div className="w-full overflow-x-auto">
-            {/* Header row */}
-            <div
-              className="flex border-b border-border bg-surface-2"
-              style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
-            >
-              {/* AGEN column header */}
+      {companyId &&
+        !scheduleQuery.isLoading &&
+        !rosterQuery.isLoading &&
+        !scheduleQuery.isError &&
+        !rosterQuery.isError &&
+        agentRows.length > 0 && (
+          <div
+            ref={popoverContainerRef}
+            className="relative overflow-hidden rounded-xl border border-border bg-surface"
+          >
+            {/* Grid table — flex-based to match .pen grid layout */}
+            <div className="w-full overflow-x-auto">
+              {/* Header row */}
               <div
-                className="shrink-0 border-r border-border-soft px-4 py-2.5"
-                style={{ width: `${AGENT_COL_W}px` }}
-              >
-                <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-3">
-                  {t('grid.agentCol')}
-                </span>
-              </div>
-              {/* Day headers */}
-              {days.map((d, i) => {
-                const isToday = d === todayIso;
-                const holidayName = holidayNameByDate.get(d);
-                const isHoliday = !!holidayName;
-                return (
-                  <div
-                    key={d}
-                    title={holidayName}
-                    className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft px-1 py-2 last:border-r-0 ${
-                      isToday ? 'bg-primary-soft' : isHoliday ? 'bg-bad-bg/40' : ''
-                    }`}
-                  >
-                    <span
-                      className={`text-[10px] font-semibold tracking-[0.3px] ${
-                        isToday ? 'text-primary' : isHoliday ? 'text-bad-tx' : 'text-text-3'
-                      }`}
-                    >
-                      {DAY_ABBR_ID[i]}
-                    </span>
-                    <span
-                      className={`text-[13px] font-bold ${
-                        isToday ? 'text-primary-strong' : isHoliday ? 'text-bad-tx' : 'text-text'
-                      }`}
-                    >
-                      {formatDayMonthId(d)}
-                    </span>
-                    {isHoliday && (
-                      <span className="mt-0.5 max-w-full truncate text-[9px] font-medium text-bad-tx">
-                        {holidayName}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Agent rows */}
-            {agentRows.map((row, rowIdx) => (
-              <div
-                key={`${row.employeeId}::${row.placementId}`}
-                className={`flex border-b border-border-soft last:border-b-0 ${
-                  rowIdx % 2 === 1 ? 'bg-surface' : 'bg-surface'
-                }`}
+                className="flex border-b border-border bg-surface-2"
                 style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
               >
-                {/* Agent name column */}
-                {(() => {
-                  const c = complianceByRow.get(`${row.employeeId}::${row.placementId}`);
+                {/* AGEN column header */}
+                <div
+                  className="shrink-0 border-r border-border-soft px-4 py-2.5"
+                  style={{ width: `${AGENT_COL_W}px` }}
+                >
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-3">
+                    {t('grid.agentCol')}
+                  </span>
+                </div>
+                {/* Day headers */}
+                {days.map((d, i) => {
+                  const isToday = d === todayIso;
+                  const holidayName = holidayNameByDate.get(d);
+                  const isHoliday = !!holidayName;
                   return (
                     <div
-                      className="shrink-0 border-r border-border-soft px-4 py-2.5"
-                      style={{ width: `${AGENT_COL_W}px` }}
+                      key={d}
+                      title={holidayName}
+                      className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft px-1 py-2 last:border-r-0 ${
+                        isToday ? 'bg-primary-soft' : isHoliday ? 'bg-bad-bg/40' : ''
+                      }`}
                     >
-                      <p className="text-[13px] font-semibold text-text leading-tight">
-                        {row.employeeName}
-                      </p>
-                      {row.serviceLineName && (
-                        <p className="mt-0.5 text-[11px] text-text-3">{row.serviceLineName}</p>
-                      )}
-                      {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
-                        <div className="mt-1 flex flex-wrap items-center gap-1">
-                          {c.noRest ? (
-                            <span
-                              title={t('compliance.noRestTip')}
-                              className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
-                            >
-                              <TriangleAlert aria-hidden className="size-2.5" />
-                              {t('compliance.noRest')}
-                            </span>
-                          ) : (
-                            c.longRun && (
-                              <span
-                                title={t('compliance.longRunTip', { count: c.longestRun })}
-                                className="inline-flex items-center gap-0.5 rounded bg-warn-bg px-1 py-0.5 text-[9px] font-semibold text-warn-tx"
-                              >
-                                <TriangleAlert aria-hidden className="size-2.5" />
-                                {t('compliance.longRun', { count: c.longestRun })}
-                              </span>
-                            )
-                          )}
-                          {c.holidayShiftCount > 0 && (
-                            <span
-                              title={t('compliance.holidayShiftTip')}
-                              className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
-                            >
-                              <Star aria-hidden className="size-2.5 fill-current" />
-                              {t('compliance.holidayShift', { count: c.holidayShiftCount })}
-                            </span>
-                          )}
-                        </div>
+                      <span
+                        className={`text-[10px] font-semibold tracking-[0.3px] ${
+                          isToday ? 'text-primary' : isHoliday ? 'text-bad-tx' : 'text-text-3'
+                        }`}
+                      >
+                        {DAY_ABBR_ID[i]}
+                      </span>
+                      <span
+                        className={`text-[13px] font-bold ${
+                          isToday ? 'text-primary-strong' : isHoliday ? 'text-bad-tx' : 'text-text'
+                        }`}
+                      >
+                        {formatDayMonthId(d)}
+                      </span>
+                      {isHoliday && (
+                        <span className="mt-0.5 max-w-full truncate text-[9px] font-medium text-bad-tx">
+                          {holidayName}
+                        </span>
                       )}
                     </div>
                   );
-                })()}
-
-                {/* Day cells */}
-                {days.map((d) => {
-                  const entry = row.cells[d];
-                  const isToday = d === todayIso;
-                  const isCancelled = entry?.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE;
-                  const isHoliday = holidaySet.has(d);
-
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      aria-label={t('cell.ariaLabel', {
-                        agent: row.employeeName,
-                        date: formatDayMonthId(d),
-                      })}
-                      onClick={(e) => handleCellClick(row, d, e.currentTarget)}
-                      className={[
-                        'group relative flex flex-1 cursor-pointer items-center justify-center border-r border-border-soft p-1.5 text-left transition-colors last:border-r-0',
-                        isToday && !isCancelled
-                          ? 'bg-primary-soft/40'
-                          : isHoliday && !isCancelled
-                            ? 'bg-bad-bg/20'
-                            : '',
-                        isCancelled ? 'opacity-50' : '',
-                        'hover:bg-surface-2',
-                      ]
-                        .filter(Boolean)
-                        .join(' ')}
-                      style={{ minHeight: '64px' }}
-                    >
-                      {renderCellContent(row, d)}
-                    </button>
-                  );
                 })}
               </div>
-            ))}
-          </div>
 
-          {/* Shift picker popover — absolutely positioned relative to grid container */}
-          {popoverTarget && (
-            <ShiftPickerPopover
-              target={popoverTarget}
-              anchorRef={popoverAnchor}
-              onClose={() => setPopoverTarget(null)}
-              onMutated={() => {
-                /* grid refetched via invalidate inside popover */
-              }}
-              scheduleQueryKey={scheduleQueryKey}
-            />
-          )}
-        </div>
-      )}
+              {/* Agent rows */}
+              {agentRows.map((row, rowIdx) => (
+                <div
+                  key={`${row.employeeId}::${row.placementId}`}
+                  className={`flex border-b border-border-soft last:border-b-0 ${
+                    rowIdx % 2 === 1 ? 'bg-surface' : 'bg-surface'
+                  }`}
+                  style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
+                >
+                  {/* Agent name column */}
+                  {(() => {
+                    const c = complianceByRow.get(`${row.employeeId}::${row.placementId}`);
+                    return (
+                      <div
+                        className="shrink-0 border-r border-border-soft px-4 py-2.5"
+                        style={{ width: `${AGENT_COL_W}px` }}
+                      >
+                        <p className="text-[13px] font-semibold text-text leading-tight">
+                          {row.employeeName}
+                        </p>
+                        {row.serviceLineName && (
+                          <p className="mt-0.5 text-[11px] text-text-3">{row.serviceLineName}</p>
+                        )}
+                        {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            {c.noRest ? (
+                              <span
+                                title={t('compliance.noRestTip')}
+                                className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                              >
+                                <TriangleAlert aria-hidden className="size-2.5" />
+                                {t('compliance.noRest')}
+                              </span>
+                            ) : (
+                              c.longRun && (
+                                <span
+                                  title={t('compliance.longRunTip', { count: c.longestRun })}
+                                  className="inline-flex items-center gap-0.5 rounded bg-warn-bg px-1 py-0.5 text-[9px] font-semibold text-warn-tx"
+                                >
+                                  <TriangleAlert aria-hidden className="size-2.5" />
+                                  {t('compliance.longRun', { count: c.longestRun })}
+                                </span>
+                              )
+                            )}
+                            {c.holidayShiftCount > 0 && (
+                              <span
+                                title={t('compliance.holidayShiftTip')}
+                                className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                              >
+                                <Star aria-hidden className="size-2.5 fill-current" />
+                                {t('compliance.holidayShift', { count: c.holidayShiftCount })}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Day cells */}
+                  {days.map((d) => {
+                    const entry = row.cells[d];
+                    const isToday = d === todayIso;
+                    const isCancelled = entry?.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE;
+                    const isHoliday = holidaySet.has(d);
+
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        aria-label={t('cell.ariaLabel', {
+                          agent: row.employeeName,
+                          date: formatDayMonthId(d),
+                        })}
+                        onClick={(e) => handleCellClick(row, d, e.currentTarget)}
+                        className={[
+                          'group relative flex flex-1 cursor-pointer items-center justify-center border-r border-border-soft p-1.5 text-left transition-colors last:border-r-0',
+                          isToday && !isCancelled
+                            ? 'bg-primary-soft/40'
+                            : isHoliday && !isCancelled
+                              ? 'bg-bad-bg/20'
+                              : '',
+                          isCancelled ? 'opacity-50' : '',
+                          'hover:bg-surface-2',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        style={{ minHeight: '64px' }}
+                      >
+                        {renderCellContent(row, d)}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* Shift picker popover — absolutely positioned relative to grid container */}
+            {popoverTarget && (
+              <ShiftPickerPopover
+                target={popoverTarget}
+                anchorRef={popoverAnchor}
+                onClose={() => setPopoverTarget(null)}
+                onMutated={() => {
+                  /* grid refetched via invalidate inside popover */
+                }}
+                scheduleQueryKey={scheduleQueryKey}
+              />
+            )}
+          </div>
+        )}
 
       {/* Bulk apply modal */}
       {bulkOpen && companyId && (
@@ -687,7 +699,7 @@ export function ScheduleGridScreen() {
           open={bulkOpen}
           onClose={() => setBulkOpen(false)}
           companyId={companyId}
-          employeeIds={agentRows.map((r) => r.employeeId)}
+          agents={agentRows.map((r) => ({ id: r.employeeId, name: r.employeeName }))}
           onMutated={() => {
             qc.invalidateQueries({ queryKey: scheduleQueryKey }).catch(() => null);
           }}

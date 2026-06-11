@@ -7,6 +7,8 @@ package people
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,7 +49,7 @@ func (r *ChangeRequestRepo) ListChangeRequests(ctx context.Context, f domain.Cha
 
 	out := make([]domain.ChangeRequest, 0, len(rows))
 	for _, row := range rows {
-		cr, err := mapChangeRequest(row)
+		cr, err := mapChangeRequest(crRowFromList(row))
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +64,7 @@ func (r *ChangeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 	if err != nil {
 		return domain.ChangeRequest{}, mapErr(err)
 	}
-	return mapChangeRequest(row)
+	return mapChangeRequest(crRowFromGet(row))
 }
 
 // GetEmployeeByID fetches a single employee by id (needed for the diff in detail + approve).
@@ -73,6 +75,23 @@ func (r *ChangeRequestRepo) GetEmployeeByID(ctx context.Context, id string) (dom
 		return domain.Employee{}, mapErr(err)
 	}
 	return mapEmployeeFromGetByID(row), nil
+}
+
+// GetEmployeeCompanyID returns the employee's current (non-terminal) client
+// company id, used for shift-leader company-scope routing on approve/reject.
+// Reuses the E3 GetActivePlacementForEmployee query (ACTIVE/EXPIRING/
+// PENDING_START). Returns "" (no error) when the employee has no active
+// placement — GuardCompany then rejects a leader (empty != their company) and
+// passes HR/super through.
+func (r *ChangeRequestRepo) GetEmployeeCompanyID(ctx context.Context, employeeID string) (string, error) {
+	row, err := r.q.GetActivePlacementForEmployee(ctx, employeeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return row.ClientCompanyID, nil
 }
 
 // UpdateEmployee applies the whitelisted change-request fields to an employee (in tx).
@@ -103,6 +122,8 @@ func (r *ChangeRequestRepo) UpdateEmployee(ctx context.Context, tx pgx.Tx, p svc
 		BankName:              nullStr(p.BankName),
 		BankAccountNumber:     nullStr(p.BankAccountNumber),
 		BankAccountHolderName: nullStr(p.BankAccountHolderName),
+		EmergencyContactName:  nullStr(p.EmergencyContactName),
+		EmergencyContactPhone: nullStr(p.EmergencyContactPhone),
 	})
 	if err != nil {
 		return domain.Employee{}, mapErr(err)
@@ -110,26 +131,41 @@ func (r *ChangeRequestRepo) UpdateEmployee(ctx context.Context, tx pgx.Tx, p svc
 	return mapEmployeeFromUpdate(row), nil
 }
 
-// ResolveChangeRequest drives :approve and :reject — sets status, resolved_at,
-// resolved_by, and rejection_reason (in tx).
+// ResolveChangeRequest drives :approve, :reject, and the SL bank-split partial
+// apply (status='partially_approved' + bank_pending + field_resolutions). Sets
+// status, field_resolutions, bank_pending, and (for terminal resolutions)
+// resolved_at/resolved_by/rejection_reason (in tx).
 func (r *ChangeRequestRepo) ResolveChangeRequest(ctx context.Context, tx pgx.Tx, p svc.ResolveChangeRequestParams) (domain.ChangeRequest, error) {
+	// Marshal the per-field resolutions to jsonb; nil/empty → '{}' so the NOT
+	// NULL column always receives a valid object.
+	resolutions := []byte("{}")
+	if len(p.FieldResolutions) > 0 {
+		raw, merr := json.Marshal(p.FieldResolutions)
+		if merr != nil {
+			return domain.ChangeRequest{}, merr
+		}
+		resolutions = raw
+	}
+
 	row, err := r.q.WithTx(tx).ResolveChangeRequest(ctx, sqlcgen.ResolveChangeRequestParams{
-		ID:              p.ID,
-		Status:          p.Status,
-		ResolvedAt:      p.ResolvedAt,
-		ResolvedBy:      p.ResolvedBy,
-		RejectionReason: p.RejectionReason,
+		ID:               p.ID,
+		Status:           p.Status,
+		FieldResolutions: resolutions,
+		BankPending:      p.BankPending,
+		ResolvedAt:       p.ResolvedAt,
+		ResolvedBy:       p.ResolvedBy,
+		RejectionReason:  p.RejectionReason,
 	})
 	if err != nil {
 		return domain.ChangeRequest{}, mapErr(err)
 	}
-	return mapChangeRequest(row)
+	return mapChangeRequest(crRowFromResolve(row))
 }
 
 // CreateChangeRequest inserts a new PENDING change request (in tx). The changes
 // value object is marshalled to the jsonb `changes` column; request_type is the
-// caller-derived PHONE|ADDRESS|BANK_ACCOUNT|MULTIPLE. The SWP-CHG id and
-// status=pending default are allocated by the query.
+// caller-derived PHONE|EMERGENCY_CONTACT|BANK_ACCOUNT|MULTIPLE. The SWP-CHG id
+// and status=pending default are allocated by the query.
 func (r *ChangeRequestRepo) CreateChangeRequest(ctx context.Context, tx pgx.Tx, p svc.CreateChangeRequestParams) (domain.ChangeRequest, error) {
 	changesJSON, err := json.Marshal(p.Changes)
 	if err != nil {
@@ -145,30 +181,77 @@ func (r *ChangeRequestRepo) CreateChangeRequest(ctx context.Context, tx pgx.Tx, 
 	if err != nil {
 		return domain.ChangeRequest{}, mapErr(err)
 	}
-	return mapChangeRequest(row)
+	return mapChangeRequest(crRowFromCreate(row))
 }
 
 // --- mapping helpers ---
 
-// mapChangeRequest converts a sqlcgen.ChangeRequest to domain.ChangeRequest.
-// The changes jsonb column is unmarshalled into domain.ChangeRequestChanges.
-func mapChangeRequest(row sqlcgen.ChangeRequest) (domain.ChangeRequest, error) {
+// crRow is the normalized field set shared by every change_requests query row
+// (List/Get/Create/Resolve all RETURNING the same columns). The sqlc-generated
+// row types are distinct structs but structurally identical; each call site
+// adapts its row into this before mapping (sqlc has no shared row type once the
+// queries diverged in column order).
+type crRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
+// mapChangeRequest converts a normalized crRow to domain.ChangeRequest. The
+// changes + field_resolutions jsonb columns are unmarshalled into the domain
+// value objects.
+func mapChangeRequest(row crRow) (domain.ChangeRequest, error) {
 	var changes domain.ChangeRequestChanges
 	if len(row.Changes) > 0 {
 		if err := json.Unmarshal(row.Changes, &changes); err != nil {
 			return domain.ChangeRequest{}, err
 		}
 	}
+	var fieldResolutions map[string]domain.FieldResolution
+	if len(row.FieldResolutions) > 0 {
+		if err := json.Unmarshal(row.FieldResolutions, &fieldResolutions); err != nil {
+			return domain.ChangeRequest{}, err
+		}
+	}
 	return domain.ChangeRequest{
-		ID:              row.ID,
-		EmployeeID:      row.EmployeeID,
-		Status:          row.Status,
-		SubmittedAt:     row.SubmittedAt,
-		ResolvedAt:      row.ResolvedAt,
-		ResolvedBy:      row.ResolvedBy,
-		RejectionReason: row.RejectionReason,
-		Note:            row.Note,
-		Changes:         changes,
-		RequestType:     row.RequestType,
+		ID:               row.ID,
+		EmployeeID:       row.EmployeeID,
+		Status:           row.Status,
+		SubmittedAt:      row.SubmittedAt,
+		ResolvedAt:       row.ResolvedAt,
+		ResolvedBy:       row.ResolvedBy,
+		RejectionReason:  row.RejectionReason,
+		Note:             row.Note,
+		Changes:          changes,
+		RequestType:      row.RequestType,
+		FieldResolutions: fieldResolutions,
+		BankPending:      row.BankPending,
 	}, nil
+}
+
+// crRowFromList / *Get / *Resolve / *Create normalize each distinct sqlc row
+// type into the shared crRow.
+func crRowFromList(r sqlcgen.ListChangeRequestsRow) crRow {
+	return crRow{r.ID, r.EmployeeID, r.Status, r.Changes, r.RequestType, r.Note, r.FieldResolutions, r.BankPending, r.SubmittedAt, r.ResolvedAt, r.ResolvedBy, r.RejectionReason}
+}
+
+func crRowFromGet(r sqlcgen.GetChangeRequestByIDRow) crRow {
+	return crRow{r.ID, r.EmployeeID, r.Status, r.Changes, r.RequestType, r.Note, r.FieldResolutions, r.BankPending, r.SubmittedAt, r.ResolvedAt, r.ResolvedBy, r.RejectionReason}
+}
+
+func crRowFromResolve(r sqlcgen.ResolveChangeRequestRow) crRow {
+	return crRow{r.ID, r.EmployeeID, r.Status, r.Changes, r.RequestType, r.Note, r.FieldResolutions, r.BankPending, r.SubmittedAt, r.ResolvedAt, r.ResolvedBy, r.RejectionReason}
+}
+
+func crRowFromCreate(r sqlcgen.CreateChangeRequestRow) crRow {
+	return crRow{r.ID, r.EmployeeID, r.Status, r.Changes, r.RequestType, r.Note, r.FieldResolutions, r.BankPending, r.SubmittedAt, r.ResolvedAt, r.ResolvedBy, r.RejectionReason}
 }

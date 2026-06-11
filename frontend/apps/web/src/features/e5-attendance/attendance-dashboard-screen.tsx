@@ -15,7 +15,6 @@
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 
-
 import { useListClientCompanies } from '@swp/api-client/e2';
 import {
   type Attendance,
@@ -26,6 +25,7 @@ import {
   useListAttendance,
 } from '@swp/api-client/e5';
 import type { StatusTone } from '@swp/design-tokens';
+import { formatDate } from '@swp/shared';
 import {
   type Column,
   CursorPagination,
@@ -37,8 +37,7 @@ import {
   StatCard,
   StatusBadge,
 } from '@swp/ui';
-import { formatDate } from '@swp/shared';
-import { useNavigate, useSearch, Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { CircleCheck, ClockAlert, Plus, TriangleAlert, Users } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -212,7 +211,14 @@ export function AttendanceDashboardScreen() {
     return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
 
-  const hasFilters = Boolean(search.q || search.company_id || search.site_id || search.position_id || search.date_from || search.date_to);
+  const hasFilters = Boolean(
+    search.q ||
+      search.company_id ||
+      search.site_id ||
+      search.position_id ||
+      search.date_from ||
+      search.date_to,
+  );
 
   function setSearch(partial: Partial<AttendanceDashboardSearch>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

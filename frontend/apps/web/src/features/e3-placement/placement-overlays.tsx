@@ -27,9 +27,11 @@ import { CompanyLeaderCandidatePicker } from '@/features/e2-identity/pickers/com
 import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
 import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
+import { ApiError } from '@swp/api-client';
 import {
   type EndRequest,
   EndRequestReason,
+  type PlacementAgreementBackfillRequest,
   type RenewRequest,
   type ResignRequest,
   type ShiftLeaderAssignmentEndRequest,
@@ -37,6 +39,7 @@ import {
   type ShiftLeaderAssignmentWriteRequest,
   type TerminateRequest,
   type TransferRequest,
+  useBackfillPlacementAgreement,
   useCreateShiftLeaderAssignment,
   useEndPlacement,
   useEndShiftLeaderAssignment,
@@ -58,10 +61,19 @@ import {
   ModalHeader,
   useToast,
 } from '@swp/ui';
-import { ArrowLeftRight, CheckCircle, RefreshCw, SquareX, UserMinus, UserPlus } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CheckCircle,
+  FileText,
+  RefreshCw,
+  SquareX,
+  UserMinus,
+  UserPlus,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
+import { AgreementField } from './agreement-field.tsx';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -69,6 +81,8 @@ import { useTranslation } from 'react-i18next';
 
 export interface PlacementInfo {
   id: string;
+  /** Agent's employee id — used to resolve the agreement in the backfill overlay. */
+  employee_id: string;
   employee_name: string;
   client_company_id: string;
   client_company_name: string;
@@ -480,6 +494,143 @@ export function RenewModal({ open, onClose, placement }: RenewModalProps) {
           <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
             <CheckCircle className="mr-1.5 size-4" aria-hidden="true" />
             {t('renew.confirmBtn')}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BackfillAgreementModal  — attach an agreement to an `awaiting_agreement` placement
+// (POST /placements/{id}/agreement, EPICS §8 2026-06-11). Reuses AgreementField to
+// resolve the agent's active agreement; calls useBackfillPlacementAgreement.
+// Server errors (422 PLACEMENT_OUTSIDE_CONTRACT / AGREEMENT_NOT_OWNED /
+// AGREEMENT_ALREADY_SET, 404 NOT_FOUND) → inline Banner via classifyError.
+// ---------------------------------------------------------------------------
+
+export interface BackfillAgreementModalProps {
+  open: boolean;
+  onClose: () => void;
+  placement: PlacementInfo;
+}
+
+interface BackfillFormValues {
+  agreement_id: string;
+}
+
+export function BackfillAgreementModal({ open, onClose, placement }: BackfillAgreementModalProps) {
+  const { t } = useTranslation('placementDetail');
+  const { toast } = useToast();
+  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
+  const [bannerTone, setBannerTone] = useState<'warn' | 'bad' | 'info'>('bad');
+
+  const mutation = useBackfillPlacementAgreement();
+
+  const {
+    handleSubmit,
+    control,
+    reset,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<BackfillFormValues>({
+    defaultValues: { agreement_id: '' },
+  });
+
+  useEffect(() => {
+    if (!open) {
+      reset();
+      setBannerMsg(null);
+    }
+  }, [open, reset]);
+
+  function handleClose() {
+    reset();
+    setBannerMsg(null);
+    onClose();
+  }
+
+  async function onSubmit(values: BackfillFormValues) {
+    setBannerMsg(null);
+    if (!values.agreement_id) {
+      setError('agreement_id', { type: 'required', message: t('validation.required') });
+      return;
+    }
+    const data: PlacementAgreementBackfillRequest = { agreement_id: values.agreement_id };
+    try {
+      // vars = { id, data }. Global MutationCache.onSuccess invalidates the
+      // placement detail query so the page reflects the cleared awaiting flag.
+      await mutation.mutateAsync({ id: placement.id, data });
+      toast({ tone: 'success', title: t('backfill.successTitle') });
+      handleClose();
+    } catch (err) {
+      const classified = classifyError(err);
+      if (classified.kind === 'validation') {
+        applyFieldErrors(err, setError as Parameters<typeof applyFieldErrors>[1]);
+      } else if (classified.kind === 'rule') {
+        // 422 business-rule codes: PLACEMENT_OUTSIDE_CONTRACT / AGREEMENT_NOT_OWNED /
+        // AGREEMENT_ALREADY_SET — surface the specific message inline.
+        const code = err instanceof ApiError ? err.code : undefined;
+        setBannerTone('warn');
+        setBannerMsg(
+          code === 'PLACEMENT_OUTSIDE_CONTRACT'
+            ? t('backfill.errOutsideContract')
+            : code === 'AGREEMENT_NOT_OWNED'
+              ? t('backfill.errNotOwned')
+              : code === 'AGREEMENT_ALREADY_SET'
+                ? t('backfill.errAlreadySet')
+                : classified.message,
+        );
+      } else if (classified.kind === 'not-found') {
+        setBannerTone('bad');
+        setBannerMsg(t('backfill.errNotFound'));
+      } else {
+        setBannerTone('bad');
+        setBannerMsg(classified.message);
+      }
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) handleClose();
+      }}
+      size="sm"
+    >
+      <form onSubmit={handleSubmit(onSubmit)} noValidate>
+        <ModalHeader icon={FileText} tone="brand" title={t('backfill.modalTitle')} />
+        <ModalBody>
+          {bannerMsg != null && <Banner tone={bannerTone} title={bannerMsg} />}
+          <p className="text-[13px] text-text-2">{t('backfill.intro')}</p>
+          <FormField
+            label={t('backfill.agreementLabel')}
+            htmlFor="bf-agreement"
+            required
+            error={errors.agreement_id?.message}
+          >
+            <Controller
+              control={control}
+              name="agreement_id"
+              render={({ field }) => (
+                <AgreementField
+                  employeeId={placement.employee_id}
+                  value={field.value || null}
+                  onChange={(v) => field.onChange(v ?? '')}
+                  error={!!errors.agreement_id}
+                />
+              )}
+            />
+          </FormField>
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="secondary" onClick={handleClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
+            <CheckCircle className="mr-1.5 size-4" aria-hidden="true" />
+            {t('backfill.confirmBtn')}
           </Button>
         </ModalFooter>
       </form>

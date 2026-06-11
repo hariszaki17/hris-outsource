@@ -370,6 +370,15 @@ paths:
 
         - **Max size:** 10 MB
         - **Allowed types:** `image/jpeg`, `image/png`
+
+        **NOTE (future, not yet implemented):** the attendance selfie capture is
+        expected to migrate to the same presigned direct-upload pattern
+        introduced for agent profile photos in E2
+        (`UploadTicket` / `POST /me/profile/photo-upload-init` → presigned PUT
+        to a private bucket, then reference the returned `object_key`). The
+        `attendance-selfies/{employee_id}/...` key namespace reuses the one
+        `platform/storage` client. Documented here for traceability; this
+        multipart route stays the contract until that migration lands.
       x-rbac:
         roles: [agent]
         scope: self
@@ -2137,6 +2146,11 @@ components:
                   code: NOT_FOUND
                   message: Catatan tidak ditemukan.
                   request_id: req_01J5XK0CCCCCCC
+    Conflict:
+      description: State conflict (e.g. record already exists or wrong state).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     RateLimited:
       description: Too many requests.
       headers:

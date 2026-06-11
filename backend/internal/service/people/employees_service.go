@@ -104,6 +104,8 @@ type UpdateEmployeeParams struct {
 	BankName              string
 	BankAccountNumber     string
 	BankAccountHolderName string
+	EmergencyContactName  string
+	EmergencyContactPhone string
 }
 
 // TxRunner is a thin interface over db.TxManager (injectable for tests).

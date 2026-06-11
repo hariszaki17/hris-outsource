@@ -34,6 +34,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/storage"
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
@@ -116,6 +117,18 @@ func run() error {
 		return err
 	}
 
+	// Object storage (MinIO / S3-compatible) behind a single private bucket.
+	// First consumer is E2 profile photos (agent self-service); reused later by
+	// E5 attendance selfies. EnsureBucket is idempotent — create the bucket once
+	// at startup so presigned PUT/GET work immediately.
+	storageClient, err := storage.New(cfg.Storage)
+	if err != nil {
+		return err
+	}
+	if err := storageClient.EnsureBucket(ctx); err != nil {
+		return err
+	}
+
 	// Auth primitives.
 	issuer, err := auth.NewIssuer(cfg.Auth.JWTPrivateKey, cfg.Auth.JWTPublicKey, cfg.Auth.AccessTTL)
 	if err != nil {
@@ -177,7 +190,14 @@ func run() error {
 	// profile-change requests (E2 F2.1 EP-5 / PPL-03).
 	crRepo := peoplerepo.NewChangeRequestRepo(pool)
 	crSvc := peoplesvc.NewChangeRequestService(crRepo, txm)
+	crSvc.SetNotifier(jobsClient) // E10: real notify on change-request approve/reject
 	crHandler := peoplehttp.NewChangeRequestHandler(crSvc)
+
+	// People self-service profile (E2 F2.1): instant-tier edit + presigned photo
+	// upload. Reuses the storage client (private bucket, presigned PUT/GET).
+	selfProfileRepo := peoplerepo.NewSelfProfileRepo(pool)
+	selfProfileSvc := peoplesvc.NewSelfProfileService(selfProfileRepo, storageClient, txm)
+	selfProfileHandler := peoplehttp.NewSelfProfileHandler(selfProfileSvc)
 
 	// Placement slice (05-02): E3 placement CRUD + lifecycle + shift-leader + roster.
 	// The placement and shift-leader services are mutually referential (the
@@ -236,7 +256,7 @@ func run() error {
 	grantRepo := leaverepo.NewGrantRepo(pool)
 	grantSvc := leavesvc.NewGrantService(grantRepo, txm) // F6.1 grant-lot ledger + FIFO allocator
 	leaveSvc := leavesvc.NewLeaveService(leaveRepo, grantSvc, scheduleRepo, txm)
-	leaveSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on approve-final/reject
+	leaveSvc.SetNotifier(jobsClient)                     // E10 (11-02): real notify on approve-final/reject
 	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm) // DEPRECATED 2026-06-08 — kept for /leave-quotas*
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
 	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, grantSvc, calendarSvc)
@@ -300,6 +320,7 @@ func run() error {
 		People:               peopleHandler,
 		PeopleAgreements:     agreementsHandler,
 		PeopleChangeRequests: crHandler,
+		PeopleSelfProfile:    selfProfileHandler,
 		Placement:            placementHandler,
 		Scheduling:           schedulingHandler,
 		Attendance:           attendanceHandler,

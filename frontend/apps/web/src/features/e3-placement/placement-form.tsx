@@ -62,7 +62,9 @@ import { AgreementField } from './agreement-field.tsx';
 const placementSchema = z
   .object({
     employee_id: z.string().min(1, 'Agen wajib dipilih'),
-    agreement_id: z.string().min(1, 'Perjanjian kerja wajib dipilih'),
+    // Optional (EPICS §8 2026-06-11): when omitted the placement is created
+    // "menunggu perjanjian" (awaiting_agreement) and the agreement is backfilled later.
+    agreement_id: z.string().optional(),
     client_company_id: z.string().min(1, 'Perusahaan klien wajib dipilih'),
     site_id: z.string().min(1, 'Site wajib dipilih'),
     service_line_id: z.string().min(1, 'Lini layanan wajib dipilih'),
@@ -226,7 +228,7 @@ export function CreatePlacementScreen() {
       const res = await createMutation.mutateAsync({
         data: {
           employee_id: values.employee_id,
-          agreement_id: values.agreement_id,
+          agreement_id: values.agreement_id || null,
           client_company_id: values.client_company_id,
           site_id: values.site_id,
           service_line_id: values.service_line_id,
@@ -380,7 +382,7 @@ export function CreatePlacementScreen() {
                   <FormField
                     label={t('fieldAgreement')}
                     htmlFor="agreement_id"
-                    required
+                    hint={t('fieldAgreementOptionalHint')}
                     error={errors.agreement_id?.message}
                   >
                     <AgreementField
@@ -406,6 +408,16 @@ export function CreatePlacementScreen() {
                 <div className="flex items-center gap-2 rounded-lg border border-bad-bd bg-bad-bg px-3 py-[9px]">
                   <X className="size-[15px] shrink-0 text-bad-tx" aria-hidden />
                   <p className="text-[12px] font-medium text-bad-tx">{t('agentConflictNote')}</p>
+                </div>
+              )}
+              {/* Advisory: no agreement resolved → placement will be created awaiting one
+                  (EPICS §8 2026-06-11). This does NOT block submit. */}
+              {watchedEmployeeId && !watchedAgreementId && !invConflict && (
+                <div className="flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-3 py-[9px]">
+                  <Info className="mt-[1px] size-[15px] shrink-0 text-info-tx" aria-hidden />
+                  <p className="text-[12px] leading-[1.4] text-info-tx">
+                    {t('awaitingAgreementNote')}
+                  </p>
                 </div>
               )}
             </FormSection>

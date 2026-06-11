@@ -70,7 +70,7 @@ export async function apiLogin(email: string, password: string): Promise<ApiLogi
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, stay_signed_in: false }),
+    body: JSON.stringify({ identifier: email, password, stay_signed_in: false }),
   });
 
   if (!res.ok) {

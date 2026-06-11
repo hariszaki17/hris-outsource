@@ -6,6 +6,7 @@
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
+       e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
        pos.id   AS current_position_id,
        pos.name AS current_position_name,
@@ -67,19 +68,42 @@ ORDER BY e.created_at DESC, e.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetEmployeeByID :one
-SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
-       phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
-       bank_name, bank_account_number, bank_account_holder_name,
-       status, created_by, created_at, updated_at
-FROM employees
-WHERE id = sqlc.arg(id)
-  AND deleted_at IS NULL;
+-- current_* come from the employee's single non-terminal placement (INV-1 → at most
+-- one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
+-- employee still resolves (current_* null).
+SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
+       e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
+       e.bank_name, e.bank_account_number, e.bank_account_holder_name,
+       e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
+       e.status, e.created_by, e.created_at, e.updated_at,
+       pos.id   AS current_position_id,
+       pos.name AS current_position_name,
+       sl.id    AS current_service_line_id,
+       sl.name  AS current_service_line_name,
+       cc.id    AS current_client_company_id,
+       cc.name  AS current_client_company_name
+FROM employees e
+LEFT JOIN LATERAL (
+    SELECT p.position_id, p.service_line_id, p.client_company_id
+    FROM placements p
+    WHERE p.employee_id = e.id
+      AND p.deleted_at IS NULL
+      AND p.lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START','EXTENDED')
+    ORDER BY p.status_changed_at DESC
+    LIMIT 1
+) cp ON true
+LEFT JOIN positions        pos ON pos.id = cp.position_id
+LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
+LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
+WHERE e.id = sqlc.arg(id)
+  AND e.deleted_at IS NULL;
 
 -- name: GetEmployeeByNIK :one
 -- Used for duplicate-NIK pre-check (EP-2) before insert/update.
 SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
        phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
        bank_name, bank_account_number, bank_account_holder_name,
+       emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
        status, created_by, created_at, updated_at
 FROM employees
 WHERE nik = sqlc.arg(nik)
@@ -90,7 +114,8 @@ WHERE nik = sqlc.arg(nik)
 INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
-    bank_name, bank_account_number, bank_account_holder_name, created_by
+    bank_name, bank_account_number, bank_account_holder_name,
+    emergency_contact_name, emergency_contact_phone, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     sqlc.narg(user_id),
@@ -110,11 +135,14 @@ INSERT INTO employees (
     sqlc.narg(bank_name),
     sqlc.narg(bank_account_number),
     sqlc.narg(bank_account_holder_name),
+    sqlc.narg(emergency_contact_name),
+    sqlc.narg(emergency_contact_phone),
     sqlc.narg(created_by)
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at;
 
 -- name: UpdateEmployee :one
@@ -135,12 +163,15 @@ SET full_name                = sqlc.arg(full_name),
     bank_name                = sqlc.narg(bank_name),
     bank_account_number      = sqlc.narg(bank_account_number),
     bank_account_holder_name = sqlc.narg(bank_account_holder_name),
+    emergency_contact_name   = sqlc.narg(emergency_contact_name),
+    emergency_contact_phone  = sqlc.narg(emergency_contact_phone),
     updated_at               = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at;
 
 -- name: SetEmployeeStatus :one
@@ -153,6 +184,24 @@ WHERE id = sqlc.arg(id)
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          status, created_by, created_at, updated_at;
+
+-- name: UpdateEmployeeSelfInstant :one
+-- EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
+-- fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
+-- when the caller passes NULL, so partial patches don't clobber the other fields.
+UPDATE employees
+SET address          = COALESCE(sqlc.narg(address), address),
+    app_language     = COALESCE(sqlc.narg(app_language), app_language),
+    photo_object_key = COALESCE(sqlc.narg(photo_object_key), photo_object_key),
+    updated_at       = now()
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
+          phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
+          bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at;
 
 -- name: SetEmployeeUserID :exec

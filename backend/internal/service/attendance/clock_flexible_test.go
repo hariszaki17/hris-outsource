@@ -25,6 +25,7 @@ type fakeClockRepo struct {
 	autoClose *AutoCloseRow             // captured AutoCloseAttendance call
 	inserted  *ClockInRow               // captured ClockIn insert
 	newID     string                    // id the insert returns
+	onLeave   bool                      // IsOnApprovedLeave result (true ⇒ ON_LEAVE block)
 }
 
 func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (PlacementInfo, bool, error) {
@@ -32,6 +33,10 @@ func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (Placeme
 		PlacementID: "SWP-PL-0001", CompanyID: "SWP-CMP-0021",
 		SiteID: "SWP-SITE-0001", PositionID: "SWP-POS-014", ServiceLine: "parking",
 	}, true, nil
+}
+
+func (f *fakeClockRepo) IsOnApprovedLeave(_ context.Context, _ string, _ time.Time) (bool, error) {
+	return f.onLeave, nil
 }
 
 // GetSite returns no coordinates → geofence skipped (keeps the test focused).
@@ -173,6 +178,29 @@ func TestClockIn_Flexible(t *testing.T) {
 			t.Error("auto-close happened, want none")
 		}
 	})
+}
+
+// TestClockIn_OnApprovedLeave: an approved leave covering today hard-blocks clock-in
+// with rule code ON_LEAVE and creates no record. ClockOut is a separate method and is
+// unaffected (not exercised here).
+func TestClockIn_OnApprovedLeave(t *testing.T) {
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	repo := &fakeClockRepo{
+		onLeave: true,
+		newID:   "SWP-ATT-NEW",
+		records: map[string]att.Attendance{"SWP-ATT-NEW": {ID: "SWP-ATT-NEW", CheckInAt: &now}},
+	}
+	svc := NewClockService(repo, sweepFakeRunner{})
+	svc.SetClock(fixedClock(now))
+
+	_, _, err := svc.ClockIn(agentCtx(), clockInReq())
+	var ae *apperr.Error
+	if !errors.As(err, &ae) || ae.Code != "ON_LEAVE" {
+		t.Fatalf("err = %v, want rule code ON_LEAVE", err)
+	}
+	if repo.inserted != nil {
+		t.Error("insert happened, want none (clock-in blocked by approved leave)")
+	}
 }
 
 func hasFlag(flags []string, want string) bool {

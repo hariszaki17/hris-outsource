@@ -21,6 +21,7 @@ INSERT INTO change_requests (
     $4
 )
 RETURNING id, employee_id, status, changes, request_type, note,
+          field_resolutions, bank_pending,
           submitted_at, resolved_at, resolved_by, rejection_reason
 `
 
@@ -31,15 +32,30 @@ type CreateChangeRequestParams struct {
 	Note        *string
 }
 
+type CreateChangeRequestRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
 // Allocates the SWP-CHG id inline from the per-prefix sequence.
-func (q *Queries) CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (ChangeRequest, error) {
+func (q *Queries) CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (CreateChangeRequestRow, error) {
 	row := q.db.QueryRow(ctx, createChangeRequest,
 		arg.EmployeeID,
 		arg.Changes,
 		arg.RequestType,
 		arg.Note,
 	)
-	var i ChangeRequest
+	var i CreateChangeRequestRow
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeID,
@@ -47,6 +63,8 @@ func (q *Queries) CreateChangeRequest(ctx context.Context, arg CreateChangeReque
 		&i.Changes,
 		&i.RequestType,
 		&i.Note,
+		&i.FieldResolutions,
+		&i.BankPending,
 		&i.SubmittedAt,
 		&i.ResolvedAt,
 		&i.ResolvedBy,
@@ -57,14 +75,30 @@ func (q *Queries) CreateChangeRequest(ctx context.Context, arg CreateChangeReque
 
 const getChangeRequestByID = `-- name: GetChangeRequestByID :one
 SELECT id, employee_id, status, changes, request_type, note,
+       field_resolutions, bank_pending,
        submitted_at, resolved_at, resolved_by, rejection_reason
 FROM change_requests
 WHERE id = $1
 `
 
-func (q *Queries) GetChangeRequestByID(ctx context.Context, id string) (ChangeRequest, error) {
+type GetChangeRequestByIDRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
+func (q *Queries) GetChangeRequestByID(ctx context.Context, id string) (GetChangeRequestByIDRow, error) {
 	row := q.db.QueryRow(ctx, getChangeRequestByID, id)
-	var i ChangeRequest
+	var i GetChangeRequestByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeID,
@@ -72,6 +106,8 @@ func (q *Queries) GetChangeRequestByID(ctx context.Context, id string) (ChangeRe
 		&i.Changes,
 		&i.RequestType,
 		&i.Note,
+		&i.FieldResolutions,
+		&i.BankPending,
 		&i.SubmittedAt,
 		&i.ResolvedAt,
 		&i.ResolvedBy,
@@ -80,11 +116,97 @@ func (q *Queries) GetChangeRequestByID(ctx context.Context, id string) (ChangeRe
 	return i, err
 }
 
-const listChangeRequests = `-- name: ListChangeRequests :many
+const listBankPendingChangeRequests = `-- name: ListBankPendingChangeRequests :many
 SELECT id, employee_id, status, changes, request_type, note,
+       field_resolutions, bank_pending,
        submitted_at, resolved_at, resolved_by, rejection_reason
 FROM change_requests
-WHERE ($1::text IS NULL OR status = $1::text)
+WHERE bank_pending
+  AND ($1::text IS NULL OR employee_id = $1::text)
+  AND (
+        $2::timestamptz IS NULL
+        OR (submitted_at, id) < ($2::timestamptz, $3::text)
+      )
+ORDER BY submitted_at DESC, id DESC
+LIMIT $4
+`
+
+type ListBankPendingChangeRequestsParams struct {
+	EmployeeID        *string
+	CursorSubmittedAt *time.Time
+	CursorID          *string
+	RowLimit          int32
+}
+
+type ListBankPendingChangeRequestsRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
+// HR bank-escalation queue: rows whose bank change a shift leader partially
+// applied and escalated. Backed by the change_requests_bank_pending_idx partial
+// index; cursor page ordered by (submitted_at desc, id desc), fetch limit+1.
+func (q *Queries) ListBankPendingChangeRequests(ctx context.Context, arg ListBankPendingChangeRequestsParams) ([]ListBankPendingChangeRequestsRow, error) {
+	rows, err := q.db.Query(ctx, listBankPendingChangeRequests,
+		arg.EmployeeID,
+		arg.CursorSubmittedAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBankPendingChangeRequestsRow{}
+	for rows.Next() {
+		var i ListBankPendingChangeRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeID,
+			&i.Status,
+			&i.Changes,
+			&i.RequestType,
+			&i.Note,
+			&i.FieldResolutions,
+			&i.BankPending,
+			&i.SubmittedAt,
+			&i.ResolvedAt,
+			&i.ResolvedBy,
+			&i.RejectionReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChangeRequests = `-- name: ListChangeRequests :many
+SELECT id, employee_id, status, changes, request_type, note,
+       field_resolutions, bank_pending,
+       submitted_at, resolved_at, resolved_by, rejection_reason
+FROM change_requests
+WHERE (
+        $1::text IS NULL
+        OR status = $1::text
+        -- The approval queue passes status='pending'; a partially-approved request
+        -- (non-bank applied by the SL, bank escalated to HR) still needs HR action,
+        -- so it must stay visible in the queue until fully approved.
+        OR ($1::text = 'pending' AND status = 'partially_approved')
+      )
   AND ($2::text IS NULL OR employee_id = $2::text)
   AND ($3::text IS NULL OR request_type = $3::text)
   AND (
@@ -104,9 +226,24 @@ type ListChangeRequestsParams struct {
 	RowLimit          int32
 }
 
+type ListChangeRequestsRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
 // Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
 // Filters: status, employee_id, request_type.
-func (q *Queries) ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ChangeRequest, error) {
+func (q *Queries) ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ListChangeRequestsRow, error) {
 	rows, err := q.db.Query(ctx, listChangeRequests,
 		arg.Status,
 		arg.EmployeeID,
@@ -119,9 +256,9 @@ func (q *Queries) ListChangeRequests(ctx context.Context, arg ListChangeRequests
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChangeRequest{}
+	items := []ListChangeRequestsRow{}
 	for rows.Next() {
-		var i ChangeRequest
+		var i ListChangeRequestsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.EmployeeID,
@@ -129,6 +266,8 @@ func (q *Queries) ListChangeRequests(ctx context.Context, arg ListChangeRequests
 			&i.Changes,
 			&i.RequestType,
 			&i.Note,
+			&i.FieldResolutions,
+			&i.BankPending,
 			&i.SubmittedAt,
 			&i.ResolvedAt,
 			&i.ResolvedBy,
@@ -146,34 +285,59 @@ func (q *Queries) ListChangeRequests(ctx context.Context, arg ListChangeRequests
 
 const resolveChangeRequest = `-- name: ResolveChangeRequest :one
 UPDATE change_requests
-SET status           = $1,
-    resolved_at      = $2,
-    resolved_by      = $3,
-    rejection_reason = $4
-WHERE id = $5
+SET status            = $1,
+    field_resolutions = $2,
+    bank_pending      = $3,
+    resolved_at       = $4,
+    resolved_by       = $5,
+    rejection_reason  = $6
+WHERE id = $7
 RETURNING id, employee_id, status, changes, request_type, note,
+          field_resolutions, bank_pending,
           submitted_at, resolved_at, resolved_by, rejection_reason
 `
 
 type ResolveChangeRequestParams struct {
-	Status          string
-	ResolvedAt      *time.Time
-	ResolvedBy      *string
-	RejectionReason *string
-	ID              string
+	Status           string
+	FieldResolutions []byte
+	BankPending      bool
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+	ID               string
 }
 
-// Drives :approve (status='approved') and :reject (status='rejected').
-// Sets resolved_at, resolved_by (optional), and rejection_reason (on reject).
-func (q *Queries) ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ChangeRequest, error) {
+type ResolveChangeRequestRow struct {
+	ID               string
+	EmployeeID       string
+	Status           string
+	Changes          []byte
+	RequestType      string
+	Note             *string
+	FieldResolutions []byte
+	BankPending      bool
+	SubmittedAt      time.Time
+	ResolvedAt       *time.Time
+	ResolvedBy       *string
+	RejectionReason  *string
+}
+
+// Drives :approve (status='approved'), :reject (status='rejected'), and the
+// SL bank-split partial apply (status='partially_approved' + bank_pending=true,
+// field_resolutions recording which non-bank fields the SL applied + who). For
+// terminal resolutions resolved_at/resolved_by/rejection_reason are set; for a
+// partial apply field_resolutions/bank_pending carry the in-between state.
+func (q *Queries) ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ResolveChangeRequestRow, error) {
 	row := q.db.QueryRow(ctx, resolveChangeRequest,
 		arg.Status,
+		arg.FieldResolutions,
+		arg.BankPending,
 		arg.ResolvedAt,
 		arg.ResolvedBy,
 		arg.RejectionReason,
 		arg.ID,
 	)
-	var i ChangeRequest
+	var i ResolveChangeRequestRow
 	err := row.Scan(
 		&i.ID,
 		&i.EmployeeID,
@@ -181,6 +345,8 @@ func (q *Queries) ResolveChangeRequest(ctx context.Context, arg ResolveChangeReq
 		&i.Changes,
 		&i.RequestType,
 		&i.Note,
+		&i.FieldResolutions,
+		&i.BankPending,
 		&i.SubmittedAt,
 		&i.ResolvedAt,
 		&i.ResolvedBy,

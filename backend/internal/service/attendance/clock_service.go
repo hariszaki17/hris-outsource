@@ -116,6 +116,9 @@ type ClockOutRow struct {
 // has a row) — the service maps that to ALREADY_CLOCKED_IN.
 type ClockRepository interface {
 	GetActivePlacement(ctx context.Context, employeeID string) (PlacementInfo, bool, error)
+	// IsOnApprovedLeave reports whether the agent has an approved leave covering
+	// the Asia/Jakarta calendar date of now (hard-blocks clock-in as ON_LEAVE).
+	IsOnApprovedLeave(ctx context.Context, employeeID string, now time.Time) (bool, error)
 	GetSite(ctx context.Context, siteID string) (lat, lng *float64, radiusM int, found bool, err error)
 	GetTodaySchedule(ctx context.Context, employeeID string, now time.Time) (scheduleID string, start, end time.Time, found bool, err error)
 	GetOpenAttendance(ctx context.Context, employeeID string) (id string, found bool, err error)
@@ -178,6 +181,16 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 	}
 	if !found {
 		return att.Attendance{}, false, apperr.Rule("NO_ACTIVE_PLACEMENT", nil)
+	}
+
+	// Hard-block clock-in when the agent has an approved leave covering today
+	// (Asia/Jakarta). ClockOut is unaffected (separate method).
+	onLeave, lerr := s.repo.IsOnApprovedLeave(ctx, employeeID, s.now())
+	if lerr != nil {
+		return att.Attendance{}, false, apperr.Internal(lerr)
+	}
+	if onLeave {
+		return att.Attendance{}, false, apperr.Rule("ON_LEAVE", nil)
 	}
 
 	siteLat, siteLng, radiusM, _, err := s.repo.GetSite(ctx, pl.SiteID)

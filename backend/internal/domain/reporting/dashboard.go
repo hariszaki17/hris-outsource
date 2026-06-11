@@ -54,6 +54,55 @@ type HrDashboard struct {
 	AttendanceAnomaliesToday int
 	BillableTrend            BillableTrend
 	PendingApprovalsPanel    []ApprovalInboxRow
+	// Admin is the admin-only widget block (openapi schemas.SuperAdminWidgets, DB-7).
+	// Populated ONLY when Role == super_admin; nil for hr_admin (C-6 → handler omits).
+	Admin *SuperAdminWidgets
+}
+
+// SuperAdminWidgets is the admin-only dashboard block (openapi schemas.SuperAdminWidgets).
+type SuperAdminWidgets struct {
+	UserAccess    UserAccessSummary
+	RecentAudit   []AuditEntry
+	OrgRollups    []OrgRollup
+	PendingGrants PendingGrants
+}
+
+// UserAccessSummary is SuperAdminWidgets.user_access (E2 / F2.7).
+type UserAccessSummary struct {
+	ActiveUsers         int
+	PendingProvisioning int
+	Offboarded30d       int
+}
+
+// AuditEntry is one SuperAdminWidgets.recent_audit row (E1 audit, newest first).
+type AuditEntry struct {
+	ID          string
+	ActorLabel  string
+	Action      string
+	TargetLabel string
+	At          time.Time
+}
+
+// ServiceLine is the SuperAdminWidgets.org_rollups service_line enum.
+type ServiceLine string
+
+const (
+	ServiceLineFacility ServiceLine = "FACILITY"
+	ServiceLineBuilding ServiceLine = "BUILDING"
+	ServiceLineParking  ServiceLine = "PARKING"
+)
+
+// OrgRollup is one SuperAdminWidgets.org_rollups row (per service line, E3).
+type OrgRollup struct {
+	ServiceLine      ServiceLine
+	Headcount        int
+	ActivePlacements int
+}
+
+// PendingGrants is SuperAdminWidgets.pending_grants (items awaiting super-admin action).
+type PendingGrants struct {
+	BankApprovals int
+	RoleRequests  int
 }
 
 // BillableTrend is HrDashboard.billable_trend.

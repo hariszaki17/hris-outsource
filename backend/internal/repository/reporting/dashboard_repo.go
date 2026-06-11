@@ -153,6 +153,63 @@ func (r *DashboardRepo) AgentPending(ctx context.Context, employeeID string) (sv
 	return svc.AgentPendingRow{Leave: int(row.LeavePending), OT: int(row.OtPending)}, nil
 }
 
+// SuperAdminWidgets runs the four global admin-block aggregations (DB-7). The
+// service maps the raw rows to the domain shape (service-line name → enum, audit
+// columns → labels).
+func (r *DashboardRepo) SuperAdminWidgets(ctx context.Context, now time.Time, auditLimit int) (svc.SuperAdminWidgetsData, error) {
+	var d svc.SuperAdminWidgetsData
+
+	active, err := r.q.CountActiveUsers(ctx)
+	if err != nil {
+		return d, err
+	}
+	d.ActiveUsers = int(active)
+
+	off, err := r.q.CountOffboardedUsers30d(ctx, now)
+	if err != nil {
+		return d, err
+	}
+	d.OffboardedUsers30d = int(off)
+
+	bank, err := r.q.CountBankApprovalsPending(ctx)
+	if err != nil {
+		return d, err
+	}
+	d.BankApprovalsPending = int(bank)
+
+	rollups, err := r.q.OrgRollupsByServiceLine(ctx)
+	if err != nil {
+		return d, err
+	}
+	d.OrgRollups = make([]svc.OrgRollupRow, 0, len(rollups))
+	for _, row := range rollups {
+		d.OrgRollups = append(d.OrgRollups, svc.OrgRollupRow{
+			ServiceLineName:  row.ServiceLineName,
+			Headcount:        int(row.Headcount),
+			ActivePlacements: int(row.ActivePlacements),
+		})
+	}
+
+	audit, err := r.q.RecentAuditEntries(ctx, int32(auditLimit))
+	if err != nil {
+		return d, err
+	}
+	d.RecentAudit = make([]svc.AuditRow, 0, len(audit))
+	for _, row := range audit {
+		d.RecentAudit = append(d.RecentAudit, svc.AuditRow{
+			ID:          row.ID,
+			ActorUserID: row.ActorUserID,
+			ActorRole:   row.ActorRole,
+			Action:      row.Action,
+			EntityType:  row.EntityType,
+			EntityID:    row.EntityID,
+			CreatedAt:   row.CreatedAt,
+		})
+	}
+
+	return d, nil
+}
+
 // CountUnread sums unread notifications across the principal's recipient ids.
 func (r *DashboardRepo) CountUnread(ctx context.Context, recipientIDs []string) (int, error) {
 	total := 0

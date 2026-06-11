@@ -89,6 +89,56 @@ export function buildAgentRows(entries: ScheduleEntry[]): AgentRow[] {
   return Array.from(map.values());
 }
 
+type RosterPlacement = {
+  id: string;
+  employee_id: string;
+  employee_name?: string;
+  service_line_id?: string;
+  service_line_name?: string;
+};
+
+/**
+ * Roster-driven rows: every active placement becomes a row (empty cells if
+ * unscheduled), then schedule entries are overlaid. Entries whose placement is
+ * NOT in the active roster (e.g. an ended placement with leftover entries) still
+ * get a row so nothing scheduled silently disappears.
+ */
+export function buildAgentRowsFromRoster(
+  placements: RosterPlacement[],
+  entries: ScheduleEntry[],
+): AgentRow[] {
+  const map = new Map<string, AgentRow>();
+  for (const p of placements) {
+    const key = `${p.employee_id}::${p.id}`;
+    map.set(key, {
+      employeeId: p.employee_id,
+      employeeName: String(p.employee_name ?? p.employee_id),
+      placementId: p.id,
+      serviceLineId: p.service_line_id ?? undefined,
+      serviceLineName: p.service_line_name ?? undefined,
+      cells: {},
+    });
+  }
+  for (const e of entries) {
+    const key = `${e.employee_id}::${e.placement_id}`;
+    let row = map.get(key);
+    if (!row) {
+      row = {
+        employeeId: e.employee_id,
+        employeeName: String(e.employee_name ?? e.employee_id),
+        placementId: e.placement_id,
+        serviceLineId: e.service_line_id ?? undefined,
+        serviceLineName: undefined,
+        cells: {},
+      };
+      map.set(key, row);
+    }
+    row.cells[e.work_date] = e;
+    if (e.service_line_id) row.serviceLineId = e.service_line_id;
+  }
+  return Array.from(map.values());
+}
+
 // ---------------------------------------------------------------------------
 // Holiday scoping (EPICS §8 D1) — global holidays + those matching a company's
 // service lines, projected onto the visible week.

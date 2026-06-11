@@ -42,8 +42,8 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 
 | Ref | Rule |
 |-----|------|
-| BR-1 | A placement requires: agent, **employment agreement**, client company, **site** (E2 F2.6 — the specific location), service line, **position** (from master), start date. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`). |
-| BR-1b | The placement period must fall **within the agent's employment-agreement validity**. For `PKWT`, if the placement `end_date` would exceed the agreement `end_date`, the system **auto-caps** it to the agreement `end_date` and notifies the creator; `PKWTT` imposes no upper bound. |
+| BR-1 | A placement requires: agent, client company, **site** (E2 F2.6 — the specific location), service line, **position** (from master), start date. The **employment agreement is optional at create and may be backfilled** *(EPICS §8 2026-06-11 — supersedes the prior version of BR-1 that made the agreement mandatory)* — an agent may be placed and start work before the PKWT/PKWTT is finalized; a placement created without one is **flagged `awaiting agreement`** (see BR-10) until the agreement is attached. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`, and for any pending-agreement placement). |
+| BR-1b | **Only when an employment agreement is present**, the placement period must fall **within the agent's employment-agreement validity**. For `PKWT`, if the placement `end_date` would exceed the agreement `end_date`, the system **auto-caps** it to the agreement `end_date` and notifies the creator; `PKWTT` imposes no upper bound. When **no** agreement is set (awaiting-agreement placement), this check is **skipped** and `end_date` may be open-ended; it re-runs when the agreement is backfilled (BR-10). |
 | BR-2 | **INV-1 + 1-day buffer** — the agent must have no `Active`/`Scheduled` placement overlapping the new period, AND the new `start_date` must be **at least 1 day after** any prior placement's `end_date` (no overlap, no same-day handover). Enforced at persist time (DB constraint), not just UI. |
 | BR-3 | The client company must be `Active`. Placing into an inactive/archived company is blocked. |
 | BR-3b | The **site** must belong to the chosen company and be `Active` (E2 F2.6 ST-4). The site defaults to the company's **primary "Main Site"** and can be changed to any other active site. Its geofence (or absence) drives E5 clock-in (CI-2). |
@@ -53,13 +53,15 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | BR-7 | On successful creation, write an audit-log entry and notify the agent and the company's shift leader (if one is assigned). |
 | BR-8 | Creation is not blocked if the company has no shift leader yet, but the UI surfaces a warning prompting F3.4. |
 | BR-9 | `position` is selected per placement from the E2 position master; the same agent may hold a **different position** at a different company. |
+| BR-10 | **Pending-agreement tracking & backfill** *(EPICS §8 2026-06-11).* A placement created without an `employment_agreement_id` carries a derived flag **`awaiting_agreement` (= the agreement reference is null)** — an **orthogonal compliance flag, NOT a lifecycle status** (the F3.2 state machine is unaffected; an awaiting placement can be Active/Scheduled/Expiring). Placement list + company-roster views expose an **`awaiting_agreement` filter** to surface the pending backlog. The agreement is attached later via a **backfill action** (`POST /placements/{id}/agreement`), which re-runs the BR-1b period check / PKWT auto-cap, then clears `awaiting_agreement`; backfilling an agreement that does **not** belong to the placement's agent is rejected, and backfilling a placement that already has an agreement is a no-op/rejected (nothing pending). On **renew/transfer** of a pending placement the successor **stays pending** (null propagates, no auto-cap) until its own agreement is backfilled (see C-11). A finalized PKWT/PKWTT remains legally required for the employment overall (alih-daya) — this rule only removes it as a blocking precondition at placement create. |
 
 ## 6. Data model (created fields)
 
 | Field | Type | Required | Validation |
 |-------|------|----------|------------|
 | `employee_id` | FK → Employee | yes | employee exists & status = active |
-| `employment_agreement_id` | FK → EmploymentAgreement | yes | belongs to the same agent; placement period ⊆ agreement validity (BR-1b) |
+| `employment_agreement_id` | FK → EmploymentAgreement | **no** | Optional at create (BR-1, EPICS §8 2026-06-11) — null = placement *awaiting agreement* (`awaiting_agreement = true`, BR-10), backfillable later. When set: belongs to the same agent; placement period ⊆ agreement validity (BR-1b). |
+| `awaiting_agreement` | bool (derived) | system | `true` ⟺ `employment_agreement_id` is null (BR-10). Compliance flag, not a lifecycle status; drives the list/roster filter. |
 | `client_company_id` | FK → ClientCompany | yes | company status = active (BR-3) |
 | `site_id` | FK → Site (E2 F2.6) | yes | belongs to `client_company_id` & status = active (BR-3b); defaults to the company's primary Main Site |
 | `service_line_id` | FK → ServiceLine | yes | one of Facility / Building Mgmt / Parking |
@@ -151,6 +153,28 @@ Feature: Agent placement creation
     When I create a placement with a start date in the past and provide a reason
     Then the placement is created
     And the audit log records the backdating reason
+
+  Scenario: Create a placement without an employment agreement (awaiting agreement)
+    Given "Budi" has no finalized employment agreement yet
+    When I create a placement for "Budi" at "Plaza Senayan" in "Parking" without an employment agreement
+    Then the placement is created successfully
+    And it is flagged "awaiting agreement"
+    And no period-within-agreement validation is applied
+    And it appears when I filter the roster by "awaiting agreement"
+
+  Scenario: Backfill the employment agreement later (re-validates the period)
+    Given "Budi" has a placement flagged "awaiting agreement" running 2026-06-09 onward
+    And his finalized PKWT agreement runs 2026-06-01 to 2026-12-31
+    When I attach that agreement to the placement
+    Then the placement is no longer flagged "awaiting agreement"
+    And the placement end date is auto-capped to 2026-12-31 if it exceeded the agreement end
+    And I am notified if the end date was adjusted
+
+  Scenario: Backfill is rejected when the agreement belongs to another agent
+    Given "Budi" has a placement flagged "awaiting agreement"
+    When I attach an employment agreement that belongs to a different agent
+    Then the backfill is rejected with the message "Agreement does not belong to this agent"
+    And the placement stays flagged "awaiting agreement"
 ```
 
 ## 8. Cases & edge cases
@@ -167,6 +191,8 @@ Feature: Agent placement creation
 | C-8 | "Today" across timezones | Use the org's configured timezone (Asia/Jakarta) to evaluate BR-5, not server UTC. |
 | C-9 | Agent record is inactive/resigned | Blocked — only active employees can be placed. |
 | C-10 | start_date far in the future (e.g. > 1 year) | Allowed but warns (likely data-entry error). |
+| C-11 | Renew or transfer a placement that is still **awaiting agreement** | Successor is created **also awaiting agreement** — the null agreement reference propagates, BR-1b is not run, and no PKWT auto-cap applies (BR-10). The successor stays flagged until its own agreement is backfilled. |
+| C-12 | Backfill an agreement to a placement that **already has one** | Rejected / no-op — nothing is pending; an agreement change must go through renew/transfer, not backfill (BR-10). |
 
 ## 9. Dependencies
 
@@ -182,5 +208,7 @@ Feature: Agent placement creation
 **Resolved (2026-05-29, round 2):** Service line → **manual classification later** (after SWP confirms) → [DATA-MAPPING.md](../DATA-MAPPING.md) G-1. Buffer → **next day after prior end** is sufficient. PKWT overrun → **auto-cap** to agreement end (BR-1b). Designation window → defaults to the employment-agreement dates, adjustable per placement.
 
 **Resolved (2026-06-07):** `annual_leave_entitlement` and `base_salary_ref` **removed from the placement** — compensation and annual-leave entitlement are employment-agreement (E2) terms, not placement terms. See EPICS §8 + [employment-agreement.md](../../E2-identity/prds/employment-agreement.md). BR-9 (position per placement) is unaffected.
+
+**Resolved (2026-06-11):** the **employment agreement is now optional at placement create** — supersedes the original mandatory BR-1. A placement without one is flagged `awaiting_agreement` (BR-10), period validation (BR-1b) only runs when an agreement is present, and the agreement is backfilled later via `POST /placements/{id}/agreement` (re-running BR-1b). Renew/transfer of a pending placement propagates the pending flag (C-11). See [EPICS.md §8](../../../EPICS.md) (2026-06-11) + [FEATURE.md](../FEATURE.md) §F3.1.
 
 _No open questions remain for this feature._

@@ -37,12 +37,13 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement
 `
 
 type CreatePlacementParams struct {
 	EmployeeID      string
-	AgreementID     string
+	AgreementID     *string
 	ClientCompanyID string
 	SiteID          string
 	ServiceLineID   string
@@ -59,7 +60,7 @@ type CreatePlacementParams struct {
 type CreatePlacementRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -79,6 +80,7 @@ type CreatePlacementRow struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	AwaitingAgreement bool
 }
 
 // id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
@@ -122,6 +124,7 @@ func (q *Queries) CreatePlacement(ctx context.Context, arg CreatePlacementParams
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }
@@ -196,7 +199,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -212,7 +216,7 @@ WHERE p.employee_id = $1
 type GetActivePlacementForEmployeeRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -238,6 +242,7 @@ type GetActivePlacementForEmployeeRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 // INV-1 service pre-check (friendly 409 before hitting the partial unique index).
@@ -273,6 +278,7 @@ func (q *Queries) GetActivePlacementForEmployee(ctx context.Context, employeeID 
 		&i.ServiceLineName,
 		&i.PositionName,
 		&i.AgreementType,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }
@@ -283,7 +289,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
-       p.backdate_reason, p.created_by, p.created_at, p.updated_at
+       p.backdate_reason, p.created_by, p.created_at, p.updated_at,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 WHERE p.employee_id = $1
   AND p.client_company_id = $2
@@ -300,7 +307,7 @@ type GetActivePlacementForEmployeeAtCompanyForUpdateParams struct {
 type GetActivePlacementForEmployeeAtCompanyForUpdateRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -320,6 +327,7 @@ type GetActivePlacementForEmployeeAtCompanyForUpdateRow struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	AwaitingAgreement bool
 }
 
 // INV-4 lock: the agent's active placement at a specific company, row-locked.
@@ -349,6 +357,7 @@ func (q *Queries) GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Co
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }
@@ -365,7 +374,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -380,7 +390,7 @@ WHERE p.id = $1
 type GetPlacementByIDRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -406,6 +416,7 @@ type GetPlacementByIDRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error) {
@@ -440,6 +451,7 @@ func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacement
 		&i.ServiceLineName,
 		&i.PositionName,
 		&i.AgreementType,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }
@@ -465,7 +477,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 JOIN chain ch                     ON ch.id  = p.id
 LEFT JOIN employees e             ON e.id   = p.employee_id
@@ -480,7 +493,7 @@ ORDER BY p.start_date ASC, p.id ASC
 type GetPlacementChainRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -506,6 +519,7 @@ type GetPlacementChainRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 // All placements sharing a predecessor/successor chain with the given placement
@@ -548,6 +562,7 @@ func (q *Queries) GetPlacementChain(ctx context.Context, id string) ([]GetPlacem
 			&i.ServiceLineName,
 			&i.PositionName,
 			&i.AgreementType,
+			&i.AwaitingAgreement,
 		); err != nil {
 			return nil, err
 		}
@@ -571,7 +586,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -603,7 +619,7 @@ type ListExpiringPlacementsParams struct {
 type ListExpiringPlacementsRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -629,6 +645,7 @@ type ListExpiringPlacementsRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 // Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
@@ -677,6 +694,7 @@ func (q *Queries) ListExpiringPlacements(ctx context.Context, arg ListExpiringPl
 			&i.ServiceLineName,
 			&i.PositionName,
 			&i.AgreementType,
+			&i.AwaitingAgreement,
 		); err != nil {
 			return nil, err
 		}
@@ -701,7 +719,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -717,22 +736,23 @@ WHERE p.deleted_at IS NULL
   AND ($5::text          IS NULL OR p.lifecycle_status  = $5::text)
   AND ($6::text[]     IS NULL OR p.lifecycle_status  = ANY($6::text[]))
   AND ($7::date   IS NULL OR (p.end_date IS NOT NULL AND p.end_date <= $7::date))
+  AND ($8::boolean IS NULL OR (p.agreement_id IS NULL) = $8::boolean)
   AND (
-        $8::boolean
+        $9::boolean
         OR p.lifecycle_status NOT IN ('ENDED','TRANSFERRED','TERMINATED','RESIGNED','SUPERSEDED')
       )
   AND (
-        $9::text IS NULL
-        OR e.full_name   ILIKE '%' || $9::text || '%'
-        OR p.employee_id ILIKE '%' || $9::text || '%'
-        OR c.name        ILIKE '%' || $9::text || '%'
+        $10::text IS NULL
+        OR e.full_name   ILIKE '%' || $10::text || '%'
+        OR p.employee_id ILIKE '%' || $10::text || '%'
+        OR c.name        ILIKE '%' || $10::text || '%'
       )
   AND (
-        $10::timestamptz IS NULL
-        OR (p.status_changed_at, p.id) < ($10::timestamptz, $11::text)
+        $11::timestamptz IS NULL
+        OR (p.status_changed_at, p.id) < ($11::timestamptz, $12::text)
       )
 ORDER BY p.status_changed_at DESC, p.id DESC
-LIMIT $12
+LIMIT $13
 `
 
 type ListPlacementsParams struct {
@@ -743,6 +763,7 @@ type ListPlacementsParams struct {
 	Status                *string
 	StatusIn              []string
 	EndDateLte            pgtype.Date
+	AwaitingAgreement     *bool
 	IncludeHistory        bool
 	Q                     *string
 	CursorStatusChangedAt *time.Time
@@ -753,7 +774,7 @@ type ListPlacementsParams struct {
 type ListPlacementsRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -779,6 +800,7 @@ type ListPlacementsRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 // E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
@@ -800,6 +822,7 @@ func (q *Queries) ListPlacements(ctx context.Context, arg ListPlacementsParams) 
 		arg.Status,
 		arg.StatusIn,
 		arg.EndDateLte,
+		arg.AwaitingAgreement,
 		arg.IncludeHistory,
 		arg.Q,
 		arg.CursorStatusChangedAt,
@@ -842,6 +865,7 @@ func (q *Queries) ListPlacements(ctx context.Context, arg ListPlacementsParams) 
 			&i.ServiceLineName,
 			&i.PositionName,
 			&i.AgreementType,
+			&i.AwaitingAgreement,
 		); err != nil {
 			return nil, err
 		}
@@ -859,7 +883,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
-       p.backdate_reason, p.created_by, p.created_at, p.updated_at
+       p.backdate_reason, p.created_by, p.created_at, p.updated_at,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 WHERE p.employee_id = $1
   AND p.deleted_at IS NULL
@@ -869,7 +894,7 @@ FOR UPDATE
 type LockEmployeePlacementsRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -889,6 +914,7 @@ type LockEmployeePlacementsRow struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	AwaitingAgreement bool
 }
 
 // INV-1 / period-overlap lock: all of the agent's placements, row-locked.
@@ -924,6 +950,7 @@ func (q *Queries) LockEmployeePlacements(ctx context.Context, employeeID string)
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AwaitingAgreement,
 		); err != nil {
 			return nil, err
 		}
@@ -981,7 +1008,8 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        s.name           AS site_name,
        sl.name          AS service_line_name,
        pos.name         AS position_name,
-       a.type           AS agreement_type
+       a.type           AS agreement_type,
+       (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
 LEFT JOIN employees e             ON e.id   = p.employee_id
 LEFT JOIN client_companies c      ON c.id   = p.client_company_id
@@ -994,16 +1022,17 @@ WHERE p.client_company_id = $1
   AND ($2::text IS NULL OR p.service_line_id  = $2::text)
   AND ($3::text          IS NULL OR p.lifecycle_status = $3::text)
   AND ($4::text[]     IS NULL OR p.lifecycle_status = ANY($4::text[]))
+  AND ($5::boolean IS NULL OR (p.agreement_id IS NULL) = $5::boolean)
   AND (
-        $5::boolean
+        $6::boolean
         OR p.lifecycle_status NOT IN ('ENDED','TRANSFERRED','TERMINATED','RESIGNED','SUPERSEDED')
       )
   AND (
-        $6::timestamptz IS NULL
-        OR (p.status_changed_at, p.id) < ($6::timestamptz, $7::text)
+        $7::timestamptz IS NULL
+        OR (p.status_changed_at, p.id) < ($7::timestamptz, $8::text)
       )
 ORDER BY p.status_changed_at DESC, p.id DESC
-LIMIT $8
+LIMIT $9
 `
 
 type RosterForCompanyParams struct {
@@ -1011,6 +1040,7 @@ type RosterForCompanyParams struct {
 	ServiceLineID         *string
 	Status                *string
 	StatusIn              []string
+	AwaitingAgreement     *bool
 	IncludeHistory        bool
 	CursorStatusChangedAt *time.Time
 	CursorID              *string
@@ -1020,7 +1050,7 @@ type RosterForCompanyParams struct {
 type RosterForCompanyRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -1046,6 +1076,7 @@ type RosterForCompanyRow struct {
 	ServiceLineName   *string
 	PositionName      *string
 	AgreementType     *string
+	AwaitingAgreement bool
 }
 
 // Company roster (RO-*). Filters: status (single), status__in (CSV),
@@ -1056,6 +1087,7 @@ func (q *Queries) RosterForCompany(ctx context.Context, arg RosterForCompanyPara
 		arg.ServiceLineID,
 		arg.Status,
 		arg.StatusIn,
+		arg.AwaitingAgreement,
 		arg.IncludeHistory,
 		arg.CursorStatusChangedAt,
 		arg.CursorID,
@@ -1097,6 +1129,7 @@ func (q *Queries) RosterForCompany(ctx context.Context, arg RosterForCompanyPara
 			&i.ServiceLineName,
 			&i.PositionName,
 			&i.AgreementType,
+			&i.AwaitingAgreement,
 		); err != nil {
 			return nil, err
 		}
@@ -1181,39 +1214,32 @@ func (q *Queries) RosterSummaryByStatus(ctx context.Context, clientCompanyID str
 	return items, nil
 }
 
-const setPlacementLifecycle = `-- name: SetPlacementLifecycle :one
+const setPlacementAgreement = `-- name: SetPlacementAgreement :one
 UPDATE placements
-SET lifecycle_status   = $1,
-    status_changed_at  = now(),
-    ended_reason       = $2,
-    ended_at           = $3,
-    termination_reason = $4,
-    resign_at          = $5,
-    successor_id       = $6,
-    updated_at         = now()
-WHERE id = $7
+SET agreement_id = $1,
+    end_date     = $2,
+    updated_at   = now()
+WHERE id = $3
+  AND deleted_at IS NULL
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           service_line_id, position_id, start_date, end_date,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement
 `
 
-type SetPlacementLifecycleParams struct {
-	LifecycleStatus   string
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	SuccessorID       *string
-	ID                string
+type SetPlacementAgreementParams struct {
+	AgreementID *string
+	EndDate     pgtype.Date
+	ID          string
 }
 
-type SetPlacementLifecycleRow struct {
+type SetPlacementAgreementRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -1233,6 +1259,97 @@ type SetPlacementLifecycleRow struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	AwaitingAgreement bool
+}
+
+// Backfill: attach an agreement to a previously pending placement (awaiting_agreement).
+// end_date is updated too so the service can persist the BR-1b PKWT auto-cap in the
+// same write. awaiting_agreement flips to false once agreement_id is non-null.
+func (q *Queries) SetPlacementAgreement(ctx context.Context, arg SetPlacementAgreementParams) (SetPlacementAgreementRow, error) {
+	row := q.db.QueryRow(ctx, setPlacementAgreement, arg.AgreementID, arg.EndDate, arg.ID)
+	var i SetPlacementAgreementRow
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.AgreementID,
+		&i.ClientCompanyID,
+		&i.SiteID,
+		&i.ServiceLineID,
+		&i.PositionID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Notes,
+		&i.LifecycleStatus,
+		&i.StatusChangedAt,
+		&i.EndedReason,
+		&i.EndedAt,
+		&i.TerminationReason,
+		&i.ResignAt,
+		&i.PredecessorID,
+		&i.SuccessorID,
+		&i.BackdateReason,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AwaitingAgreement,
+	)
+	return i, err
+}
+
+const setPlacementLifecycle = `-- name: SetPlacementLifecycle :one
+UPDATE placements
+SET lifecycle_status   = $1,
+    status_changed_at  = now(),
+    ended_reason       = $2,
+    ended_at           = $3,
+    termination_reason = $4,
+    resign_at          = $5,
+    successor_id       = $6,
+    updated_at         = now()
+WHERE id = $7
+RETURNING id, employee_id, agreement_id, client_company_id, site_id,
+          service_line_id, position_id, start_date, end_date,
+          notes,
+          lifecycle_status, status_changed_at, ended_reason, ended_at,
+          termination_reason, resign_at, predecessor_id, successor_id,
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement
+`
+
+type SetPlacementLifecycleParams struct {
+	LifecycleStatus   string
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	SuccessorID       *string
+	ID                string
+}
+
+type SetPlacementLifecycleRow struct {
+	ID                string
+	EmployeeID        string
+	AgreementID       *string
+	ClientCompanyID   string
+	SiteID            string
+	ServiceLineID     string
+	PositionID        string
+	StartDate         pgtype.Date
+	EndDate           pgtype.Date
+	Notes             *string
+	LifecycleStatus   string
+	StatusChangedAt   time.Time
+	EndedReason       *string
+	EndedAt           pgtype.Date
+	TerminationReason *string
+	ResignAt          pgtype.Date
+	PredecessorID     *string
+	SuccessorID       *string
+	BackdateReason    *string
+	CreatedBy         *string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	AwaitingAgreement bool
 }
 
 // Drives end/terminate/resign/transfer/supersede. status_changed_at=now().
@@ -1270,6 +1387,7 @@ func (q *Queries) SetPlacementLifecycle(ctx context.Context, arg SetPlacementLif
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }
@@ -1316,7 +1434,8 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
-          backdate_reason, created_by, created_at, updated_at
+          backdate_reason, created_by, created_at, updated_at,
+          (agreement_id IS NULL)::boolean AS awaiting_agreement
 `
 
 type UpdatePlacementFieldsParams struct {
@@ -1329,7 +1448,7 @@ type UpdatePlacementFieldsParams struct {
 type UpdatePlacementFieldsRow struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
 	ServiceLineID     string
@@ -1349,6 +1468,7 @@ type UpdatePlacementFieldsRow struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	AwaitingAgreement bool
 }
 
 // Limited-field PATCH (position_id, end_date, notes).
@@ -1383,6 +1503,7 @@ func (q *Queries) UpdatePlacementFields(ctx context.Context, arg UpdatePlacement
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AwaitingAgreement,
 	)
 	return i, err
 }

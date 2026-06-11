@@ -103,6 +103,36 @@ type AgentPendingRow struct {
 	OT    int
 }
 
+// SuperAdminWidgetsData is the raw bundle backing the admin-only widget block
+// (DB-7). The repo runs the four global aggregations; the service maps it to the
+// domain shape (service-line name → enum, audit columns → labels). now is the
+// Asia/Jakarta-resolved instant used for the offboarded-30d window.
+type SuperAdminWidgetsData struct {
+	ActiveUsers          int
+	OffboardedUsers30d   int
+	BankApprovalsPending int
+	OrgRollups           []OrgRollupRow
+	RecentAudit          []AuditRow
+}
+
+// OrgRollupRow mirrors the sqlc OrgRollupsByServiceLine row (raw service-line name).
+type OrgRollupRow struct {
+	ServiceLineName  string
+	Headcount        int
+	ActivePlacements int
+}
+
+// AuditRow mirrors the sqlc RecentAuditEntries row (raw audit columns).
+type AuditRow struct {
+	ID          string
+	ActorUserID *string
+	ActorRole   *string
+	Action      string
+	EntityType  string
+	EntityID    string
+	CreatedAt   time.Time
+}
+
 // DashboardRepository wraps the 11-01 dashboard aggregation queries. today is the
 // Asia/Jakarta calendar date the service resolves once. companyID nil = global.
 type DashboardRepository interface {
@@ -113,6 +143,9 @@ type DashboardRepository interface {
 	AgentRecent(ctx context.Context, employeeID string, today time.Time) (AgentRecentRow, error)
 	AgentPending(ctx context.Context, employeeID string) (AgentPendingRow, error)
 	CountUnread(ctx context.Context, recipientIDs []string) (int, error)
+	// SuperAdminWidgets runs the four global admin-block aggregations (DB-7). now is
+	// used for the offboarded-30d window; auditLimit caps recent_audit (~8).
+	SuperAdminWidgets(ctx context.Context, now time.Time, auditLimit int) (SuperAdminWidgetsData, error)
 }
 
 // --- billable port ---

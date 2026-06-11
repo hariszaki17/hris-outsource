@@ -55,11 +55,12 @@ func (h *Handler) ListPlacements(w http.ResponseWriter, r *http.Request) {
 		EmployeeID:    strPtrParam(q.Get("employee_id")),
 		AgreementID:   strPtrParam(q.Get("agreement_id")),
 		// Param names are `status` / `status__in`; both filter lifecycle_status.
-		Status:         strPtrParam(q.Get("status")),
-		StatusIn:       csvParam(q.Get("status__in")),
-		Q:              strPtrParam(q.Get("q")),
-		IncludeHistory: boolParam(q.Get("include_history")),
-		Limit:          intParam(q.Get("limit")),
+		Status:            strPtrParam(q.Get("status")),
+		StatusIn:          csvParam(q.Get("status__in")),
+		Q:                 strPtrParam(q.Get("q")),
+		AwaitingAgreement: boolPtrParam(q.Get("awaiting_agreement")),
+		IncludeHistory:    boolParam(q.Get("include_history")),
+		Limit:             intParam(q.Get("limit")),
 	}
 	if v := q.Get("expiring_within_days"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -192,7 +193,7 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 	actor := actorPtr(r)
 	created, err := h.placements.CreatePlacement(r.Context(), svc.CreatePlacementParams{
 		EmployeeID:      req.EmployeeID,
-		AgreementID:     req.AgreementID,
+		AgreementID:     req.AgreementID, // nil/"" → pending agreement (normalized in the service)
 		ClientCompanyID: req.ClientCompanyID,
 		SiteID:          req.SiteID,
 		ServiceLineID:   req.ServiceLineID,
@@ -209,6 +210,27 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/placements/"+created.ID)
 	httpx.WriteJSON(w, http.StatusCreated, toPlacementResponse(created, jakartaToday()))
+}
+
+// SetPlacementAgreement handles POST /placements/{id}/agreement — backfills an
+// employment agreement onto a pending placement (awaiting_agreement → false).
+func (h *Handler) SetPlacementAgreement(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req setAgreementRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(req.AgreementID) == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian wajib diisi."}))
+		return
+	}
+	updated, err := h.placements.SetAgreement(r.Context(), id, strings.TrimSpace(req.AgreementID))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toPlacementResponse(updated, jakartaToday()))
 }
 
 // UpdatePlacement handles PATCH /placements/{id}.
@@ -516,6 +538,16 @@ func csvParam(s string) []string {
 
 func boolParam(s string) bool {
 	return s == "true" || s == "1"
+}
+
+// boolPtrParam parses an optional tri-state bool query param: absent → nil (no
+// filter); "true"/"1" → true; anything else non-empty → false.
+func boolPtrParam(s string) *bool {
+	if s == "" {
+		return nil
+	}
+	b := s == "true" || s == "1"
+	return &b
 }
 
 func intParam(s string) int {

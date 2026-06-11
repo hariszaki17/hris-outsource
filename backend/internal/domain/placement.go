@@ -14,7 +14,7 @@ import "time"
 type Placement struct {
 	ID                string
 	EmployeeID        string
-	AgreementID       string
+	AgreementID       *string // nil = pending agreement (awaiting_agreement = true)
 	ClientCompanyID   string
 	SiteID            string // INV-5: required
 	ServiceLineID     string
@@ -34,6 +34,9 @@ type Placement struct {
 	CreatedBy         *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// AwaitingAgreement is the orthogonal compliance flag (= AgreementID == nil),
+	// derived in SQL and carried through every read/write row. NOT a lifecycle state.
+	AwaitingAgreement bool
 	// Denormalized for display (server-authoritative; filled via JOINs).
 	EmployeeName      *string
 	ClientCompanyName *string
@@ -129,6 +132,7 @@ type PlacementFilter struct {
 	StatusIn              []string // CSV → lifecycle_status = ANY
 	Q                     *string  // ILIKE over agent name / employee_id / company name
 	EndDateLTE            *time.Time
+	AwaitingAgreement     *bool // nil = no filter; true/false = pending-agreement filter
 	IncludeHistory        bool
 	Limit                 int
 	CursorStatusChangedAt *time.Time

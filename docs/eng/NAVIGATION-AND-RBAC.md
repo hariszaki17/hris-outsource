@@ -56,7 +56,7 @@ Order matches `comp/Sidebar` `iCqTB` and `NAV_ITEMS`:
 
 | # | Module | Route | `requires` |
 |---|--------|-------|-----------|
-| 1 | Dashboard | `/` | `dashboard.view` |
+| 1 | Dashboard | `/` | `dashboard.view` |[^db7]
 | 2 | **Kotak Masuk** | `/inbox` | *any of* `leave.approve` · `overtime.approve` · `attendance.verify` · `change_requests.approve` |
 | 3 | Karyawan | `/employees` | `employees.read` |
 | 4 | Penempatan | `/placements` | `placements.read` |
@@ -71,6 +71,8 @@ Order matches `comp/Sidebar` `iCqTB` and `NAV_ITEMS`:
 
 The "8 modules" design lock (DESIGN-SYSTEM line 171) is **retired** — sidebar length is a
 per-role *outcome* (a shift leader sees ~8; a future finance role would see ~3), not a fixed count.
+
+[^db7]: `dashboard.view` gates the route for all four roles; the **Super Admin admin-widget block** (DB-7: users & access · audit feed · org rollups · pending grants) needs **no new permission key** — the server fills `HrDashboard.admin` only when the principal's effective role is `super_admin`, and the client renders those widgets conditionally on `role === 'super_admin'`. Defense-in-depth: the API is the gate (ENGINEERING C1). The shift-leader dashboard is dual-surface (web + mobile Beranda, DB-8) on the same `LeaderDashboard` payload.
 
 ### 3.2 Section sub-nav (tabs under the topbar)
 
@@ -108,6 +110,7 @@ sidebar active-state). Follow-up: move these under `/settings/*` and relocate ov
 The catalog lives in `packages/shared/src/rbac.ts` (`PERMISSIONS`, type `Permission`). Granularity
 is **`module.action`** (decided 2026-06-03) so one vocabulary gates both nav items and in-screen
 buttons: `employees.read`/`.write`, `leave.read`/`.approve`, `payroll.read`/`.export`,
+`change_requests.read`/`.approve` (+ HR-only `change_requests.approve.bank`),
 `settings.roles.manage`, `masterdata.manage`, etc.
 
 A **role is a named bundle** of permissions (`ROLE_PERMISSIONS`). The UI checks
@@ -123,7 +126,8 @@ Interim role bundles:
 - **super_admin** — all permissions (incl. `settings.roles.manage`).
 - **hr_admin** — all except `settings.roles.manage` (super admin owns the access model).
 - **shift_leader** — `dashboard.view`, `employees.read`, `placements.read`, `schedule.read/.write`,
-  `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`. No clients,
+  `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`,
+  `change_requests.read/.approve` (**not** `.approve.bank`). No clients,
   contracts, payroll, reports, master data, or settings.
 - **agent** — the `self.*` self-service bundle: `self.dashboard`, `self.attendance`, `self.schedule`,
   `self.leave`, `self.overtime`, `self.profile`, `self.payslip`. *(Updated 2026-06-10: agents now
@@ -131,6 +135,14 @@ Interim role bundles:
   shell picks the nav backbone by role; `self.*` keys never overlap the staff capability keys, so
   the two surfaces stay cleanly separated. Ratified EPICS §8; full spec:
   [AGENT-WEB-ACCESS.md](./AGENT-WEB-ACCESS.md).)*
+
+**Change-request approval is split by sensitivity** *(2026-06-11).* `change_requests.approve` covers
+non-sensitive fields (phone, emergency contact); **bank-account** changes need the HR-only
+`change_requests.approve.bank` (fraud/payroll risk). A request mixing both is **partially actionable**:
+a shift leader approves the non-bank fields, and the **bank field escalates to HR** (stays pending
+until an `change_requests.approve.bank` holder acts) — it never silently applies. The Inbox review UI
+disables the bank-field action and shows "Perlu HR" for approvers without the sub-permission. (F2.1
+EP-5c/EP-5d.)
 
 ### 4.2 Scope axis — data rows (server-only) ✅
 

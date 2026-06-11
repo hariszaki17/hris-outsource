@@ -135,3 +135,62 @@ SELECT
     (SELECT count(*) FROM overtime o
        WHERE o.deleted_at IS NULL AND o.employee_id = sqlc.arg(employee_id)
          AND o.status IN ('PENDING_AGENT_CONFIRM','PENDING_L1','PENDING_HR'))::bigint AS ot_pending;
+
+-- =====================================================================
+-- SuperAdminWidgets (DB-7) — admin-only dashboard block. Present ONLY when
+-- role=super_admin; the queries below are global (no scope param). Each backs one
+-- sub-widget of openapi schemas.SuperAdminWidgets.
+-- =====================================================================
+
+-- name: CountActiveUsers :one
+-- user_access.active_users: login accounts with status 'active' (00002_users).
+SELECT count(*)::bigint AS total
+FROM users
+WHERE deleted_at IS NULL
+  AND status = 'active';
+
+-- name: CountOffboardedUsers30d :one
+-- user_access.offboarded_30d: users disabled within the last 30 days (F2.7).
+-- The schema records offboarding as status='disabled' + a tokens_valid_after epoch
+-- bump (00038); updated_at carries the disable instant. We count disabled users
+-- whose tokens_valid_after (the revocation instant) falls in the last 30 days.
+SELECT count(*)::bigint AS total
+FROM users
+WHERE deleted_at IS NULL
+  AND status = 'disabled'
+  AND tokens_valid_after >= (sqlc.arg(now_ts)::timestamptz - INTERVAL '30 days');
+
+-- name: OrgRollupsByServiceLine :many
+-- org_rollups: per-service-line headcount (distinct placed employees) + active
+-- placement count, over non-terminal placements (mirrors CountActivePlacements).
+-- service_lines.name is free text ("Facility Services" / "Building Management" /
+-- "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
+-- the raw name so the mapping stays in Go (no enum in the schema).
+SELECT
+    sl.name                                  AS service_line_name,
+    count(DISTINCT p.employee_id)::bigint     AS headcount,
+    count(*)::bigint                          AS active_placements
+FROM placements p
+JOIN service_lines sl ON sl.id = p.service_line_id
+WHERE p.deleted_at IS NULL
+  AND p.lifecycle_status IN ('ACTIVE','EXTENDED','EXPIRING','PENDING_START')
+GROUP BY sl.id, sl.name
+ORDER BY sl.name;
+
+-- name: CountBankApprovalsPending :one
+-- pending_grants.bank_approvals: change-requests with a bank change escalated to
+-- HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
+-- rbac.CanApproveBank / PARTIALLY_APPROVED).
+SELECT count(*)::bigint AS total
+FROM change_requests
+WHERE bank_pending;
+
+-- name: RecentAuditEntries :many
+-- recent_audit: last sensitive admin actions, newest first (capped by row_limit ~8).
+-- The schema (00004_audit_log) stores actor_user_id/actor_role/action/entity_type/
+-- entity_id; the service composes actor_label/target_label from these (no
+-- human-name columns exist on audit_log).
+SELECT id, actor_user_id, actor_role, action, entity_type, entity_id, created_at
+FROM audit_log
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);

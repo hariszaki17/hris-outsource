@@ -26,7 +26,6 @@ import {
 } from '@swp/api-client/e5';
 import type { StatusTone } from '@swp/design-tokens';
 import { ConfirmDialog, DateText, Input, StatusBadge, useToast } from '@swp/ui';
-import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeft,
   CheckCheck,
@@ -101,7 +100,6 @@ const FLAG_LABELS: Record<string, string> = {
 
 export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenProps) {
   const { t } = useTranslation('attendance');
-  const navigate = useNavigate();
   const currentUser = useCurrentUser();
   const { toast } = useToast();
   const isShiftLeader = currentUser?.role === 'shift_leader';
@@ -123,12 +121,13 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
 
   function handleVerifyConfirm() {
     const data: Record<string, string> = {};
-    const needsTimes = record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE;
+    const needsTimes =
+      record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE;
     if (needsTimes && verifyCheckInAt) {
       // datetime-local gives YYYY-MM-DDTHH:mm in local time; append WIB offset explicitly.
-      data.check_in_at = verifyCheckInAt + '+07:00';
+      data.check_in_at = `${verifyCheckInAt}+07:00`;
       if (verifyCheckOutAt) {
-        data.check_out_at = verifyCheckOutAt + '+07:00';
+        data.check_out_at = `${verifyCheckOutAt}+07:00`;
       }
     }
     verifySingle.mutate(
@@ -375,7 +374,8 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
                   <span className="text-[11px] text-warn-tx font-medium">
                     {t('lateBy', { minutes: record.late_minutes })}
                   </span>
-                ) : record.status === AttendanceStatus.PRESENT || record.status === AttendanceStatus.LATE ? (
+                ) : record.status === AttendanceStatus.PRESENT ||
+                  record.status === AttendanceStatus.LATE ? (
                   <span className="text-[11px] text-ok-tx font-medium">{t('onTime')}</span>
                 ) : null}
               </div>
@@ -576,7 +576,10 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
         open={verifyOpen}
         onOpenChange={(open) => {
           setVerifyOpen(open);
-          if (!open) { setVerifyCheckInAt(''); setVerifyCheckOutAt(''); }
+          if (!open) {
+            setVerifyCheckInAt('');
+            setVerifyCheckOutAt('');
+          }
         }}
         icon={CheckCheck}
         tone="neutral"
@@ -585,11 +588,17 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
         cancelLabel={t('cancel')}
         confirmLabel={verifySingle.isPending ? t('saving') : t('verifyConfirm')}
         confirmTone="primary"
-        confirmDisabled={verifySingle.isPending || ((record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE) && !verifyCheckInAt)}
+        confirmDisabled={
+          verifySingle.isPending ||
+          ((record?.status === AttendanceStatus.ABSENT ||
+            record?.status === AttendanceStatus.INCOMPLETE) &&
+            !verifyCheckInAt)
+        }
         loading={verifySingle.isPending}
         onConfirm={handleVerifyConfirm}
       >
-        {(record?.status === AttendanceStatus.ABSENT || record?.status === AttendanceStatus.INCOMPLETE) && (
+        {(record?.status === AttendanceStatus.ABSENT ||
+          record?.status === AttendanceStatus.INCOMPLETE) && (
           <div className="mt-3 flex flex-col gap-3">
             <div className="flex flex-col gap-1">
               <label htmlFor="verify-checkin" className="text-[12px] font-medium text-text-2">

@@ -223,8 +223,18 @@ export function ChangeRequestsScreen() {
     approveMutation.mutate(
       { changeRequestId: cr.id },
       {
-        onSuccess: () => {
-          toast({ tone: 'success', title: t('changeRequests.approveSuccess') });
+        onSuccess: (res) => {
+          // A shift leader approving a mixed/bank request lands on PARTIALLY_APPROVED
+          // (non-bank applied, bank escalated to HR) — surface the partial toast.
+          const partial =
+            (res?.data as ChangeRequest | undefined)?.status ===
+            ChangeRequestStatus.PARTIALLY_APPROVED;
+          toast({
+            tone: 'success',
+            title: partial
+              ? t('changeRequests.partialApproveToast')
+              : t('changeRequests.approveSuccess'),
+          });
           void query.refetch();
         },
         onError: (err) => {
@@ -270,7 +280,13 @@ export function ChangeRequestsScreen() {
       cell: (cr) => {
         const keys = Object.keys(cr.changes ?? {});
         const labels = keys.map((fk) =>
-          fk === 'bank_account' ? 'Rekening' : fk === 'phone' ? 'Telepon' : 'Alamat',
+          fk === 'bank_account'
+            ? 'Rekening'
+            : fk === 'phone'
+              ? 'Telepon'
+              : fk === 'emergency_contact'
+                ? 'Kontak Darurat'
+                : fk,
         );
         return <span className="text-sm text-text-2">{labels.join(', ') || '—'}</span>;
       },
@@ -283,7 +299,11 @@ export function ChangeRequestsScreen() {
         const changes = cr.changes ?? {};
         const parts: string[] = [];
         if (changes.phone) parts.push(changes.phone);
-        if (changes.address) parts.push(changes.address);
+        if (changes.emergency_contact) {
+          const ec = changes.emergency_contact;
+          const ecStr = [ec.name, ec.phone].filter(Boolean).join(' · ');
+          if (ecStr) parts.push(ecStr);
+        }
         if (changes.bank_account) {
           const ba = changes.bank_account;
           const baStr = [ba.bank_name, ba.account_number].filter(Boolean).join(' · ');

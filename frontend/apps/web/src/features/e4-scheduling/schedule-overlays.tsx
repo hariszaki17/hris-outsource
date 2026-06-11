@@ -35,7 +35,16 @@ import {
 import { Button, Modal, ModalBody, ModalFooter, useToast } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { Copy } from 'lucide-react';
-import { CalendarOff, CirclePlus, Loader2, Search, Trash2 } from 'lucide-react';
+import {
+  CalendarOff,
+  Check,
+  ChevronDown,
+  CirclePlus,
+  Loader2,
+  Search,
+  Trash2,
+  Users,
+} from 'lucide-react';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -67,7 +76,8 @@ export interface BulkApplyModalProps {
   open: boolean;
   onClose: () => void;
   companyId: string;
-  employeeIds: string[];
+  /** Agents placed at the company — the selectable targets for the bulk apply. */
+  agents: { id: string; name: string }[];
   onMutated: () => void;
   scheduleQueryKey: readonly unknown[];
 }
@@ -542,7 +552,7 @@ export function BulkApplyModal({
   open,
   onClose,
   companyId: _companyId,
-  employeeIds,
+  agents,
   onMutated,
   scheduleQueryKey,
 }: BulkApplyModalProps) {
@@ -550,6 +560,11 @@ export function BulkApplyModal({
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const [agentSearch, setAgentSearch] = React.useState('');
+  const [selectedAgent, setSelectedAgent] = React.useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [agentMenuOpen, setAgentMenuOpen] = React.useState(false);
   const [shiftSearch, setShiftSearch] = React.useState('');
   const [selectedShift, setSelectedShift] = React.useState<ShiftMaster | null>(null);
   const [startDate, setStartDate] = React.useState('');
@@ -571,7 +586,12 @@ export function BulkApplyModal({
   const checkConflicts = useCheckScheduleConflicts();
   const bulkApply = useBulkApplySchedule();
 
-  const canPreview = !!selectedShift && !!startDate && !!endDate && startDate <= endDate;
+  const canPreview =
+    !!selectedShift && !!startDate && !!endDate && startDate <= endDate && weekdays.length > 0;
+  const targetEmployeeIds = selectedAgent ? [selectedAgent.id] : agents.map((a) => a.id);
+  const filteredAgents = agents.filter((a) =>
+    a.name.toLowerCase().includes(agentSearch.toLowerCase()),
+  );
 
   const handlePreview = async () => {
     if (!selectedShift || !startDate || !endDate) return;
@@ -582,7 +602,7 @@ export function BulkApplyModal({
           shift_master_id: selectedShift.id,
           start_date: startDate,
           end_date: endDate,
-          employee_ids: employeeIds,
+          employee_ids: targetEmployeeIds,
           weekdays_mask: weekdays,
           override_existing: overrideExisting,
         },
@@ -606,7 +626,7 @@ export function BulkApplyModal({
           shift_master_id: selectedShift.id,
           start_date: startDate,
           end_date: endDate,
-          employee_ids: employeeIds,
+          employee_ids: targetEmployeeIds,
           weekdays_mask: weekdays,
           override_existing: overrideExisting,
         },
@@ -627,6 +647,9 @@ export function BulkApplyModal({
 
   const handleClose = () => {
     setSelectedShift(null);
+    setSelectedAgent(null);
+    setAgentSearch('');
+    setAgentMenuOpen(false);
     setStartDate('');
     setEndDate('');
     setPreviewDone(false);
@@ -675,6 +698,76 @@ export function BulkApplyModal({
       </div>
       <ModalBody>
         <div className="flex flex-col gap-4">
+          {/* Agent selector — scope the bulk apply to one agent or all */}
+          <div className="relative">
+            <span className="mb-1.5 block text-sm font-semibold text-text">
+              {t('bulk.agentLabel')}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAgentMenuOpen((o) => !o)}
+              className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm text-text"
+            >
+              <Users aria-hidden className="size-3.5 shrink-0 text-text-3" />
+              <span className="flex-1 truncate">
+                {selectedAgent ? selectedAgent.name : t('bulk.allAgents', { count: agents.length })}
+              </span>
+              <ChevronDown aria-hidden className="size-3.5 shrink-0 text-text-3" />
+            </button>
+            {agentMenuOpen && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-surface shadow-overlay">
+                <div className="flex items-center gap-2 border-b border-border-soft px-3 py-2">
+                  <Search aria-hidden className="size-3.5 text-text-3" />
+                  <input
+                    type="text"
+                    // biome-ignore lint/a11y/noAutofocus: opening the menu intends focus
+                    autoFocus
+                    placeholder={t('bulk.agentSearchPlaceholder')}
+                    value={agentSearch}
+                    onChange={(e) => setAgentSearch(e.target.value)}
+                    className="flex-1 bg-transparent text-sm text-text placeholder:text-text-3 outline-none"
+                  />
+                </div>
+                <div className="max-h-44 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAgent(null);
+                      setAgentMenuOpen(false);
+                      setAgentSearch('');
+                      setPreviewDone(false);
+                    }}
+                    className={`flex w-full items-center px-3 py-2 text-left text-sm hover:bg-surface-2 ${
+                      !selectedAgent ? 'bg-primary-soft text-primary' : 'text-text'
+                    }`}
+                  >
+                    {t('bulk.allAgents', { count: agents.length })}
+                  </button>
+                  {filteredAgents.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedAgent(a);
+                        setAgentMenuOpen(false);
+                        setAgentSearch('');
+                        setPreviewDone(false);
+                      }}
+                      className={`flex w-full items-center px-3 py-2 text-left text-sm hover:bg-surface-2 ${
+                        selectedAgent?.id === a.id ? 'bg-primary-soft text-primary' : 'text-text'
+                      }`}
+                    >
+                      {a.name}
+                    </button>
+                  ))}
+                  {filteredAgents.length === 0 && (
+                    <p className="px-3 py-2 text-xs text-text-3">{t('bulk.noAgents')}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Shift selector */}
           <div>
             <span className="mb-1.5 block text-sm font-semibold text-text">
@@ -753,23 +846,34 @@ export function BulkApplyModal({
 
           {/* Weekday mask */}
           <div>
-            <p className="mb-1.5 text-sm font-semibold text-text">{t('bulk.weekdays')}</p>
-            <div className="flex gap-1.5">
-              {weekdayLabels.map(({ n, label }) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => toggleWeekday(n)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    weekdays.includes(n)
-                      ? 'bg-primary text-white'
-                      : 'bg-surface-2 text-text-2 hover:bg-surface'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <p className="text-sm font-semibold text-text">{t('bulk.weekdays')}</p>
+            <p className="mb-2 text-xs text-text-3">{t('bulk.weekdaysHint')}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {weekdayLabels.map(({ n, label }) => {
+                const on = weekdays.includes(n);
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleWeekday(n)}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      on
+                        ? 'border-primary bg-primary text-white'
+                        : 'border-dashed border-border bg-surface text-text-3 hover:border-text-3 hover:text-text-2'
+                    }`}
+                  >
+                    {on && <Check aria-hidden className="size-3" />}
+                    {label}
+                  </button>
+                );
+              })}
             </div>
+            <p className="mt-1.5 text-xs text-text-3">
+              {weekdays.length > 0
+                ? t('bulk.weekdaysCount', { count: weekdays.length })
+                : t('bulk.weekdaysNone')}
+            </p>
           </div>
 
           {/* Override toggle */}

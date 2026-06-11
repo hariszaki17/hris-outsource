@@ -169,7 +169,6 @@ export function DataTable<T>({
 
   function renderHeaderCell(col: Column<T>) {
     const align = col.align ?? 'left';
-    const isFlex = !col.width;
     return (
       <div
         key={col.id}
@@ -190,7 +189,6 @@ export function DataTable<T>({
 
   function renderDataCell(col: Column<T>, row: T) {
     const align = col.align ?? 'left';
-    const isFlex = !col.width;
     return (
       <div
         key={col.id}

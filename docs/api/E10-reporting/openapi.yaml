@@ -105,7 +105,11 @@ paths:
           company totals, expiring placements (E3), pending approvals counts
           (E5/E6/E7), attendance anomalies (E5), "Perlu Tindakan" approval-
           inbox panel rows. Super Admin receives the same payload plus
-          `role_label: "Super Admin"` (D1 — locked in EPICS §8).
+          `role_label: "Super Admin"` **and an admin-only `admin` block**
+          (DB-7: users & access, recent audit feed, org rollups by service
+          line, pending grants). The `admin` block is present **only** for
+          `super_admin` and omitted for `hr_admin` (extends the dashboard
+          D1 "same body" into a superset — locked in EPICS §8 2026-06-11).
         - `shift_leader` → `LeaderDashboard` shape:
           today's team status (clock-ins, late count from E5), pending
           verifications (E5), OT/leave pending counts (E6/E7), schedule
@@ -134,7 +138,7 @@ paths:
       x-rbac:
         roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
-      x-design-screens: [ETi5H, RiSPW, e8Sw1]
+      x-design-screens: [ETi5H, DhzyL, RiSPW, UMzuO, e8Sw1]
       responses:
         '200':
           description: |
@@ -1609,8 +1613,9 @@ components:
       description: |
         POV-shaped dashboard payload. The `role` discriminator selects
         the per-role variant. `super_admin` reuses the `HrDashboard`
-        shape with `role: super_admin` and `role_label: "Super Admin"`
-        (D1).
+        shape with `role: super_admin`, `role_label: "Super Admin"`, and
+        an additional `admin` widget block (DB-7) that `hr_admin` does not
+        receive — a superset, not a relabel (EPICS §8 2026-06-11).
       oneOf:
         - $ref: '#/components/schemas/HrDashboard'
         - $ref: '#/components/schemas/LeaderDashboard'
@@ -1751,6 +1756,95 @@ components:
             deep-links into the owning epic's approval queue.
           items:
             $ref: '#/components/schemas/ApprovalInboxRow'
+        admin:
+          $ref: '#/components/schemas/SuperAdminWidgets'
+
+    SuperAdminWidgets:
+      type: object
+      description: |
+        Admin-only widget block (DB-7). **Present only when the dashboard
+        `role` is `super_admin`** — omitted entirely from the `hr_admin`
+        payload (C-6). Each sub-widget deep-links into its owning epic
+        (DB-5). All counts may be 0 / arrays empty → clients render the
+        empty-state variant (C-5).
+      required: [user_access, recent_audit, org_rollups, pending_grants]
+      properties:
+        user_access:
+          type: object
+          description: User & access summary (E2 / F2.7).
+          required: [active_users, pending_provisioning, offboarded_30d]
+          properties:
+            active_users:
+              type: integer
+              description: Users with status `active` (E2).
+              example: 514
+            pending_provisioning:
+              type: integer
+              description: |
+                Employees awaiting login provisioning. Normally 0 under the
+                auto-provision rule (E2 §8 D1); surfaced for the F2.7 edge.
+              example: 0
+            offboarded_30d:
+              type: integer
+              description: Users offboarded / disabled within the last 30 days (F2.7).
+              example: 7
+        recent_audit:
+          type: array
+          description: |
+            Last sensitive admin actions (E1 audit), newest first; capped
+            (~8, C-7). A "Lihat semua" link deep-links to the full audit log.
+          items:
+            type: object
+            required: [id, actor_label, action, target_label, at]
+            properties:
+              id:
+                type: string
+                description: Audit entry id (`SWP-AUD-…`).
+                example: SWP-AUD-90412
+              actor_label:
+                type: string
+                example: "Sari (HR Admin)"
+              action:
+                type: string
+                description: Stable action code (UPPER_SNAKE_CASE).
+                example: ROLE_GRANTED
+              target_label:
+                type: string
+                example: "Budi → Shift Leader"
+              at:
+                type: string
+                format: date-time
+        org_rollups:
+          type: array
+          description: Headcount + active placements per service line (E3).
+          items:
+            type: object
+            required: [service_line, headcount, active_placements]
+            properties:
+              service_line:
+                type: string
+                enum: [FACILITY, BUILDING, PARKING]
+              headcount:
+                type: integer
+                example: 312
+              active_placements:
+                type: integer
+                example: 298
+        pending_grants:
+          type: object
+          description: Items awaiting super-admin action (deep-link, DB-5).
+          required: [bank_approvals, role_requests]
+          properties:
+            bank_approvals:
+              type: integer
+              description: |
+                Bank-account approval escalations (`PARTIALLY_APPROVED` →
+                HR/super-admin, see E1 rbac `CanApproveBank`).
+              example: 3
+            role_requests:
+              type: integer
+              description: Role-change requests awaiting grant.
+              example: 1
 
     LeaderDashboard:
       type: object
@@ -2007,7 +2101,9 @@ components:
         - `ATTENDANCE_VERIFY_NEEDED` — E5 (to leader)
         - `ATTENDANCE_CORRECTION_SUBMITTED` — E5 (to leader / HR if >7d)
         - `ATTENDANCE_AUTO_CLOSED` — E5 (to agent)
-        - `HR_CHANGE_REQUEST_SUBMITTED` — E2 (to HR)
+        - `HR_CHANGE_REQUEST_SUBMITTED` — E2 (to leader/HR)
+        - `CHANGE_REQUEST_APPROVED` — E2 (to submitting agent; lists applied fields / partial)
+        - `CHANGE_REQUEST_REJECTED` — E2 (to submitting agent; carries reason)
         - `AGREEMENT_EXPIRING` — E2 cron (to HR)
         - `PLACEMENT_EXPIRING` — E3 cron (to HR + leader)
         - `PLACEMENT_LEADER_CHANGED` — E3
@@ -2028,6 +2124,8 @@ components:
         - ATTENDANCE_CORRECTION_SUBMITTED
         - ATTENDANCE_AUTO_CLOSED
         - HR_CHANGE_REQUEST_SUBMITTED
+        - CHANGE_REQUEST_APPROVED
+        - CHANGE_REQUEST_REJECTED
         - AGREEMENT_EXPIRING
         - PLACEMENT_EXPIRING
         - PLACEMENT_LEADER_CHANGED

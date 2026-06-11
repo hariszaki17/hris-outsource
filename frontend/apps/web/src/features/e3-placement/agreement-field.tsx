@@ -14,7 +14,9 @@
  *   - no employee selected → muted placeholder
  *   - loading → spinner + "Memuat…"
  *   - resolved → read-only chip: agreement_no (fallback id) · type · validity
- *   - none found → warn box; value stays null so required validation blocks submit
+ *   - none found → advisory box (value stays null). Since EPICS §8 2026-06-11 the
+ *     agreement is OPTIONAL: the placement can be created "menunggu perjanjian"
+ *     (awaiting_agreement) and backfilled later, so this no longer gates submit.
  *
  * i18n namespace: `pickers`.
  */
@@ -114,12 +116,15 @@ export function AgreementField({ employeeId, value, onChange, error }: Agreement
     );
   }
 
-  // No active agreement — block submit via the form's required validation (value stays null).
+  // No active agreement — advisory only (value stays null). Submit is allowed:
+  // the placement is created awaiting an agreement, backfilled later (EPICS §8 2026-06-11).
   if (!resolved) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-warn-bd bg-warn-bg px-3 py-[9px]">
-        <AlertTriangle className="size-[15px] shrink-0 text-warn-tx" aria-hidden />
-        <p className="text-[12px] font-medium text-warn-tx">{t('agreement.none')}</p>
+      <div className="flex items-start gap-2 rounded-lg border border-warn-bd bg-warn-bg px-3 py-[9px]">
+        <AlertTriangle className="mt-[1px] size-[15px] shrink-0 text-warn-tx" aria-hidden />
+        <p className="text-[12px] font-medium leading-[1.4] text-warn-tx">
+          {t('agreement.noneAdvisory')}
+        </p>
       </div>
     );
   }

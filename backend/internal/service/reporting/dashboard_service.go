@@ -10,6 +10,7 @@ package reporting
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
@@ -110,6 +111,17 @@ func (s *DashboardService) hrDashboard(ctx context.Context, p auth.Principal, no
 		})
 	}
 
+	// admin block (DB-7): present ONLY for super_admin (C-6); hr_admin gets nil so
+	// the handler omits the `admin` property entirely.
+	var admin *dom.SuperAdminWidgets
+	if p.Role == auth.RoleSuperAdmin {
+		w, err := s.superAdminWidgets(ctx, now)
+		if err != nil {
+			return nil, apperr.Internal(err)
+		}
+		admin = w
+	}
+
 	return dom.HrDashboard{
 		Role:        role,
 		RoleLabel:   roleLabel,
@@ -131,7 +143,96 @@ func (s *DashboardService) hrDashboard(ctx context.Context, p auth.Principal, no
 		AttendanceAnomaliesToday: counts.PendingAttendanceVerify,
 		BillableTrend:            dom.BillableTrend{Granularity: "day", Points: []dom.BillableTrendPoint{}},
 		PendingApprovalsPanel:    panel,
+		Admin:                    admin,
 	}, nil
+}
+
+// recentAuditCap is the SuperAdminWidgets.recent_audit row cap (~8, C-7).
+const recentAuditCap = 8
+
+// superAdminWidgets assembles the admin-only widget block (DB-7). It maps the raw
+// repo bundle to the domain shape: free-text service-line name → FACILITY|BUILDING|
+// PARKING enum, and audit columns → actor_label/target_label.
+func (s *DashboardService) superAdminWidgets(ctx context.Context, now time.Time) (*dom.SuperAdminWidgets, error) {
+	data, err := s.repo.SuperAdminWidgets(ctx, now.UTC(), recentAuditCap)
+	if err != nil {
+		return nil, err
+	}
+
+	rollups := make([]dom.OrgRollup, 0, len(data.OrgRollups))
+	for _, r := range data.OrgRollups {
+		sl, ok := serviceLineEnum(r.ServiceLineName)
+		if !ok {
+			// Unknown service line (not one of the three SWP lines) — skip rather
+			// than emit a value outside the openapi enum.
+			continue
+		}
+		rollups = append(rollups, dom.OrgRollup{
+			ServiceLine:      sl,
+			Headcount:        r.Headcount,
+			ActivePlacements: r.ActivePlacements,
+		})
+	}
+
+	audit := make([]dom.AuditEntry, 0, len(data.RecentAudit))
+	for _, a := range data.RecentAudit {
+		audit = append(audit, dom.AuditEntry{
+			ID:          a.ID,
+			ActorLabel:  auditActorLabel(a.ActorUserID, a.ActorRole),
+			Action:      a.Action,
+			TargetLabel: a.EntityType + " " + a.EntityID,
+			At:          a.CreatedAt,
+		})
+	}
+
+	return &dom.SuperAdminWidgets{
+		UserAccess: dom.UserAccessSummary{
+			ActiveUsers: data.ActiveUsers,
+			// pending_provisioning: per E2 §8 D1 employees are auto-provisioned a login
+			// on creation, so there is no "awaiting provisioning" queue/table in the
+			// schema → honest 0 (required field present per openapi).
+			PendingProvisioning: 0,
+			Offboarded30d:       data.OffboardedUsers30d,
+		},
+		RecentAudit: audit,
+		OrgRollups:  rollups,
+		PendingGrants: dom.PendingGrants{
+			BankApprovals: data.BankApprovalsPending,
+			// role_requests: roles are set directly on users (and shift_leader scope is
+			// derived from E3 assignments) — there is no role-change-request table in the
+			// schema → honest 0 (required field present per openapi).
+			RoleRequests: 0,
+		},
+	}, nil
+}
+
+// serviceLineEnum maps a free-text service_lines.name to the openapi
+// FACILITY|BUILDING|PARKING enum (the schema stores names, not enum codes — seeded
+// as "Facility Services" / "Building Management" / "Parking").
+func serviceLineEnum(name string) (dom.ServiceLine, bool) {
+	switch {
+	case strings.Contains(strings.ToUpper(name), "FACILITY"):
+		return dom.ServiceLineFacility, true
+	case strings.Contains(strings.ToUpper(name), "BUILDING"):
+		return dom.ServiceLineBuilding, true
+	case strings.Contains(strings.ToUpper(name), "PARKING"):
+		return dom.ServiceLineParking, true
+	default:
+		return "", false
+	}
+}
+
+// auditActorLabel composes recent_audit.actor_label from the audit columns. The
+// schema has no human-name column on audit_log, so we use the actor user id +
+// role; a null actor is a system/cron action.
+func auditActorLabel(userID, role *string) string {
+	if userID == nil || *userID == "" {
+		return "Sistem"
+	}
+	if role != nil && *role != "" {
+		return *userID + " (" + *role + ")"
+	}
+	return *userID
 }
 
 // --- Shift Leader ---

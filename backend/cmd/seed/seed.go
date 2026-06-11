@@ -234,12 +234,13 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	}
 
 	// -----------------------------------------------------------------------
-	// Phase 4 (04-04): Seed pending change-requests.
-	// FK: change_requests → employees (must run AFTER seedEmployees).
-	// Two PENDING CRs against Budi Santoso (SWP-EMP-2891) so the HR queue
-	// renders content on first load and the diff (old→new) is meaningful:
-	//   SWP-CHG-2117  MULTIPLE (phone + bank_account change)
-	//   SWP-CHG-2118  ADDRESS change
+	// Phase 4 (04-04) + EP-5 redesign (2026-06-11): Seed pending change-requests.
+	// FK: change_requests → employees (must run AFTER seedEmployees); the SL
+	// company-scope routing also relies on seedPlacements (run later) placing the
+	// submitter at a client company. Three PENDING CRs:
+	//   SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone+bank)  → SL out-of-company 403
+	//   SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone+bank)  → SL bank-split → HR finalize
+	//   SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only → SL/HR full approve / reject
 	// -----------------------------------------------------------------------
 	if err := seedChangeRequests(ctx, pool); err != nil {
 		return fmt.Errorf("seed change_requests: %w", err)
@@ -1012,9 +1013,18 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 		joinAt                string // YYYY-MM-DD
 		gender                string
 		phone                 *string
+		emailPersonal         *string
+		address               *string
+		birthDate             *string // YYYY-MM-DD
+		birthPlace            *string
+		npwp                  *string
+		bpjsKesehatan         *string
+		bpjsKetenagakerjaan   *string
 		bankName              *string
 		bankAccountNumber     *string
 		bankAccountHolderName *string
+		emergencyContactName  *string
+		emergencyContactPhone *string
 	}
 
 	bca := "BCA"
@@ -1052,12 +1062,25 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 			bankAccountHolderName: &budiName,
 		},
 		{
-			id:       "SWP-EMP-3001",
-			fullName: "Dewi Lestari",
-			nik:      "3175001505903001",
-			nip:      "3001",
-			joinAt:   "2022-04-01",
-			gender:   "FEMALE",
+			id:                    "SWP-EMP-3001",
+			fullName:              "Dewi Lestari",
+			nik:                   "3175001505903001",
+			nip:                   "3001",
+			joinAt:                "2022-04-01",
+			gender:                "FEMALE",
+			phone:                 strPtr("+62-812-3001-0001"),
+			emailPersonal:         strPtr("dewi.lestari.personal@gmail.com"),
+			address:               strPtr("Jl. Melawai Raya No. 12, Kebayoran Baru, Jakarta Selatan 12160"),
+			birthDate:             strPtr("1995-08-17"),
+			birthPlace:            strPtr("Bandung"),
+			npwp:                  strPtr("09.123.456.7-011.000"),
+			bpjsKesehatan:         strPtr("0001234567890"),
+			bpjsKetenagakerjaan:   strPtr("23B1234567"),
+			bankName:              strPtr("BCA"),
+			bankAccountNumber:     strPtr("2891037001"),
+			bankAccountHolderName: strPtr("Dewi Lestari"),
+			emergencyContactName:  strPtr("Sapto Lestari"),
+			emergencyContactPhone: strPtr("+62-812-9000-1234"),
 		},
 		{
 			id:       "SWP-EMP-3002",
@@ -1077,20 +1100,51 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 		},
 	}
 
+	// ON CONFLICT DO UPDATE so a re-seed enriches an existing row (e.g. Dewi's full
+	// profile) without clobbering intentionally-omitted values: every nullable column
+	// is COALESCE(EXCLUDED.col, employees.col), so a NULL in the seed keeps the stored
+	// value. status is left untouched (not reset on re-seed).
 	const empQ = `
 		INSERT INTO employees
 			(id, full_name, nik, nip, join_at, gender,
-			 phone, bank_name, bank_account_number, bank_account_holder_name,
+			 phone, email_personal, address, birth_date, birth_place,
+			 npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
+			 bank_name, bank_account_number, bank_account_holder_name,
+			 emergency_contact_name, emergency_contact_phone,
 			 status)
 		VALUES ($1, $2, $3, $4, $5::date, $6,
-		        $7, $8, $9, $10,
+		        $7, $8, $9, $10::date, $11,
+		        $12, $13, $14,
+		        $15, $16, $17,
+		        $18, $19,
 		        'active')
-		ON CONFLICT (id) DO NOTHING`
+		ON CONFLICT (id) DO UPDATE SET
+			full_name                = COALESCE(EXCLUDED.full_name, employees.full_name),
+			nik                      = COALESCE(EXCLUDED.nik, employees.nik),
+			nip                      = COALESCE(EXCLUDED.nip, employees.nip),
+			join_at                  = COALESCE(EXCLUDED.join_at, employees.join_at),
+			gender                   = COALESCE(EXCLUDED.gender, employees.gender),
+			phone                    = COALESCE(EXCLUDED.phone, employees.phone),
+			email_personal           = COALESCE(EXCLUDED.email_personal, employees.email_personal),
+			address                  = COALESCE(EXCLUDED.address, employees.address),
+			birth_date               = COALESCE(EXCLUDED.birth_date, employees.birth_date),
+			birth_place              = COALESCE(EXCLUDED.birth_place, employees.birth_place),
+			npwp                     = COALESCE(EXCLUDED.npwp, employees.npwp),
+			bpjs_kesehatan           = COALESCE(EXCLUDED.bpjs_kesehatan, employees.bpjs_kesehatan),
+			bpjs_ketenagakerjaan     = COALESCE(EXCLUDED.bpjs_ketenagakerjaan, employees.bpjs_ketenagakerjaan),
+			bank_name                = COALESCE(EXCLUDED.bank_name, employees.bank_name),
+			bank_account_number      = COALESCE(EXCLUDED.bank_account_number, employees.bank_account_number),
+			bank_account_holder_name = COALESCE(EXCLUDED.bank_account_holder_name, employees.bank_account_holder_name),
+			emergency_contact_name   = COALESCE(EXCLUDED.emergency_contact_name, employees.emergency_contact_name),
+			emergency_contact_phone  = COALESCE(EXCLUDED.emergency_contact_phone, employees.emergency_contact_phone)`
 
 	for _, e := range employees {
 		if _, err := pool.Pool.Exec(ctx, empQ,
 			e.id, e.fullName, e.nik, e.nip, e.joinAt, e.gender,
-			e.phone, e.bankName, e.bankAccountNumber, e.bankAccountHolderName,
+			e.phone, e.emailPersonal, e.address, e.birthDate, e.birthPlace,
+			e.npwp, e.bpjsKesehatan, e.bpjsKetenagakerjaan,
+			e.bankName, e.bankAccountNumber, e.bankAccountHolderName,
+			e.emergencyContactName, e.emergencyContactPhone,
 		); err != nil {
 			return fmt.Errorf("seed employee %q: %w", e.id, err)
 		}
@@ -1475,25 +1529,41 @@ func seedMasterData(ctx context.Context, pool *db.Pool) error {
 	return nil
 }
 
-// seedChangeRequests inserts Phase-4 pending change-request fixtures.
-// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+// seedChangeRequests inserts the EP-5 pending change-request fixtures (redesigned
+// 2026-06-11). All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
 //
-// Budi Santoso (SWP-EMP-2891) has phone "+62-812-3344-5566" and BCA bank
-// account "1234567890" seeded in seedEmployees — these are the "old" values
-// so the HR approval detail renders a meaningful old→new diff.
+// Budi Santoso (SWP-EMP-2891) has phone "+62-812-3344-5566" and BCA bank account
+// "1234567890"; Dewi Lestari (SWP-EMP-3001) has empty profile fields — both seeded
+// in seedEmployees, so the approval detail renders a meaningful old→new diff.
 //
-// Change requests:
+// Change requests (status: pending):
 //
-//	SWP-CHG-2117  MULTIPLE  — phone + bank_account change (status: pending)
-//	SWP-CHG-2118  ADDRESS   — address change              (status: pending)
+//	SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone+bank)  — SL out-of-company 403 target
+//	SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone+bank)  — SL bank-split → HR finalize
+//	SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only — SL/HR full approve / reject
 func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
-	// SWP-CHG-2117: MULTIPLE (phone + bank_account).
+	// Change-request fixtures aligned with the 2026-06-11 redesign (E2 EP-5):
+	// tiers shifted (address → instant, emergency-contact → approval) and approval
+	// now routes to the on-site shift leader (company scope) with HR bank-split.
+	//
+	// The shift leader Rudi (SWP-EMP-1108) leads SWP-CMP-0021 (Plaza Senayan), where
+	// Dewi (SWP-EMP-3001) is placed. Budi (SWP-EMP-2891) is placed at SWP-CMP-0022
+	// (Mall Kelapa Gading) — OUT of Rudi's company scope. These placements are seeded
+	// later in seedPlacements; both demo agents carry an active placement company so
+	// the SL company-scope resolution (GetEmployeeCompanyID → GuardCompany) works.
+	//
+	//   SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone + bank)  → SL Rudi OUT_OF_SCOPE (403)
+	//   SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone + bank)  → SL applies phone, bank
+	//                                                              escalates to HR (partial)
+	//   SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only   → SL fully approves
 	const crQ = `
 		INSERT INTO change_requests
 			(id, employee_id, changes, request_type, note, submitted_at)
 		VALUES ($1, $2, $3::jsonb, $4, $5, $6::timestamptz)
 		ON CONFLICT (id) DO NOTHING`
 
+	// SWP-CHG-2117: MULTIPLE (phone + bank) for Budi @ CMP-0022 — the cross-company
+	// 403 target for shift leader Rudi (who leads CMP-0021).
 	if _, err := pool.Pool.Exec(ctx, crQ,
 		"SWP-CHG-2117",
 		"SWP-EMP-2891",
@@ -1506,18 +1576,34 @@ func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
 	}
 	slog.Info("seed: upserted change request", "id", "SWP-CHG-2117", "type", "MULTIPLE")
 
-	// SWP-CHG-2118: ADDRESS change.
+	// SWP-CHG-2119: MULTIPLE (phone + bank) for Dewi @ CMP-0021 — the in-company
+	// bank-split target. SL Rudi approves → phone applied + bank escalated to HR
+	// (status=partially_approved, bank_pending=true); HR finalizes the bank field.
 	if _, err := pool.Pool.Exec(ctx, crQ,
-		"SWP-CHG-2118",
-		"SWP-EMP-2891",
-		`{"address":"Jl. Melati 5, Jakarta Selatan"}`,
-		"ADDRESS",
-		nil,
-		"2026-06-03T09:30:00Z",
+		"SWP-CHG-2119",
+		"SWP-EMP-3001",
+		`{"phone":"+62-813-5566-7788","bank_account":{"bank_name":"Mandiri","account_number":"1440011223344","account_holder_name":"Dewi Lestari"}}`,
+		"MULTIPLE",
+		"Pindah nomor & rekening gaji",
+		"2026-06-04T07:15:00Z",
 	); err != nil {
-		return fmt.Errorf("seed change_request SWP-CHG-2118: %w", err)
+		return fmt.Errorf("seed change_request SWP-CHG-2119: %w", err)
 	}
-	slog.Info("seed: upserted change request", "id", "SWP-CHG-2118", "type", "ADDRESS")
+	slog.Info("seed: upserted change request", "id", "SWP-CHG-2119", "type", "MULTIPLE")
+
+	// SWP-CHG-2120: EMERGENCY_CONTACT only for Dewi @ CMP-0021 — a non-bank request
+	// the shift leader can fully approve (no escalation).
+	if _, err := pool.Pool.Exec(ctx, crQ,
+		"SWP-CHG-2120",
+		"SWP-EMP-3001",
+		`{"emergency_contact":{"name":"Siti Lestari","phone":"+62-877-1234-9000"}}`,
+		"EMERGENCY_CONTACT",
+		"Perbarui kontak darurat",
+		"2026-06-04T09:30:00Z",
+	); err != nil {
+		return fmt.Errorf("seed change_request SWP-CHG-2120: %w", err)
+	}
+	slog.Info("seed: upserted change request", "id", "SWP-CHG-2120", "type", "EMERGENCY_CONTACT")
 
 	return nil
 }

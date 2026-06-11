@@ -41,6 +41,9 @@ func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (svc.Pla
 		SiteID: "SWP-SITE-0001", PositionID: "SWP-POS-014", ServiceLine: "parking",
 	}, true, nil
 }
+func (f *fakeClockRepo) IsOnApprovedLeave(_ context.Context, _ string, _ time.Time) (bool, error) {
+	return false, nil
+}
 func (f *fakeClockRepo) GetSite(_ context.Context, _ string) (*float64, *float64, int, bool, error) {
 	return nil, nil, 0, true, nil // no coords → geofence skipped
 }

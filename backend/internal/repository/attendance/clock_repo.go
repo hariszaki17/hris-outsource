@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -85,6 +86,30 @@ func (r *ClockRepo) GetTodaySchedule(ctx context.Context, employeeID string, now
 		return "", time.Time{}, time.Time{}, false, err
 	}
 	return row.ScheduleID, row.ShiftStartAt, row.ShiftEndAt, true, nil
+}
+
+// IsOnApprovedLeave reports whether the agent has an approved leave covering today
+// (Asia/Jakarta calendar date). Reuses the shared FindApprovedLeaveForAgentDate query;
+// pgx.ErrNoRows (no covering leave) → (false, nil). The service hard-blocks clock-in
+// (ON_LEAVE) when this returns true.
+func (r *ClockRepo) IsOnApprovedLeave(ctx context.Context, employeeID string, now time.Time) (bool, error) {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		loc = time.FixedZone("WIB", 7*3600)
+	}
+	d := now.In(loc)
+	jakartaDate := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc)
+	_, err = r.q.FindApprovedLeaveForAgentDate(ctx, sqlcgen.FindApprovedLeaveForAgentDateParams{
+		EmployeeID: employeeID,
+		LeaveDate:  pgtype.Date{Time: jakartaDate, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // GetOpenAttendance returns the caller's currently-open record id. found=false when

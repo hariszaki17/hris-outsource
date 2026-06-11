@@ -73,6 +73,7 @@ import {
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  BackfillAgreementModal,
   EndConfirm,
   RenewModal,
   ResignModal,
@@ -233,6 +234,7 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
   const [showEnd, setShowEnd] = useState(false);
   const [showTerminate, setShowTerminate] = useState(false);
   const [showResign, setShowResign] = useState(false);
+  const [showBackfill, setShowBackfill] = useState(false);
 
   // Data — `query.data?.data` is `PlacementDetailResponse`
   const placementQuery = useGetPlacement(placementId);
@@ -293,6 +295,7 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
 
   const placementInfo: PlacementInfo = {
     id: placement.id,
+    employee_id: placement.employee_id,
     employee_name: placement.employee_name ?? placement.employee_id,
     client_company_id: placement.client_company_id,
     client_company_name: placement.client_company_name ?? placement.client_company_id,
@@ -341,13 +344,18 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
             <Initials name={placement.employee_name ?? '?'} />
           </div>
           <div className="flex flex-col gap-[3px]">
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <span className="text-[20px] font-bold text-text">
                 {placement.employee_name ?? placement.employee_id}
               </span>
               <StatusBadge tone={toneForPlacement(placement.lifecycle_status)} dot>
                 {STATUS_LABEL[placement.lifecycle_status]}
               </StatusBadge>
+              {placement.awaiting_agreement && (
+                <StatusBadge tone="warn" dot>
+                  {t('awaitingAgreement.badge')}
+                </StatusBadge>
+              )}
             </div>
             <span className="text-[13px] text-text-2">
               {[
@@ -552,18 +560,47 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
           <DetailCard
             title={t('card.agreement')}
             icon={<FileText className="size-3.5 text-text-2" aria-hidden="true" />}
+            action={
+              placement.awaiting_agreement && canEdit && !terminal ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowBackfill(true)}
+                >
+                  <FileText className="mr-1.5 size-3.5" aria-hidden="true" />
+                  {t('awaitingAgreement.backfillAction')}
+                </Button>
+              ) : undefined
+            }
           >
-            <KvRow label={t('field.agreementType')} value={placement.agreement_type ?? '—'} />
-            <KvRow label={t('field.agreementId')}>
-              <IdChip id={placement.agreement_id} />
-            </KvRow>
-            {/* Info note: placement period sits within agreement (.pen Fpre6) */}
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-3 py-2">
-              <span className="mt-0.5 text-[11px] text-info-tx" aria-hidden="true">
-                ⓘ
-              </span>
-              <p className="text-[12px] text-info-tx">{t('agreement.periodNote')}</p>
-            </div>
+            {placement.awaiting_agreement ? (
+              /* Awaiting agreement — no agreement attached yet (EPICS §8 2026-06-11). */
+              <Banner
+                tone="warn"
+                title={t('awaitingAgreement.title')}
+                description={t('awaitingAgreement.desc')}
+                className="mt-2"
+              />
+            ) : (
+              <>
+                <KvRow label={t('field.agreementType')} value={placement.agreement_type ?? '—'} />
+                <KvRow label={t('field.agreementId')}>
+                  {placement.agreement_id ? (
+                    <IdChip id={placement.agreement_id} />
+                  ) : (
+                    <span className="text-[13px] text-text-3">—</span>
+                  )}
+                </KvRow>
+                {/* Info note: placement period sits within agreement (.pen Fpre6) */}
+                <div className="mt-3 flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-3 py-2">
+                  <span className="mt-0.5 text-[11px] text-info-tx" aria-hidden="true">
+                    ⓘ
+                  </span>
+                  <p className="text-[12px] text-info-tx">{t('agreement.periodNote')}</p>
+                </div>
+              </>
+            )}
           </DetailCard>
 
           {/* Shift-leader card (.pen g3pGV) — INV-2/3/4. Read-only here: leader
@@ -595,6 +632,11 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
       <ResignModal
         open={showResign}
         onClose={() => setShowResign(false)}
+        placement={placementInfo}
+      />
+      <BackfillAgreementModal
+        open={showBackfill}
+        onClose={() => setShowBackfill(false)}
         placement={placementInfo}
       />
     </div>

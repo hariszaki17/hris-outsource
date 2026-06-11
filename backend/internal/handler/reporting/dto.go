@@ -120,6 +120,42 @@ type hrDashboardResp struct {
 	AttendanceAnomaliesToday int                    `json:"attendance_anomalies_today"`
 	BillableTrend            billableTrendResp      `json:"billable_trend"`
 	PendingApprovalsPanel    []approvalInboxRowResp `json:"pending_approvals_panel"`
+	// Admin is present ONLY for super_admin (omitempty → omitted for hr_admin, C-6).
+	Admin *superAdminWidgetsResp `json:"admin,omitempty"`
+}
+
+// --- SuperAdminWidgets (openapi schemas.SuperAdminWidgets, DB-7) ---
+
+type userAccessResp struct {
+	ActiveUsers         int `json:"active_users"`
+	PendingProvisioning int `json:"pending_provisioning"`
+	Offboarded30d       int `json:"offboarded_30d"`
+}
+
+type auditEntryResp struct {
+	ID          string `json:"id"`
+	ActorLabel  string `json:"actor_label"`
+	Action      string `json:"action"`
+	TargetLabel string `json:"target_label"`
+	At          string `json:"at"`
+}
+
+type orgRollupResp struct {
+	ServiceLine      string `json:"service_line"`
+	Headcount        int    `json:"headcount"`
+	ActivePlacements int    `json:"active_placements"`
+}
+
+type pendingGrantsResp struct {
+	BankApprovals int `json:"bank_approvals"`
+	RoleRequests  int `json:"role_requests"`
+}
+
+type superAdminWidgetsResp struct {
+	UserAccess    userAccessResp    `json:"user_access"`
+	RecentAudit   []auditEntryResp  `json:"recent_audit"`
+	OrgRollups    []orgRollupResp   `json:"org_rollups"`
+	PendingGrants pendingGrantsResp `json:"pending_grants"`
 }
 
 type leaderCompanyResp struct {
@@ -240,6 +276,7 @@ func toDashboard(v any) any {
 				Points:      toTrendPoints(d.BillableTrend.Points),
 			},
 			PendingApprovalsPanel: toApprovalRows(d.PendingApprovalsPanel),
+			Admin:                 toSuperAdminWidgets(d.Admin),
 		}
 	case dom.LeaderDashboard:
 		alerts := make([]scheduleAlertResp, 0, len(d.ScheduleAlerts))
@@ -307,6 +344,46 @@ func toDashboard(v any) any {
 		}
 	default:
 		return v
+	}
+}
+
+// toSuperAdminWidgets maps the admin-only block (nil → nil so the `admin` field is
+// omitted entirely for hr_admin, C-6). recent_audit / org_rollups are always arrays
+// (never null) per openapi (empty → client renders the empty-state, C-5).
+func toSuperAdminWidgets(w *dom.SuperAdminWidgets) *superAdminWidgetsResp {
+	if w == nil {
+		return nil
+	}
+	audit := make([]auditEntryResp, 0, len(w.RecentAudit))
+	for _, a := range w.RecentAudit {
+		audit = append(audit, auditEntryResp{
+			ID:          a.ID,
+			ActorLabel:  a.ActorLabel,
+			Action:      a.Action,
+			TargetLabel: a.TargetLabel,
+			At:          rfc3339(a.At),
+		})
+	}
+	rollups := make([]orgRollupResp, 0, len(w.OrgRollups))
+	for _, r := range w.OrgRollups {
+		rollups = append(rollups, orgRollupResp{
+			ServiceLine:      string(r.ServiceLine),
+			Headcount:        r.Headcount,
+			ActivePlacements: r.ActivePlacements,
+		})
+	}
+	return &superAdminWidgetsResp{
+		UserAccess: userAccessResp{
+			ActiveUsers:         w.UserAccess.ActiveUsers,
+			PendingProvisioning: w.UserAccess.PendingProvisioning,
+			Offboarded30d:       w.UserAccess.Offboarded30d,
+		},
+		RecentAudit: audit,
+		OrgRollups:  rollups,
+		PendingGrants: pendingGrantsResp{
+			BankApprovals: w.PendingGrants.BankApprovals,
+			RoleRequests:  w.PendingGrants.RoleRequests,
+		},
 	}
 }
 

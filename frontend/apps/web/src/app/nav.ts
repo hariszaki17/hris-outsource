@@ -113,23 +113,17 @@ export const SETTINGS_ITEM: NavItem = {
  * role is `agent` (AW-4); item visibility within it stays permission-keyed.
  */
 export const AGENT_NAV_ITEMS: readonly NavItem[] = [
-  { to: '/me', labelKey: 'nav.meDashboard', icon: LayoutDashboard, requires: 'self.dashboard' },
+  // Kehadiran (home /me) merges the old dashboard + attendance + schedule: live clock, clock-in/out,
+  // today's shift and recent history. Pengajuan merges leave + overtime (request tabs). Akun merges
+  // profile + payslip + tiered Ubah Profil. See docs/eng/AGENT-WEB-ACCESS.md + E2 employee-profile.md.
+  { to: '/me', labelKey: 'nav.meKehadiran', icon: Fingerprint, requires: 'self.attendance' },
   {
-    to: '/me/attendance',
-    labelKey: 'nav.meAttendance',
-    icon: Fingerprint,
-    requires: 'self.attendance',
+    to: '/me/pengajuan',
+    labelKey: 'nav.mePengajuan',
+    icon: ClipboardCheck,
+    requires: { anyOf: ['self.leave', 'self.overtime'] },
   },
-  {
-    to: '/me/schedule',
-    labelKey: 'nav.meSchedule',
-    icon: CalendarClock,
-    requires: 'self.schedule',
-  },
-  { to: '/me/leave', labelKey: 'nav.meLeave', icon: Plane, requires: 'self.leave' },
-  { to: '/me/overtime', labelKey: 'nav.meOvertime', icon: Timer, requires: 'self.overtime' },
-  { to: '/me/payslip', labelKey: 'nav.mePayslip', icon: Banknote, requires: 'self.payslip' },
-  { to: '/me/profile', labelKey: 'nav.meProfile', icon: UserRound, requires: 'self.profile' },
+  { to: '/me/akun', labelKey: 'nav.meAkun', icon: UserRound, requires: 'self.profile' },
 ];
 
 /** The primary nav backbone for a role: agents get the self-service list, staff get the modules. */
@@ -241,6 +235,11 @@ export function activeSection(pathname: string): string | null {
  */
 const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   // Agent self-service (/me/*) — most-specific first; /me/notifications is auth-only (no entry).
+  // The merged homes: Kehadiran (/me), Pengajuan (/me/pengajuan), Akun (/me/akun). The old
+  // per-feature paths are kept as guarded redirect routes (router.tsx) so bookmarks survive —
+  // their requirements stay listed here so a denied deep link still resolves to /forbidden.
+  [/^\/me\/pengajuan/, { anyOf: ['self.leave', 'self.overtime'] }],
+  [/^\/me\/akun/, 'self.profile'],
   [/^\/me\/attendance/, 'self.attendance'],
   [/^\/me\/correction/, 'self.attendance'],
   [/^\/me\/schedule/, 'self.schedule'],
@@ -248,7 +247,8 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   [/^\/me\/overtime/, 'self.overtime'],
   [/^\/me\/payslip/, 'self.payslip'],
   [/^\/me\/profile/, 'self.profile'],
-  [/^\/me$/, 'self.dashboard'],
+  // Kehadiran is the agent home — gated on self.attendance (the live clock-in/out surface).
+  [/^\/me$/, 'self.attendance'],
   // Most-specific first.
   [/^\/client-companies\/[^/]+\/roster/, 'placements.read'],
   [/^\/client-companies/, 'clients.read'],

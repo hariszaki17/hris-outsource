@@ -16,7 +16,8 @@ const createEmployee = `-- name: CreateEmployee :one
 INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
-    bank_name, bank_account_number, bank_account_holder_name, created_by
+    bank_name, bank_account_number, bank_account_holder_name,
+    emergency_contact_name, emergency_contact_phone, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     $1,
@@ -36,11 +37,14 @@ INSERT INTO employees (
     $15,
     $16,
     $17,
-    $18
+    $18,
+    $19,
+    $20
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at
 `
 
@@ -62,6 +66,8 @@ type CreateEmployeeParams struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
 	CreatedBy             *string
 }
 
@@ -84,6 +90,10 @@ type CreateEmployeeRow struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -110,6 +120,8 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		arg.BankName,
 		arg.BankAccountNumber,
 		arg.BankAccountHolderName,
+		arg.EmergencyContactName,
+		arg.EmergencyContactPhone,
 		arg.CreatedBy,
 	)
 	var i CreateEmployeeRow
@@ -132,6 +144,10 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		&i.BankName,
 		&i.BankAccountNumber,
 		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -141,40 +157,72 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 }
 
 const getEmployeeByID = `-- name: GetEmployeeByID :one
-SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
-       phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
-       bank_name, bank_account_number, bank_account_holder_name,
-       status, created_by, created_at, updated_at
-FROM employees
-WHERE id = $1
-  AND deleted_at IS NULL
+SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
+       e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
+       e.bank_name, e.bank_account_number, e.bank_account_holder_name,
+       e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
+       e.status, e.created_by, e.created_at, e.updated_at,
+       pos.id   AS current_position_id,
+       pos.name AS current_position_name,
+       sl.id    AS current_service_line_id,
+       sl.name  AS current_service_line_name,
+       cc.id    AS current_client_company_id,
+       cc.name  AS current_client_company_name
+FROM employees e
+LEFT JOIN LATERAL (
+    SELECT p.position_id, p.service_line_id, p.client_company_id
+    FROM placements p
+    WHERE p.employee_id = e.id
+      AND p.deleted_at IS NULL
+      AND p.lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START','EXTENDED')
+    ORDER BY p.status_changed_at DESC
+    LIMIT 1
+) cp ON true
+LEFT JOIN positions        pos ON pos.id = cp.position_id
+LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
+LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
+WHERE e.id = $1
+  AND e.deleted_at IS NULL
 `
 
 type GetEmployeeByIDRow struct {
-	ID                    string
-	UserID                *string
-	FullName              string
-	Nik                   string
-	Nip                   string
-	JoinAt                pgtype.Date
-	Gender                *string
-	BirthDate             pgtype.Date
-	BirthPlace            *string
-	Phone                 *string
-	EmailPersonal         *string
-	Address               *string
-	Npwp                  *string
-	BpjsKesehatan         *string
-	BpjsKetenagakerjaan   *string
-	BankName              *string
-	BankAccountNumber     *string
-	BankAccountHolderName *string
-	Status                string
-	CreatedBy             *string
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                       string
+	UserID                   *string
+	FullName                 string
+	Nik                      string
+	Nip                      string
+	JoinAt                   pgtype.Date
+	Gender                   *string
+	BirthDate                pgtype.Date
+	BirthPlace               *string
+	Phone                    *string
+	EmailPersonal            *string
+	Address                  *string
+	Npwp                     *string
+	BpjsKesehatan            *string
+	BpjsKetenagakerjaan      *string
+	BankName                 *string
+	BankAccountNumber        *string
+	BankAccountHolderName    *string
+	EmergencyContactName     *string
+	EmergencyContactPhone    *string
+	AppLanguage              string
+	PhotoObjectKey           *string
+	Status                   string
+	CreatedBy                *string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	CurrentPositionID        *string
+	CurrentPositionName      *string
+	CurrentServiceLineID     *string
+	CurrentServiceLineName   *string
+	CurrentClientCompanyID   *string
+	CurrentClientCompanyName *string
 }
 
+// current_* come from the employee's single non-terminal placement (INV-1 → at most
+// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
+// employee still resolves (current_* null).
 func (q *Queries) GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error) {
 	row := q.db.QueryRow(ctx, getEmployeeByID, id)
 	var i GetEmployeeByIDRow
@@ -197,10 +245,20 @@ func (q *Queries) GetEmployeeByID(ctx context.Context, id string) (GetEmployeeBy
 		&i.BankName,
 		&i.BankAccountNumber,
 		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CurrentPositionID,
+		&i.CurrentPositionName,
+		&i.CurrentServiceLineID,
+		&i.CurrentServiceLineName,
+		&i.CurrentClientCompanyID,
+		&i.CurrentClientCompanyName,
 	)
 	return i, err
 }
@@ -209,6 +267,7 @@ const getEmployeeByNIK = `-- name: GetEmployeeByNIK :one
 SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
        phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
        bank_name, bank_account_number, bank_account_holder_name,
+       emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
        status, created_by, created_at, updated_at
 FROM employees
 WHERE nik = $1
@@ -234,6 +293,10 @@ type GetEmployeeByNIKRow struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -263,6 +326,10 @@ func (q *Queries) GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployee
 		&i.BankName,
 		&i.BankAccountNumber,
 		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -275,6 +342,7 @@ const listEmployees = `-- name: ListEmployees :many
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
+       e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
        pos.id   AS current_position_id,
        pos.name AS current_position_name,
@@ -366,6 +434,10 @@ type ListEmployeesRow struct {
 	BankName                 *string
 	BankAccountNumber        *string
 	BankAccountHolderName    *string
+	EmergencyContactName     *string
+	EmergencyContactPhone    *string
+	AppLanguage              string
+	PhotoObjectKey           *string
 	Status                   string
 	CreatedBy                *string
 	CreatedAt                time.Time
@@ -419,6 +491,10 @@ func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([
 			&i.BankName,
 			&i.BankAccountNumber,
 			&i.BankAccountHolderName,
+			&i.EmergencyContactName,
+			&i.EmergencyContactPhone,
+			&i.AppLanguage,
+			&i.PhotoObjectKey,
 			&i.Status,
 			&i.CreatedBy,
 			&i.CreatedAt,
@@ -449,6 +525,7 @@ WHERE id = $2
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at
 `
 
@@ -476,6 +553,10 @@ type SetEmployeeStatusRow struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -505,6 +586,10 @@ func (q *Queries) SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusPa
 		&i.BankName,
 		&i.BankAccountNumber,
 		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -551,12 +636,15 @@ SET full_name                = $1,
     bank_name                = $14,
     bank_account_number      = $15,
     bank_account_holder_name = $16,
+    emergency_contact_name   = $17,
+    emergency_contact_phone  = $18,
     updated_at               = now()
-WHERE id = $17
+WHERE id = $19
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           status, created_by, created_at, updated_at
 `
 
@@ -577,6 +665,8 @@ type UpdateEmployeeParams struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
 	ID                    string
 }
 
@@ -599,6 +689,10 @@ type UpdateEmployeeRow struct {
 	BankName              *string
 	BankAccountNumber     *string
 	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -623,6 +717,8 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		arg.BankName,
 		arg.BankAccountNumber,
 		arg.BankAccountHolderName,
+		arg.EmergencyContactName,
+		arg.EmergencyContactPhone,
 		arg.ID,
 	)
 	var i UpdateEmployeeRow
@@ -645,6 +741,103 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		&i.BankName,
 		&i.BankAccountNumber,
 		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEmployeeSelfInstant = `-- name: UpdateEmployeeSelfInstant :one
+UPDATE employees
+SET address          = COALESCE($1, address),
+    app_language     = COALESCE($2, app_language),
+    photo_object_key = COALESCE($3, photo_object_key),
+    updated_at       = now()
+WHERE id = $4
+  AND deleted_at IS NULL
+RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
+          phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
+          bank_name, bank_account_number, bank_account_holder_name,
+          emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          status, created_by, created_at, updated_at
+`
+
+type UpdateEmployeeSelfInstantParams struct {
+	Address        *string
+	AppLanguage    *string
+	PhotoObjectKey *string
+	ID             string
+}
+
+type UpdateEmployeeSelfInstantRow struct {
+	ID                    string
+	UserID                *string
+	FullName              string
+	Nik                   string
+	Nip                   string
+	JoinAt                pgtype.Date
+	Gender                *string
+	BirthDate             pgtype.Date
+	BirthPlace            *string
+	Phone                 *string
+	EmailPersonal         *string
+	Address               *string
+	Npwp                  *string
+	BpjsKesehatan         *string
+	BpjsKetenagakerjaan   *string
+	BankName              *string
+	BankAccountNumber     *string
+	BankAccountHolderName *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	AppLanguage           string
+	PhotoObjectKey        *string
+	Status                string
+	CreatedBy             *string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
+// EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
+// fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
+// when the caller passes NULL, so partial patches don't clobber the other fields.
+func (q *Queries) UpdateEmployeeSelfInstant(ctx context.Context, arg UpdateEmployeeSelfInstantParams) (UpdateEmployeeSelfInstantRow, error) {
+	row := q.db.QueryRow(ctx, updateEmployeeSelfInstant,
+		arg.Address,
+		arg.AppLanguage,
+		arg.PhotoObjectKey,
+		arg.ID,
+	)
+	var i UpdateEmployeeSelfInstantRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.FullName,
+		&i.Nik,
+		&i.Nip,
+		&i.JoinAt,
+		&i.Gender,
+		&i.BirthDate,
+		&i.BirthPlace,
+		&i.Phone,
+		&i.EmailPersonal,
+		&i.Address,
+		&i.Npwp,
+		&i.BpjsKesehatan,
+		&i.BpjsKetenagakerjaan,
+		&i.BankName,
+		&i.BankAccountNumber,
+		&i.BankAccountHolderName,
+		&i.EmergencyContactName,
+		&i.EmergencyContactPhone,
+		&i.AppLanguage,
+		&i.PhotoObjectKey,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,

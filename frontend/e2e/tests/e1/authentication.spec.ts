@@ -77,7 +77,7 @@ test('AU-1 · wrong password shows INVALID_CREDENTIALS banner', async ({ page })
   await page.goto('/login');
 
   // Fill hrAdmin's email but a wrong password.
-  await page.locator('#email').fill(PERSONAS.hrAdmin.email);
+  await page.locator('#identifier').fill(PERSONAS.hrAdmin.email);
   await page.locator('#password').fill('WrongPassword99!');
   await page.locator('button[type="submit"]').click();
 
@@ -102,7 +102,7 @@ test('AU-2 · disabled account is rejected with ACCOUNT_DISABLED', async ({ page
   await disableUser(PERSONAS.agent.email);
 
   await page.goto('/login');
-  await page.locator('#email').fill(PERSONAS.agent.email);
+  await page.locator('#identifier').fill(PERSONAS.agent.email);
   await page.locator('#password').fill(PERSONAS.agent.password);
   await page.locator('button[type="submit"]').click();
 
@@ -195,7 +195,7 @@ test('AU-4 · password reset: request + use token sets a new password', async ({
 
   // Step 1: Navigate to forgot-password and submit the hrAdmin email.
   await page.goto('/forgot-password');
-  await page.locator('#email').fill(hrAdminEmail);
+  await page.locator('#identifier').fill(hrAdminEmail);
   await page.locator('button[type="submit"]').click();
 
   // Step 2: The BE processes the request and the FE advances to the 'sent' state.
@@ -230,7 +230,7 @@ test('AU-4 · password reset: request + use token sets a new password', async ({
 
   // Step 7: Log in with the NEW password — should land on the dashboard.
   await page.goto('/login');
-  await page.locator('#email').fill(hrAdminEmail);
+  await page.locator('#identifier').fill(hrAdminEmail);
   await page.locator('#password').fill(NEW_PASSWORD);
   await page.locator('button[type="submit"]').click();
   await page.waitForURL(/^http:\/\/localhost:4173\/?$/, { timeout: 15_000 });
@@ -245,7 +245,7 @@ test('C-2 · forgot-password for an unknown email returns the same generic respo
   const unknownEmail = 'unknown.user@no-such-domain.test';
 
   await page.goto('/forgot-password');
-  await page.locator('#email').fill(unknownEmail);
+  await page.locator('#identifier').fill(unknownEmail);
   await page.locator('button[type="submit"]').click();
 
   // The FE always advances to 'sent' (anti-enumeration, C-2 per authentication.md).

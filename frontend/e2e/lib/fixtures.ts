@@ -8,7 +8,7 @@
  *   - `expect` — re-exported from @playwright/test
  *
  * loginAs(page, persona):
- *   Drives the REAL login screen (fills #email / #password, submits, waits for
+ *   Drives the REAL login screen (fills #identifier / #password, submits, waits for
  *   navigation away from /login). This is true E2E — it exercises the full auth
  *   path including the cookie-transport refresh mechanism.
  *
@@ -22,9 +22,9 @@
  *   Documented in README.md §StorageState caching.
  */
 
-import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { test as base, expect, type Page } from '@playwright/test';
+import * as path from 'node:path';
+import { type Page, test as base, expect } from '@playwright/test';
 import { PERSONAS, type Persona, type PersonaKey } from './personas.js';
 
 // Directory for per-persona storage state JSON files.
@@ -49,8 +49,9 @@ async function loginAs(page: Page, persona: Persona | PersonaKey): Promise<void>
 
   await page.goto('/login');
 
-  // The login screen renders id="email" and id="password" inputs (login-screen.tsx).
-  await page.locator('#email').fill(p.email);
+  // The login screen renders id="identifier" (phone-or-email) and id="password" inputs
+  // (features/auth/login-screen.tsx). The persona `email` doubles as the identifier value.
+  await page.locator('#identifier').fill(p.email);
   await page.locator('#password').fill(p.password);
   await page.locator('button[type="submit"]').click();
 
@@ -88,7 +89,8 @@ const test = base.extend<E2EFixtures>({
   loginAs: async ({ page }, use) => {
     await use((persona) => loginAs(page, persona));
   },
-  storageStateFor: async ({}, use) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+  storageStateFor: async ({}, use) => {
+    // eslint-disable-line @typescript-eslint/no-unused-vars
     await use(storageStateFor);
   },
 });
