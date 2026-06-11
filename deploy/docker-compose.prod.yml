@@ -1,0 +1,157 @@
+# HRIS staging deploy — ISOLATED from the legacy `lumen-*` stack on this host.
+# - project name `hris`, dedicated network + volumes, `hris-*` container names
+# - all host ports bound to 127.0.0.1 ONLY (the host nginx proxies in; no new
+#   public ports — only the additive :443 vhost reaches this)
+# - mem_limit on every service so a runaway can't pressure the neighbours' prod
+# - River runs as a separate `worker` (cmd/worker); `migrate` does goose + River
+#
+# Usage (see deploy.sh / README.md):
+#   docker compose -p hris --env-file .env.prod -f docker-compose.prod.yml up -d
+name: hris
+
+x-api-image: &api-image hris-api:local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hris-postgres
+    restart: unless-stopped
+    env_file: [.env.prod]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - hris_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:55432:5432"   # localhost-only (admin/psql); not public
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [hris-net]
+
+  minio:
+    image: minio/minio:latest
+    container_name: hris-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+    volumes:
+      - hris_miniodata:/data
+    ports:
+      - "127.0.0.1:9100:9000"    # S3 API — host nginx proxies presigned URLs here
+      - "127.0.0.1:9101:9001"    # console — localhost-only admin
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [hris-net]
+
+  # One-shot: create the private bucket if absent.
+  minio-init:
+    image: minio/mc:latest
+    container_name: hris-minio-init
+    depends_on:
+      minio: { condition: service_healthy }
+    env_file: [.env.prod]
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${STORAGE_ACCESS_KEY} $${STORAGE_SECRET_KEY} &&
+      mc mb -p local/$${STORAGE_BUCKET} &&
+      echo 'bucket ready'
+      "
+    networks: [hris-net]
+    restart: "no"
+
+  # One-shot: goose schema migrations.
+  migrate:
+    image: *api-image
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: hris-migrate
+    depends_on:
+      postgres: { condition: service_healthy }
+    env_file: [.env.prod]
+    entrypoint: ["/usr/local/bin/migrate"]
+    command: ["up"]
+    networks: [hris-net]
+    restart: "no"
+
+  # One-shot: River job-queue tables (programmatic rivermigrate).
+  migrate-river:
+    image: *api-image
+    container_name: hris-migrate-river
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    env_file: [.env.prod]
+    entrypoint: ["/usr/local/bin/migrate"]
+    command: ["river-up"]
+    networks: [hris-net]
+    restart: "no"
+
+  # One-shot: demo seed (idempotent per cmd/seed). Remove from `up` after first run
+  # if you don't want it re-attempted; it depends on schema being present.
+  seed:
+    image: *api-image
+    container_name: hris-seed
+    depends_on:
+      migrate-river: { condition: service_completed_successfully }
+    env_file: [.env.prod]
+    entrypoint: ["/usr/local/bin/seed"]
+    networks: [hris-net]
+    restart: "no"
+
+  api:
+    image: *api-image
+    container_name: hris-api
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      migrate-river: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+    env_file: [.env.prod]
+    ports:
+      - "127.0.0.1:8090:8080"
+    mem_limit: 384m
+    networks: [hris-net]
+
+  worker:
+    image: *api-image
+    container_name: hris-worker
+    restart: unless-stopped
+    depends_on:
+      migrate-river: { condition: service_completed_successfully }
+    env_file: [.env.prod]
+    entrypoint: ["/usr/local/bin/worker"]
+    mem_limit: 256m
+    networks: [hris-net]
+
+  web:
+    image: hris-web:local
+    build:
+      context: ../frontend
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    container_name: hris-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8091:80"
+    mem_limit: 128m
+    networks: [hris-net]
+
+volumes:
+  hris_pgdata:
+  hris_miniodata:
+
+networks:
+  hris-net:
+    name: hris-net

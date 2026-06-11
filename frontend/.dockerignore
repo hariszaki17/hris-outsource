@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.vite
+**/coverage
+**/playwright-report
+**/test-results
+**/.env.local
+**/.env.*.local
+.git
