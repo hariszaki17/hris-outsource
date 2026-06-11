@@ -30,7 +30,7 @@ func (h *ClockHandler) ClockIn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	rec, err := h.clock.ClockIn(r.Context(), svc.ClockInParams{
+	rec, autoClosedPrevious, err := h.clock.ClockIn(r.Context(), svc.ClockInParams{
 		Lat:                  req.Lat,
 		Lng:                  req.Lng,
 		GPSAvailable:         req.GPSAvailable,
@@ -42,7 +42,11 @@ func (h *ClockHandler) ClockIn(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusCreated, dataResponse[attendanceResponse]{Data: toAttendanceResponse(rec)})
+	httpx.WriteJSON(w, http.StatusCreated, clockInResponse{
+		Data:               toAttendanceResponse(rec),
+		AutoClosedPrevious: autoClosedPrevious,
+		Message:            clockInMessage(autoClosedPrevious),
+	})
 }
 
 // ClockOut handles POST /attendance:clock-out (200, ClockOutResponse).

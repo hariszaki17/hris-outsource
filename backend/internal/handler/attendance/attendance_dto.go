@@ -133,6 +133,11 @@ type attendanceResponse struct {
 	WorkedMinutes *int `json:"worked_minutes"`
 	AutoClosed    bool `json:"auto_closed"`
 
+	// CanCheckOut is a server-computed display hint for the mobile toggle (F5.1): true
+	// only for an OPEN record still within its checkout window (shift_end + grace). An
+	// open row past its window reads false → mobile shows "Check In", not "Check Out".
+	CanCheckOut bool `json:"can_check_out"`
+
 	Status             string   `json:"status"`
 	VerificationStatus string   `json:"verification_status"`
 	Flags              []string `json:"flags"`
@@ -156,6 +161,24 @@ type attendanceResponse struct {
 // dataResponse[T] is the generic single-object envelope `{ "data": ... }`.
 type dataResponse[T any] struct {
 	Data T `json:"data"`
+}
+
+// clockInResponse is the clock-in envelope (F5.1). It extends the data envelope with
+// auto_closed_previous (a stale forgotten clock-out was auto-closed to let this check-in
+// through) + an informative message. Additive/backward-compatible: existing clients that
+// read only `data` are unaffected.
+type clockInResponse struct {
+	Data               attendanceResponse `json:"data"`
+	AutoClosedPrevious bool               `json:"auto_closed_previous"`
+	Message            string             `json:"message"`
+}
+
+// clockInMessage is the Bahasa user message for the check-in result.
+func clockInMessage(autoClosedPrevious bool) string {
+	if autoClosedPrevious {
+		return "Berhasil Check In. Absensi sebelumnya belum di-check out dan telah ditutup otomatis oleh sistem."
+	}
+	return "Berhasil Check In."
 }
 
 // bulkActionResponse is the openapi BulkActionResponse (200 ≥1 succeeded / 422 all failed).
@@ -226,6 +249,7 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		LateMinutes:        a.LateMinutes,
 		WorkedMinutes:      a.WorkedMinutes,
 		AutoClosed:         a.AutoClosed,
+		CanCheckOut:        att.IsWithinCheckoutWindow(a, time.Now()),
 		Status:             string(a.Status),
 		VerificationStatus: string(a.VerificationStatus),
 		Flags:              flags,

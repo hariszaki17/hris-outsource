@@ -1591,7 +1591,19 @@ components:
           description: Set on clock-out (or auto-close). Null while open.
         auto_closed:
           type: boolean
-          description: True iff record was force-closed by the shift-end job (F5.2 EV-3).
+          description: |
+            True iff the record was force-closed without an agent clock-out — either by the
+            shift-end job (F5.2 EV-3) OR synchronously when the agent's NEXT clock-in found this
+            row stale (forgotten clock-out, checkout window elapsed — F5.1 flexible check-in).
+        can_check_out:
+          type: boolean
+          description: |
+            Server-computed mobile-toggle hint (F5.1). True only for an **open** record still
+            within its checkout window (`shift_end` + 4h grace; `shift_end` falls back to
+            `check_in` + 18h when unscheduled). An open record past its window reads `false` →
+            the app shows **Check In** (new day/shift), not **Check Out**. Present on the
+            self-by-date (toggle) reads and on the clock-in/out response `data`; absent/`false`
+            on admin by-id detail is non-authoritative.
         status:
           $ref: '#/components/schemas/AttendanceStatus'
         verification_status:
@@ -1671,7 +1683,7 @@ components:
         - `UNSCHEDULED` — no `schedule_id` (no shift today).
         - `ESCALATED` — leader-own record routed to HR (drives HR-only filter `source=leader_own`).
         - `CORRECTED` — at least one correction applied to this record.
-        - `AUTO_CLOSED` — force-closed by shift-end job (F5.2 EV-3).
+        - `AUTO_CLOSED` — force-closed without an agent clock-out: by the shift-end job (F5.2 EV-3) or synchronously when the agent's next clock-in found this row stale (F5.1).
         - `ABSENT` — scheduled but no clock-in by shift end.
         - `NEEDS_CODE_VERIFICATION` — attendance code's `needs_verification=true` (E2).
 
@@ -1821,6 +1833,20 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/Attendance' }
+        auto_closed_previous:
+          type: boolean
+          description: |
+            True when a stale prior open record (forgotten clock-out, checkout window elapsed)
+            was auto-closed to let this check-in proceed (F5.1 flexible check-in). The closed
+            record carries `auto_closed: true` + the `AUTO_CLOSED` flag and enters the leader
+            queue (INCOMPLETE/PENDING). Additive — clients reading only `data` are unaffected.
+          default: false
+        message:
+          type: string
+          description: |
+            User-facing Bahasa result. When `auto_closed_previous` is true, informs the agent
+            their previous attendance was closed automatically by the system.
+          example: "Berhasil Check In."
 
     ClockOutRequest:
       type: object

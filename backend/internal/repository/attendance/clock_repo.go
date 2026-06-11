@@ -164,6 +164,29 @@ func (r *ClockRepo) ClockOut(ctx context.Context, tx pgx.Tx, p svc.ClockOutRow) 
 	return id, nil
 }
 
+// AutoCloseAttendance stamps a stale open record closed at its computed shift_end in tx
+// (F5.1 flexible check-in). found=false (no error) when the guarded UPDATE matched no
+// row — a concurrent clock-out already closed it — which the service treats as a no-op.
+func (r *ClockRepo) AutoCloseAttendance(ctx context.Context, tx pgx.Tx, p svc.AutoCloseRow) (string, bool, error) {
+	checkOut := p.CheckOutAt
+	worked := int32(p.WorkedMinutes)
+	id, err := r.q.WithTx(tx).AutoCloseAttendance(ctx, sqlcgen.AutoCloseAttendanceParams{
+		CheckOutAt:         &checkOut,
+		WorkedMinutes:      &worked,
+		Flags:              p.Flags,
+		Status:             p.Status,
+		VerificationStatus: p.VerificationStatus,
+		ID:                 p.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return id, true, nil
+}
+
 // GetAttendance re-reads the full record (denormalized names + assembled geofence) via
 // the existing GetAttendance query + mapper.
 func (r *ClockRepo) GetAttendance(ctx context.Context, id string) (att.Attendance, error) {

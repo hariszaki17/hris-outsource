@@ -10,6 +10,51 @@ import (
 	"time"
 )
 
+const autoCloseAttendance = `-- name: AutoCloseAttendance :one
+UPDATE attendance
+SET check_out_at        = $1,
+    worked_minutes      = $2,
+    auto_closed         = true,
+    flags               = $3,
+    status              = $4,
+    verification_status = $5,
+    updated_at          = now()
+WHERE id = $6
+  AND check_out_at IS NULL
+  AND deleted_at IS NULL
+RETURNING id
+`
+
+type AutoCloseAttendanceParams struct {
+	CheckOutAt         *time.Time
+	WorkedMinutes      *int32
+	Flags              []string
+	Status             string
+	VerificationStatus string
+	ID                 string
+}
+
+// Auto-close a STALE open record at clock-in time (F5.1 flexible check-in): the agent
+// clocked in, never clocked out, and the checkout window has elapsed. check_out_at is
+// stamped at the computed shift_end (NOT now — they did not actually work past it),
+// auto_closed=true, the AUTO_CLOSED flag added, status INCOMPLETE, verification PENDING
+// (enters the leader queue as an anomaly). Synchronous complement to the absence sweep,
+// for users/companies the cron skips. Guarded by check_out_at IS NULL so a concurrent
+// clock-out wins the race (yields no row → repo treats as already-closed, no-op).
+func (q *Queries) AutoCloseAttendance(ctx context.Context, arg AutoCloseAttendanceParams) (string, error) {
+	row := q.db.QueryRow(ctx, autoCloseAttendance,
+		arg.CheckOutAt,
+		arg.WorkedMinutes,
+		arg.Flags,
+		arg.Status,
+		arg.VerificationStatus,
+		arg.ID,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const clockInAttendance = `-- name: ClockInAttendance :one
 INSERT INTO attendance (
     employee_id, placement_id, schedule_id, company_id, service_line,

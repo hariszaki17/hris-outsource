@@ -52,6 +52,69 @@ const (
 	FlagManualEntry           Flag = "MANUAL_ENTRY"
 )
 
+// Flexible check-out window (F5.1). An open record (check_out_at IS NULL) only means
+// "currently clocked in" — i.e. the next toggle is a CHECK OUT — while now is within
+// the shift's checkout window: shift_end + CheckoutWindowGrace. Past that, the row is a
+// STALE forgotten clock-out: the next toggle is a fresh CHECK IN (the stale row is
+// auto-closed server-side). This is the synchronous complement to the absence sweep —
+// it fires inside the clock-in request even for users/companies the cron skips.
+const (
+	// CheckoutWindowGrace extends shift_end before an open row stops counting as
+	// "checked in". Distinct from the 15-min lateness/early grace.
+	CheckoutWindowGrace = 4 * time.Hour
+	// FallbackShiftHours is the assumed shift length when the record has no usable
+	// scheduled shift (unscheduled clock-in, or a 00:00==00:00 sentinel).
+	FallbackShiftHours = 18 * time.Hour
+)
+
+// ShiftEndTimestamp returns the instant the record's shift is considered to end —
+// schedule-aware with an overnight-correct snapshot, falling back to check_in +
+// FallbackShiftHours when there is no usable shift. ShiftEndAt is the timestamptz the
+// clock-in snapshotted from the schedule (cross_midnight already added a day), so
+// overnight shifts need no extra handling here. Returns the zero time only when the
+// record has neither a usable shift nor a clock-in (a true ABSENT row).
+func ShiftEndTimestamp(a Attendance) time.Time {
+	if hasUsableShift(a) {
+		return *a.ShiftEndAt
+	}
+	if a.CheckInAt != nil {
+		return a.CheckInAt.Add(FallbackShiftHours)
+	}
+	return time.Time{}
+}
+
+// hasUsableShift reports whether the snapshotted shift window is meaningful: a non-nil
+// end that is not equal to the start (start==end is the 00:00:00 "no fixed time"
+// sentinel → treat as no shift, per the fallback rule).
+func hasUsableShift(a Attendance) bool {
+	if a.ShiftEndAt == nil {
+		return false
+	}
+	if a.ShiftStartAt != nil && a.ShiftEndAt.Equal(*a.ShiftStartAt) {
+		return false
+	}
+	return true
+}
+
+// IsWithinCheckoutWindow reports whether the record is still an open clock-in whose
+// checkout window has not elapsed (now <= shift_end + CheckoutWindowGrace) — i.e. the
+// mobile toggle should show CHECK OUT. False when the row is already checked out, has
+// no clock-in (true ABSENT), or its window has passed (a stale forgotten clock-out, for
+// which the mobile toggle should show CHECK IN instead).
+func IsWithinCheckoutWindow(a Attendance, now time.Time) bool {
+	if a.CheckOutAt != nil {
+		return false
+	}
+	if a.CheckInAt == nil {
+		return false
+	}
+	end := ShiftEndTimestamp(a)
+	if end.IsZero() {
+		return false
+	}
+	return !now.After(end.Add(CheckoutWindowGrace))
+}
+
 // ServiceLine enumerates the placement service lines carried on the record.
 const (
 	ServiceLineFacilityServices   = "facility_services"

@@ -121,7 +121,21 @@ type ClockRepository interface {
 	GetOpenAttendance(ctx context.Context, employeeID string) (id string, found bool, err error)
 	ClockIn(ctx context.Context, tx pgx.Tx, p ClockInRow) (id string, created bool, err error)
 	ClockOut(ctx context.Context, tx pgx.Tx, p ClockOutRow) (id string, err error)
+	// AutoCloseAttendance closes a stale open record at its computed shift_end.
+	// found=false (no error) when a concurrent clock-out already closed it.
+	AutoCloseAttendance(ctx context.Context, tx pgx.Tx, p AutoCloseRow) (id string, found bool, err error)
 	GetAttendance(ctx context.Context, id string) (att.Attendance, error)
+}
+
+// AutoCloseRow is the UPDATE payload for auto-closing one stale open record (in-tx).
+// CheckOutAt is the computed shift_end (NOT now); the row is marked auto_closed.
+type AutoCloseRow struct {
+	ID                 string
+	CheckOutAt         time.Time
+	WorkedMinutes      int
+	Flags              []string
+	Status             string
+	VerificationStatus string
 }
 
 // ClockService implements the agent clock-in/out business logic.
@@ -142,56 +156,75 @@ func (s *ClockService) SetClock(c Clock) { s.now = c }
 
 // --- clock-in ---
 
-// ClockIn creates the caller's attendance record (GPS + geofence + lateness).
-func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Attendance, error) {
+// ClockIn creates the caller's attendance record (GPS + geofence + lateness). It
+// returns autoClosedPrevious=true when a STALE forgotten clock-out from an earlier
+// shift was auto-closed to let this check-in proceed (F5.1 flexible check-in).
+func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Attendance, bool, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
-		return att.Attendance{}, apperr.Unauthenticated()
+		return att.Attendance{}, false, apperr.Unauthenticated()
 	}
 	employeeID := p.EmployeeID
 	if employeeID == "" {
-		return att.Attendance{}, apperr.OutOfScope()
+		return att.Attendance{}, false, apperr.OutOfScope()
 	}
 	if !req.GPSAvailable {
-		return att.Attendance{}, apperr.Rule("GPS_UNAVAILABLE", nil)
+		return att.Attendance{}, false, apperr.Rule("GPS_UNAVAILABLE", nil)
 	}
 
 	pl, found, err := s.repo.GetActivePlacement(ctx, employeeID)
 	if err != nil {
-		return att.Attendance{}, apperr.Internal(err)
+		return att.Attendance{}, false, apperr.Internal(err)
 	}
 	if !found {
-		return att.Attendance{}, apperr.Rule("NO_ACTIVE_PLACEMENT", nil)
+		return att.Attendance{}, false, apperr.Rule("NO_ACTIVE_PLACEMENT", nil)
 	}
 
 	siteLat, siteLng, radiusM, _, err := s.repo.GetSite(ctx, pl.SiteID)
 	if err != nil {
-		return att.Attendance{}, apperr.Internal(err)
+		return att.Attendance{}, false, apperr.Internal(err)
 	}
 	inside, distanceM, haveGeo := evalGeofence(req.Lat, req.Lng, siteLat, siteLng, radiusM)
 
 	// Out-of-geofence blocks clock-in unless the agent explicitly overrides.
 	if haveGeo && !inside && !req.ForceOutsideGeofence {
-		return att.Attendance{}, apperr.Rule("OUT_OF_GEOFENCE", map[string]string{
+		return att.Attendance{}, false, apperr.Rule("OUT_OF_GEOFENCE", map[string]string{
 			"distance_m": itoa(distanceM),
 			"radius_m":   itoa(radiusM),
 			"company_id": pl.CompanyID,
 		})
 	}
 
-	// Reject a second open record before doing more work (CI-5).
-	if openID, openFound, oerr := s.repo.GetOpenAttendance(ctx, employeeID); oerr != nil {
-		return att.Attendance{}, apperr.Internal(oerr)
-	} else if openFound {
-		return att.Attendance{}, alreadyClockedIn(openID)
-	}
-
 	now := s.now()
+
+	// Flexible check-in (F5.1): an open record only blocks this clock-in (as
+	// ALREADY_CLOCKED_IN — the toggle is really a CHECK OUT) while it is still within
+	// its checkout window. A STALE open row (forgotten clock-out, window elapsed) is
+	// auto-closed at its shift_end and this check-in proceeds. Synchronous — works even
+	// for users/companies the absence-sweep cron skips (CI-5).
+	autoClosedPrevious := false
+	openID, openFound, oerr := s.repo.GetOpenAttendance(ctx, employeeID)
+	if oerr != nil {
+		return att.Attendance{}, false, apperr.Internal(oerr)
+	}
+	if openFound {
+		openRec, gerr := s.repo.GetAttendance(ctx, openID)
+		if gerr != nil {
+			return att.Attendance{}, false, apperr.Internal(gerr)
+		}
+		if att.IsWithinCheckoutWindow(openRec, now) {
+			return att.Attendance{}, false, alreadyClockedIn(openID)
+		}
+		if cerr := s.autoCloseStale(ctx, openRec, now); cerr != nil {
+			return att.Attendance{}, false, cerr
+		}
+		autoClosedPrevious = true
+	}
 
 	// Today's schedule (lateness eval + schedule_id). Absent ⇒ unscheduled.
 	schedID, shiftStart, shiftEnd, schedFound, serr := s.repo.GetTodaySchedule(ctx, employeeID, now)
 	if serr != nil {
-		return att.Attendance{}, apperr.Internal(serr)
+		return att.Attendance{}, false, apperr.Internal(serr)
 	}
 
 	var (
@@ -289,9 +322,67 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		})
 	})
 	if txErr != nil {
-		return att.Attendance{}, asAppErr(txErr)
+		return att.Attendance{}, false, asAppErr(txErr)
 	}
-	return s.rereadClock(ctx, newID)
+	rec, err := s.rereadClock(ctx, newID)
+	if err != nil {
+		return att.Attendance{}, false, err
+	}
+	return rec, autoClosedPrevious, nil
+}
+
+// autoCloseStale closes one stale open record (forgotten clock-out, window elapsed) at
+// its computed shift_end so a fresh clock-in can proceed (F5.1). The row is marked
+// auto_closed + AUTO_CLOSED flag, status INCOMPLETE, verification PENDING (enters the
+// leader queue as an anomaly). worked_minutes is shift_end − check_in (they are not
+// credited past shift_end). A concurrent clock-out that already closed the row makes the
+// guarded UPDATE a no-op (found=false) — harmless, the row is closed either way.
+func (s *ClockService) autoCloseStale(ctx context.Context, rec att.Attendance, now time.Time) error {
+	end := att.ShiftEndTimestamp(rec)
+	if end.IsZero() {
+		end = now // defensive: an open row always has a check_in, so this is unreachable.
+	}
+	worked := 0
+	if rec.CheckInAt != nil {
+		worked = int(end.Sub(*rec.CheckInAt).Minutes())
+	}
+	if worked < 0 {
+		worked = 0
+	}
+	flags := appendUnique(flagStrings(rec.Flags), string(att.FlagAutoClosed))
+	row := AutoCloseRow{
+		ID:                 rec.ID,
+		CheckOutAt:         end,
+		WorkedMinutes:      worked,
+		Flags:              flags,
+		Status:             string(att.StatusIncomplete),
+		VerificationStatus: string(att.VerificationPending),
+	}
+	txErr := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		_, _, aerr := s.repo.AutoCloseAttendance(ctx, tx, row)
+		if aerr != nil {
+			return aerr
+		}
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionUpdate,
+			EntityType: "attendance",
+			EntityID:   rec.ID,
+			Before:     map[string]any{"check_out_at": nil, "verification_status": string(rec.VerificationStatus)},
+			After: map[string]any{
+				"check_out_at":        end.UTC(),
+				"worked_minutes":      worked,
+				"status":              string(att.StatusIncomplete),
+				"verification_status": string(att.VerificationPending),
+				"auto_closed":         true,
+				"flags":               flags,
+				"source":              "auto_close_on_clock_in",
+			},
+		})
+	})
+	if txErr != nil {
+		return asAppErr(txErr)
+	}
+	return nil
 }
 
 // --- clock-out ---

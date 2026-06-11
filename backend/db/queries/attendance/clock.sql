@@ -71,6 +71,27 @@ ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
 DO NOTHING
 RETURNING id;
 
+-- name: AutoCloseAttendance :one
+-- Auto-close a STALE open record at clock-in time (F5.1 flexible check-in): the agent
+-- clocked in, never clocked out, and the checkout window has elapsed. check_out_at is
+-- stamped at the computed shift_end (NOT now — they did not actually work past it),
+-- auto_closed=true, the AUTO_CLOSED flag added, status INCOMPLETE, verification PENDING
+-- (enters the leader queue as an anomaly). Synchronous complement to the absence sweep,
+-- for users/companies the cron skips. Guarded by check_out_at IS NULL so a concurrent
+-- clock-out wins the race (yields no row → repo treats as already-closed, no-op).
+UPDATE attendance
+SET check_out_at        = sqlc.arg(check_out_at),
+    worked_minutes      = sqlc.arg(worked_minutes),
+    auto_closed         = true,
+    flags               = sqlc.arg(flags),
+    status              = sqlc.arg(status),
+    verification_status = sqlc.arg(verification_status),
+    updated_at          = now()
+WHERE id = sqlc.arg(id)
+  AND check_out_at IS NULL
+  AND deleted_at IS NULL
+RETURNING id;
+
 -- name: ClockOutAttendance :one
 -- Close one open record: stamp the clock-out columns + recomputed worked_minutes /
 -- flags / status / verification_status. Guarded by deleted_at — yields NO row
