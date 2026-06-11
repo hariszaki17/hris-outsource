@@ -12,7 +12,7 @@ web SPA. No Redis (River lives in Postgres). Mobile (Expo) is **not** server-dep
 - The legacy `lumen_mysql_prod` (our future E9 migration source) is never touched.
 
 ## Prereqs
-- DNS: `103-103-23-210.sslip.io` → `103.103.23.210` (DuckDNS, done).
+- DNS: `103-103-23-210.sslip.io` → `103.103.23.210` (sslip.io wildcard — auto-resolves to the embedded IP, no record to manage).
 - Repo cloned on the VPS; user in `docker` + `sudo` groups (✓ `mightymig`).
 
 ## Run
