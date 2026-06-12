@@ -31,6 +31,22 @@ export const theme = {
     'info-bg': color.info.bg,
     'info-border': color.info.border,
     'info-text': color.info.text,
+    'orange-bg': color.orange.bg,
+    'orange-border': color.orange.border,
+    'orange-text': color.orange.text,
+    // Dark sidebar (web shell; exposed for parity / shared organisms).
+    sidebar: color.sidebar,
+    'sidebar-hover': color.sidebarHover,
+    'sidebar-text': color.sidebarText,
+    // Overlay scrim + control/avatar neutrals (comp/Toggle off, comp/Avatar neutral).
+    scrim: color.scrim,
+    'control-off': color.controlOff,
+    'avatar-neutral': color.avatarNeutral,
+    // Logo accents (service-line / category coding, charts) — used by the brand emblem.
+    'accent-gold': color.accent.gold,
+    'accent-green': color.accent.green,
+    'accent-blue': color.accent.blue,
+    'accent-purple': color.accent.purple,
     // Convenience text aliases.
     success: color.ok.text,
     warning: color.warn.text,
@@ -43,5 +59,19 @@ export const theme = {
     input: `${radius.input}px`,
     card: `${radius.card}px`,
     pill: `${radius.pill}px`,
+  },
+  // Font families (DESIGN-SYSTEM §3). Static per-weight families from @expo-google-fonts,
+  // loaded in app/_layout.tsx. RN doesn't synthesize weights from a single static family,
+  // so each weight is its own className token (e.g. `font-sans-bold`). The canonical
+  // src/ui/Text component maps the type ramp onto these.
+  //   sans = Inter · mono = IBM Plex Mono (IDs/times) · display = Poppins (brand wordmark).
+  fontFamily: {
+    sans: ['Inter_400Regular'],
+    'sans-medium': ['Inter_500Medium'],
+    'sans-semibold': ['Inter_600SemiBold'],
+    'sans-bold': ['Inter_700Bold'],
+    mono: ['IBMPlexMono_400Regular'],
+    'mono-medium': ['IBMPlexMono_500Medium'],
+    display: ['Poppins_700Bold'],
   },
 } as const;

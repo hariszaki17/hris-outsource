@@ -26,7 +26,7 @@
 | Shift leader | **1 per client company/placement.** Verifies attendance, approves OT & leave, manages roster, sees team dashboards. |
 | Shifts | A **work-shift master** (working hours + break) is admin-defined; the shift leader **picks from master** to schedule each agent. |
 | Service line | **Drives shift & attendance rules** (e.g. Parking = 24/7 rotating, Building Mgmt = office hours). |
-| Payroll | **Data-only** in v1 — migrate for history/reporting; no active payroll runs. |
+| Payroll | **Compute-assist** in v1 — migrate history (read-only) **and** run a monthly payroll: system assembles agent pay from E2/E5/E6/E7, HR posts immutable payslips, **manual** transfer + evidence (no bank/BPJS/tax API). Agent pay = **monthly wage**, not billable hours. *(flipped from data-only 2026-06-11; see §8 E8)* |
 | MVP | **All core modules together** (attendance + shift + leave + overtime), one release; build order dependency-driven. |
 | Migration | **Everything** from SWP prod incl. payroll + full history. MySQL → Postgres **transform-and-load** (not a copy). |
 | Stack | **Backend: Go · Frontend: React · DB: Postgres.** (FE framework + Go libs being finalized.) |
@@ -51,7 +51,7 @@ Schedule (agent + ShiftMaster + date)  ← shift leader builds from ShiftMaster 
    │
 Attendance (vs Schedule) · Leave (vs Quota) · Overtime (vs Schedule)
    │
-Payroll history (read-only, migrated)
+Payroll = migrated history (read-only) + compute-assist run (base E2 ± attendance/leave/OT → posted payslip → manual paid)
 ```
 
 ---
@@ -102,11 +102,11 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 **Entities:** Overtime, OvertimeStatus.
 **Depends on:** E4, E5, E3
 
-### E8 — Payroll Data (historical, read-only)
-**Goal:** preserve migrated payroll history for continuity & reporting. **Not** active payroll.
-**Features:** Payslip history view · Salary components (read) · Benefits (read) · Payroll reports/exports.
-**Entities:** Payslip, EmployeeSalary, SalaryColumn, EmployeeBenefit — read-only.
-**Out of scope (v1):** payroll runs, BPJS/PPh21 calculation.
+### E8 — Payroll (historical archive + compute-assist runs)
+**Goal:** preserve migrated payroll history (read-only) **and** run a monthly **compute-assist** payroll for placed agents. Agent pay = **monthly wage** (E2 base), modulated by verified attendance/leave/OT — **not** billable hours (those bill the client, hours-only, outside).
+**Features:** Payslip history & summaries (migrated + generated) · Payroll archive (components/benefits/payments) · **Compute-assist payroll run** (assemble from E2/E5/E6/E7 → review/adjust → post immutable payslips) · **Payment recording** (manual transfer + uploaded evidence) · prior-period carry-forward adjustments.
+**Entities:** PayrollRun, Payslip, SalaryComponent, PayrollPayment, PayrollAdjustment, Benefit (migrated history read-only).
+**Out of scope (v1):** bank/BPJS/tax API; automatic BPJS/PPh21 calculation engine (statutory lines are editable, config-assisted); client invoicing/rate application; editing posted payslips.
 **Depends on:** E2, E9
 
 ### E9 — Data Migration (SWP prod → hris-outsource)
@@ -150,7 +150,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | **E5** Attendance | [FEATURE](epics/E5-attendance/FEATURE.md) | clock-in-out · attendance-evaluation · attendance-verification · attendance-corrections · attendance-records | [✓](epics/E5-attendance/DATA-MAPPING.md) |
 | **E6** Leave | [FEATURE](epics/E6-leave/FEATURE.md) | leave-quota-balances · leave-request · leave-approval · leave-schedule-integration · leave-calendar-views | [✓](epics/E6-leave/DATA-MAPPING.md) |
 | **E7** Overtime | [FEATURE](epics/E7-overtime/FEATURE.md) | overtime-rules · overtime-capture · overtime-approval · overtime-records | [✓](epics/E7-overtime/DATA-MAPPING.md) |
-| **E8** Payroll (read-only) | [FEATURE](epics/E8-payroll/FEATURE.md) | payslip-history · payroll-archive | [✓](epics/E8-payroll/DATA-MAPPING.md) |
+| **E8** Payroll (history + compute-assist) | [FEATURE](epics/E8-payroll/FEATURE.md) | payslip-history · payroll-archive · payroll-run · payroll-payment | [✓](epics/E8-payroll/DATA-MAPPING.md) |
 | **E9** Data Migration *(script-only, no UI v1)* | [FEATURE](epics/E9-migration/FEATURE.md) | extraction-staging · transform-crosswalks · reconciliation-review · load-idempotent · cutover-validation | (orchestrates E2–E8) |
 | **E10** Reporting & Notifications | [FEATURE](epics/E10-reporting/FEATURE.md) | notifications · dashboards · attendance-billable-report · export-framework | — (reads modules) |
 
@@ -256,8 +256,15 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **D4 — holiday calendar seeding = HR-confirmed yearly import, not live-sync.** A yearly **"Import {tahun}"** bootstrap (e.g. Nager.Date / `date-holidays`) prefills candidate holidays; **HR reviews/confirms** and adds **cuti bersama**. The **SKB 3 Menteri decree is authoritative** for cuti bersama (APIs lag; Islamic dates shift by rukyat). HR-maintained master stays the source of truth (no live external sync).
   - See [E4 FEATURE], [E6 FEATURE], [E7 FEATURE §6b holiday calendar], [E10 notifications].
 
-**E8 — Payroll (read-only)**
-- Payslips **view-only** in v1 (PDF download later); historical payroll **immutable** (HR annotate via audit note); retention indefinite pending compliance input *(default)*
+**E8 — Payroll (historical archive + compute-assist runs)**
+- Payslips **view-only** for agents (PDF download later); historical payroll **immutable** (HR annotate via audit note); retention indefinite pending compliance input *(default)*
+- ✅ **Active compute-assist payroll, flipped from data-only** *(resolved 2026-06-11)* — v1 was "no active runs"; now E8 **also** runs a monthly payroll. The system **assembles** each agent's draft pay from authoritative upstream data (E2 base salary, E5 **verified** attendance, E6 leave, E7 **approved** OT), HR **reviews/adjusts editable component lines**, then **posts immutable payslips** (F8.3). Payment is **manual** — HR transfers in their own bank channel and records the reference + **uploaded bukti transfer** (F8.4, INV-8); **no bank/BPJS/tax API**. Rationale + flow in [E8 FEATURE](epics/E8-payroll/FEATURE.md).
+  - ✅ **Agent pay = monthly wage, not billable hours.** Two distinct money flows: **client billing** (revenue, **hours-only**, rates applied outside — E5→E10) vs **agent payroll** (cost, **monthly** `EmploymentAgreement.base_salary` — E8). Payroll does **not** consume billable hours; attendance/OT/leave only **modulate** the monthly base. Consistent with the 2026-06-07 "base salary single-source on E2" lock and the legacy monthly `gaji_pokok` model.
+  - ✅ **No statutory auto-engine in v1** — BPJS/PPh21 + allowances are **editable component lines** (optionally config-prefilled), not a calculator. A full statutory/payroll-tax engine is a future epic.
+  - ✅ **Immutable posted payslips + carry-forward.** A posted payslip never changes; **late-verified** E5/E7 changes after a run's cutoff accrue as a **`PayrollAdjustment`** consumed by the **next** run (prior-period adjustment line). Protects audit + matches "historical payroll immutable".
+  - ✅ **OT pay** = approved hours × `OvertimeRule.multiplier` × hourly base; **hourly base = base_salary / 173** *(default, configurable — Permenaker)*. Finance sub-role **none** (HR runs payroll).
+  - **Open:** proration divisor (calendar vs working-day, *default calendar*); re-open posted run before payment (*default no*); statutory config prefill depth.
+  - See [E8 FEATURE](epics/E8-payroll/FEATURE.md), [F8.3 payroll-run](epics/E8-payroll/prds/payroll-run.md), [F8.4 payroll-payment](epics/E8-payroll/prds/payroll-payment.md).
 
 **E9 — Migration**
 - ✅ **Sites are net-new, with a migration shim** *(2026-06-03)* — no geofence/site data is migrated from legacy (`companies.role=2` geo is **not** carried over; `role=4` sub-companies stay ignored). To satisfy the required `Placement.site_id`, the loader **auto-creates one primary "Main Site" per migrated ClientCompany** (geofence empty). Migrated placements attach to it; `leader_scope` defaults to `company`. HR configures geofences and splits multi-site companies **post-cutover**.

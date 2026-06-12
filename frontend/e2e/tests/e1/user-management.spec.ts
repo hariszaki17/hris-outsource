@@ -71,7 +71,8 @@ test('FND-01 · users list renders seeded users from the real BE', async ({ page
 // FND-01 — Create user → success toast + user appears in list
 // ---------------------------------------------------------------------------
 
-test('FND-01 · create user opens modal, submits, and user row appears', async ({ page }) => {
+// Skipped: standalone create/edit-user flow removed (D1, 2026-06-07) — users are provisioned via employee-create + change-role.
+test.skip('FND-01 · create user opens modal, submits, and user row appears', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/settings/users');
 
@@ -110,7 +111,8 @@ test('FND-01 · create user opens modal, submits, and user row appears', async (
 // FND-01 — Edit user email → success toast + updated value in list
 // ---------------------------------------------------------------------------
 
-test('FND-01 · edit user email updates the row in the list', async ({ page }) => {
+// Skipped: standalone create/edit-user flow removed (D1, 2026-06-07) — users are provisioned via employee-create + change-role.
+test.skip('FND-01 · edit user email updates the row in the list', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/settings/users');
 

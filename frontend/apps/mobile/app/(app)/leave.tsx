@@ -3,9 +3,9 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button } from '../src/ui/Button';
-import { Card } from '../src/ui/Card';
-import { Text } from '../src/ui/Text';
+import { Button } from '../../src/ui/Button';
+import { Card } from '../../src/ui/Card';
+import { Text } from '../../src/ui/Text';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'muted';
 const leaveTone: Record<string, Tone> = {

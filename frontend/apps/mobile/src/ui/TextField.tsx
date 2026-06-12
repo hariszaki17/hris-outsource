@@ -1,8 +1,8 @@
+import { color } from '@swp/design-tokens';
 // Matches .pen design: label + bordered box with icon slot.
 // Design: TextField `Box` = fill=surface, cornerRadius=8, stroke=border, padding=[13,14]
 // Icon on right side with fill=text-3.
-import { type TextInputProps, TextInput, View } from 'react-native';
-import { color } from '@swp/design-tokens';
+import { TextInput, type TextInputProps, View } from 'react-native';
 import { Text } from './Text';
 
 export interface FieldIcon {
@@ -34,11 +34,7 @@ export function TextField({
 }) {
   return (
     <View className="gap-1.5">
-      {label ? (
-        <Text className="text-[13px] font-semibold text-text-2">
-          {label}
-        </Text>
-      ) : null}
+      {label ? <Text className="text-[13px] font-semibold text-text-2">{label}</Text> : null}
       <View
         className={`flex-row items-center justify-between rounded-input border bg-surface px-3.5 py-[13px] ${
           invalid ? 'border-bad-text' : 'border-border'

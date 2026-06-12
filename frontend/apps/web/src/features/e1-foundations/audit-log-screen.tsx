@@ -313,7 +313,7 @@ export function AuditLogScreen() {
           rows.length > 0 ? (
             <div className="flex items-center justify-end px-4 py-2.5">
               <CursorPagination
-                rangeLabel={t('auditLog.rowCountThisPage', { count: rows.length })}
+                rangeLabel={t('auditLog.rowCount', { count: rows.length })}
                 hasPrev={prevCursors.length > 0}
                 hasNext={Boolean(page?.has_more)}
                 prevLabel={t('common.prev')}

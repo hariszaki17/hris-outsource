@@ -107,6 +107,9 @@ export const id = {
     successTitle: 'Kata sandi diperbarui',
     successBody: 'Kata sandi Anda berhasil disetel ulang. Silakan masuk dengan kata sandi baru.',
     goLogin: 'Masuk Sekarang',
+    weakPassword: 'Kata sandi tidak memenuhi persyaratan.',
+    expiredTitle: 'Tautan telah kedaluwarsa',
+    expiredBody: 'Tautan reset kata sandi ini sudah tidak berlaku. Silakan minta tautan baru.',
   },
   errors: {
     forbidden: 'Anda tidak memiliki izin untuk tindakan ini.',
@@ -207,6 +210,7 @@ export const id = {
       'Konvensi platform yang dibagikan ke semua modul. Bahasa & zona waktu dikunci untuk v1.',
     noPermissionBody: 'Pengaturan hanya untuk HR/Super Admin.',
     errorTitle: 'Gagal memuat pengaturan platform',
+    locked: 'Terkunci',
     section: {
       localization: 'Lokalisasi',
       security: 'Keamanan',
@@ -514,6 +518,7 @@ export const id = {
     filteredBody: 'Coba ubah kata kunci atau filter.',
     errorTitle: 'Gagal memuat lini layanan',
     errorBody: 'Terjadi kesalahan saat memuat data. Coba lagi.',
+    rowActions: 'Aksi baris',
     menuEdit: 'Edit Lini Layanan',
     menuDiscontinue: 'Nonaktifkan',
     addModal: {
@@ -587,6 +592,9 @@ export const id = {
     filteredTitle: 'Tidak ada hasil',
     filteredBody: 'Coba ubah kata kunci atau filter.',
     rowActions: 'Aksi baris',
+    menuEdit: 'Edit',
+    menuDeactivate: 'Nonaktifkan',
+    menuReactivate: 'Aktifkan kembali',
     auditHint: 'Tindakan ini akan dicatat di audit log.',
     deleteTitle: 'Nonaktifkan item?',
     deleteConfirm: 'Ya, Nonaktifkan',

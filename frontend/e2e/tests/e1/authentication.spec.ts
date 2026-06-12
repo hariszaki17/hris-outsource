@@ -195,7 +195,7 @@ test('AU-4 · password reset: request + use token sets a new password', async ({
 
   // Step 1: Navigate to forgot-password and submit the hrAdmin email.
   await page.goto('/forgot-password');
-  await page.locator('#identifier').fill(hrAdminEmail);
+  await page.locator('#email').fill(hrAdminEmail);
   await page.locator('button[type="submit"]').click();
 
   // Step 2: The BE processes the request and the FE advances to the 'sent' state.
@@ -245,7 +245,7 @@ test('C-2 · forgot-password for an unknown email returns the same generic respo
   const unknownEmail = 'unknown.user@no-such-domain.test';
 
   await page.goto('/forgot-password');
-  await page.locator('#identifier').fill(unknownEmail);
+  await page.locator('#email').fill(unknownEmail);
   await page.locator('button[type="submit"]').click();
 
   // The FE always advances to 'sent' (anti-enumeration, C-2 per authentication.md).

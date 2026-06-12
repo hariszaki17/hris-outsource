@@ -27,6 +27,7 @@ import {
   getEmployeeStatus,
   getEmployeePhone,
   getEmployeeIdByNIK,
+  getEmployeeUserId,
 } from '../../lib/db.js';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,8 @@ test('EP-create-data-only · create employee (data only, no login): row appears 
   await page.locator('#full_name').fill(newName);
   await page.locator('#nik').fill(newNik);
   await page.locator('#join_at').fill('2026-01-15');
+  // Phone is the login identifier (D2) — required by the form.
+  await page.locator('#phone').fill('+62-812-1111-2222');
 
   // Submit with "Simpan Karyawan".
   await page.getByRole('button', { name: 'Simpan Karyawan' }).click();
@@ -93,13 +96,12 @@ test('EP-create-data-only · create employee (data only, no login): row appears 
 });
 
 // ---------------------------------------------------------------------------
-// EP-create-with-login — create with provision_login stub (UserID stays NULL)
+// EP-create-with-login — login auto-provisions on create (D1); UserID NOT null
 // ---------------------------------------------------------------------------
 
-test('EP-create-with-login · create employee with provision_login: row created (login stub — UserID NULL)', async ({ page }) => {
-  // NOTE: EP-3 stub — provision_login and login_email are accepted by the BE but UserID
-  // stays NULL (no E1 User created in Phase 4). We only assert that the employee row is
-  // created successfully without a server error. Full login provisioning deferred.
+test('EP-create-with-login · create employee auto-provisions a login (D1): UserID not null', async ({ page }) => {
+  // Login is ALWAYS auto-provisioned on create (D1); employee.user_id is non-null
+  // after create. The optional #login_email is a secondary identifier (phone is primary).
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/employees/new');
 
@@ -107,24 +109,26 @@ test('EP-create-with-login · create employee with provision_login: row created 
   await page.locator('#full_name').fill('Doni Prasetyo E2E Login');
   await page.locator('#nik').fill(stubNik);
   await page.locator('#join_at').fill('2026-02-01');
+  // Phone is the login identifier (D2) — required.
+  await page.locator('#phone').fill('+62-812-9999-8888');
 
-  // Toggle provision login on.
-  const toggle = page.getByRole('switch', { name: /provision.*login|login.*self/i }).first();
-  await toggle.click();
-
-  // Fill login email (now required by the form).
-  const loginEmailField = page.locator('#login_email').or(page.getByPlaceholder(/login.*email/i));
-  await loginEmailField.fill('doni.prasetyo.e2e@swp.test');
+  // Fill the optional login email if the field is present.
+  const loginEmailField = page.locator('#login_email');
+  if (await loginEmailField.isVisible().catch(() => false)) {
+    await loginEmailField.fill('doni.prasetyo.e2e@swp.test');
+  }
 
   // Submit.
   await page.getByRole('button', { name: 'Simpan Karyawan' }).click();
 
-  // Success toast — employee row created even though UserID is NULL (stub).
+  // Success toast.
   await expect(page.getByText('Karyawan berhasil ditambahkan')).toBeVisible({ timeout: 15_000 });
 
-  // DB-side: employee must exist.
+  // DB-side: employee must exist and have an auto-provisioned login (user_id NOT null).
   const id = await getEmployeeIdByNIK(stubNik);
   expect(id).not.toBeNull();
+  const userId = await getEmployeeUserId(id!);
+  expect(userId).not.toBeNull();
 });
 
 // ---------------------------------------------------------------------------
@@ -141,6 +145,8 @@ test('EP-reject-dup-NIK · duplicate NIK shows DUPLICATE_NIK conflict error', as
   await page.locator('#full_name').fill('Duplikat NIK Test');
   await page.locator('#nik').fill(budiNik);
   await page.locator('#join_at').fill('2026-01-01');
+  // Phone is the login identifier (D2) — required by the form.
+  await page.locator('#phone').fill('+62-812-3333-4444');
 
   await page.getByRole('button', { name: 'Simpan Karyawan' }).click();
 
@@ -169,7 +175,8 @@ test('EP-detail · employee detail: Profil tab renders phone and bank account fo
   await expect(page.getByText('Budi Santoso').first()).toBeVisible({ timeout: 30_000 });
 
   // Profil tab should be active by default; phone and bank data should appear.
-  await expect(page.getByText('+62-812-3344-5566')).toBeVisible({ timeout: 10_000 });
+  // Phone renders twice (Kontak + Akun Login → Identitas login) → use .first().
+  await expect(page.getByText('+62-812-3344-5566').first()).toBeVisible({ timeout: 10_000 });
   // BCA bank account seeded with account_number 1234567890
   await expect(page.getByText('1234567890')).toBeVisible({ timeout: 10_000 });
 });
@@ -214,15 +221,16 @@ test('EP-deactivate · deactivate employee: status badge Nonaktif + DB inactive'
   // Wait for detail screen.
   await expect(page.getByText('Budi Santoso').first()).toBeVisible({ timeout: 30_000 });
 
-  // Click kebab / "Aksi lainnya" — opens deactivate confirm.
+  // Click "Aksi lainnya" — opens the offboard (employment-end) confirm dialog.
   await page.getByRole('button', { name: 'Aksi lainnya' }).click();
 
-  // Confirm dialog.
-  await expect(page.getByText('Nonaktifkan karyawan?')).toBeVisible({ timeout: 5_000 });
-  await page.getByRole('button', { name: 'Nonaktifkan' }).first().click();
+  // Confirm dialog — pick a reason (confirm is disabled until a reason is chosen).
+  await expect(page.getByText('Berhentikan karyawan')).toBeVisible({ timeout: 5_000 });
+  await page.locator('#offboard-reason').selectOption('END_OF_TERM');
+  await page.getByRole('button', { name: 'Berhentikan' }).first().click();
 
   // Toast.
-  await expect(page.getByText('Karyawan dinonaktifkan')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Karyawan diberhentikan')).toBeVisible({ timeout: 15_000 });
 
   // Status badge should now show Nonaktif.
   await expect(page.getByText('Nonaktif').first()).toBeVisible({ timeout: 10_000 });
@@ -242,11 +250,12 @@ test('EP-reactivate · reactivate employee (C-3): status badge Aktif + DB active
 
   await expect(page.getByText('Budi Santoso').first()).toBeVisible({ timeout: 30_000 });
 
-  // Step 1: deactivate first.
+  // Step 1: offboard (employment-end) first.
   await page.getByRole('button', { name: 'Aksi lainnya' }).click();
-  await expect(page.getByText('Nonaktifkan karyawan?')).toBeVisible({ timeout: 5_000 });
-  await page.getByRole('button', { name: 'Nonaktifkan' }).first().click();
-  await expect(page.getByText('Karyawan dinonaktifkan')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Berhentikan karyawan')).toBeVisible({ timeout: 5_000 });
+  await page.locator('#offboard-reason').selectOption('END_OF_TERM');
+  await page.getByRole('button', { name: 'Berhentikan' }).first().click();
+  await expect(page.getByText('Karyawan diberhentikan')).toBeVisible({ timeout: 15_000 });
 
   // Step 2: the MoreVertical button now opens reactivate confirm (since status = inactive).
   await page.getByRole('button', { name: 'Aksi lainnya' }).click();

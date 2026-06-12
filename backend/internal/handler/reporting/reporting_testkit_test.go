@@ -399,6 +399,7 @@ type fakeDashboardRepo struct {
 	agentRecent svc.AgentRecentRow
 	agentLeave  int
 	agentOT     int
+	agentToday  *dom.AgentTodayShift
 	unread      int
 	adminData   svc.SuperAdminWidgetsData
 }
@@ -429,6 +430,10 @@ func (r *fakeDashboardRepo) AgentRecent(_ context.Context, _ string, _ time.Time
 
 func (r *fakeDashboardRepo) AgentPending(_ context.Context, _ string) (svc.AgentPendingRow, error) {
 	return svc.AgentPendingRow{Leave: r.agentLeave, OT: r.agentOT}, nil
+}
+
+func (r *fakeDashboardRepo) AgentTodayShift(_ context.Context, _ string, _ time.Time) (*dom.AgentTodayShift, error) {
+	return r.agentToday, nil
 }
 
 func (r *fakeDashboardRepo) CountUnread(_ context.Context, _ []string) (int, error) {

@@ -38,6 +38,7 @@ import {
   openCell,
   popover,
   selectCompany,
+  waitForToken,
 } from '../../lib/e4-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
@@ -203,12 +204,23 @@ test('CH-2-edit-swap · changing an existing entry shift → status MODIFIED', a
 // grid-empty · a company with no placements → empty state
 // ---------------------------------------------------------------------------
 
-test('grid-empty · company with no placements/entries → empty state', async ({ page }) => {
-  // hr_admin has global scope; CMP-0022 has Budi placed but NO schedule entries this week,
-  // so the grid (which builds rows from entries) renders the no-agents empty state.
+test('grid-empty · company with no placements → empty state', async ({ page }) => {
+  // The grid is ROSTER-driven: it renders one row per ACTIVE placement (regardless of
+  // entries). Both seeded companies have placements, so to exercise the empty state we
+  // create a fresh company (auto primary site, zero placements) and select it.
   await loginAs(page, PERSONAS.hrAdmin);
+  await page.goto('/');
+  await waitForToken(page);
+
+  const emptyCompany = 'PT Kosong Jadwal E2E';
+  const res = await apiAs(page, 'POST', '/client-companies', {
+    name: emptyCompany,
+    address: 'Jl. Kosong No. 1, Jakarta',
+  });
+  expect([200, 201]).toContain(res.status);
+
   await page.goto('/schedule');
-  await selectCompany(page, 'Mall Kelapa Gading');
+  await selectCompany(page, emptyCompany);
 
   await expect(page.getByText(/Belum ada|tidak ada agen|Tidak ada agen/i).first()).toBeVisible({
     timeout: 30_000,

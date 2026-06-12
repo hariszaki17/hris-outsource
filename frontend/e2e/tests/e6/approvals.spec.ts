@@ -20,9 +20,6 @@
  * 8003 Budi PENDING_HR over-balance (no_leader); 8005 APPROVED; 8007 Dewi PENDING_HR.
  */
 
-import { expect, loginAs, test } from '../../lib/fixtures.js';
-import { PERSONAS } from '../../lib/personas.js';
-import { resetDb } from '../../lib/reset-db.js';
 import {
   BTN,
   LR,
@@ -31,6 +28,9 @@ import {
   openLeaveDetail,
   waitForToken,
 } from '../../lib/e6-helpers.js';
+import { expect, loginAs, test } from '../../lib/fixtures.js';
+import { PERSONAS } from '../../lib/personas.js';
+import { resetDb } from '../../lib/reset-db.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -208,12 +208,16 @@ test('LIST-default · HR /leave shows PENDING_HR rows; APPROVED filter surfaces 
     timeout: 20_000,
   });
 
-  // Switch the status filter to APPROVED → only the APPROVED terminal (8005, Dewi) remains.
+  // Switch the status filter to APPROVED → the seeded APPROVED requests surface.
+  // The ledger backfill now plants three APPROVED "Cuti Tahunan" requests:
+  // 8005 (Dewi, 1d) + 8008 (Dewi, 3d, history) @ CMP-0021 and 8009 (Budi, 11d,
+  // history) @ CMP-0022.
   await page.getByLabel('Semua status').selectOption('APPROVED');
-  await expect(page.locator('div.border-b').filter({ hasText: 'Cuti Tahunan' })).toHaveCount(1, {
+  await expect(page.locator('div.border-b').filter({ hasText: 'Cuti Tahunan' })).toHaveCount(3, {
     timeout: 20_000,
   });
   await expectLeaveRow(page, 'Dewi Lestari');
+  await expectLeaveRow(page, 'Budi Santoso');
 });
 
 // ---------------------------------------------------------------------------

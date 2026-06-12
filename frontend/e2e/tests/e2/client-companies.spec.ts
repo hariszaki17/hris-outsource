@@ -147,17 +147,13 @@ test('CC-3 · edit company pic_name shows updated value', async ({ page }) => {
   // Wait for list.
   await expect(page.getByText('Plaza Senayan').first()).toBeVisible({ timeout: 30_000 });
 
-  // Open the kebab menu for Plaza Senayan's row.
-  const senRow = page
-    .locator('div.border-b')
-    .filter({ hasText: 'Plaza Senayan' })
-    .first();
-  await senRow.getByRole('button', { name: 'Buka menu aksi' }).click();
+  // Navigate to the detail page via the company name link.
+  await page.getByRole('link', { name: 'Plaza Senayan' }).first().click();
 
-  // Click Edit.
-  await page.getByRole('button', { name: 'Edit' }).first().click();
+  // Detail header → Edit (it's a link).
+  await page.getByRole('link', { name: 'Edit' }).first().click();
 
-  // Edit drawer opens — fill PIC Name.
+  // Edit form opens — fill PIC Name.
   await expect(page.locator('#cc-pic-name')).toBeVisible({ timeout: 10_000 });
   await page.locator('#cc-pic-name').fill('Budi Santoso E2E');
 
@@ -179,13 +175,11 @@ test('CC-4a · deactivate company: status badge Nonaktif + DB inactive', async (
   // Wait for list.
   await expect(page.getByText('Mall Kelapa Gading').first()).toBeVisible({ timeout: 30_000 });
 
-  // Open kebab for Mall Kelapa Gading and deactivate.
+  // Direct inline deactivate button on Mall Kelapa Gading's row.
   const mkgRow = page
     .locator('div.border-b')
     .filter({ hasText: 'Mall Kelapa Gading' });
-  await mkgRow.getByRole('button', { name: 'Buka menu aksi' }).click();
-
-  await page.getByRole('button', { name: 'Nonaktifkan' }).first().click();
+  await mkgRow.getByRole('button', { name: 'Nonaktifkan' }).click();
 
   // Confirm dialog.
   await expect(page.getByText('Nonaktifkan Perusahaan?')).toBeVisible({ timeout: 5_000 });
@@ -218,15 +212,13 @@ test('CC-4b · reactivate company: status badge Aktif + DB active', async ({ pag
   const mkgRow = () =>
     page.locator('div.border-b').filter({ hasText: 'Mall Kelapa Gading' });
 
-  // Step 1: deactivate first.
-  await mkgRow().getByRole('button', { name: 'Buka menu aksi' }).click();
-  await page.getByRole('button', { name: 'Nonaktifkan' }).first().click();
+  // Step 1: deactivate first (direct inline button).
+  await mkgRow().getByRole('button', { name: 'Nonaktifkan' }).click();
   await page.getByRole('button', { name: 'Ya, Nonaktifkan' }).click();
   await expect(page.getByText('Perusahaan berhasil dinonaktifkan')).toBeVisible({ timeout: 15_000 });
 
-  // Step 2: reactivate.
-  await mkgRow().getByRole('button', { name: 'Buka menu aksi' }).click();
-  await page.getByRole('button', { name: 'Aktifkan kembali' }).first().click();
+  // Step 2: reactivate (direct inline button).
+  await mkgRow().getByRole('button', { name: 'Aktifkan kembali' }).click();
 
   // Reactivate confirm dialog.
   await expect(page.getByText('Aktifkan Kembali?')).toBeVisible({ timeout: 5_000 });
@@ -236,7 +228,8 @@ test('CC-4b · reactivate company: status badge Aktif + DB active', async ({ pag
   await expect(page.getByText('Perusahaan berhasil diaktifkan kembali')).toBeVisible({ timeout: 15_000 });
 
   // Status badge.
-  await expect(mkgRow().getByText('Aktif')).toBeVisible({ timeout: 10_000 });
+  // exact:true — otherwise "Aktif" also matches the "Nonaktifkan" action button (contains "aktif").
+  await expect(mkgRow().getByText('Aktif', { exact: true })).toBeVisible({ timeout: 10_000 });
 
   // DB-side.
   const id = await getCompanyByName('Mall Kelapa Gading');

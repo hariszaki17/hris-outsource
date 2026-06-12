@@ -1713,12 +1713,19 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 	return nil
 }
 
-// mondayOfCurrentWeek returns the Monday (00:00 Asia/Jakarta-anchored UTC date)
-// of the week containing now. Schedule fixtures are placed a few days INTO this
-// week so they land inside the visible grid AND avoid the Asia/Jakarta-vs-UTC
-// midnight boundary the fixed E2E clock derives statuses at (05-03 TZ note).
+// mondayOfCurrentWeek returns the Monday (00:00 UTC-stamped) of the week containing
+// `now`, where "now" is resolved to its **Asia/Jakarta calendar date** first. This
+// anchors the seeded week on the same WIB day the web grid + agent dashboard derive
+// "today" from (todayJakartaIso / DashboardRepo.AgentTodayShift) so the seed's
+// rudi/dewi/leave/free dates line up exactly with the grid cells, even when the
+// process clock is UTC and the UTC date is a day behind WIB at the midnight boundary.
 func mondayOfCurrentWeek(now time.Time) time.Time {
-	d := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	jkt, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		jkt = time.FixedZone("WIB", 7*3600)
+	}
+	nj := now.In(jkt)
+	d := time.Date(nj.Year(), nj.Month(), nj.Day(), 0, 0, 0, 0, time.UTC)
 	// Go: Sunday=0..Saturday=6. ISO Monday-start offset.
 	offset := (int(d.Weekday()) + 6) % 7
 	return d.AddDate(0, 0, -offset)
@@ -1781,6 +1788,16 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 	dewiDate := monday.AddDate(0, 0, 2).Format("2006-01-02")  // Wednesday
 	leaveDate := monday.AddDate(0, 0, 3).Format("2006-01-02") // Thursday (over-leave target)
 
+	// TODAY (Asia/Jakarta) — matches the agent dashboard's today_shift resolution
+	// (DashboardRepo.AgentTodayShift uses jakartaNow). Gives the agent persona
+	// (Budi, SWP-EMP-2891 @ SWP-PL-5002) a clockable shift so the self-service
+	// Kehadiran screen ("Absen Sekarang") is enabled/testable.
+	jkt, locErr := time.LoadLocation("Asia/Jakarta")
+	if locErr != nil {
+		jkt = time.FixedZone("WIB", 7*3600)
+	}
+	agentToday := time.Now().In(jkt).Format("2006-01-02")
+
 	// --- Schedule entries (snapshot Pagi 07:00–15:00 onto each cell) ---
 	const schQ = `
 		INSERT INTO schedule_entries
@@ -1798,6 +1815,8 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 		// SWP-SCH-6003 — scheduled shift for the E5 true-ABSENT fixture (SWP-ATT-9009):
 		// the agent was scheduled but never clocked in.
 		{"SWP-SCH-6003", "SWP-EMP-1042", "SWP-PL-5003", "SWP-SVC-002", rudiDate},
+		// SWP-SCH-6004 — the agent persona's shift for TODAY (enables the /me clock CTA).
+		{"SWP-SCH-6004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-SVC-003", agentToday},
 	}
 	for _, e := range entries {
 		if _, err := pool.Pool.Exec(ctx, schQ, e.id, e.employeeID, e.placementID, e.serviceLineID, e.date); err != nil {

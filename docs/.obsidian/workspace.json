@@ -185,6 +185,9 @@
   },
   "active": "fdddf068abe83970",
   "lastOpenFiles": [
+    "user_requirement.md",
+    "epics/E8-payroll/prds/payroll-payment.md",
+    "epics/E8-payroll/prds/payroll-run.md",
     "eng/AGENT-WEB-ACCESS.md",
     "epics/E5-attendance/prds/manual-attendance.md",
     "epics/E1-foundations/prds/audit-log.md",

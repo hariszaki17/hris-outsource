@@ -53,6 +53,18 @@ export function nowIso(): string {
   return Temporal.Now.instant().toString();
 }
 
+/**
+ * Today's calendar date in Asia/Jakarta as "YYYY-MM-DD".
+ *
+ * This is the canonical "today" for all date-grid / scheduling derivations — it MUST
+ * match how the backend resolves "today" (agent dashboard `today_shift`, attendance,
+ * the E4 seed). Near the UTC↔WIB midnight boundary the UTC date and the WIB date
+ * diverge by a day; always anchor on WIB so the web grid and the API agree.
+ */
+export function todayJakartaIso(): string {
+  return Temporal.Now.plainDateISO(TZ).toString();
+}
+
 /** Whole days between two calendar dates (inclusive of neither end; for ranges). */
 export function daysBetween(startIsoDate: string, endIsoDate: string): number {
   return Temporal.PlainDate.from(startIsoDate).until(Temporal.PlainDate.from(endIsoDate)).days;

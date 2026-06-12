@@ -32,7 +32,7 @@
  * (same real-409 + token-hydration patterns) so e6 specs import from one lib.
  */
 
-import { expect, type Locator, type Page } from '@playwright/test';
+import { type Locator, type Page, expect } from '@playwright/test';
 import { API_BASE, apiAs, errorCode, errorDetails, waitForToken } from './e5-helpers.js';
 
 export { API_BASE, apiAs, errorCode, errorDetails, waitForToken };
@@ -61,12 +61,18 @@ export const LR = {
   inv3Overlap: 'SWP-LR-8007',
 } as const;
 
-/** Leave-quota fixtures planted by the seed (08-02). */
-export const LQ = {
-  /** Dewi (SWP-EMP-3001): total 12, used 4 → remaining 8. Adjust happy target. */
-  dewi: 'SWP-LQ-8001',
-  /** Budi (SWP-EMP-2891): total 12, used 11 → remaining 1. Over-balance / refuse target. */
-  budi: 'SWP-LQ-8002',
+/**
+ * Leave-grant LOT fixtures planted by the seed (F6.1 grant-lot ledger, redesigned
+ * 2026-06-08). The legacy `leave_quotas` table is no longer seeded — balances are a
+ * per-employee POOL of LeaveGrant lots, each with its own expires_at/consumed/pending.
+ */
+export const LG = {
+  /** Dewi (SWP-EMP-3001) ANNUAL lot: amount 12, consumed 4, pending 0 → remaining 8. Adjust-happy target. */
+  dewiAnnual: 'SWP-LG-8001',
+  /** Budi (SWP-EMP-2891) ANNUAL lot: amount 12, consumed 11, pending 0 → remaining 1. Adjust-refuse target. */
+  budiAnnual: 'SWP-LG-8002',
+  /** Dewi (SWP-EMP-3001) MATERNITY earmark lot: amount 90, consumed 0 → earmarked. */
+  dewiMaternity: 'SWP-LG-8003',
 } as const;
 
 /** Employee IDs referenced by the leave fixtures. */
@@ -164,24 +170,40 @@ export async function leaveStatus(page: Page, id: string): Promise<string | unde
 }
 
 /** Poll until a leave request reaches `expected` status (after a refetch-driven UI action). */
-export async function expectLeaveStatus(
-  page: Page,
-  id: string,
-  expected: string,
-): Promise<void> {
+export async function expectLeaveStatus(page: Page, id: string, expected: string): Promise<void> {
   await expect.poll(() => leaveStatus(page, id), { timeout: 20_000 }).toBe(expected);
 }
 
 /**
- * quotaRemaining — GET /leave-quotas and return the persisted `remaining` for `id`.
- * apiAs() returns the RAW BE body (not the Orval `{data}` wrap), so the page envelope
- * is the top-level `{ data: [quotas], next_cursor, has_more }` (httpx.PageResponse).
+ * balanceRemaining — GET /leave-balances and return the per-employee POOL `pool_remaining`
+ * for `employeeId` (the flat unearmarked pool: Σ amount−consumed−pending over un-earmarked
+ * lots). apiAs() returns the RAW BE body, so the envelope is the top-level
+ * `{ data: [EmployeeLeaveBalance], next_cursor, has_more }` (httpx.PageResponse).
  */
-export async function quotaRemaining(page: Page, id: string): Promise<number | undefined> {
-  const res = await apiAs(page, 'GET', '/leave-quotas?limit=50');
-  const body = res.body as { data?: Array<{ id: string; remaining: number }> } | null;
+export async function balanceRemaining(
+  page: Page,
+  employeeId: string,
+): Promise<number | undefined> {
+  const res = await apiAs(page, 'GET', '/leave-balances?limit=50');
+  const body = res.body as { data?: Array<{ employee_id: string; pool_remaining: number }> } | null;
   const rows = body?.data ?? [];
-  return rows.find((q) => q.id === id)?.remaining;
+  return rows.find((b) => b.employee_id === employeeId)?.pool_remaining;
+}
+
+/**
+ * grantRemaining — GET /leave-grants for an employee and return the LOT `remaining_days`
+ * for `grantId` (amount − consumed − pending). Used to cross-check a single lot after a
+ * manual adjust (PATCH /leave-grants/{id}).
+ */
+export async function grantRemaining(
+  page: Page,
+  employeeId: string,
+  grantId: string,
+): Promise<number | undefined> {
+  const res = await apiAs(page, 'GET', `/leave-grants?employee_id=${employeeId}&limit=50`);
+  const body = res.body as { data?: Array<{ id: string; remaining_days: number }> } | null;
+  const rows = body?.data ?? [];
+  return rows.find((g) => g.id === grantId)?.remaining_days;
 }
 
 // ---------------------------------------------------------------------------

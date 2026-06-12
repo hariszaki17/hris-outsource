@@ -58,6 +58,24 @@ run:
 worker:
 	go run ./cmd/worker
 
+## cron: one-shot maintenance sweeps (schedule externally via OS/k8s cron).
+##   make cron JOB=absence-sweep | leave-expiry-sweep | all
+.PHONY: cron
+cron:
+	go run ./cmd/cron $(JOB)
+
+.PHONY: cron-absence
+cron-absence:
+	go run ./cmd/cron absence-sweep
+
+.PHONY: cron-leave-expiry
+cron-leave-expiry:
+	go run ./cmd/cron leave-expiry-sweep
+
+.PHONY: cron-all
+cron-all:
+	go run ./cmd/cron all
+
 ## test: unit + integration (integration uses testcontainers; needs Docker)
 .PHONY: test
 test:

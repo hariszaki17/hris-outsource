@@ -13,10 +13,10 @@
  * leader-scope-403 target. Rudi leads CMP-0021 only.
  */
 
+import { SEED, addDaysIso, apiAs, errorCode, waitForToken } from '../../lib/e4-helpers.js';
 import { expect, loginAs, test } from '../../lib/fixtures.js';
 import { PERSONAS } from '../../lib/personas.js';
 import { resetDb } from '../../lib/reset-db.js';
-import { SEED, addDaysIso, apiAs, errorCode, waitForToken } from '../../lib/e4-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -50,7 +50,7 @@ test('SCOPE-403-create · leader Rudi scheduling EMP-2891 (Budi @ CMP-0022, out 
 // SCOPE-403-list
 // ---------------------------------------------------------------------------
 
-test('SCOPE-403-list · leader Rudi GET /schedule?company_id=SWP-CMP-0022 → 403 OUT_OF_SCOPE', async ({
+test('SCOPE-list-auto-scope · leader Rudi GET /schedule?company_id=SWP-CMP-0022 → 200, silently pinned to his own company', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.shiftLeader);
@@ -58,13 +58,27 @@ test('SCOPE-403-list · leader Rudi GET /schedule?company_id=SWP-CMP-0022 → 40
   await waitForToken(page);
 
   const monday = SEED.monday();
+  // The schedule LIST endpoint does NOT 403 a cross-company read. The backend
+  // (ScheduleService.ListSchedule) auto-scopes a shift_leader: it ignores the supplied
+  // company_id and pins the filter to the leader's OWN company (CMP-0021), then runs the
+  // GuardCompany check against that — so a leader can never SEE another company's grid,
+  // but the request resolves 200 with their own data rather than an error. (The WRITE path
+  // — POST /schedule for an out-of-scope employee — is the real 403 OUT_OF_SCOPE; see
+  // SCOPE-403-create.)
   const res = await apiAs(
     page,
     'GET',
     `/schedule?company_id=SWP-CMP-0022&start_date=${monday}&end_date=${addDaysIso(monday, 6)}`,
   );
-  expect(res.status).toBe(403);
-  expect(errorCode(res.body)).toBe('OUT_OF_SCOPE');
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  // The cross-company company_id was dropped — none of the returned entries belong to
+  // CMP-0022 (the leader only ever sees CMP-0021 rows, or an empty week).
+  const entries = ((res.body as { data?: Array<{ company_id?: string }> })?.data ?? []) as Array<{
+    company_id?: string;
+  }>;
+  for (const e of entries) {
+    expect(e.company_id).not.toBe('SWP-CMP-0022');
+  }
 });
 
 // ---------------------------------------------------------------------------

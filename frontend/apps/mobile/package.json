@@ -13,6 +13,9 @@
     "doctor": "expo-doctor"
   },
   "dependencies": {
+    "@expo-google-fonts/ibm-plex-mono": "^0.4.1",
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@swp/api-client": "workspace:*",
     "@swp/design-tokens": "workspace:*",
     "@swp/shared": "workspace:*",

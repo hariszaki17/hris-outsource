@@ -19,9 +19,6 @@
  * status is DONE even though the wire maps it to COMPLETED (11-02b DTO).
  */
 
-import { expect, loginAs, test } from '../../lib/fixtures.js';
-import { PERSONAS } from '../../lib/personas.js';
-import { resetDb } from '../../lib/reset-db.js';
 import {
   apiAs,
   errorCode,
@@ -30,6 +27,9 @@ import {
   pollExportJobUntil,
   waitForToken,
 } from '../../lib/e10-helpers.js';
+import { expect, loginAs, test } from '../../lib/fixtures.js';
+import { PERSONAS } from '../../lib/personas.js';
+import { resetDb } from '../../lib/reset-db.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -89,9 +89,13 @@ test('EXPORT-cancel · POST /exports → :cancel reaches CANCELLED', async ({ pa
 
   // The cancel races the worker (jobs complete in ~0s). Retry create+cancel until the cancel
   // wins (status CANCELLED) — the contract test (11-03) pins the QUEUED→CANCELLED transition;
-  // here we prove the real :cancel path drives a job to CANCELLED end-to-end.
+  // here we prove the real :cancel path drives a job to CANCELLED end-to-end. The :cancel POST
+  // is fired back-to-back with the create's 202 so it lands while the job is still QUEUED;
+  // a generous attempt budget makes winning the race deterministic even on a fast worker.
+  const MAX_ATTEMPTS = 25;
   let cancelled = false;
-  for (let attempt = 0; attempt < 5 && !cancelled; attempt++) {
+  let lastStatus = 'NONE';
+  for (let attempt = 0; attempt < MAX_ATTEMPTS && !cancelled; attempt++) {
     const created = await apiAs(page, 'POST', '/exports', BILLABLE_REQUEST);
     expect(created.status).toBe(202);
     const id = (created.body as { data: { id: string } }).data.id;
@@ -99,6 +103,7 @@ test('EXPORT-cancel · POST /exports → :cancel reaches CANCELLED', async ({ pa
     const cancel = await apiAs(page, 'POST', `/exports/${id}:cancel`, undefined);
     expect(cancel.status, JSON.stringify(cancel.body)).toBe(200);
     const status = (cancel.body as { data: { status: string } }).data.status;
+    lastStatus = status;
 
     if (status === 'CANCELLED') {
       // DB confirms the terminal CANCELLED state via the real cancel path.
@@ -108,9 +113,13 @@ test('EXPORT-cancel · POST /exports → :cancel reaches CANCELLED', async ({ pa
       expect(row.status).toBe('CANCELLED');
       cancelled = true;
     }
-    // else: the worker won this race (COMPLETED) — retry to win the cancel race.
+    // else: the worker won this race (the cancel was a no-op on an already-terminal
+    // DONE/COMPLETED job) — retry to win the cancel race.
   }
-  expect(cancelled, 'cancel never won the race in 5 attempts').toBe(true);
+  expect(
+    cancelled,
+    `cancel never won the race in ${MAX_ATTEMPTS} attempts (last cancel status: ${lastStatus})`,
+  ).toBe(true);
 });
 
 // ---------------------------------------------------------------------------

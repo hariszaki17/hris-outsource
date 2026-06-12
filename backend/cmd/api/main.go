@@ -27,7 +27,6 @@ import (
 	schedulinghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
-	"github.com/hariszaki17/hris-outsource/backend/internal/platform/cron"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/crypto"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/idempotency"
@@ -241,11 +240,10 @@ func run() error {
 	clockSvc := attendancesvc.NewClockService(clockRepo, txm)
 	clockHandler := attendancehttp.NewClockHandler(clockSvc)
 
-	// Absence-sweep cron (07-xx / F5.2): in-process, single-binary job that writes
-	// ABSENT rows for scheduled shifts that ended past the grace with no clock-in.
-	// The partial unique index on attendance(schedule_id) is the idempotency guard.
-	absenceSweepRepo := attendancerepo.NewAbsenceSweepRepo(pool)
-	absenceSweepSvc := attendancesvc.NewAbsenceSweepService(absenceSweepRepo, txm, cfg.Cron.AbsenceGrace, 0)
+	// Absence-sweep (F5.2) + leave-expiry-sweep (F6.1) used to run as in-process cron
+	// runners here. They now live in the standalone `cmd/cron` binary (one-shot,
+	// externally scheduled) so the API process never mutates shared state on a timer.
+	// See cmd/cron/main.go.
 
 	// Leave slice (08-02): E6 two-level approval + quotas + calendar (F6.1/F6.2/F6.3).
 	// The leave service's INV-3 loop-closer reuses the EXISTING scheduling repo
@@ -261,10 +259,7 @@ func run() error {
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
 	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, grantSvc, calendarSvc)
 
-	// Leave-expiry sweep (F6.1): in-process cron that releases dangling pending on
-	// lapsed grant-lots (remaining is already 0 for an inactive lot at the read
-	// boundary). Mirrors the absence-sweep wiring.
-	leaveExpirySvc := leavesvc.NewLeaveExpirySweepService(grantRepo, txm, 0)
+	// Leave-expiry sweep (F6.1) moved to cmd/cron (see note above).
 
 	// Overtime slice (09-02): E7 two-level OT approval + holiday calendar
 	// (F7.1/F7.3/F7.4). The OT service reuses the EXISTING scheduling repo
@@ -341,27 +336,9 @@ func run() error {
 		WriteTimeout: cfg.HTTP.WriteTimeout,
 	}
 
-	// In-process cron (single binary): start the absence-sweep runner before serving.
-	// It stops on ctx.Done() (the same signal that drives graceful shutdown).
-	if cfg.Cron.AbsenceSweepEnabled {
-		runner := cron.NewRunner("absence-sweep", cfg.Cron.AbsenceSweepInterval, func(ctx context.Context) error {
-			_, err := absenceSweepSvc.Sweep(ctx)
-			return err
-		})
-		go runner.Start(ctx)
-		slog.Info("absence-sweep cron started",
-			"interval", cfg.Cron.AbsenceSweepInterval.String(), "grace", cfg.Cron.AbsenceGrace.String())
-	}
-
-	// Leave-expiry sweep cron (F6.1): releases dangling pending on lapsed grant-lots.
-	if cfg.Cron.LeaveExpirySweepEnabled {
-		runner := cron.NewRunner("leave-expiry-sweep", cfg.Cron.LeaveExpiryInterval, func(ctx context.Context) error {
-			_, err := leaveExpirySvc.Sweep(ctx)
-			return err
-		})
-		go runner.Start(ctx)
-		slog.Info("leave-expiry-sweep cron started", "interval", cfg.Cron.LeaveExpiryInterval.String())
-	}
+	// Periodic maintenance sweeps (absence-sweep, leave-expiry-sweep) are no longer
+	// run in-process. They are one-shot jobs in cmd/cron, scheduled externally — the
+	// API process stays free of timer-driven DB mutations.
 
 	// Serve until signal, then graceful shutdown.
 	errCh := make(chan error, 1)

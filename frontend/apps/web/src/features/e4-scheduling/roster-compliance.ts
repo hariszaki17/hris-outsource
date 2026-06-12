@@ -13,7 +13,7 @@
  */
 import { type ScheduleEntry, ScheduleEntryStatus } from '@swp/api-client/e4';
 import type { Holiday } from '@swp/api-client/e7';
-import { TZ } from '@swp/shared';
+import { todayJakartaIso } from '@swp/shared';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -32,9 +32,9 @@ export function toIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Current date in Asia/Jakarta as "YYYY-MM-DD". */
+/** Current date in Asia/Jakarta as "YYYY-MM-DD" (canonical helper in @swp/shared). */
 export function currentJakartaIso(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: TZ });
+  return todayJakartaIso();
 }
 
 /** Add N days to a "YYYY-MM-DD" string. */

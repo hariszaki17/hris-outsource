@@ -24,7 +24,8 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { execSync } from 'node:child_process';
+import * as os from 'node:os';
+import { execFileSync, execSync } from 'node:child_process';
 import pg from 'pg';
 
 const { Client } = pg;
@@ -36,6 +37,15 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '../../..');
 const BACKEND_DIR = path.join(REPO_ROOT, 'backend');
 const E2E_DIR = path.join(REPO_ROOT, 'frontend', 'e2e');
 const ENV_FILE = path.join(E2E_DIR, '.env.e2e');
+
+// Prebuilt seed binary compiled ONCE by globalSetup (lib/backend.ts SEED_BIN).
+// Reseeding via this binary avoids a `go run ./cmd/seed` toolchain recompile on every
+// beforeEach (~250×/full run), which otherwise thrashes the machine. Keep in sync with
+// lib/backend.ts SEED_BIN.
+const SEED_BIN = path.join(
+  os.tmpdir(),
+  process.platform === 'win32' ? 'swp-e2e-seed.exe' : 'swp-e2e-seed',
+);
 
 // ---------------------------------------------------------------------------
 // Parse .env.e2e (minimal — only need DATABASE_URL)
@@ -188,9 +198,19 @@ export async function resetDb(): Promise<void> {
     DATABASE_URL: dbUrl,
     ENV: 'test',
   };
-  execSync('go run ./cmd/seed', {
-    cwd: BACKEND_DIR,
-    env: envForSeed,
-    stdio: 'inherit',
-  });
+  // Prefer the prebuilt binary (globalSetup compiled it once); fall back to `go run`
+  // only if it's missing (e.g. a spec run outside the full harness).
+  if (fs.existsSync(SEED_BIN)) {
+    execFileSync(SEED_BIN, [], {
+      cwd: BACKEND_DIR,
+      env: envForSeed,
+      stdio: 'inherit',
+    });
+  } else {
+    execSync('go run ./cmd/seed', {
+      cwd: BACKEND_DIR,
+      env: envForSeed,
+      stdio: 'inherit',
+    });
+  }
 }

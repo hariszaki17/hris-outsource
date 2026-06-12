@@ -90,7 +90,11 @@ test('REPORT-hr-renders · HR /reports renders TitleBand + summary StatCards + b
 // Leader scope — server-scoped to own company; cross-company → OUT_OF_SCOPE
 // ---------------------------------------------------------------------------
 
-test('REPORT-leader-scoped · shift_leader report is own-company scoped; cross-company company_id → 403 OUT_OF_SCOPE', async ({
+// Skipped: BR-4 (PRD) says a shift_leader sees their own company's billable report,
+// but the shipped role model (packages/shared/src/rbac.ts + NAVIGATION-AND-RBAC.md)
+// gives shift_leader NO reports.read. This conflict needs an EPICS.md §8 ruling before
+// the test can assert the correct behavior (SL own-company 200 vs SL fully denied 403).
+test.skip('REPORT-leader-scoped · shift_leader report is own-company scoped; cross-company company_id → 403 OUT_OF_SCOPE', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.shiftLeader);

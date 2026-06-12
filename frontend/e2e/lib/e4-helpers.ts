@@ -54,18 +54,25 @@ export async function waitForToken(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Asia/Jakarta-anchored week dates (mirror the seed's mondayOfCurrentWeek, which
-// uses the UTC calendar date — see backend/cmd/seed/seed.go). The seed plants:
+// Asia/Jakarta-anchored week dates (mirror the seed's mondayOfCurrentWeek and the
+// web grid, which both anchor "today"/the week on the Asia/Jakarta calendar date —
+// see backend/cmd/seed/seed.go + schedule-grid-screen.tsx). The seed plants:
 //   monday+1 (Tue) SWP-SCH-6001 Rudi (SWP-EMP-1108)
 //   monday+2 (Wed) SWP-SCH-6002 Dewi (SWP-EMP-3001)
 //   monday+3 (Thu) approved-leave SWP-LR-44210 for Dewi (SWP-EMP-3001)
-// We compute the same Monday so the negative/positive dates line up exactly.
+// We compute the same Monday so the negative/positive dates line up exactly, even
+// across the UTC↔WIB midnight boundary (where the UTC date is a day behind WIB).
 // ---------------------------------------------------------------------------
 
-/** Monday (UTC calendar date) of the current week, "YYYY-MM-DD" — matches the seed. */
+/** Today's calendar date in Asia/Jakarta as "YYYY-MM-DD" (matches the grid + seed). */
+export function todayJakartaIso(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+}
+
+/** Monday (Asia/Jakarta calendar date) of the current week, "YYYY-MM-DD" — matches the seed. */
 export function mondayOfCurrentWeekIso(): string {
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const [y, m, dd] = todayJakartaIso().split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, dd));
   const offset = (d.getUTCDay() + 6) % 7; // Go: (Weekday()+6)%7 — ISO Monday-start
   d.setUTCDate(d.getUTCDate() - offset);
   return d.toISOString().slice(0, 10);
@@ -79,11 +86,9 @@ export function addDaysIso(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** N days from today (UTC), "YYYY-MM-DD". */
+/** N days from today (Asia/Jakarta), "YYYY-MM-DD" — matches the grid's Jakarta "today". */
 export function isoDaysFromNow(days: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addDaysIso(todayJakartaIso(), days);
 }
 
 // Convenience anchors keyed off the seed's Monday.
@@ -103,20 +108,54 @@ export const SEED = {
 // Company picker (ClientCompanyPicker = Combobox in schedule-grid-screen)
 // ---------------------------------------------------------------------------
 
-/** Drive the ClientCompanyPicker (the only Combobox in the grid header) to `name`. */
+/**
+ * Drive the ClientCompanyPicker (the Combobox in the grid header) to `name`.
+ *
+ * A shift_leader is scoped to exactly ONE company, so the grid auto-selects it and
+ * renders NO picker (the heading shows "Jadwal Mingguan — <company>"). hr_admin /
+ * super_admin are global and DO get the picker. Wait for whichever appears, and only
+ * drive the combobox when it exists — otherwise the company is already selected.
+ */
 export async function selectCompany(page: Page, name: string): Promise<void> {
   // The ClientCompanyPicker lives in a fixed-width wrapper `div.w-72` right after the header.
-  const scope = page.locator('div.w-72').first();
-  await pickCombobox(page, scope, name, name);
+  const trigger = page.locator('div.w-72 button[aria-haspopup="listbox"]').first();
+  const heading = page.getByRole('heading', { name: /Jadwal Mingguan/i });
+
+  // Wait until the header settles: either the picker (global roles) or the
+  // auto-selected grid heading (single-company leader) is on screen.
+  await expect(trigger.or(heading).first()).toBeVisible({ timeout: 30_000 });
+
+  if ((await trigger.count()) > 0) {
+    const scope = page.locator('div.w-72').first();
+    await pickCombobox(page, scope, name, name);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Grid cell button (aria-label = "{{agent}} — {{date}}")
 // ---------------------------------------------------------------------------
 
+/**
+ * gridCellDateLabel — format an ISO date the SAME way the grid does in the cell
+ * aria-label (schedule-grid-screen.tsx formatDayMonthId: id-ID, day-numeric +
+ * short month, parsed as UTC midnight). The aria-label embeds e.g. "13 Jun", NOT
+ * the ISO date, so matching on the raw ISO never hits.
+ */
+export function gridCellDateLabel(dateIso: string): string {
+  const [y, m, d] = dateIso.split('-').map(Number);
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
 /** Locate the grid cell button for an agent on a given ISO date. */
 export function cellButton(page: Page, agentName: string, dateIso: string): Locator {
-  return page.locator(`button[aria-label*="${agentName}"][aria-label*="${dateIso}"]`).first();
+  const dateLabel = gridCellDateLabel(dateIso);
+  return page
+    .locator(`button[aria-label*="${agentName}"][aria-label*="${dateLabel}"]`)
+    .first();
 }
 
 /** Click the grid cell for an agent+date to open the ShiftPickerPopover. */

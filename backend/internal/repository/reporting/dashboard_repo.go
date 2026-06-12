@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	sqlcgen "github.com/hariszaki17/hris-outsource/backend/internal/repository/sqlc"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/reporting"
@@ -151,6 +152,86 @@ func (r *DashboardRepo) AgentPending(ctx context.Context, employeeID string) (sv
 		return svc.AgentPendingRow{}, err
 	}
 	return svc.AgentPendingRow{Leave: int(row.LeavePending), OT: int(row.OtPending)}, nil
+}
+
+// agentTodayShiftSQL resolves the agent's single live schedule entry for `today`
+// (joined to its shift master for the name, the placement's company for the name,
+// and the latest attendance for that entry to derive clock_in_status). A raw query
+// (not sqlc) — this read is local to the dashboard and avoids a codegen round-trip.
+const agentTodayShiftSQL = `
+SELECT se.id,
+       COALESCE(sm.name, ''),
+       COALESCE(se.start_time, ''),
+       COALESCE(se.end_time, ''),
+       COALESCE(cc.name, ''),
+       se.is_day_off,
+       se.shift_master_id,
+       a.check_in_at,
+       a.check_out_at
+FROM schedule_entries se
+JOIN placements pl ON pl.id = se.placement_id
+JOIN client_companies cc ON cc.id = pl.client_company_id
+LEFT JOIN shift_masters sm ON sm.id = se.shift_master_id
+LEFT JOIN LATERAL (
+    SELECT check_in_at, check_out_at
+    FROM attendance
+    WHERE schedule_id = se.id AND deleted_at IS NULL
+    ORDER BY check_in_at DESC NULLS LAST
+    LIMIT 1
+) a ON true
+WHERE se.employee_id = $1
+  AND se.work_date = $2
+  AND se.deleted_at IS NULL
+  AND se.status <> 'CANCELLED_BY_LEAVE'
+ORDER BY se.created_at DESC
+LIMIT 1`
+
+// AgentTodayShift returns the agent's live shift for `today` (Asia/Jakarta), or
+// nil when off-duty (no entry, an explicit day-off, or a leave-cancelled entry).
+func (r *DashboardRepo) AgentTodayShift(ctx context.Context, employeeID string, today time.Time) (*dom.AgentTodayShift, error) {
+	var (
+		id            string
+		shiftName     string
+		startTime     string
+		endTime       string
+		companyName   string
+		isDayOff      bool
+		shiftMasterID *string
+		checkInAt     *time.Time
+		checkOutAt    *time.Time
+	)
+	err := r.pool.Pool.QueryRow(ctx, agentTodayShiftSQL, employeeID, pgDate(today)).Scan(
+		&id, &shiftName, &startTime, &endTime, &companyName, &isDayOff, &shiftMasterID, &checkInAt, &checkOutAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Off-duty: an explicit day-off, or an entry with no shift template, is not a
+	// clockable shift.
+	if isDayOff || shiftMasterID == nil {
+		return nil, nil
+	}
+
+	status := "NOT_CLOCKED_IN"
+	if checkInAt != nil {
+		if checkOutAt != nil {
+			status = "CLOCKED_OUT"
+		} else {
+			status = "CLOCKED_IN"
+		}
+	}
+
+	return &dom.AgentTodayShift{
+		ScheduleID:    id,
+		ShiftName:     shiftName,
+		StartTime:     startTime,
+		EndTime:       endTime,
+		CompanyName:   companyName,
+		ClockInStatus: status,
+	}, nil
 }
 
 // SuperAdminWidgets runs the four global admin-block aggregations (DB-7). The

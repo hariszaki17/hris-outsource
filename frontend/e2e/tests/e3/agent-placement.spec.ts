@@ -15,10 +15,11 @@
  *   AP-expiring-filter   Expiring-soon toggle (role=switch) renders SWP-PL-5004 (Dewi, EXPIRING)
  *
  * DOM (from placement-form.tsx / placements-screen.tsx):
- *   - FK fields are @swp/ui Combobox pickers (button[aria-haspopup=listbox] → search input → option button).
- *   - Native date/number ids: start_date, end_date, annual_leave_entitlement_days,
- *     base_salary_ref_idr, notes, backdate_reason. Forms are noValidate.
- *   - List rows are div.border-b; expiring toggle is role=switch.
+ *   - FK fields are @swp/ui Combobox pickers (button[aria-haspopup=listbox] → search input → option button),
+ *     EXCEPT agreement_id: it is now AgreementField — a read-only auto-resolver (no combobox) that picks the
+ *     agent's single active agreement once the employee is chosen (EA-2). Do NOT pickCombobox it.
+ *   - Native date/number ids: start_date, end_date, notes, backdate_reason. Forms are noValidate.
+ *   - The filter row has TWO role=switch toggles (Menunggu perjanjian + Akan berakhir) — target by aria-label.
  *
  * Seed (05-02): unplaced agents SWP-EMP-3002 (Agus Pratama) / SWP-EMP-3003 (Bambang Sutrisno);
  *   placed agents Rudi/SWP-PL-5001@0021, Budi/SWP-PL-5002@0022; companies
@@ -87,7 +88,8 @@ test('AP-create-active · UI create a backdated (active) placement for an unplac
     timeout: 30_000,
   });
   await pickCombobox(page, comboFieldById(page, 'employee_id'), /Agus Pratama/i, 'Agus');
-  await pickCombobox(page, comboFieldById(page, 'agreement_id'), /PKWTT|3002UI/i);
+  // agreement_id is auto-resolved by AgreementField once the agent is chosen (read-only,
+  // no combobox) — EA-2: one active agreement per agent. No pick needed.
   await pickCombobox(page, comboFieldById(page, 'client_company_id'), /Mall Kelapa Gading/i, 'Mall');
   await pickCombobox(page, comboFieldById(page, 'site_id'), /Mall Kelapa Gading/i);
   await pickCombobox(page, comboFieldById(page, 'service_line_id'), /Parking/i, 'Park');
@@ -226,7 +228,7 @@ test('AP-inv1-block · 2nd placement for already-placed Rudi → 409 INV_1_VIOLA
     timeout: 30_000,
   });
   await pickCombobox(page, comboFieldById(page, 'employee_id'), /Rudi Wijaya/i, 'Rudi');
-  await pickCombobox(page, comboFieldById(page, 'agreement_id'), /PKWT/i);
+  // agreement_id auto-resolves from the chosen agent (AgreementField, read-only).
   await pickCombobox(page, comboFieldById(page, 'client_company_id'), /Mall Kelapa Gading/i, 'Mall');
   await pickCombobox(page, comboFieldById(page, 'site_id'), /Mall Kelapa Gading/i);
   await pickCombobox(page, comboFieldById(page, 'service_line_id'), /Parking/i, 'Park');
@@ -340,8 +342,10 @@ test('AP-expiring-filter · expiring-soon toggle (role=switch) lists the EXPIRIN
   await expect(page.getByText(/Penempatan/i).first()).toBeVisible({ timeout: 30_000 });
 
   // Dewi (SWP-PL-5004) has end_date = today+20d → DTO derives EXPIRING.
-  // Flip the expiring-soon toggle (role=switch) and assert Dewi appears.
-  const toggle = page.getByRole('switch').first();
+  // Flip the expiring-soon toggle and assert Dewi appears. The filter row now carries
+  // TWO role=switch toggles (Menunggu perjanjian + Akan berakhir), so target the
+  // expiring one by its aria-label ("Akan berakhir") rather than .first().
+  const toggle = page.getByRole('switch', { name: /Akan berakhir/i });
   await expect(toggle).toBeVisible({ timeout: 10_000 });
   await toggle.click();
 

@@ -85,7 +85,9 @@ test('RO-filter-status · status FilterSelect narrows the roster (ENDED filter +
   await expect(page.getByText('Plaza Senayan').first()).toBeVisible({ timeout: 15_000 });
 
   // Include history (else terminal rows are hidden), then filter by ENDED via the FilterSelect.
-  await page.getByRole('switch').first().click();
+  // The filter row now has TWO role=switch toggles (Menunggu perjanjian + Sertakan riwayat),
+  // so target the include-history one by aria-label rather than .first().
+  await page.getByRole('switch', { name: /Sertakan riwayat/i }).click();
   // The status FilterSelect is the only native <select> in the filter row.
   await page.locator('select').first().selectOption('ENDED');
 
@@ -123,8 +125,10 @@ test('RO-include-history · ending a placement then toggling "Sertakan riwayat" 
   // Without history, the ENDED Sari row is hidden from the table.
   await expect(table.getByText(/Sari Hadi/i)).toHaveCount(0, { timeout: 10_000 });
 
-  // Toggle include_history (role=switch) → terminal rows appear in the table.
-  await page.getByRole('switch').first().click();
+  // Toggle include_history → terminal rows appear in the table. Target by aria-label
+  // ("Sertakan riwayat") — the filter row also has the "Menunggu perjanjian" switch, so
+  // .first() would flip the wrong toggle.
+  await page.getByRole('switch', { name: /Sertakan riwayat/i }).click();
   await expect(table.getByText(/Sari Hadi/i).first()).toBeVisible({ timeout: 15_000 });
 });
 

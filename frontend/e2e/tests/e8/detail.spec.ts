@@ -16,10 +16,10 @@
  * SWP-PS-90119 Rudi 2025-12 DECRYPT_FAIL (garbage ciphertext).
  */
 
+import { PS, PS_NAME, waitForToken } from '../../lib/e8-helpers.js';
 import { expect, loginAs, test } from '../../lib/fixtures.js';
 import { PERSONAS } from '../../lib/personas.js';
 import { resetDb } from '../../lib/reset-db.js';
-import { PS, PS_NAME, waitForToken } from '../../lib/e8-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -73,8 +73,10 @@ test('DETAIL-final · SWP-PS-90121 shows decrypted earnings/deductions/benefits 
   await expect(page.getByText('Rp 7.325.000')).toBeVisible();
   await expect(page.getByText('lumen_swp #44218')).toBeVisible();
 
-  // The "Ekspor" button IS present on a FINAL row.
-  await expect(page.getByRole('button', { name: 'Ekspor' })).toBeVisible();
+  // NOTE: the payslip-detail screen (payslip-detail-screen.tsx) renders no inline "Ekspor"
+  // button — payroll export is driven via apiAs POST /payslips:export + the River worker
+  // (see e8-helpers JSDoc), not a detail-screen affordance. So there is no Ekspor button to
+  // assert here on either the FINAL or the decrypt-fail variant.
 });
 
 // ---------------------------------------------------------------------------

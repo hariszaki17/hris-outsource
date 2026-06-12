@@ -14,10 +14,13 @@
  *   SL-end            End SWP-SLA-3001 → 0021 vacant; ending again → 409 ALREADY_ENDED
  *   SL-replace        Replace via :replace from the detail page → old ended, new active
  *
- * DOM (placement-detail-screen.tsx ShiftLeaderCard + placement-overlays.tsx):
- *   - ShiftLeaderCard: "Tetapkan" when leader==null, "Ganti"/"Akhiri" when present.
- *   - ShiftLeaderAssignModal: sl-assign-emp (ShiftLeaderPicker Combobox) / sl-assign-start / sl-assign-notes;
- *     confirm "Tetapkan". ShiftLeaderReplaceModal: sl-rep-emp / sl-rep-start / sl-rep-reason; confirm "Ganti".
+ * DOM (client-company-detail-screen.tsx "Pemimpin Shift" tab → PemimpinShiftPanel + placement-overlays.tsx):
+ *   - Leader management is the company detail's "Pemimpin Shift" tab (single entry point); the
+ *     placement-detail ShiftLeaderCard is now read-only and only links here.
+ *   - PemimpinShiftPanel: "Tetapkan Pemimpin" (assignBtn) when vacant; "Ganti" (replaceBtn) + "Cabut" when led.
+ *   - ShiftLeaderAssignModal: sl-assign-emp (CompanyLeaderCandidatePicker Combobox, sourced from the roster
+ *     so only INV-4-eligible agents appear) / sl-assign-start / sl-assign-notes; confirm "Tetapkan".
+ *     ShiftLeaderReplaceModal: sl-rep-emp / sl-rep-start / sl-rep-reason; confirm "Ganti".
  *
  * Seed: SWP-SLA-3001 Rudi (SWP-EMP-1108) leads SWP-CMP-0021; SWP-PL-5002 Budi (SWP-EMP-2891) placed @ 0022;
  *   SWP-PL-5003 Sari (SWP-EMP-1042) placed @ 0021. SWP-CMP-0022 starts vacant.
@@ -55,18 +58,22 @@ test('SL-assign-first · assign Budi (placed @0022) as the first leader of vacan
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
 
-  // Open Budi's placement detail (SWP-PL-5002 @ 0022). The ShiftLeaderCard shows "Tetapkan"
-  // because 0022 has no leader.
-  await page.goto('/placements/SWP-PL-5002');
-  await expect(page.getByText(/Budi Santoso/i).first()).toBeVisible({ timeout: 30_000 });
+  // Leader assignment is now driven from the client-company detail "Pemimpin Shift" tab
+  // (the single entry point — the placement-detail ShiftLeaderCard is read-only and only
+  // links here). 0022 is vacant, so the panel shows the "Tetapkan Pemimpin" CTA.
+  await page.goto('/client-companies/SWP-CMP-0022');
+  await expect(page.getByText(/Mall Kelapa Gading/i).first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Pemimpin Shift' }).click();
 
-  await page.getByRole('button', { name: 'Tetapkan' }).first().click();
+  await page.getByRole('button', { name: 'Tetapkan Pemimpin' }).click();
   await expect(page.locator('#sl-assign-start')).toBeVisible({ timeout: 10_000 });
 
-  // ShiftLeaderPicker lists all employees; pick Budi (placed @0022 → satisfies INV-4).
+  // CompanyLeaderCandidatePicker sources candidates from the company roster (INV-4: must be
+  // placed @0022). Budi (SWP-PL-5002 @0022) is eligible.
   await pickCombobox(page, comboFieldById(page, 'sl-assign-emp'), /Budi Santoso/i, 'Budi');
   await page.locator('#sl-assign-start').fill(isoDaysFromNow(0));
-  await page.getByRole('button', { name: 'Tetapkan' }).last().click();
+  // Modal confirm button is "Tetapkan" (assignConfirmBtn).
+  await page.getByRole('button', { name: 'Tetapkan', exact: true }).click();
 
   // 0022 now has Budi as the active company-scope leader.
   await expect
@@ -196,24 +203,28 @@ test('SL-end · end SWP-SLA-3001 → 0021 vacant; ending again → 409 ALREADY_E
 // SL-replace — replace via the detail UI (ShiftLeaderReplaceModal) → old ended, new active
 // ---------------------------------------------------------------------------
 
-test('SL-replace · replace the leader of 0021 via the detail page → old ended, new (Sari) active', async ({
+test('SL-replace · replace the leader of 0021 via the company detail page → old ended, new (Sari) active', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
 
-  // Open Rudi's placement (SWP-PL-5001 @ 0021). The ShiftLeaderCard shows the current leader
-  // (Rudi) with "Ganti"/"Akhiri" actions.
-  await page.goto('/placements/SWP-PL-5001');
-  await expect(page.getByText(/Rudi Wijaya/i).first()).toBeVisible({ timeout: 30_000 });
+  // Replace is driven from the client-company "Pemimpin Shift" tab (single entry point).
+  // 0021 is led by Rudi, so the panel shows "Ganti" (replaceBtn) + "Cabut" actions.
+  await page.goto('/client-companies/SWP-CMP-0021');
+  await expect(page.getByText(/Plaza Senayan/i).first()).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Pemimpin Shift' }).click();
 
-  await page.getByRole('button', { name: 'Ganti' }).first().click();
+  await page.getByRole('button', { name: 'Ganti', exact: true }).click();
   await expect(page.locator('#sl-rep-start')).toBeVisible({ timeout: 10_000 });
 
-  // New leader = Sari (SWP-EMP-1042, placed @0021 → eligible).
+  // New leader = Sari (SWP-EMP-1042, placed @0021 → INV-4 eligible). The candidate picker
+  // excludes the current leader (Rudi).
   await pickCombobox(page, comboFieldById(page, 'sl-rep-emp'), /Sari Hadi/i, 'Sari');
   await page.locator('#sl-rep-start').fill(isoDaysFromNow(0));
   await page.locator('#sl-rep-reason').fill('Rotasi kepemimpinan shift.');
-  await page.getByRole('button', { name: 'Ganti' }).last().click();
+  // With the modal open there are two "Ganti" buttons (panel trigger + modal confirm) —
+  // the modal confirm is the last one.
+  await page.getByRole('button', { name: 'Ganti', exact: true }).last().click();
 
   // Active leader of 0021 is now Sari; the seeded assignment is ended.
   await expect

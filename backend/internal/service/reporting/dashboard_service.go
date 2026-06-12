@@ -306,6 +306,7 @@ func (s *DashboardService) agentDashboard(ctx context.Context, p auth.Principal,
 	empID := p.EmployeeID
 	recent := dom.AgentRecentAttendance{}
 	pending := dom.AgentPendingRequests{}
+	var todayShift *dom.AgentTodayShift
 	if empID != "" {
 		r, err := s.repo.AgentRecent(ctx, empID, now)
 		if err != nil {
@@ -318,6 +319,12 @@ func (s *DashboardService) agentDashboard(ctx context.Context, p auth.Principal,
 			return nil, apperr.Internal(err)
 		}
 		pending = dom.AgentPendingRequests{Leave: pr.Leave, OT: pr.OT}
+
+		ts, err := s.repo.AgentTodayShift(ctx, empID, now)
+		if err != nil {
+			return nil, apperr.Internal(err)
+		}
+		todayShift = ts
 	}
 
 	unread, err := s.repo.CountUnread(ctx, selfRecipientsList(p))
@@ -328,7 +335,7 @@ func (s *DashboardService) agentDashboard(ctx context.Context, p auth.Principal,
 	return dom.AgentDashboard{
 		Role:             "agent",
 		GeneratedAt:      now.UTC(),
-		TodayShift:       nil, // no today-shift query in 11-01; nullable per openapi (off-duty state)
+		TodayShift:       todayShift, // live schedule entry for today (Asia/Jakarta), nil when off-duty
 		RecentAttendance: recent,
 		// leave_balance / ot_this_month_hours: no dedicated query in 11-01 → honest
 		// zero/empty (required fields present per openapi).

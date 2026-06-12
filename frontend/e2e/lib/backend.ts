@@ -20,6 +20,7 @@
 import * as path from 'node:path';
 import { ChildProcess, execSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -28,6 +29,15 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '../../..');
 const BACKEND_DIR = path.join(REPO_ROOT, 'backend');
 const E2E_DIR = path.join(REPO_ROOT, 'frontend', 'e2e');
 const COMPOSE_FILE = path.join(E2E_DIR, 'docker-compose.e2e.yml');
+
+// Prebuilt seed binary. resetDb() reseeds in EVERY beforeEach (~250×/full run);
+// `go run ./cmd/seed` recompiles+spawns the toolchain each time, which thrashes the
+// machine on the full suite. We compile ONCE here and both globalSetup + reset-db.ts
+// exec this binary by the same fixed path. Keep this in sync with lib/reset-db.ts SEED_BIN.
+export const SEED_BIN = path.join(
+  os.tmpdir(),
+  process.platform === 'win32' ? 'swp-e2e-seed.exe' : 'swp-e2e-seed',
+);
 const ENV_FILE = path.join(E2E_DIR, '.env.e2e');
 
 // ---------------------------------------------------------------------------
@@ -179,19 +189,27 @@ function runRiverMigrations(testEnv: NodeJS.ProcessEnv): void {
 }
 
 // ---------------------------------------------------------------------------
-// Step 5: Seed personas
+// Step 4b: Compile the seed binary ONCE (reused by every resetDb reseed).
+// ---------------------------------------------------------------------------
+function buildSeedBinary(testEnv: NodeJS.ProcessEnv): void {
+  console.log(`[e2e] Building seed binary once → ${SEED_BIN} …`);
+  runSync('go', ['build', '-o', SEED_BIN, './cmd/seed'], { cwd: BACKEND_DIR, env: testEnv });
+}
+
+// ---------------------------------------------------------------------------
+// Step 5: Seed personas (prebuilt binary — no per-call `go run` recompile)
 // ---------------------------------------------------------------------------
 function runSeed(testEnv: NodeJS.ProcessEnv): void {
-  console.log('[e2e] Seeding test personas (go run ./cmd/seed) …');
-  runSync('go', ['run', './cmd/seed'], { cwd: BACKEND_DIR, env: testEnv });
+  console.log('[e2e] Seeding test personas (prebuilt seed binary) …');
+  runSync(SEED_BIN, [], { cwd: BACKEND_DIR, env: testEnv });
 }
 
 // ---------------------------------------------------------------------------
 // Step 6: Generate Ed25519 keypair
 // ---------------------------------------------------------------------------
 function generateKeypair(): { privateKey: string; publicKey: string } {
-  console.log('[e2e] Generating Ed25519 keypair (go run ./cmd/seed -genkeys) …');
-  const output = execSync('go run ./cmd/seed -genkeys', {
+  console.log('[e2e] Generating Ed25519 keypair (prebuilt seed binary -genkeys) …');
+  const output = execSync(`"${SEED_BIN}" -genkeys`, {
     cwd: BACKEND_DIR,
     env: process.env,
     encoding: 'utf8',
@@ -318,6 +336,9 @@ export async function startBackend(): Promise<void> {
 
   // 4. River migrations (best-effort)
   runRiverMigrations(testEnv);
+
+  // 4b. Compile the seed binary once (reused by every resetDb reseed).
+  buildSeedBinary(testEnv);
 
   // 5. Seed personas
   runSeed(testEnv);

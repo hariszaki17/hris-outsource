@@ -132,6 +132,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'placements.read',
     'schedule.read',
     'schedule.write',
+    // Read-only access to the Master Shift catalog: the leader needs it to render the
+    // weekly schedule grid's shift picker AND to open the /shifts catalog screen. The
+    // backend allows shift_leader GET /shift-masters; writes stay super_admin/hr_admin
+    // only (no `shifts.write` here), so the catalog is read-only for a leader (SM-rbac).
+    'shifts.read',
     'attendance.read',
     'attendance.verify',
     'leave.read',

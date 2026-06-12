@@ -10,10 +10,10 @@
  * variant="no-permission" (t('common.noPermission')). The real 403 is asserted via apiAs.
  */
 
+import { PS, PS_EMP, apiAs, errorCode, waitForToken } from '../../lib/e8-helpers.js';
 import { expect, loginAs, test } from '../../lib/fixtures.js';
 import { PERSONAS } from '../../lib/personas.js';
 import { resetDb } from '../../lib/reset-db.js';
-import { PS, apiAs, errorCode, waitForToken } from '../../lib/e8-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -25,21 +25,38 @@ test.beforeEach(async () => {
 // RBAC-agent — agent gets the no-permission UI + a real 403 on /payslips
 // ---------------------------------------------------------------------------
 
-test('RBAC-agent · agent /payroll → no-permission UI AND a real BE 403 on GET /payslips', async ({
+test('RBAC-agent · agent /payroll → no-permission UI; BE archive is self-scoped (no global access)', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.agent);
   await page.goto('/payroll');
   await waitForToken(page);
 
-  // Client gate: the no-permission EmptyState renders (no archive table).
-  await expect(page.getByText('Akses ditolak').first()).toBeVisible({ timeout: 20_000 });
+  // Client gate: an agent lacks `payroll.read`, so the router's capability guard
+  // (authedRoute.beforeLoad → routeRequirement('/payroll')='payroll.read') redirects to
+  // the global /forbidden NoPermissionScreen BEFORE the HR payroll archive screen mounts.
+  // That screen shows the canonical no-permission copy and renders no archive table.
+  await expect(page).toHaveURL(/\/forbidden$/, { timeout: 20_000 });
+  await expect(page.getByText('Anda tidak memiliki izin untuk tindakan ini.').first()).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.locator('div.border-b')).toHaveCount(0);
 
-  // The REAL gate: the BE 403s the list for an agent token.
-  const res = await apiAs(page, 'GET', '/payslips');
-  expect(res.status).toBe(403);
-  expect(errorCode(res.body)).toBe('FORBIDDEN');
+  // The REAL gate (server-side, PAY-01 scope:self): the agent has NO access to the global
+  // HR archive. GET /payslips is force-scoped to the caller's own employee_id (200 with
+  // ONLY their own rows), and the HR-only surfaces (export / another employee's slips)
+  // are denied:
+  //   - an explicit OTHER employee_id → 403 OUT_OF_SCOPE (no existence leak). The agent
+  //     persona (agent.budi@swp.test) is SWP-EMP-2891; PS_EMP.budi (SWP-EMP-1042) is a
+  //     different employee, so the service rejects the cross-employee read.
+  const other = await apiAs(page, 'GET', `/payslips?employee_id=${PS_EMP.budi}`);
+  expect(other.status).toBe(403);
+  expect(errorCode(other.body)).toBe('OUT_OF_SCOPE');
+
+  //   - the async export is HR/Super-Admin only → 403 FORBIDDEN
+  const exp = await apiAs(page, 'POST', '/payslips:export', { period: '2025-12', format: 'XLSX' });
+  expect(exp.status).toBe(403);
+  expect(errorCode(exp.body)).toBe('FORBIDDEN');
 });
 
 // ---------------------------------------------------------------------------
@@ -53,7 +70,12 @@ test('RBAC-leader · shift_leader /payroll → no-permission UI AND real 403 on 
   await page.goto('/payroll');
   await waitForToken(page);
 
-  await expect(page.getByText('Akses ditolak').first()).toBeVisible({ timeout: 20_000 });
+  // A shift_leader also lacks `payroll.read` → the router redirects to /forbidden (the
+  // global NoPermissionScreen) before the payroll screen mounts. Same canonical copy.
+  await expect(page).toHaveURL(/\/forbidden$/, { timeout: 20_000 });
+  await expect(page.getByText('Anda tidak memiliki izin untuk tindakan ini.').first()).toBeVisible({
+    timeout: 20_000,
+  });
 
   // Real BE 403 on the list…
   const list = await apiAs(page, 'GET', '/payslips');

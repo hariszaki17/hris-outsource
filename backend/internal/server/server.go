@@ -386,9 +386,12 @@ func New(d Deps) http.Handler {
 			// COORDINATION POINT: future Phase-6 slices append AFTER this block.
 			// ---------------------------------------------------------------
 
-			// Shift-master reads: super_admin, hr_admin only (SL has no shifts.read).
+			// Shift-master reads: super_admin, hr_admin, shift_leader. The leader needs
+			// them as the schedule-grid shift PICKER (E4 openapi listShiftMasters /
+			// getShiftMaster x-rbac = [super_admin, hr_admin, shift_leader]). Writes stay
+			// super_admin/hr_admin only (see CreateShiftMaster below).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.Get("/shift-masters", d.Scheduling.ListShiftMasters)
 				r.Get("/shift-masters/{id}", d.Scheduling.GetShiftMaster)
 			})

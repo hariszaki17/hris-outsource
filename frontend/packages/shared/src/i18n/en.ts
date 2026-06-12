@@ -104,6 +104,9 @@ export const en: Messages = {
     successTitle: 'Password updated',
     successBody: 'Your password has been reset. Please sign in with your new password.',
     goLogin: 'Sign in now',
+    weakPassword: 'Password does not meet the requirements.',
+    expiredTitle: 'Link has expired',
+    expiredBody: 'This password reset link is no longer valid. Please request a new one.',
   },
   errors: {
     forbidden: 'You do not have permission for this action.',
@@ -205,6 +208,7 @@ export const en: Messages = {
       'Platform conventions shared across all modules. Language & timezone are locked for v1.',
     noPermissionBody: 'Settings are restricted to HR/Super Admin.',
     errorTitle: 'Failed to load platform settings',
+    locked: 'Locked',
     section: {
       localization: 'Localization',
       security: 'Security',
@@ -445,6 +449,7 @@ export const en: Messages = {
     filteredBody: 'Try adjusting the keyword or filters.',
     errorTitle: 'Failed to load service lines',
     errorBody: 'An error occurred while loading data. Try again.',
+    rowActions: 'Row actions',
     menuEdit: 'Edit Service Line',
     menuDiscontinue: 'Discontinue',
     addModal: {
@@ -518,6 +523,9 @@ export const en: Messages = {
     filteredTitle: 'No results',
     filteredBody: 'Try adjusting the keyword or filters.',
     rowActions: 'Row actions',
+    menuEdit: 'Edit',
+    menuDeactivate: 'Deactivate',
+    menuReactivate: 'Reactivate',
     auditHint: 'This action will be recorded in the audit log.',
     deleteTitle: 'Deactivate item?',
     deleteConfirm: 'Yes, Deactivate',

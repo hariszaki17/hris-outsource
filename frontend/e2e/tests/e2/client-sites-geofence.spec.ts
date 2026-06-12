@@ -43,13 +43,16 @@ test.beforeEach(async () => {
 test('ST-1 · sites list for Plaza Senayan shows seeded primary site', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
 
-  // Navigate to Plaza Senayan detail page (Profil tab has SitesPanel).
+  // Navigate to Plaza Senayan detail page (Sites live under the "Lokasi & Geofence" tab).
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   // Wait for the company name.
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
 
-  // The Sites panel title appears on the Profil tab.
+  // Switch to the "Lokasi & Geofence" tab to reveal the Sites panel.
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
+
+  // The Sites panel title appears on the Lokasi & Geofence tab.
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // The seeded primary site "Main Site" or the first auto-created site should appear.
@@ -66,6 +69,7 @@ test('ST-2 · duplicate site name within same company shows conflict error', asy
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Open "Tambah Site" drawer.
@@ -97,6 +101,7 @@ test('ST-3 · add site with geofence: persists lat/lng/radius in DB and UI shows
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Open "Tambah Site" drawer.
@@ -126,9 +131,10 @@ test('ST-3 · add site with geofence: persists lat/lng/radius in DB and UI shows
   expect(geo!.lng).toBeCloseTo(106.7995, 3);
   expect(geo!.radius).toBe(150);
 
-  // UI: after reload the panel should show "Geofence aktif" for this site.
+  // UI: after reload the tab resets to Profil — re-open "Lokasi & Geofence".
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText(siteName)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Geofence aktif').first()).toBeVisible({ timeout: 10_000 });
 });
@@ -142,6 +148,7 @@ test('ST-4 · site with no geo has geofence inactive badge', async ({ page }) =>
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Add a site without lat/lng.
@@ -170,6 +177,7 @@ test('ST-5 · set new site as primary demotes previous primary (INV-5)', async (
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   // Add a second site and mark it as primary.
@@ -206,6 +214,7 @@ test('ST-8 · geofence radius > 1000 m shows GEOFENCE_RADIUS_INVALID error', asy
   await page.goto(`/client-companies/${PLAZA_SENAYAN_ID}`);
 
   await expect(page.getByRole('heading', { name: 'Plaza Senayan' })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Lokasi & Geofence' }).click();
   await expect(page.getByText('Site & Geofence')).toBeVisible({ timeout: 10_000 });
 
   await page.getByRole('button', { name: 'Tambah Site' }).click();

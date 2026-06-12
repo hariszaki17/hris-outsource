@@ -18,10 +18,10 @@
  * queue); 9005 Budi (EMP-2891) @ CMP-0022; 9006 Rudi (EMP-1108) ESCALATED @ CMP-0021.
  */
 
+import { expectNoQueueRow, expectQueueRow, waitForToken } from '../../lib/e5-helpers.js';
 import { expect, loginAs, test } from '../../lib/fixtures.js';
 import { PERSONAS } from '../../lib/personas.js';
 import { resetDb } from '../../lib/reset-db.js';
-import { expectNoQueueRow, expectQueueRow, queueRow, waitForToken } from '../../lib/e5-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -86,15 +86,22 @@ test('DETAIL-open · clicking a queue row opens /attendance/$attendanceId with t
   await page.goto('/attendance/verification');
   await waitForToken(page);
 
-  // Open Sari's unambiguous OUTSIDE_GEOFENCE row (EMP-1042 → 9003).
-  const row = queueRow(page, 'SWP-EMP-1042');
+  // EMP-1042 (Sari) now has two PENDING queue rows: the PRESENT/OUTSIDE_GEOFENCE
+  // 9003 and the ABSENT 9009. Anchor the OUTSIDE_GEOFENCE row by EXCLUDING the
+  // ABSENT badge ("Tidak hadir") so we open 9003 deterministically (9008 is
+  // VERIFIED → not in the queue).
+  const row = page
+    .locator('div.border-b')
+    .filter({ hasText: 'SWP-EMP-1042' })
+    .filter({ hasNotText: 'Tidak hadir' })
+    .first();
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.click();
 
   // Navigated to the detail route.
   await page.waitForURL(/\/attendance\/SWP-ATT-/, { timeout: 15_000 });
 
-  // HeaderCard renders the employee id + the clock section heading + the metadata id.
+  // HeaderCard renders the employee id + the metadata id of the 9003 record.
   await expect(page.getByText('SWP-EMP-1042').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('SWP-ATT-9003').first()).toBeVisible({ timeout: 20_000 });
 });

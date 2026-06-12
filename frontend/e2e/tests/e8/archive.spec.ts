@@ -16,9 +16,6 @@
  * 2025-11 FINAL, 90124 Dewi 2025-11 FINAL, 90119 Rudi 2025-12 DECRYPT_FAIL.
  */
 
-import { expect, loginAs, test } from '../../lib/fixtures.js';
-import { PERSONAS } from '../../lib/personas.js';
-import { resetDb } from '../../lib/reset-db.js';
 import {
   PS,
   PS_EMP,
@@ -29,6 +26,9 @@ import {
   payslipRow,
   waitForToken,
 } from '../../lib/e8-helpers.js';
+import { expect, loginAs, test } from '../../lib/fixtures.js';
+import { PERSONAS } from '../../lib/personas.js';
+import { resetDb } from '../../lib/reset-db.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -121,9 +121,12 @@ test('ARCH-filter · status DECRYPT_FAIL → only the decrypt-fail row; period +
   await expectNoPayslipRow(page, PS_NAME.budi); // Budi is 2025-12
 
   // Filter by employee_id via the SearchField (exact match) → only Budi (SWP-EMP-1042).
+  // The SearchField renders an <input type="search"> (role=searchbox); target it by role
+  // rather than placeholder (the archive SearchField's i18n placeholder key drives
+  // `employee_id`, but the role selector is stable regardless of copy).
   await page.getByRole('button', { name: 'Reset filter' }).click();
   await page.getByLabel('Tahun').selectOption('2025');
-  await page.getByPlaceholder(/Cari karyawan/i).fill(PS_EMP.budi);
+  await page.getByRole('searchbox').fill(PS_EMP.budi);
   await expectPayslipRow(page, PS_NAME.budi);
   await expectNoPayslipRow(page, PS_NAME.andi);
 });

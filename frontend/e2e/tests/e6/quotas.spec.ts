@@ -2,37 +2,52 @@
  * tests/e6/quotas.spec.ts
  *
  * E6 · leave quota management (LVE-02) against the REAL stack, driving the REAL
- * leave-quotas-screen (AdjustQuotaModal + BulkGrantModal). Each scenario is its own test().
+ * leave-quotas-screen — redesigned 2026-06-08 into the F6.1 grant-lot LEDGER.
+ * Each scenario is its own test().
+ *
+ * The screen is now a per-employee POOL aggregate (GET /leave-balances) with a
+ * drill-in to the per-lot table (GET /leave-grants). Balances are Σ over the
+ * employee's LeaveGrant lots (each amount/consumed/pending/expires); the legacy
+ * flat `leave_quotas` table + bulk-grant/adjust-by-delta endpoints are deprecated.
  *
  * Coverage:
- *   LIST-remaining   HR /leave/quotas shows Dewi (remaining 5) + Budi (remaining -3).
- *                    remaining = total − used − pending; the seeded PENDING requests count
- *                    as pending soft-reservations: Dewi pending 3 (8001+8002+8007 @ 1 day),
- *                    Budi pending 4 (8003 @ 3 days + 8004 @ 1 day).
- *   ADJUST-happy     Adjust Dewi #delta=+2 / #reason → success toast + persisted remaining 7.
- *   ADJUST-refuse    Adjust Budi #delta=-2 (total 10 < used 11) → 422 RULE_VIOLATION field error
- *                    on #delta; modal stays open; remaining unchanged.
- *   BULK-grant       Terbitkan Kuota Tahunan → Pratinjau (preview) → Terbitkan (apply) → success.
+ *   LIST-remaining   HR /leave/quotas shows Dewi (pool_remaining 8) + Budi (pool_remaining 1).
+ *                    pool_remaining = Σ(amount − consumed − pending) over un-earmarked lots.
+ *   ADJUST-happy     Drill into Dewi → Sesuaikan the ANNUAL lot → #adj-amount=14 / #adj-remark →
+ *                    "Simpan" → "Kuota diperbarui" toast → lot remaining 10, pool_remaining 10.
+ *   ADJUST-refuse    Drill into Budi → Sesuaikan the ANNUAL lot → #adj-amount=10 (< consumed 11)
+ *                    → 422 RULE_VIOLATION field error on #adj-amount; modal stays open; pool unchanged.
+ *   BULK-grant       Tambah Kuota (grant a new lot) → fill the grant form → "Simpan" →
+ *                    "Kuota ditambahkan" toast (the grant-lot replacement for the old bulk issuance).
  *   BALANCE-override over-balance HR final on 8003 surfaces the override modal → APPROVED
  *                    (the FE balance-recheck → override path, quota-driven).
  *
- * Seed (08-02): SWP-LQ-8001 Dewi total 12 used 4 (pending 3 → remaining 5); SWP-LQ-8002 Budi
- * total 12 used 11 (pending 4 → remaining -3). SWP-LR-8003 Budi PENDING_HR over-balance.
+ * Seed (08-02, grant-lot ledger): SWP-LG-8001 Dewi ANNUAL amount 12 / consumed 4 / pending 0
+ * → pool_remaining 8; SWP-LG-8002 Budi ANNUAL amount 12 / consumed 11 / pending 0 →
+ * pool_remaining 1; SWP-LG-8003 Dewi MATERNITY earmark 90. SWP-LR-8003 Budi PENDING_HR over-balance.
+ *
+ * Screen DOM (leave-quotas-screen.tsx): list rows = div.border-b (employee_id mono); row click
+ * drills in (?employee_id=…). Per-lot "Sesuaikan" Button aria "Sesuaikan lot {{id}}"
+ * (t('actions.adjustAriaLabel')). Adjust modal: #adj-amount (number, absolute new amount),
+ * #adj-remark (textarea), save "Simpan" (t('adjust.saveBtn')); success toast "Kuota diperbarui"
+ * (t('adjust.successTitle')). Add quota: header "Tambah Kuota" (t('actions.grantLot')) → grant form
+ * (#g-amount, #g-expires, #g-remark) → "Simpan" (t('grant.saveBtn')); toast "Kuota ditambahkan".
  */
 
-import { expect, loginAs, test } from '../../lib/fixtures.js';
-import { PERSONAS } from '../../lib/personas.js';
-import { resetDb } from '../../lib/reset-db.js';
 import {
   BTN,
   EMP,
-  LQ,
+  LG,
   LR,
+  balanceRemaining,
   expectLeaveStatus,
+  grantRemaining,
   openLeaveDetail,
-  quotaRemaining,
   waitForToken,
 } from '../../lib/e6-helpers.js';
+import { expect, loginAs, test } from '../../lib/fixtures.js';
+import { PERSONAS } from '../../lib/personas.js';
+import { resetDb } from '../../lib/reset-db.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -41,10 +56,10 @@ test.beforeEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// LIST-remaining — the quota table renders the seeded remaining math
+// LIST-remaining — the per-employee balance table renders the seeded pool math
 // ---------------------------------------------------------------------------
 
-test('LIST-remaining · HR /leave/quotas shows Dewi (remaining 5) + Budi (remaining -3)', async ({
+test('LIST-remaining · HR /leave/quotas shows Dewi (pool_remaining 8) + Budi (pool_remaining 1)', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
@@ -57,89 +72,105 @@ test('LIST-remaining · HR /leave/quotas shows Dewi (remaining 5) + Budi (remain
   await expect(dewiRow).toBeVisible({ timeout: 30_000 });
   await expect(budiRow).toBeVisible({ timeout: 30_000 });
 
-  // Cross-check the persisted remaining via the API (deterministic).
-  // remaining = total − used − pending (the seeded PENDING requests soft-reserve days).
-  expect(await quotaRemaining(page, LQ.dewi)).toBe(5);
-  expect(await quotaRemaining(page, LQ.budi)).toBe(-3);
+  // Cross-check the persisted POOL remaining via the API (deterministic).
+  // pool_remaining = Σ(amount − consumed − pending) over un-earmarked lots.
+  expect(await balanceRemaining(page, EMP.dewi)).toBe(8);
+  expect(await balanceRemaining(page, EMP.budi)).toBe(1);
 });
 
 // ---------------------------------------------------------------------------
-// ADJUST-happy — +2 to Dewi → remaining 7
+// ADJUST-happy — set Dewi's ANNUAL lot to 14 → lot remaining 10, pool 10
 // ---------------------------------------------------------------------------
 
-test('ADJUST-happy · Adjust Dewi +2 with a reason → success toast + persisted remaining 7', async ({
+test('ADJUST-happy · Adjust Dewi ANNUAL lot to 14 with a remark → success toast + persisted remaining 10', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/leave/quotas');
   await waitForToken(page);
 
+  // Drill into Dewi's lot ledger.
   const dewiRow = page.locator('div.border-b').filter({ hasText: EMP.dewi }).first();
   await expect(dewiRow).toBeVisible({ timeout: 30_000 });
-  await dewiRow.getByRole('button', { name: /^Sesuaikan kuota/ }).click();
+  await dewiRow.click();
 
-  await page.locator('#delta').fill('2');
-  await page.locator('#reason').fill('Penyesuaian kuota sisa cuti tahunan.');
-  await page.getByRole('button', { name: 'Simpan Penyesuaian', exact: true }).click();
+  // Sesuaikan the ANNUAL lot (aria "Sesuaikan lot SWP-LG-8001").
+  await page.getByRole('button', { name: `Sesuaikan lot ${LG.dewiAnnual}` }).click();
+
+  // The adjust modal sets the ABSOLUTE new amount_days (not a delta). 14 − 4 consumed → 10.
+  await page.locator('#adj-amount').fill('14');
+  await page.locator('#adj-remark').fill('Penyesuaian kuota sisa cuti tahunan.');
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click();
 
   await expect(page.getByText('Kuota diperbarui').first()).toBeVisible({ timeout: 15_000 });
-  // remaining was 5 (12 − 4 − 3 pending) → +2 total → 7.
-  await expect.poll(() => quotaRemaining(page, LQ.dewi), { timeout: 20_000 }).toBe(7);
+  // Lot remaining was 8 (12 − 4 − 0) → amount 14 → remaining 10; pool_remaining → 10.
+  await expect
+    .poll(() => grantRemaining(page, EMP.dewi, LG.dewiAnnual), { timeout: 20_000 })
+    .toBe(10);
+  await expect.poll(() => balanceRemaining(page, EMP.dewi), { timeout: 20_000 }).toBe(10);
 });
 
 // ---------------------------------------------------------------------------
-// ADJUST-refuse — total below used → 422 RULE_VIOLATION field error
+// ADJUST-refuse — amount below consumed → 422 RULE_VIOLATION field error
 // ---------------------------------------------------------------------------
 
-test('ADJUST-refuse · Adjust Budi -2 (total 10 < used 11) → 422 field error, remaining unchanged', async ({
+test('ADJUST-refuse · Adjust Budi ANNUAL lot to 10 (< consumed 11) → 422 field error, remaining unchanged', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/leave/quotas');
   await waitForToken(page);
 
+  // Drill into Budi's lot ledger.
   const budiRow = page.locator('div.border-b').filter({ hasText: EMP.budi }).first();
   await expect(budiRow).toBeVisible({ timeout: 30_000 });
-  await budiRow.getByRole('button', { name: /^Sesuaikan kuota/ }).click();
+  await budiRow.click();
 
-  // total 12 - 2 = 10 < used 11 → BE refuses with 422 RULE_VIOLATION fields.delta.
-  await page.locator('#delta').fill('-2');
-  await page.locator('#reason').fill('Mengurangi kuota di bawah terpakai.');
-  await page.getByRole('button', { name: 'Simpan Penyesuaian', exact: true }).click();
+  // Sesuaikan the ANNUAL lot (aria "Sesuaikan lot SWP-LG-8002").
+  await page.getByRole('button', { name: `Sesuaikan lot ${LG.budiAnnual}` }).click();
 
-  // applyFieldErrors pushes the server message onto the #delta FormField.
-  await expect(page.locator('#delta')).toBeVisible({ timeout: 10_000 });
-  // The save button label is still present (modal did not close on the rejected save).
-  await expect(page.getByRole('button', { name: 'Simpan Penyesuaian', exact: true })).toBeVisible();
+  // amount_days 10 < consumed 11 → BE refuses with 422 RULE_VIOLATION fields.amount_days.
+  await page.locator('#adj-amount').fill('10');
+  await page.locator('#adj-remark').fill('Mengurangi kuota di bawah terpakai.');
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click();
 
-  // Remaining is unchanged (still 12 − 11 − 4 pending = -3; the refused save wrote nothing).
-  expect(await quotaRemaining(page, LQ.budi)).toBe(-3);
+  // applyFieldErrors pushes the server message onto the #adj-amount FormField; the modal
+  // stays open (the save button label is still present) on the rejected save.
+  await expect(page.locator('#adj-amount')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole('button', { name: 'Simpan', exact: true })).toBeVisible();
+
+  // Remaining is unchanged (still 12 − 11 − 0 = 1; the refused save wrote nothing).
+  expect(await balanceRemaining(page, EMP.budi)).toBe(1);
 });
 
 // ---------------------------------------------------------------------------
-// BULK-grant — preview → apply (partial success tolerated)
+// BULK-grant — grant a NEW lot via "Tambah Kuota" (the grant-lot replacement)
 // ---------------------------------------------------------------------------
 
-test('BULK-grant · Terbitkan Kuota Tahunan → Pratinjau → Terbitkan → success toast', async ({
-  page,
-}) => {
+test('BULK-grant · Tambah Kuota → grant a new lot for Dewi → success toast', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/leave/quotas');
   await waitForToken(page);
 
-  await page.getByRole('button', { name: 'Terbitkan Kuota Tahunan', exact: true }).click();
+  // Open the grant-lot modal from the list header.
+  await page.getByRole('button', { name: 'Tambah Kuota', exact: true }).click();
 
-  // Step 1 — preview. The default form (annual / current year / 12 days / pro-rate) is valid.
-  await page.getByRole('button', { name: 'Pratinjau', exact: true }).click();
+  // The Combobox trigger shows the placeholder until opened; click it to reveal the
+  // search input, then type to resolve the employee via the typeahead.
+  await page.getByRole('button', { name: 'Ketik nama, NIK, atau NIP…' }).click();
+  const search = page.getByPlaceholder('Ketik nama, NIK, atau NIP…');
+  await expect(search).toBeVisible({ timeout: 15_000 });
+  await search.fill('Dewi');
+  // The option list is debounced/async; click Dewi's option once it renders.
+  await page.getByRole('button', { name: /Dewi Lestari/ }).click();
 
-  // The preview step renders the result banner then the apply button.
-  await expect(page.getByRole('button', { name: 'Terbitkan', exact: true })).toBeVisible({
-    timeout: 15_000,
-  });
+  // Fill the grant lot: amount, expiry, required remark.
+  await page.locator('#g-amount').fill('5');
+  await page.locator('#g-expires').fill('2026-12-31');
+  await page.locator('#g-remark').fill('Hibah kuota tambahan untuk periode berjalan.');
+  await page.getByRole('button', { name: 'Simpan', exact: true }).click();
 
-  // Step 2 — apply.
-  await page.getByRole('button', { name: 'Terbitkan', exact: true }).click();
-  await expect(page.getByText('Kuota diterbitkan').first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Kuota ditambahkan').first()).toBeVisible({ timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------------------

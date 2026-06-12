@@ -18,10 +18,10 @@
  * Seed (07-02): 9002 Dewi LATE, 9003 Sari OUTSIDE_GEOFENCE — both PENDING @ CMP-0021.
  */
 
+import { ATT, apiAs, waitForToken } from '../../lib/e5-helpers.js';
 import { expect, loginAs, test } from '../../lib/fixtures.js';
 import { PERSONAS } from '../../lib/personas.js';
 import { resetDb } from '../../lib/reset-db.js';
-import { ATT, apiAs, queueRow, waitForToken } from '../../lib/e5-helpers.js';
 
 test.use({ viewport: { width: 1600, height: 1000 } });
 
@@ -119,8 +119,15 @@ test('VERIFY-queue-inline · inline Verifikasi on a queue row → confirm → th
   await page.goto('/attendance/verification');
   await waitForToken(page);
 
-  // Sari's row (EMP-1042 → 9003) is unambiguous in the queue.
-  const row = queueRow(page, 'SWP-EMP-1042');
+  // EMP-1042 (Sari) now has two PENDING queue rows — the PRESENT/OUTSIDE_GEOFENCE
+  // 9003 and the ABSENT 9009. Target the OUTSIDE_GEOFENCE 9003 by EXCLUDING the
+  // ABSENT badge ("Tidak hadir") so the inline action + the leaves-queue assertion
+  // both reference the same row (9008 is VERIFIED → not in the queue).
+  const row = page
+    .locator('div.border-b')
+    .filter({ hasText: 'SWP-EMP-1042' })
+    .filter({ hasNotText: 'Tidak hadir' })
+    .first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
   // Click the row's inline Verifikasi button (scoped to the row).
@@ -130,8 +137,15 @@ test('VERIFY-queue-inline · inline Verifikasi on a queue row → confirm → th
   await page.getByRole('button', { name: 'Verifikasi', exact: true }).last().click();
   await expect(page.getByText('Record diverifikasi').first()).toBeVisible({ timeout: 15_000 });
 
-  // After the refetch, 9003 is no longer PENDING → its row leaves the queue.
-  await expect(page.locator('div.border-b').filter({ hasText: 'SWP-EMP-1042' })).toHaveCount(0, {
+  // After the refetch, the verified 9003 row leaves the PENDING queue. The ABSENT
+  // 9009 EMP-1042 row remains, so assert specifically that the PRESENT 9003 row
+  // (the non-"Tidak hadir" EMP-1042 row) is gone.
+  await expect(
+    page
+      .locator('div.border-b')
+      .filter({ hasText: 'SWP-EMP-1042' })
+      .filter({ hasNotText: 'Tidak hadir' }),
+  ).toHaveCount(0, {
     timeout: 20_000,
   });
 });

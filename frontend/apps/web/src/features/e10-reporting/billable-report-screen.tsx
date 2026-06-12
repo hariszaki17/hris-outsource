@@ -32,9 +32,15 @@ import { useServiceLineOptions } from '@/lib/use-service-line-options.ts';
 import {
   type BillableReport,
   type BillableReportRow,
+  type ExportJob,
+  ExportFormat,
+  ExportStatus,
   GetBillableAttendanceReportGroupBy,
   type GetBillableAttendanceReportParams,
+  ReportType,
+  useCreateExport,
   useGetBillableAttendanceReport,
+  useGetExport,
 } from '@swp/api-client/e10';
 import {
   Banner,
@@ -43,12 +49,14 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  type ExportStep,
+  ExportModal,
   FilterSelect,
   StatCard,
   StateView,
   StatusBadge,
 } from '@swp/ui';
-import { BarChart3, Clock, FileCheck2, RotateCcw, ShieldAlert } from 'lucide-react';
+import { BarChart3, Clock, Download, FileCheck2, RotateCcw, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -128,6 +136,77 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   };
 
   const query = useGetBillableAttendanceReport(params);
+
+  // ---------------------------------------------------------------------------
+  // Export flow — "Ekspor" → POST /exports (ATTENDANCE_BILLABLE, EXCEL) → poll
+  // GET /exports/{id} until COMPLETED → ExportModal success step ("Unduh").
+  // F10.4 · EX-1..EX-6. ExportModal (.pen FJ6hX) is the canonical multi-step modal.
+  // ---------------------------------------------------------------------------
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const createExport = useCreateExport();
+
+  // Unwrap envelopes like the report query: Orval customFetch wraps in { data,status,headers }
+  // and the BE wraps the ExportJob in { data: <ExportJob> }.
+  function unwrapJob(raw: unknown): ExportJob | undefined {
+    const outer = (raw as { data?: { data?: ExportJob } | ExportJob } | undefined)?.data;
+    return ((outer as { data?: ExportJob } | undefined)?.data ??
+      (outer as ExportJob | undefined)) as ExportJob | undefined;
+  }
+
+  const exportPoll = useGetExport(exportJobId ?? '', {
+    query: {
+      enabled: Boolean(exportJobId),
+      refetchInterval: (q) => {
+        const job = unwrapJob(q.state.data);
+        return job && (job.status === ExportStatus.QUEUED || job.status === ExportStatus.PROCESSING)
+          ? 2500
+          : false;
+      },
+    },
+  });
+  const exportJob = unwrapJob(exportPoll.data);
+
+  const exportStep: ExportStep = createExport.isError
+    ? 'error'
+    : exportJob?.status === ExportStatus.COMPLETED
+      ? 'success'
+      : exportJob?.status === ExportStatus.FAILED || exportJob?.status === ExportStatus.CANCELLED
+        ? 'error'
+        : exportJobId
+          ? 'progress'
+          : 'format';
+
+  function openExport() {
+    setExportJobId(null);
+    createExport.reset();
+    setExportOpen(true);
+  }
+
+  function runExport() {
+    createExport.mutate(
+      {
+        data: {
+          report_type: ReportType.ATTENDANCE_BILLABLE,
+          format: ExportFormat.EXCEL,
+          filters: {
+            period_start: periodStart,
+            period_end: periodEnd,
+            company_id: filters.company_id || undefined,
+            service_line_id: filters.service_line_id || undefined,
+            group_by: filters.group_by || undefined,
+          },
+        },
+      },
+      {
+        onSuccess: (res) => {
+          const job = unwrapJob(res);
+          if (job?.id) setExportJobId(job.id);
+        },
+      },
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Helpers to update filters
@@ -290,7 +369,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   return (
     /* Title band — EF8AZ TitleBand */
     <div className="flex flex-col gap-[18px]">
-      <TitleBand />
+      <TitleBand onExport={openExport} />
 
       {/* Filters — EF8AZ Filters strip */}
       <div className="flex flex-wrap items-center gap-2.5">
@@ -459,6 +538,23 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
           ) : undefined
         }
       />
+
+      {/* Export modal — EF8AZ "Ekspor" → .pen FJ6hX. XLSX-only (D5). */}
+      <ExportModal
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        step={exportStep}
+        labels={{ title: t('report.exportModalTitle') }}
+        rangeStart={periodStart}
+        rangeEnd={periodEnd}
+        onExport={runExport}
+        exporting={createExport.isPending || exportStep === 'progress'}
+        progressPct={exportJob?.progress_percent ?? 0}
+        onDownload={() => {
+          if (exportJob?.file_url) window.open(exportJob.file_url, '_blank', 'noopener');
+        }}
+        onRetry={openExport}
+      />
     </div>
   );
 }
@@ -467,7 +563,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
 // TitleBand — EF8AZ TitleBand (title · subtitle)
 // ---------------------------------------------------------------------------
 
-function TitleBand() {
+function TitleBand({ onExport }: { onExport?: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between">
@@ -475,6 +571,12 @@ function TitleBand() {
         <h1 className="text-3xl font-bold text-text">{t('report.title')}</h1>
         <p className="text-sm text-text-3">{t('report.subtitle')}</p>
       </div>
+      {onExport && (
+        <Button type="button" onClick={onExport}>
+          <Download aria-hidden className="size-4" />
+          {t('report.exportBtn')}
+        </Button>
+      )}
     </div>
   );
 }

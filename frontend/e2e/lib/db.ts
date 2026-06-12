@@ -760,3 +760,72 @@ export async function getPlacementIdForEmployeeAtCompany(
     return res.rows[0]?.id ?? null;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Cross-epic onboarding-journey helpers (E2 → E3 → E4 → E5)
+// ---------------------------------------------------------------------------
+
+/**
+ * getPrimarySiteIdForCompany — return the id of the auto-created primary site
+ * (is_primary=true) for a company, or null. Used by the onboarding journey to
+ * resolve the site a fresh placement should target.
+ */
+export async function getPrimarySiteIdForCompany(companyId: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ id: string }>(
+      `SELECT id FROM client_sites
+       WHERE client_company_id = $1 AND is_primary = true AND deleted_at IS NULL
+       ORDER BY created_at ASC LIMIT 1`,
+      [companyId],
+    );
+    return res.rows[0]?.id ?? null;
+  });
+}
+
+/**
+ * getEmployeeUserId — return the linked users row id (user_id) for an employee,
+ * or null if no login was provisioned. After D1 (auto-provision) this is always
+ * non-null for freshly created employees.
+ */
+export async function getEmployeeUserId(employeeId: string): Promise<string | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{ user_id: string | null }>(
+      'SELECT user_id FROM employees WHERE id = $1',
+      [employeeId],
+    );
+    return res.rows[0]?.user_id ?? null;
+  });
+}
+
+/**
+ * getLatestAttendanceForEmployee — return the most recent attendance row for an
+ * employee (by check_in_at), or null. Used to assert a clock-in/out persisted:
+ * check_in_at present after clock-in, check_out_at + worked_minutes after clock-out.
+ */
+export async function getLatestAttendanceForEmployee(
+  employeeId: string,
+): Promise<{
+  id: string;
+  check_in_at: Date | null;
+  check_out_at: Date | null;
+  worked_minutes: number | null;
+  status: string;
+} | null> {
+  return withClient(async (client) => {
+    const res = await client.query<{
+      id: string;
+      check_in_at: Date | null;
+      check_out_at: Date | null;
+      worked_minutes: number | null;
+      status: string;
+    }>(
+      `SELECT id, check_in_at, check_out_at, worked_minutes, status
+       FROM attendance
+       WHERE employee_id = $1
+       ORDER BY check_in_at DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [employeeId],
+    );
+    return res.rows[0] ?? null;
+  });
+}

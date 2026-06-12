@@ -142,6 +142,10 @@ type DashboardRepository interface {
 	CompanyName(ctx context.Context, companyID string) (string, error)
 	AgentRecent(ctx context.Context, employeeID string, today time.Time) (AgentRecentRow, error)
 	AgentPending(ctx context.Context, employeeID string) (AgentPendingRow, error)
+	// AgentTodayShift returns the agent's live shift for `today` (Asia/Jakarta), or
+	// nil when off-duty (no entry, an explicit day-off, or a leave-cancelled entry).
+	// clock_in_status is derived from today's attendance for that schedule entry.
+	AgentTodayShift(ctx context.Context, employeeID string, today time.Time) (*dom.AgentTodayShift, error)
 	CountUnread(ctx context.Context, recipientIDs []string) (int, error)
 	// SuperAdminWidgets runs the four global admin-block aggregations (DB-7). now is
 	// used for the offboarded-30d window; auditLimit caps recent_audit (~8).

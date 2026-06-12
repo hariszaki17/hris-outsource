@@ -142,11 +142,13 @@ test('LT-3 · update leave type (toggle is_annual off) shows updated state', asy
 
   await expect(page.getByText('Cuti Tahunan').first()).toBeVisible({ timeout: 30_000 });
 
-  // Click the row-actions button for Cuti Tahunan to open edit modal.
+  // Open the row-actions dropdown for Cuti Tahunan, then click the Edit item.
   const ltRow = page.locator('div.border-b').filter({ hasText: 'Cuti Tahunan' }).first();
   await ltRow.getByRole('button', { name: 'Aksi baris' }).click();
+  // Edit is the first menuitem (the menu is portaled to <body>).
+  await page.getByRole('menuitem').first().click();
 
-  // The leave-types-screen opens the edit modal when the action button is clicked.
+  // The leave-types-screen opens the edit modal when the Edit item is clicked.
   await expect(page.locator('#lt-name')).toBeVisible({ timeout: 10_000 });
 
   // Wait for the form to be hydrated with the editing row's values (useEffect timing).
@@ -299,9 +301,11 @@ test('AC-3 · update attendance code label shows updated value', async ({ page }
 
   await expect(page.getByText('Terlambat').first()).toBeVisible({ timeout: 30_000 });
 
-  // Open edit modal for Terlambat (LATE / SWP-AC-002).
+  // Open the row-actions dropdown for Terlambat (LATE / SWP-AC-002), then click Edit.
   const lateRow = page.locator('div.border-b').filter({ hasText: 'Terlambat' }).first();
   await lateRow.getByRole('button', { name: 'Aksi baris' }).click();
+  // Edit is the first menuitem (the menu is portaled to <body>).
+  await page.getByRole('menuitem').first().click();
 
   await expect(page.locator('#ac-label')).toBeVisible({ timeout: 10_000 });
   await page.locator('#ac-label').fill('Terlambat (Updated)');
@@ -367,7 +371,8 @@ test('OR-1a · overtime rules list shows seeded Default OT rule', async ({ page 
 // OR-1b — Create overtime rule with min_minutes=20 → RULE_VIOLATION 422 inline error (D4)
 // ---------------------------------------------------------------------------
 
-test('OR-1b · create OT rule with min_minutes=20 shows RULE_VIOLATION error (D4 min=30)', async ({ page }) => {
+// Skipped: overtime-rules screen is view-only (no create/edit/delete) per 2026-06-09 decision.
+test.skip('OR-1b · create OT rule with min_minutes=20 shows RULE_VIOLATION error (D4 min=30)', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/master-data/overtime-rules');
 
@@ -403,7 +408,8 @@ test('OR-1b · create OT rule with min_minutes=20 shows RULE_VIOLATION error (D4
 // OR-1c — Create valid overtime rule → row appears
 // ---------------------------------------------------------------------------
 
-test('OR-1c · create valid overtime rule: row appears in list', async ({ page }) => {
+// Skipped: overtime-rules screen is view-only (no create/edit/delete) per 2026-06-09 decision.
+test.skip('OR-1c · create valid overtime rule: row appears in list', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/master-data/overtime-rules');
 
@@ -439,7 +445,8 @@ test('OR-1c · create valid overtime rule: row appears in list', async ({ page }
 // OR-2 — Update overtime rule → updated name visible
 // ---------------------------------------------------------------------------
 
-test('OR-2 · update overtime rule name shows updated value', async ({ page }) => {
+// Skipped: overtime-rules screen is view-only (no create/edit/delete) per 2026-06-09 decision.
+test.skip('OR-2 · update overtime rule name shows updated value', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/master-data/overtime-rules');
 
@@ -478,7 +485,8 @@ test('OR-2 · update overtime rule name shows updated value', async ({ page }) =
 // OR-3 — Soft-delete overtime rule → DB status inactive
 // ---------------------------------------------------------------------------
 
-test('OR-3 · soft-delete overtime rule: DB status inactive', async ({ page }) => {
+// Skipped: overtime-rules screen is view-only (no create/edit/delete) per 2026-06-09 decision.
+test.skip('OR-3 · soft-delete overtime rule: DB status inactive', async ({ page }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/master-data/overtime-rules');
 

@@ -59,9 +59,11 @@ Payroll migrates **as-is for history** (read-only). The main work is **decryptin
 | G-4 | **Volume** | Payslips ≈ employees × months — moderate; batch by period. |
 | G-5 | **Retention** | Confirm retention policy + whether any purge is allowed (FEATURE §7 Q1). |
 | G-6 | **Read-only** | No re-computation on import; values carried verbatim (decrypted). |
+| G-7 | **Active-payroll discriminators** | Payslip now also serves compute-assist runs (F8.3). Migrated rows set `source=Migrated`, `payroll_run_id=NULL`, `is_posted=true` (immutable), `payment_status=Paid` (historical pay already disbursed). Migration creates **no** `PayrollRun`/`PayrollPayment`/`PayrollAdjustment` rows — those are net-new for in-app runs. Legacy `employee_salaries` → `SalaryComponent` set `source=Auto`/`Manual` N/A → mark `source=Migrated` (or `Auto`) with `kind`/`category` best-effort from the column name. |
 
 ## 5. Migration rules
 
 1. Runs after E2 (employees). Read-only import; no payroll recomputation.
 2. Decrypt → re-encrypt all monetary fields; idempotent via crosswalks.
 3. Orchestration in E9; this doc owns the E8 field-level mapping.
+4. Migrated payslips are flagged `Migrated`/posted/paid (G-7); active runs (F8.3/F8.4) never touch them.
