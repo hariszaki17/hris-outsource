@@ -766,39 +766,9 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	periodStart := fmt.Sprintf("%d-01-01", year)
 	periodEnd := fmt.Sprintf("%d-12-31", year)
 
-	// --- leave_grants (F6.1 grant-lot ledger; explicit ids for deterministic E2E) ---
-	// Each demo agent gets an ANNUAL pool lot (expires year-end). Dewi also gets an
-	// earmarked MATERNITY lot HR pre-funded (only a maternity request may draw it,
-	// LQ-10). consumed_days is seeded directly so balances are non-trivial; matching
-	// leave_consumptions rows are written below to keep Σ consumption == lot.consumed.
-	const lgQ = `
-		INSERT INTO leave_grants
-			(id, employee_id, amount_days, effective_from, expires_at, source, earmark, remark, consumed_days, pending_days, created_by)
-		VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, 0, 'system-seed')
-		ON CONFLICT (id) DO NOTHING`
-	matExpiry := fmt.Sprintf("%d-03-31", year+1)
-	grants := []struct {
-		id, employeeID   string
-		amount, consumed int
-		expires          string
-		source           string
-		earmark          *string
-		remark           string
-	}{
-		{"SWP-LG-8001", "SWP-EMP-3001", 12, 4, periodEnd, "ANNUAL", nil, "Hibah kuota tahunan " + fmt.Sprint(year) + " (Dewi)."},
-		{"SWP-LG-8002", "SWP-EMP-2891", 12, 11, periodEnd, "ANNUAL", nil, "Hibah kuota tahunan " + fmt.Sprint(year) + " (Budi)."},
-		{"SWP-LG-8003", "SWP-EMP-3001", 90, 0, matExpiry, "MATERNITY", strPtr("MATERNITY"), "Pre-fund cuti melahirkan (LQ-11)."},
-	}
-	for _, g := range grants {
-		if _, err := pool.Pool.Exec(ctx, lgQ, g.id, g.employeeID, g.amount, periodStart, g.expires, g.source, g.earmark, g.remark, g.consumed); err != nil {
-			return fmt.Errorf("seed leave_grant %q: %w", g.id, err)
-		}
-		slog.Info("seed: upserted leave grant", "id", g.id, "employee_id", g.employeeID, "remaining", g.amount-g.consumed, "earmark", g.earmark)
-	}
-
-	// --- leave_quotas (per-type ledger, 2026-06-12; live path for the meter) ---
-	// ANNUAL_POOL (CT = SWP-LT-001) window per demo agent, mirroring the grant
-	// amounts so GET /leave-balances/by-employee/{id}/types is non-trivial. Legacy
+	// --- leave_quotas (per-type ledger, 2026-06-12; the live balance model) ---
+	// ANNUAL_POOL (CT = SWP-LT-001) window per demo agent so
+	// GET /leave-balances/by-employee/{id}/types is non-trivial. Legacy
 	// period/period_start/period_end/total are filled transitionally (NOT NULL).
 	// created_by is NULL (FK → users; no seed user row).
 	const lqQ = `
@@ -878,54 +848,9 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	}
 	slog.Info("seed: upserted leave approval", "leave_request_id", "SWP-LR-8002", "stage", "L1")
 
-	// --- leave_consumptions: tie each lot's consumed_days to APPROVED requests so
-	// Σ consumption.days per lot == lot.consumed_days (the F6.1 ledger invariant).
-	// Dewi's lot SWP-LG-8001 consumed 4 → attribute to the APPROVED SWP-LR-8005
-	// (1 day) + the historical SWP-LR-8006 placeholder is REJECTED so we add a 3-day
-	// APPROVED back-history request (SWP-LR-8008). Budi's lot SWP-LG-8002 consumed 11
-	// → one APPROVED back-history request SWP-LR-8009.
-	const lrHistQ = `
-		INSERT INTO leave_requests
-			(id, employee_id, placement_id, company_id, leave_type_id,
-			 start_date, end_date, duration_days, reason, status, no_leader, assigned_leader_id, created_by)
-		VALUES ($1, $2, $3, $4, 'SWP-LT-001', $5::date, $6::date, $7, $8, 'APPROVED', false, $9, 'system-seed')
-		ON CONFLICT (id) DO NOTHING`
-	h1s := monday.AddDate(0, 0, -30).Format("2006-01-02")
-	h1e := monday.AddDate(0, 0, -28).Format("2006-01-02")
-	h2s := monday.AddDate(0, 0, -60).Format("2006-01-02")
-	h2e := monday.AddDate(0, 0, -50).Format("2006-01-02")
-	hist := []struct {
-		id, emp, pl, cmp string
-		start, end       string
-		days             int
-		leader           *string
-	}{
-		{"SWP-LR-8008", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", h1s, h1e, 3, &rudi},
-		{"SWP-LR-8009", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", h2s, h2e, 11, nil},
-	}
-	for _, r := range hist {
-		if _, err := pool.Pool.Exec(ctx, lrHistQ, r.id, r.emp, r.pl, r.cmp, r.start, r.end, r.days, "Cuti historis (backfill saldo).", r.leader); err != nil {
-			return fmt.Errorf("seed historical leave_request %q: %w", r.id, err)
-		}
-	}
-	const lcQ = `
-		INSERT INTO leave_consumptions (id, leave_request_id, grant_id, days)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (id) DO NOTHING`
-	cons := []struct {
-		id, req, grant string
-		days           int
-	}{
-		{"SWP-LC-8001", "SWP-LR-8005", "SWP-LG-8001", 1},  // Dewi approved (current week)
-		{"SWP-LC-8002", "SWP-LR-8008", "SWP-LG-8001", 3},  // Dewi historical (1+3 = 4 == consumed)
-		{"SWP-LC-8003", "SWP-LR-8009", "SWP-LG-8002", 11}, // Budi historical (== consumed)
-	}
-	for _, c := range cons {
-		if _, err := pool.Pool.Exec(ctx, lcQ, c.id, c.req, c.grant, c.days); err != nil {
-			return fmt.Errorf("seed leave_consumption %q: %w", c.id, err)
-		}
-		slog.Info("seed: upserted leave consumption", "id", c.id, "grant_id", c.grant, "days", c.days)
-	}
+	// Per-type ledger note: the demo agents' used_days (Dewi 4, Budi 11) are seeded
+	// directly on the leave_quotas windows above — the grant-lot consumption rows and
+	// their back-history requests retired with the grant ledger (2026-06-12).
 
 	return nil
 }

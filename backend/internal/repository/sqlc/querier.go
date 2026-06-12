@@ -20,9 +20,6 @@ type Querier interface {
 	AdjustQuotaEntitled(ctx context.Context, arg AdjustQuotaEntitledParams) (LeaveQuota, error)
 	// AgentDashboard.recent_attendance: last-7-day present/late/absent for one agent.
 	AgentRecentAttendance(ctx context.Context, arg AgentRecentAttendanceParams) (AgentRecentAttendanceRow, error)
-	// Write one lot-drawdown row at APPROVE (one per lot the request drew). id allocated
-	// by column DEFAULT.
-	ApplyConsumption(ctx context.Context, arg ApplyConsumptionParams) (LeaveConsumption, error)
 	// Apply an approved correction's whitelisted proposed_* fields to the target row:
 	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
 	// (de-duped via array_remove first); sets last_correction_id. status/is_late/
@@ -113,9 +110,6 @@ type Querier interface {
 	ClockOutAttendance(ctx context.Context, arg ClockOutAttendanceParams) (string, error)
 	// Final approval: move the reservation pending_days -> used_days.
 	CommitQuotaDays(ctx context.Context, arg CommitQuotaDaysParams) (LeaveQuota, error)
-	// Move days pending_days → consumed_days at APPROVE (commit). Paired with an
-	// ApplyConsumption (leave_consumptions) insert in the same tx.
-	CommitReservation(ctx context.Context, arg CommitReservationParams) (CommitReservationRow, error)
 	// HrDashboard.kpis.active_companies = companies with >=1 active placement.
 	CountActiveCompanies(ctx context.Context) (int64, error)
 	// HrDashboard.kpis.active_placements.
@@ -220,14 +214,6 @@ type Querier interface {
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
 	// id allocated by the column DEFAULT ('SWP-LA-' || swp_next_id('LA')).
 	CreateLeadAssignment(ctx context.Context, arg CreateLeadAssignmentParams) (LeadAssignment, error)
-	// E6 leave-grant ledger queries (F6.1 / SWP-LG-* / SWP-LC-*). One lot per
-	// leave_grants row; remaining_days = amount_days - consumed_days - pending_days is a
-	// DERIVED domain method (not a column). FIFO allocation orders by soonest expires_at,
-	// then granted_at, then id. Dates come back as pgtype.Date (repo converts).
-	// HR POST /leave-grants — inserts one lot. id allocated by column DEFAULT when omitted.
-	CreateLeaveGrant(ctx context.Context, arg CreateLeaveGrantParams) (CreateLeaveGrantRow, error)
-	// Seed / migration-repair variant that supplies an explicit id.
-	CreateLeaveGrantWithID(ctx context.Context, arg CreateLeaveGrantWithIDParams) (CreateLeaveGrantWithIDRow, error)
 	// Seed / HR-on-behalf path (FE/web does not create — mobile/agent does). id
 	// allocated by the column DEFAULT ('SWP-LR-' || swp_next_id('LR')) when omitted.
 	CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequestParams) (CreateLeaveRequestRow, error)
@@ -262,8 +248,6 @@ type Querier interface {
 	DeductLeaveQuota(ctx context.Context, arg DeductLeaveQuotaParams) (LeaveQuota, error)
 	// INV-3 reverse (cancel/shorten restore — used by later cancel paths; added now).
 	DeleteApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) (int64, error)
-	// Reversal: drop the request's consumption rows after reversing each lot's consumed.
-	DeleteConsumptionsForRequest(ctx context.Context, leaveRequestID string) error
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
@@ -273,13 +257,6 @@ type Querier interface {
 	EndPlacementsForEmployee(ctx context.Context, arg EndPlacementsForEmployeeParams) ([]EndPlacementsForEmployeeRow, error)
 	// Sets unassigned_at=now() + vacated_reason (release the active partial unique index).
 	EndShiftLeaderAssignment(ctx context.Context, arg EndShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
-	// Expiry sweep: find lots whose expires_at < today that still hold pending_days
-	// (dangling reservations on an expired lot) so the sweep can release them, and report
-	// the lot for the audit/zeroing. We do NOT mutate amount/consumed — remaining is
-	// DERIVED and already 0 for an inactive lot (now >= expires_at) at the read boundary.
-	// We DO zero any leftover pending_days (releasing dangling reservations). FOR UPDATE
-	// locks the batch.
-	ExpireLeaveLots(ctx context.Context, arg ExpireLeaveLotsParams) ([]ExpireLeaveLotsRow, error)
 	// INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement
 	// whose period covers work_date (open-ended end_date treated as +inf).
 	FindActivePlacementForAgentDate(ctx context.Context, arg FindActivePlacementForAgentDateParams) (FindActivePlacementForAgentDateRow, error)
@@ -316,12 +293,6 @@ type Querier interface {
 	GetActiveLeaderForCompanyForUpdate(ctx context.Context, clientCompanyID string) (ShiftLeaderAssignment, error)
 	// INV-2 site-scope lock: active leader of a site-scope unit, row-locked.
 	GetActiveLeaderForSiteForUpdate(ctx context.Context, siteID *string) (ShiftLeaderAssignment, error)
-	// FIFO allocation source. Returns the employee's ACTIVE lots (now < expires_at,
-	// effective_from <= now) matching the request's earmark: ordinary requests draw ONLY
-	// unearmarked lots (earmark_match='__null'); an earmarked request draws ONLY lots with
-	// the matching earmark (LQ-10 isolation). Ordered FIFO (expires_at, granted_at, id).
-	// FOR UPDATE locks the lots for the reserve/commit/release tx.
-	GetActiveLotsForAllocation(ctx context.Context, arg GetActiveLotsForAllocationParams) ([]GetActiveLotsForAllocationRow, error)
 	// INV-1 service pre-check (friendly 409 before hitting the partial unique index).
 	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (GetActivePlacementForEmployeeRow, error)
 	// INV-4 lock: the agent's active placement at a specific company, row-locked.
@@ -369,10 +340,6 @@ type Querier interface {
 	// day_type classification: is this work_date a holiday? Highest-priority category
 	// (NATIONAL) wins when several share a date.
 	GetHolidayForDate(ctx context.Context, holidayDate pgtype.Date) (GetHolidayForDateRow, error)
-	// Single lot with denormalized employee_name.
-	GetLeaveGrant(ctx context.Context, id string) (GetLeaveGrantRow, error)
-	// Row-lock for PATCH (adjust amount/expires_at/earmark).
-	GetLeaveGrantForUpdate(ctx context.Context, id string) (GetLeaveGrantForUpdateRow, error)
 	GetLeaveQuota(ctx context.Context, id string) (GetLeaveQuotaRow, error)
 	// Row-lock for :adjust and the final-approval deduct/restore.
 	GetLeaveQuotaForUpdate(ctx context.Context, id string) (LeaveQuota, error)
@@ -552,10 +519,6 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
-	// GET /leave-grants/{id} consumptions[] embed.
-	ListConsumptionsForGrant(ctx context.Context, grantID string) ([]LeaveConsumption, error)
-	// Reversal source (cancel/shorten): the exact lots a request drew, to reverse.
-	ListConsumptionsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveConsumption, error)
 	// E5 corrections queries (F5.3 / SWP-COR-*). Cursor lists keyset on
 	// (created_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
 	// Corrections queue for a company over filters, newest first.
@@ -592,21 +555,6 @@ type Querier interface {
 	ListLeadAssignments(ctx context.Context, arg ListLeadAssignmentsParams) ([]ListLeadAssignmentsRow, error)
 	// Timeline source: all decisions for a request, chronological.
 	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
-	// The /leave/quotas screen: ONE ROW PER EMPLOYEE, aggregating ALL of the employee's
-	// ACTIVE lots (now < expires_at AND deleted_at IS NULL). JOINs employees for the
-	// name/nik/nip display + the q ILIKE filter (mirrors people/employees.sql ListEmployees:
-	// ILIKE over full_name/nik/nip ONLY). An employee appears iff they hold >= 1 ACTIVE lot
-	// regardless of remaining (an employee whose lots are all consumed still lists as long
-	// as a lot is non-expired); an employee with ONLY expired lots is excluded by the
-	// expires_at > now_date predicate. Pool fields aggregate unearmarked lots (earmark IS
-	// NULL); earmarked_remaining sums remaining across earmarked lots. next_expiry is the
-	// MIN(expires_at) over active lots that still have remaining > 0. Keyset cursor on
-	// (full_name, employee_id); deterministic ORDER BY full_name ASC, employee_id ASC.
-	ListLeaveBalances(ctx context.Context, arg ListLeaveBalancesParams) ([]ListLeaveBalancesRow, error)
-	// The ledger. Keyset cursor (expires_at ASC, id) — FIFO-aligned order. Filters
-	// (narg): employee_id, earmark ('__null' sentinel → unearmarked only), source,
-	// include_expired (default: active only), company_id (via covering placement).
-	ListLeaveGrants(ctx context.Context, arg ListLeaveGrantsParams) ([]ListLeaveGrantsRow, error)
 	// E6 leave-quota queries (F6.3 / SWP-LQ-*). remaining = total-used-pending is a
 	// DERIVED domain method (not a column). Reads LEFT JOIN employees/leave_types for
 	// denormalized names. Dates come back as pgtype.Date (08-02 repo converts).
@@ -754,10 +702,6 @@ type Querier interface {
 	// Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
 	// removed, position is a plain text column on placements — no master/enum).
 	OrgRollupsByPosition(ctx context.Context) ([]OrgRollupsByPositionRow, error)
-	// HR PATCH /leave-grants/{id}: adjust amount_days/expires_at/earmark (+ remark). The
-	// service guards amount_days >= consumed_days+pending_days (422) before calling. nargs
-	// left NULL keep the current value (COALESCE).
-	PatchLeaveGrant(ctx context.Context, arg PatchLeaveGrantParams) (PatchLeaveGrantRow, error)
 	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
 	PayslipExists(ctx context.Context, id string) (bool, error)
 	// Dashboard stat cards (C2SSLA): global placement aggregates over non-deleted
@@ -775,13 +719,8 @@ type Querier interface {
 	RejectAttendance(ctx context.Context, arg RejectAttendanceParams) (RejectAttendanceRow, error)
 	// Reject a PENDING correction (reason required). Same PENDING guard.
 	RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error)
-	// Release pending_days at REJECT/CANCEL (a still-pending request never consumed).
-	ReleasePending(ctx context.Context, arg ReleasePendingParams) (ReleasePendingRow, error)
 	// Reject/withdraw: release the held reservation.
 	ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysParams) (LeaveQuota, error)
-	// Move days into pending_days at SUBMIT (FIFO reserve). Never drives a lot negative:
-	// the service caps the delta at the lot's remaining before calling.
-	ReservePending(ctx context.Context, arg ReservePendingParams) (ReservePendingRow, error)
 	// Submit: hold pending_days on the window (remaining must cover it — service guards).
 	ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysParams) (LeaveQuota, error)
 	// Drives :approve (status='approved'), :reject (status='rejected'), and the
@@ -803,9 +742,6 @@ type Querier interface {
 	RestoreLeaveQuota(ctx context.Context, arg RestoreLeaveQuotaParams) (LeaveQuota, error)
 	// Cancel/shorten an APPROVED leave: return committed days to the balance.
 	ReverseCommittedQuotaDays(ctx context.Context, arg ReverseCommittedQuotaDaysParams) (LeaveQuota, error)
-	// Reverse committed consumed_days at CANCEL-APPROVED / SHORTEN (paired with deleting
-	// the leave_consumptions rows). Returns days to the lot.
-	ReverseConsumption(ctx context.Context, arg ReverseConsumptionParams) (ReverseConsumptionRow, error)
 	// Invalidates every live session for a user (AU-6: called on password reset).
 	RevokeAllRefreshForUser(ctx context.Context, userID string) error
 	// Reuse detection: kill every live token in the family.
@@ -840,9 +776,9 @@ type Querier interface {
 	SetEmployeeUserID(ctx context.Context, arg SetEmployeeUserIDParams) error
 	// Records the time of a successful login (AU-3). Called inside issuePair's tx.
 	SetLastLogin(ctx context.Context, id string) error
-	// Writes the FIFO reservation snapshot (openapi BalanceCheck) at SUBMIT-reserve /
-	// APPROVE-commit. balance_allocation is the per-lot split (jsonb array). Clearing
-	// (release/reverse) passes nulls.
+	// Writes the BalanceCheck snapshot (openapi) at SUBMIT-reserve / APPROVE-commit.
+	// Per-type ledger: requested/remaining/requires_override only (no per-lot split).
+	// Clearing (release/reverse) passes nulls.
 	SetLeaveBalanceSnapshot(ctx context.Context, arg SetLeaveBalanceSnapshotParams) error
 	// HR override that drove remaining negative (LA-8): records last_override.
 	SetLeaveQuotaOverride(ctx context.Context, arg SetLeaveQuotaOverrideParams) (LeaveQuota, error)
@@ -872,10 +808,6 @@ type Querier interface {
 	SoftDeleteLeaveType(ctx context.Context, id string) error
 	SoftDeleteOvertimeRule(ctx context.Context, id string) error
 	SoftDeleteScheduleEntry(ctx context.Context, id string) (int64, error)
-	// Computed balance over ACTIVE lots (now < expires_at), grouped by earmark. The
-	// unearmarked group (earmark IS NULL) is the flat pool; each non-null earmark is one
-	// per-purpose line. Returns Σ(amount-consumed-pending) and the soonest expiry per group.
-	SumActiveBalanceByEarmark(ctx context.Context, arg SumActiveBalanceByEarmarkParams) ([]SumActiveBalanceByEarmarkRow, error)
 	// DELIBERATE CROSS-EPIC WRITE (E4 → E5): when a master's end_time moves and an
 	// agent is mid-shift (checked in, NOT yet out), the entry keeps its frozen start
 	// but its end is re-synced; the OPEN attendance row's shift_end_at must follow so
@@ -939,8 +871,6 @@ type Querier interface {
 	// reevaluates status/is_late/late_minutes before calling — those override nargs
 	// are COALESCEd so they can be left NULL (verify-only, no times mutation).
 	VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAttendanceWithTimesParams) (VerifyAttendanceWithTimesRow, error)
-	// Expiry sweep: release dangling pending on an expired lot.
-	ZeroLotPending(ctx context.Context, id string) (ZeroLotPendingRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

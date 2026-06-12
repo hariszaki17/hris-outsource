@@ -162,9 +162,7 @@ func (r *LeaveRepo) SetBalanceSnapshot(ctx context.Context, tx pgx.Tx, p svc.Bal
 		RemainingAtCheck: i32ptr(p.RemainingAtCheck),
 		RequiresOverride: p.RequiresOverride,
 		// balance_earmark / balance_allocation retired with the grant-lot ledger
-		// (per-type meter has no per-lot split); columns dropped in 00052.
-		Earmark:    nil,
-		Allocation: nil,
+		// (per-type meter has no per-lot split); columns dropped in 00055.
 	})
 }
 

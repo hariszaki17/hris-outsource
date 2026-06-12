@@ -12,7 +12,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -47,7 +47,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -68,7 +68,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at
 FROM leave_requests lr
 WHERE lr.id = sqlc.arg(id)
@@ -112,8 +112,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at;
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at;
 
 -- name: CreateLeaveRequestWithID :one
 -- Seed / test variant that supplies an explicit id (deterministic E2E targets).
@@ -153,8 +153,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at;
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at;
 
 -- name: CheckOverlappingLeave :one
 -- LR-5 OVERLAPPING_LEAVE pre-check: does this employee already hold a live
@@ -191,8 +191,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at;
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at;
 
 -- name: UpdateLeaveRequestDates :one
 -- HR :shorten — sets a new (earlier) end_date + recomputed duration on an APPROVED
@@ -208,19 +208,17 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at;
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at;
 
 -- name: SetLeaveBalanceSnapshot :exec
--- Writes the FIFO reservation snapshot (openapi BalanceCheck) at SUBMIT-reserve /
--- APPROVE-commit. balance_allocation is the per-lot split (jsonb array). Clearing
--- (release/reverse) passes nulls.
+-- Writes the BalanceCheck snapshot (openapi) at SUBMIT-reserve / APPROVE-commit.
+-- Per-type ledger: requested/remaining/requires_override only (no per-lot split).
+-- Clearing (release/reverse) passes nulls.
 UPDATE leave_requests
 SET balance_requested_days     = sqlc.narg(requested_days),
     balance_remaining_at_check = sqlc.narg(remaining_at_check),
     balance_requires_override  = sqlc.narg(requires_override),
-    balance_earmark            = sqlc.narg(earmark),
-    balance_allocation         = sqlc.narg(allocation),
     updated_at                 = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;

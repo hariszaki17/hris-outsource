@@ -109,8 +109,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at
 `
 
 type CreateLeaveRequestParams struct {
@@ -159,8 +159,6 @@ type CreateLeaveRequestRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -215,8 +213,6 @@ func (q *Queries) CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequest
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -261,8 +257,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at
 `
 
 type CreateLeaveRequestWithIDParams struct {
@@ -312,8 +308,6 @@ type CreateLeaveRequestWithIDRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -368,8 +362,6 @@ func (q *Queries) CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveR
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -383,7 +375,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -419,8 +411,6 @@ type GetLeaveRequestRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -456,8 +446,6 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, id string) (GetLeaveReque
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -475,7 +463,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at
 FROM leave_requests lr
 WHERE lr.id = $1
@@ -505,8 +493,6 @@ type GetLeaveRequestForUpdateRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -539,8 +525,6 @@ func (q *Queries) GetLeaveRequestForUpdate(ctx context.Context, id string) (GetL
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -555,7 +539,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
-       lr.balance_requires_override, lr.balance_earmark, lr.balance_allocation,
+       lr.balance_requires_override,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -620,8 +604,6 @@ type ListLeaveRequestsRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -681,8 +663,6 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, arg ListLeaveRequestsPa
 			&i.BalanceRequestedDays,
 			&i.BalanceRemainingAtCheck,
 			&i.BalanceRequiresOverride,
-			&i.BalanceEarmark,
-			&i.BalanceAllocation,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -706,10 +686,8 @@ UPDATE leave_requests
 SET balance_requested_days     = $1,
     balance_remaining_at_check = $2,
     balance_requires_override  = $3,
-    balance_earmark            = $4,
-    balance_allocation         = $5,
     updated_at                 = now()
-WHERE id = $6
+WHERE id = $4
   AND deleted_at IS NULL
 `
 
@@ -717,21 +695,17 @@ type SetLeaveBalanceSnapshotParams struct {
 	RequestedDays    *int32
 	RemainingAtCheck *int32
 	RequiresOverride *bool
-	Earmark          *string
-	Allocation       []byte
 	ID               string
 }
 
-// Writes the FIFO reservation snapshot (openapi BalanceCheck) at SUBMIT-reserve /
-// APPROVE-commit. balance_allocation is the per-lot split (jsonb array). Clearing
-// (release/reverse) passes nulls.
+// Writes the BalanceCheck snapshot (openapi) at SUBMIT-reserve / APPROVE-commit.
+// Per-type ledger: requested/remaining/requires_override only (no per-lot split).
+// Clearing (release/reverse) passes nulls.
 func (q *Queries) SetLeaveBalanceSnapshot(ctx context.Context, arg SetLeaveBalanceSnapshotParams) error {
 	_, err := q.db.Exec(ctx, setLeaveBalanceSnapshot,
 		arg.RequestedDays,
 		arg.RemainingAtCheck,
 		arg.RequiresOverride,
-		arg.Earmark,
-		arg.Allocation,
 		arg.ID,
 	)
 	return err
@@ -749,8 +723,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at
 `
 
 type UpdateLeaveRequestDatesParams struct {
@@ -782,8 +756,6 @@ type UpdateLeaveRequestDatesRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -821,8 +793,6 @@ func (q *Queries) UpdateLeaveRequestDates(ctx context.Context, arg UpdateLeaveRe
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -847,8 +817,8 @@ RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
-          balance_remaining_at_check, balance_requires_override, balance_earmark,
-          balance_allocation, created_by, created_at, updated_at
+          balance_remaining_at_check, balance_requires_override,
+          created_by, created_at, updated_at
 `
 
 type UpdateLeaveRequestStatusParams struct {
@@ -885,8 +855,6 @@ type UpdateLeaveRequestStatusRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
-	BalanceEarmark          *string
-	BalanceAllocation       []byte
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -929,8 +897,6 @@ func (q *Queries) UpdateLeaveRequestStatus(ctx context.Context, arg UpdateLeaveR
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
-		&i.BalanceEarmark,
-		&i.BalanceAllocation,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
