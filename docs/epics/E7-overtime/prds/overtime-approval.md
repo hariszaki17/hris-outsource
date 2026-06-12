@@ -29,6 +29,7 @@ Shift Leader (level 1), HR/Super Admin (level 2), System (route, count, notify),
 |---|---|---|
 | **Web / mobile** | Shift Leader | Level-1 approve/reject for their company. |
 | **Web console** | HR / Super Admin | Level-2 approve/reject; no-leader escalations; overrides. |
+| **Web console** | Lead | Level-2 (final) approve/reject for agents in their assigned companies. |
 
 ## 5. Business rules
 
@@ -36,7 +37,7 @@ Shift Leader (level 1), HR/Super Admin (level 2), System (route, count, notify),
 |-----|------|
 | OA-1 | Flow: `Pending → (leader) LeaderApproved → (HR) Approved`; reject at either level → `Rejected` (reason required). |
 | OA-2 | Level-1 = the agent's **company shift leader**; escalates to HR if none (F3.4 SL-7). |
-| OA-3 | Level-2 = **HR/Super Admin**. |
+| OA-3 | Level-2 (final) = **HR/Super Admin**, OR the **assigned Lead** scoped to the agent's company. |
 | OA-4 | On **final Approved**, the OT counts toward reporting (F7.4) classified by `day_type`. |
 | OA-5 | An approver **cannot approve their own** OT (separation). |
 | OA-6 | Auto-detected candidates follow the same flow (after any required agent confirmation, F7.2 OC-7). |

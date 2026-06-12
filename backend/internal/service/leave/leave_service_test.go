@@ -419,6 +419,12 @@ func agentCtx(emp string) context.Context {
 	return auth.WithPrincipal(context.Background(), auth.Principal{UserID: "SWP-USR-AG", EmployeeID: emp, Role: auth.RoleAgent})
 }
 
+// leadCtx builds a stored `lead` principal whose company SET (CompanyIDs) the
+// middleware would have resolved per-request from lead_assignments.
+func leadCtx(emp string, companies ...string) context.Context {
+	return auth.WithPrincipal(context.Background(), auth.Principal{UserID: "SWP-USR-LEAD", EmployeeID: emp, Role: auth.RoleLead, CompanyIDs: companies})
+}
+
 func newReq(status dom.LeaveStatus, company, employee string, days int) dom.LeaveRequest {
 	c := company
 	return dom.LeaveRequest{
@@ -497,6 +503,34 @@ func TestApproveL1_SelfApprove403(t *testing.T) {
 	_, err := s.ApproveL1(leaderCtx("SWP-CMP-0021", "SWP-EMP-2003"), "SWP-LR-8001", "")
 	if got := codeOf(t, err); got != "FORBIDDEN" {
 		t.Fatalf("code = %s, want FORBIDDEN", got)
+	}
+}
+
+// --- lead as L2 (final) approver, scoped to the agent's company ---
+
+// A lead finalizes a PENDING_HR leave for an agent at one of its assigned
+// companies (in-scope → succeeds, lot consumed).
+func TestApproveFinal_LeadInScope(t *testing.T) {
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 1), leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil))
+	s := newSvc(lr, gr, &fakeSchedule{})
+	out, err := s.ApproveFinal(leadCtx("SWP-EMP-3004", "SWP-CMP-0021", "SWP-CMP-0022"), "SWP-LR-8001", "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if out.Status != dom.LeaveStatusApproved {
+		t.Fatalf("status = %s, want APPROVED", out.Status)
+	}
+}
+
+// A lead cannot finalize a leave for an agent at a company OUTSIDE its set.
+func TestApproveFinal_LeadOutOfScope(t *testing.T) {
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0099", "SWP-EMP-3001", 1), leaveType: annualType()}
+	gr := newFakeGrantRepo(lot("SWP-LG-1", "SWP-EMP-3001", 12, time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC), nil))
+	s := newSvc(lr, gr, &fakeSchedule{})
+	_, err := s.ApproveFinal(leadCtx("SWP-EMP-3004", "SWP-CMP-0021", "SWP-CMP-0022"), "SWP-LR-8001", "")
+	if got := codeOf(t, err); got != "OUT_OF_SCOPE" {
+		t.Fatalf("code = %s, want OUT_OF_SCOPE", got)
 	}
 }
 

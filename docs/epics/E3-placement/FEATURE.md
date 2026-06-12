@@ -13,7 +13,8 @@ Make **placement a first-class entity** (in the legacy system it was just a stri
 
 | Actor | Involvement in this epic |
 |---|---|
-| **HR / Placement Admin** | Primary driver — creates, activates, transfers, and ends placements; assigns shift leaders. |
+| **HR / Placement Admin** | Keeps **global oversight + override** — creates, activates, transfers, and ends placements anywhere, assigns shift leaders. The routine arranger within scope is now the Lead; HR is the fallback outside any lead's scope and the final authority everywhere. |
+| **Lead (Service Lead)** | Service-line operational lead (parking/facility/building). **Arranges placements** — creates, transfers, renews, and ends placements — within their **assigned client companies** (scoped). Cannot add employees, run payroll, or assign shift leaders. |
 | **Super Admin** | Same powers as HR admin + can override/correct any placement; manages master data (companies, service lines). |
 | **Shift Leader** | Designated per company; consumes the roster (read) and is assigned/unassigned by HR admin. |
 | **Agent** | Subject of a placement; views own active placement & history (read-only). |

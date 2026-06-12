@@ -985,6 +985,11 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 			EmployeeID: employeeID,
 		},
 	}
+	// A lead's company scope lives in CompanyIDs (the middleware fills it from
+	// lead_assignments). Mirror that so rbac.GuardCompany scopes the lead.
+	if principalRole == auth.RoleLead && companyID != "" {
+		h.principal.CompanyIDs = []string{companyID}
+	}
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestIDMiddleware)
@@ -1024,10 +1029,14 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/leave-requests/{id}:submit", handler.SubmitLeaveRequest)
 		r.With(idem.Handler).Post("/leave-requests/{id}:cancel", handler.CancelLeaveRequest)
 	})
+	// L2 final/override admits lead (scoped via GuardCompany in-service).
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-final", handler.ApproveLeaveRequestFinal)
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-override", handler.ApproveLeaveRequestOverride)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 		r.With(idem.Handler).Post("/leave-grants", handler.CreateLeaveGrant)
 		r.With(idem.Handler).Patch("/leave-grants/{id}", handler.PatchLeaveGrant)
 		r.With(idem.Handler).Post("/leave-quotas/{id}:adjust", handler.AdjustLeaveQuota)

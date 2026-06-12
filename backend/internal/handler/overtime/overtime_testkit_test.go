@@ -628,6 +628,11 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 			EmployeeID: employeeID,
 		},
 	}
+	// A lead's company scope lives in CompanyIDs (the middleware fills it from
+	// lead_assignments). Mirror that here so rbac.GuardCompany scopes the lead.
+	if principalRole == auth.RoleLead && companyID != "" {
+		h.principal.CompanyIDs = []string{companyID}
+	}
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestIDMiddleware)
@@ -663,9 +668,13 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/overtime:bulk-approve", handler.BulkApprove)
 		r.With(idem.Handler).Post("/overtime:bulk-reject", handler.BulkReject)
 	})
+	// L2 final approval admits lead (scoped via GuardCompany in-service).
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
+		r.With(idem.Handler).Post("/overtime/{id}:approve-final", handler.ApproveFinal)
+	})
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-		r.With(idem.Handler).Post("/overtime/{id}:approve-final", handler.ApproveFinal)
 		r.With(idem.Handler).Post("/holidays", handler.CreateHoliday)
 		r.With(idem.Handler).Patch("/holidays/{id}", handler.UpdateHoliday)
 		r.Delete("/holidays/{id}", handler.DeleteHoliday)

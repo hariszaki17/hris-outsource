@@ -100,9 +100,19 @@ erDiagram
     }
     LEAVE_TYPE {
         bigint id PK
+        string code "unique — CTHO|CT|SDSKD|…"
         string name
-        boolean is_annual
-        boolean is_document_required
+        string category
+        string cap_basis "ANNUAL_POOL|PER_EVENT|PER_MONTH|PER_YEAR_COUNT|UNCAPPED|LIFETIME_ONCE|SERVICE_UNPAID"
+        int cap_value "nullable"
+        string cap_unit "DAYS|COUNT"
+        boolean paid
+        string gender "ANY|FEMALE|MALE"
+        boolean requires_document
+        int notice_days
+        int min_service_years
+        int lead_days
+        int trail_days
         string status
     }
     ATTENDANCE_CODE {

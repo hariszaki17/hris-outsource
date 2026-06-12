@@ -43,18 +43,14 @@ WHERE lq.id = sqlc.arg(id);
 
 -- name: GetLeaveQuotaForUpdate :one
 -- Row-lock for :adjust and the final-approval deduct/restore.
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end,
-       lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed,
-       lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at
+SELECT lq.*
 FROM leave_quotas lq
 WHERE lq.id = sqlc.arg(id)
 FOR UPDATE;
 
 -- name: FindQuotaForEmployeeTypePeriod :one
 -- INV-1 quota guard lookup by (employee_id, leave_type_id, period).
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end,
-       lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed,
-       lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at
+SELECT lq.*
 FROM leave_quotas lq
 WHERE lq.employee_id   = sqlc.arg(employee_id)
   AND lq.leave_type_id = sqlc.arg(leave_type_id)
@@ -81,9 +77,7 @@ SET total          = EXCLUDED.total,
     is_prorated    = EXCLUDED.is_prorated,
     prorate_months = EXCLUDED.prorate_months,
     updated_at     = now()
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end,
-          total, used, pending, is_prorated, prorate_months, closed,
-          last_adjustment, last_override, created_at, updated_at;
+RETURNING *;
 
 -- name: AdjustLeaveQuotaTotal :one
 -- :adjust — signed delta on total + audited last_adjustment snapshot. Service
@@ -93,9 +87,7 @@ SET total           = total + sqlc.arg(delta),
     last_adjustment = sqlc.arg(last_adjustment),
     updated_at      = now()
 WHERE id = sqlc.arg(id)
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end,
-          total, used, pending, is_prorated, prorate_months, closed,
-          last_adjustment, last_override, created_at, updated_at;
+RETURNING *;
 
 -- name: DeductLeaveQuota :one
 -- Final-approval deduct: move days from the soft-reservation into used.
@@ -103,9 +95,7 @@ UPDATE leave_quotas
 SET used       = used + sqlc.arg(delta),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end,
-          total, used, pending, is_prorated, prorate_months, closed,
-          last_adjustment, last_override, created_at, updated_at;
+RETURNING *;
 
 -- name: RestoreLeaveQuota :one
 -- Cancel/withdraw restore: return days to the balance (used - delta).
@@ -113,9 +103,7 @@ UPDATE leave_quotas
 SET used       = GREATEST(used - sqlc.arg(delta), 0),
     updated_at = now()
 WHERE id = sqlc.arg(id)
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end,
-          total, used, pending, is_prorated, prorate_months, closed,
-          last_adjustment, last_override, created_at, updated_at;
+RETURNING *;
 
 -- name: SetLeaveQuotaOverride :one
 -- HR override that drove remaining negative (LA-8): records last_override.
@@ -123,9 +111,110 @@ UPDATE leave_quotas
 SET last_override = sqlc.arg(last_override),
     updated_at    = now()
 WHERE id = sqlc.arg(id)
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end,
-          total, used, pending, is_prorated, prorate_months, closed,
-          last_adjustment, last_override, created_at, updated_at;
+RETURNING *;
+
+-- ============================================================================
+-- Per-type ledger (2026-06-12, EPICS §8). New live path: meter per (employee,
+-- leave_type, period_key) window. Reserve at submit, commit at approve, release
+-- at reject/cancel; no-negative enforced by the entitled/used/pending CHECKs.
+-- Legacy period/period_start/period_end are still supplied (NOT NULL until 00052+
+-- drops them); period_key is the authoritative window key.
+-- ============================================================================
+
+-- name: ResolveQuotaWindow :one
+-- Row-locked lookup of the per-type window for reserve/commit/release.
+SELECT lq.*
+FROM leave_quotas lq
+WHERE lq.employee_id   = sqlc.arg(employee_id)
+  AND lq.leave_type_id = sqlc.arg(leave_type_id)
+  AND lq.period_key    = sqlc.arg(period_key)
+FOR UPDATE;
+
+-- name: OpenQuotaWindow :one
+-- Auto-open a per-type window at its entitlement (annual: agreement days; other
+-- quota-bearing: cap_value). Idempotent on the (emp,type,period_key) unique index.
+INSERT INTO leave_quotas (
+    employee_id, leave_type_id, period_key,
+    period, period_start, period_end,
+    entitled_days, source, remark, expires_at, created_by,
+    total
+) VALUES (
+    sqlc.arg(employee_id),
+    sqlc.arg(leave_type_id),
+    sqlc.arg(period_key),
+    sqlc.arg(period),
+    sqlc.arg(period_start),
+    sqlc.arg(period_end),
+    sqlc.arg(entitled_days),
+    sqlc.arg(source),
+    sqlc.arg(remark),
+    sqlc.narg(expires_at),
+    sqlc.narg(created_by),
+    sqlc.arg(entitled_days)
+)
+ON CONFLICT (employee_id, leave_type_id, period_key) DO UPDATE
+SET entitled_days = EXCLUDED.entitled_days,
+    expires_at    = EXCLUDED.expires_at,
+    updated_at    = now()
+RETURNING *;
+
+-- name: ReserveQuotaDays :one
+-- Submit: hold pending_days on the window (remaining must cover it — service guards).
+UPDATE leave_quotas
+SET pending_days = pending_days + sqlc.arg(delta),
+    updated_at   = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CommitQuotaDays :one
+-- Final approval: move the reservation pending_days -> used_days.
+UPDATE leave_quotas
+SET pending_days = GREATEST(pending_days - sqlc.arg(delta), 0),
+    used_days    = used_days + sqlc.arg(delta),
+    updated_at   = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: ReleaseQuotaDays :one
+-- Reject/withdraw: release the held reservation.
+UPDATE leave_quotas
+SET pending_days = GREATEST(pending_days - sqlc.arg(delta), 0),
+    updated_at   = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: ReverseCommittedQuotaDays :one
+-- Cancel/shorten an APPROVED leave: return committed days to the balance.
+UPDATE leave_quotas
+SET used_days  = GREATEST(used_days - sqlc.arg(delta), 0),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: AdjustQuotaEntitled :one
+-- HR per-type quota adjust (LQ-6): signed delta on entitled_days; service guards
+-- entitled cannot drop below used+pending and records last_adjustment.
+UPDATE leave_quotas
+SET entitled_days   = entitled_days + sqlc.arg(delta),
+    source          = 'ADJUSTMENT',
+    remark          = sqlc.arg(remark),
+    last_adjustment = sqlc.arg(last_adjustment),
+    updated_at      = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: CountApprovedRequestsForType :one
+-- Occurrence/lifetime gate source (PER_YEAR_COUNT, LIFETIME_ONCE): how many
+-- non-terminal-rejected requests of this type the employee already has in the
+-- window [from,to]. Counts PENDING_*/APPROVED (reserved or committed).
+SELECT count(*)
+FROM leave_requests lr
+WHERE lr.employee_id   = sqlc.arg(employee_id)
+  AND lr.leave_type_id = sqlc.arg(leave_type_id)
+  AND lr.status IN ('PENDING_L1','PENDING_HR','APPROVED')
+  AND lr.start_date >= sqlc.arg(window_start)::date
+  AND lr.start_date <= sqlc.arg(window_end)::date
+  AND lr.deleted_at IS NULL;
 
 -- name: ListActivePlacedEmployeesForGrant :many
 -- bulk-grant employee_ids:["all"] sentinel + pro-rate join-date source: employees

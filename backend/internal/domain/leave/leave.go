@@ -305,6 +305,18 @@ type LeaveQuota struct {
 	ProrateMonths int
 	Closed        bool
 
+	// Per-type ledger (2026-06-12, EPICS §8). PeriodKey generalizes Period across
+	// cap_basis windows (year | year-month | "EMP"). EntitledDays/UsedDays/
+	// PendingDays supersede Total/Used/Pending once the service is rewired (Phase 4).
+	PeriodKey    string
+	EntitledDays int
+	UsedDays     int
+	PendingDays  int
+	Source       QuotaSource
+	Remark       string
+	ExpiresAt    *time.Time
+	CreatedBy    *string
+
 	LastAdjustment *LeaveQuotaAdjustment
 	LastOverride   *LeaveQuotaOverride
 
@@ -320,6 +332,61 @@ type LeaveQuota struct {
 // Remaining is the derived balance: total - used - pending. May go negative after
 // an HR :approve-override (LA-8); last_override is set in that case.
 func (q LeaveQuota) Remaining() int { return q.Total - q.Used - q.Pending }
+
+// RemainingPerType is the per-type-ledger derived balance (entitled - used -
+// pending). Used by the per-type model (Phase 4 onward); never negative by design
+// (allocation only ever draws available, INV-6).
+func (q LeaveQuota) RemainingPerType() int { return q.EntitledDays - q.UsedDays - q.PendingDays }
+
+// QuotaWindowSpec opens (or upserts) a per-type quota window. Legacy Period/
+// PeriodStart/PeriodEnd are supplied transitionally (NOT NULL until Phase 8).
+type QuotaWindowSpec struct {
+	EmployeeID   string
+	LeaveTypeID  string
+	PeriodKey    string
+	Period       int
+	PeriodStart  time.Time
+	PeriodEnd    time.Time
+	EntitledDays int
+	Source       QuotaSource
+	Remark       string
+	ExpiresAt    *time.Time
+	CreatedBy    *string
+}
+
+// QuotaSource is how a leave_quotas row was created (leave_quotas.source).
+type QuotaSource string
+
+const (
+	QuotaSourceAuto       QuotaSource = "AUTO"       // annual auto-grant / window auto-open
+	QuotaSourceAdjustment QuotaSource = "ADJUSTMENT" // HR manual adjust
+	QuotaSourceMigration  QuotaSource = "MIGRATION"  // E9 backfill from lumen_swp
+)
+
+// LeaveTypeCapBasis is how a leave type meters its entitlement (leave_types.cap_basis,
+// migr. 00050). Drives the per-type ledger window (F6.1 LQ-13).
+type LeaveTypeCapBasis string
+
+const (
+	CapBasisAnnualPool   LeaveTypeCapBasis = "ANNUAL_POOL"    // accruing yearly pool, expires year-end, no carryover
+	CapBasisPerEvent     LeaveTypeCapBasis = "PER_EVENT"      // fixed days per occurrence, no standing row
+	CapBasisPerMonth     LeaveTypeCapBasis = "PER_MONTH"      // resets each calendar month
+	CapBasisPerYearCount LeaveTypeCapBasis = "PER_YEAR_COUNT" // max occurrences per year
+	CapBasisUncapped     LeaveTypeCapBasis = "UNCAPPED"       // doc-bounded, no standing row
+	CapBasisLifetimeOnce LeaveTypeCapBasis = "LIFETIME_ONCE"  // once per employment
+	CapBasisServiceUnpaid LeaveTypeCapBasis = "SERVICE_UNPAID" // eligibility-gated, unpaid, once
+)
+
+// QuotaBearing reports whether a cap_basis holds a standing leave_quotas window row
+// (vs PER_EVENT / UNCAPPED, which are validated at request time without a row).
+func (c LeaveTypeCapBasis) QuotaBearing() bool {
+	switch c {
+	case CapBasisAnnualPool, CapBasisPerMonth, CapBasisPerYearCount, CapBasisLifetimeOnce, CapBasisServiceUnpaid:
+		return true
+	default:
+		return false
+	}
+}
 
 // LeaveApproval is one immutable decision-trail row (the leave_approvals table /
 // the FEATURE ER decision log). 08-02 maps these into LeaveRequest.timeline[].

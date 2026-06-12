@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -188,4 +189,115 @@ func (r *QuotaRepo) ListActivePlacedEmployeesForGrant(ctx context.Context, perio
 		})
 	}
 	return out, nil
+}
+
+// --- per-type ledger (2026-06-12, EPICS §8) — reserve/commit/release lifecycle ---
+// These are the new live-path primitives (wired by the QuotaMeter service in
+// Phase 3/4). Window-mutating methods take a tx so the service can row-lock the
+// window (ResolveQuotaWindow ... FOR UPDATE) and mutate atomically.
+
+func pgDateFromPtr(t *time.Time) pgtype.Date {
+	if t == nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: *t, Valid: true}
+}
+
+// ResolveQuotaWindow row-locks the (employee, leave_type, period_key) window.
+func (r *QuotaRepo) ResolveQuotaWindow(ctx context.Context, tx pgx.Tx, employeeID, leaveTypeID, periodKey string) (dom.LeaveQuota, error) {
+	row, err := r.q.WithTx(tx).ResolveQuotaWindow(ctx, sqlcgen.ResolveQuotaWindowParams{
+		EmployeeID: employeeID, LeaveTypeID: leaveTypeID, PeriodKey: &periodKey,
+	})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// OpenQuotaWindow auto-opens (or upserts entitlement of) a per-type window.
+func (r *QuotaRepo) OpenQuotaWindow(ctx context.Context, tx pgx.Tx, s dom.QuotaWindowSpec) (dom.LeaveQuota, error) {
+	pk := s.PeriodKey
+	row, err := r.q.WithTx(tx).OpenQuotaWindow(ctx, sqlcgen.OpenQuotaWindowParams{
+		EmployeeID:   s.EmployeeID,
+		LeaveTypeID:  s.LeaveTypeID,
+		PeriodKey:    &pk,
+		Period:       i32(s.Period),
+		PeriodStart:  timeToPgDate(s.PeriodStart),
+		PeriodEnd:    timeToPgDate(s.PeriodEnd),
+		EntitledDays: i32(s.EntitledDays),
+		Source:       string(s.Source),
+		Remark:       s.Remark,
+		ExpiresAt:    pgDateFromPtr(s.ExpiresAt),
+		CreatedBy:    s.CreatedBy,
+	})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// ReserveQuotaDays holds pending_days on the window (submit).
+func (r *QuotaRepo) ReserveQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
+	row, err := r.q.WithTx(tx).ReserveQuotaDays(ctx, sqlcgen.ReserveQuotaDaysParams{Delta: i32(delta), ID: id})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// CommitQuotaDays moves pending_days -> used_days (final approval).
+func (r *QuotaRepo) CommitQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
+	row, err := r.q.WithTx(tx).CommitQuotaDays(ctx, sqlcgen.CommitQuotaDaysParams{Delta: i32(delta), ID: id})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// ReleaseQuotaDays releases held pending_days (reject/withdraw).
+func (r *QuotaRepo) ReleaseQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
+	row, err := r.q.WithTx(tx).ReleaseQuotaDays(ctx, sqlcgen.ReleaseQuotaDaysParams{Delta: i32(delta), ID: id})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// ReverseCommittedQuotaDays returns committed used_days to the balance (cancel/shorten).
+func (r *QuotaRepo) ReverseCommittedQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
+	row, err := r.q.WithTx(tx).ReverseCommittedQuotaDays(ctx, sqlcgen.ReverseCommittedQuotaDaysParams{Delta: i32(delta), ID: id})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// AdjustQuotaEntitled applies an audited signed delta on entitled_days (HR LQ-6).
+func (r *QuotaRepo) AdjustQuotaEntitled(ctx context.Context, tx pgx.Tx, id string, delta int, remark string, adj dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error) {
+	raw, err := marshalAdjustment(adj)
+	if err != nil {
+		return dom.LeaveQuota{}, err
+	}
+	row, err := r.q.WithTx(tx).AdjustQuotaEntitled(ctx, sqlcgen.AdjustQuotaEntitledParams{
+		Delta: i32(delta), Remark: remark, LastAdjustment: raw, ID: id,
+	})
+	if err != nil {
+		return dom.LeaveQuota{}, mapErr(err)
+	}
+	return mapQuotaFromModel(row), nil
+}
+
+// CountApprovedRequestsForType counts the employee's non-rejected requests of a
+// type whose start_date falls in [from,to] — the PER_YEAR_COUNT / LIFETIME_ONCE gate.
+func (r *QuotaRepo) CountApprovedRequestsForType(ctx context.Context, employeeID, leaveTypeID string, from, to time.Time) (int, error) {
+	n, err := r.q.CountApprovedRequestsForType(ctx, sqlcgen.CountApprovedRequestsForTypeParams{
+		EmployeeID:  employeeID,
+		LeaveTypeID: leaveTypeID,
+		WindowStart: timeToPgDate(from),
+		WindowEnd:   timeToPgDate(to),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }

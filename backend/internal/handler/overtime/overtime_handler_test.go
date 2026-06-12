@@ -349,6 +349,35 @@ func TestApproveFinal_HRApproves(t *testing.T) {
 	}
 }
 
+// A lead is the L2 (final) approver for overtime, SCOPED to the agent's company.
+// In-scope company → APPROVED.
+func TestApproveFinal_LeadInScopeApproves(t *testing.T) {
+	h := newHarness(t, auth.RoleLead, cmpLed, "SWP-EMP-3004")
+	h.seedOvertime("SWP-OT-30003", cmpLed, empAgent, dom.OvertimeStatusPendingHR, dom.OvertimeTierWorkday)
+
+	rr := h.do("POST", "/overtime/SWP-OT-30003:approve-final", map[string]any{"note": "OK lead."})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if d := dataObject(t, rr); d["status"] != "APPROVED" {
+		t.Errorf("status = %v, want APPROVED", d["status"])
+	}
+}
+
+// A lead finalizing an OT for an agent at a company OUTSIDE its set → 403 OUT_OF_SCOPE.
+func TestApproveFinal_LeadOutOfScope403(t *testing.T) {
+	h := newHarness(t, auth.RoleLead, cmpLed, "SWP-EMP-3004")
+	h.seedOvertime("SWP-OT-30005", cmpOther, "SWP-EMP-2891", dom.OvertimeStatusPendingHR, dom.OvertimeTierWorkday)
+
+	rr := h.do("POST", "/overtime/SWP-OT-30005:approve-final", map[string]any{"note": "OK."})
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := errCode(t, rr); got != "OUT_OF_SCOPE" {
+		t.Errorf("code = %s, want OUT_OF_SCOPE", got)
+	}
+}
+
 func TestApproveFinal_WrongStateNonOverride409(t *testing.T) {
 	// :approve-final on a PENDING_L1 record without override → 409.
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)

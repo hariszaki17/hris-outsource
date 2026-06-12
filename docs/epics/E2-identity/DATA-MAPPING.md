@@ -20,7 +20,7 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | *(none — net-new)* | Site (F2.6) | Loader **auto-creates one primary "Main Site" per ClientCompany**, geofence **empty**; geo is configured post-cutover (G-8). |
 | `recruitment_roles` | Position | `id, role, alias, client, recruitment_role_type_id` |
 | `recruitment_role_types` | (lookup) | `id, name` — drives PKWT/PKWTT + position category derivation |
-| `leave_types` | LeaveType | `id, name, description, is_tahunan, is_document_required` |
+| `leave_types` | LeaveType | `id, name, description, is_tahunan, is_document_required` (legacy has only annual/doc flags — new cap mechanics are **seeded**, not migrated; see leave_types mapping below) |
 | `attendance_codes` | AttendanceCode | `id, name, description, company_id, hari_masuk, hari_penggajian, dapat_ditagih, perlu_verifikasi, color` |
 | — (none) | ServiceLine, OvertimeRule | **net-new** — seed / define fresh |
 
@@ -66,7 +66,7 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | — | `service_line_id` | **manual classification** (no source; same approach as placement G-1) |
 
 ### `leave_types` → LeaveType
-`name→name`, `description→description`, `is_tahunan→is_annual`, `is_document_required→is_document_required`.
+`name→name`, `description→description`, `is_document_required→requires_document`. Legacy `is_tahunan=1` → `cap_basis=ANNUAL_POOL`. The richer cap mechanics (`code`, `cap_basis`, `cap_value`, `cap_unit`, `paid`, `gender`, `notice_days`, `min_service_years`, `lead/trail_days`, `category`) have **no legacy source** — the active catalog is **seeded** from SWP's 18-code `Fitur Ijin` policy (E2 operational-master-data §5a), and `leaves.type` (E6) is remapped onto the seeded codes (E6 DATA-MAPPING G-1). Migrate legacy rows that aren't in the seeded set as `cap_basis=UNCAPPED` (or deactivate) and reconcile post-cutover.
 
 ### `attendance_codes` → AttendanceCode
 `name→name`, `description→description`, `hari_masuk→is_workday`, `hari_penggajian→is_payable`, `dapat_ditagih→is_billable`, `perlu_verifikasi→needs_verification`, `color→color`, `company_id`→**drop/collapse** (single org; dedupe across companies, G-6).

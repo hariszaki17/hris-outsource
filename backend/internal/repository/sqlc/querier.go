@@ -15,6 +15,9 @@ type Querier interface {
 	// :adjust — signed delta on total + audited last_adjustment snapshot. Service
 	// guards delta cannot drop total below used (422 RULE_VIOLATION) before calling.
 	AdjustLeaveQuotaTotal(ctx context.Context, arg AdjustLeaveQuotaTotalParams) (LeaveQuota, error)
+	// HR per-type quota adjust (LQ-6): signed delta on entitled_days; service guards
+	// entitled cannot drop below used+pending and records last_adjustment.
+	AdjustQuotaEntitled(ctx context.Context, arg AdjustQuotaEntitledParams) (LeaveQuota, error)
 	// AgentDashboard.recent_attendance: last-7-day present/late/absent for one agent.
 	AgentRecentAttendance(ctx context.Context, arg AgentRecentAttendanceParams) (AgentRecentAttendanceRow, error)
 	// Write one lot-drawdown row at APPROVE (one per lot the request drew). id allocated
@@ -105,6 +108,8 @@ type Querier interface {
 	// flags / status / verification_status. Guarded by deleted_at — yields NO row
 	// (pgx.ErrNoRows) if the record vanished, which the service treats as a 500/NotFound.
 	ClockOutAttendance(ctx context.Context, arg ClockOutAttendanceParams) (string, error)
+	// Final approval: move the reservation pending_days -> used_days.
+	CommitQuotaDays(ctx context.Context, arg CommitQuotaDaysParams) (LeaveQuota, error)
 	// Move days pending_days → consumed_days at APPROVE (commit). Paired with an
 	// ApplyConsumption (leave_consumptions) insert in the same tx.
 	CommitReservation(ctx context.Context, arg CommitReservationParams) (CommitReservationRow, error)
@@ -123,6 +128,10 @@ type Querier interface {
 	// =====================================================================
 	// user_access.active_users: login accounts with status 'active' (00002_users).
 	CountActiveUsers(ctx context.Context) (int64, error)
+	// Occurrence/lifetime gate source (PER_YEAR_COUNT, LIFETIME_ONCE): how many
+	// non-terminal-rejected requests of this type the employee already has in the
+	// window [from,to]. Counts PENDING_*/APPROVED (reserved or committed).
+	CountApprovedRequestsForType(ctx context.Context, arg CountApprovedRequestsForTypeParams) (int64, error)
 	// pending_grants.bank_approvals: change-requests with a bank change escalated to
 	// HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
 	// rbac.CanApproveBank / PARTIALLY_APPROVED).
@@ -208,6 +217,8 @@ type Querier interface {
 	CreateCorrection(ctx context.Context, arg CreateCorrectionParams) (string, error)
 	// Allocates the SWP-EMP id inline from the per-prefix sequence.
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
+	// id allocated by the column DEFAULT ('SWP-LA-' || swp_next_id('LA')).
+	CreateLeadAssignment(ctx context.Context, arg CreateLeadAssignmentParams) (LeadAssignment, error)
 	// E6 leave-grant ledger queries (F6.1 / SWP-LG-* / SWP-LC-*). One lot per
 	// leave_grants row; remaining_days = amount_days - consumed_days - pending_days is a
 	// DERIVED domain method (not a column). FIFO allocation orders by soonest expires_at,
@@ -258,6 +269,8 @@ type Querier interface {
 	// Clears is_primary on all other sites of the company when a new primary is set.
 	// Call inside the same tx before SetSitePrimary (INV-5).
 	DemoteOtherPrimaries(ctx context.Context, arg DemoteOtherPrimariesParams) error
+	// Sets unassigned_at=now() on the active row (releases lead_assignment_active_uq).
+	EndLeadAssignment(ctx context.Context, id string) error
 	// Offboard cascade (OB-1): end every non-terminal placement of an employee.
 	EndPlacementsForEmployee(ctx context.Context, arg EndPlacementsForEmployeeParams) ([]EndPlacementsForEmployeeRow, error)
 	// Sets unassigned_at=now() + vacated_reason (release the active partial unique index).
@@ -489,6 +502,8 @@ type Querier interface {
 	// schedule_entries (joined to placements for company scope); the attendance-derived
 	// counts read today's attendance rows (check_in_at::date = today). COALESCE to 0.
 	LeaderTodayStatus(ctx context.Context, arg LeaderTodayStatusParams) (LeaderTodayStatusRow, error)
+	// The set of companies the lead currently covers — drives Principal.CompanyIDs.
+	ListActiveLeadCompaniesForEmployee(ctx context.Context, employeeID string) ([]string, error)
 	// bulk-grant employee_ids:["all"] sentinel + pro-rate join-date source: employees
 	// with an ACTIVE/EXPIRING placement covering any day of the [period_start,period_end].
 	ListActivePlacedEmployeesForGrant(ctx context.Context, arg ListActivePlacedEmployeesForGrantParams) ([]ListActivePlacedEmployeesForGrantRow, error)
@@ -558,6 +573,11 @@ type Querier interface {
 	// via narg): category, service_line_id (matches when applicable_service_lines is
 	// empty=global OR contains the line), year (EXTRACT(year FROM holiday_date)).
 	ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]ListHolidaysRow, error)
+	// E3 lead_assignments queries. A lead (service-line operational approver) covers
+	// MANY client companies; the auth middleware derives Principal.CompanyIDs from the
+	// active rows here at request time (mirror of shift_leader_assignments derivation).
+	// Filters: employee_id, company_id, active (unassigned_at IS NULL).
+	ListLeadAssignments(ctx context.Context, arg ListLeadAssignmentsParams) ([]ListLeadAssignmentsRow, error)
 	// Timeline source: all decisions for a request, chronological.
 	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
 	// The /leave/quotas screen: ONE ROW PER EMPLOYEE, aggregating ALL of the employee's
@@ -715,6 +735,9 @@ type Querier interface {
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
 	// Marks a token as consumed (single-use enforcement, AU-4).
 	MarkResetTokenUsed(ctx context.Context, id int64) error
+	// Auto-open a per-type window at its entitlement (annual: agreement days; other
+	// quota-bearing: cap_value). Idempotent on the (emp,type,period_key) unique index.
+	OpenQuotaWindow(ctx context.Context, arg OpenQuotaWindowParams) (LeaveQuota, error)
 	// org_rollups: per-service-line headcount (distinct placed employees) + active
 	// placement count, over non-terminal placements (mirrors CountActivePlacements).
 	// service_lines.name is free text ("Facility Services" / "Building Management" /
@@ -744,17 +767,32 @@ type Querier interface {
 	RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error)
 	// Release pending_days at REJECT/CANCEL (a still-pending request never consumed).
 	ReleasePending(ctx context.Context, arg ReleasePendingParams) (ReleasePendingRow, error)
+	// Reject/withdraw: release the held reservation.
+	ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysParams) (LeaveQuota, error)
 	// Move days into pending_days at SUBMIT (FIFO reserve). Never drives a lot negative:
 	// the service caps the delta at the lot's remaining before calling.
 	ReservePending(ctx context.Context, arg ReservePendingParams) (ReservePendingRow, error)
+	// Submit: hold pending_days on the window (remaining must cover it — service guards).
+	ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysParams) (LeaveQuota, error)
 	// Drives :approve (status='approved'), :reject (status='rejected'), and the
 	// SL bank-split partial apply (status='partially_approved' + bank_pending=true,
 	// field_resolutions recording which non-bank fields the SL applied + who). For
 	// terminal resolutions resolved_at/resolved_by/rejection_reason are set; for a
 	// partial apply field_resolutions/bank_pending carry the in-between state.
 	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ResolveChangeRequestRow, error)
+	// ============================================================================
+	// Per-type ledger (2026-06-12, EPICS §8). New live path: meter per (employee,
+	// leave_type, period_key) window. Reserve at submit, commit at approve, release
+	// at reject/cancel; no-negative enforced by the entitled/used/pending CHECKs.
+	// Legacy period/period_start/period_end are still supplied (NOT NULL until 00052+
+	// drops them); period_key is the authoritative window key.
+	// ============================================================================
+	// Row-locked lookup of the per-type window for reserve/commit/release.
+	ResolveQuotaWindow(ctx context.Context, arg ResolveQuotaWindowParams) (LeaveQuota, error)
 	// Cancel/withdraw restore: return days to the balance (used - delta).
 	RestoreLeaveQuota(ctx context.Context, arg RestoreLeaveQuotaParams) (LeaveQuota, error)
+	// Cancel/shorten an APPROVED leave: return committed days to the balance.
+	ReverseCommittedQuotaDays(ctx context.Context, arg ReverseCommittedQuotaDaysParams) (LeaveQuota, error)
 	// Reverse committed consumed_days at CANCEL-APPROVED / SHORTEN (paired with deleting
 	// the leave_consumptions rows). Returns days to the lot.
 	ReverseConsumption(ctx context.Context, arg ReverseConsumptionParams) (ReverseConsumptionRow, error)

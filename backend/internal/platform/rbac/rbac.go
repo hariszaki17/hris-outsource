@@ -2,8 +2,12 @@
 // API is the source of truth; the client's x-rbac map is only defense-in-depth.
 //
 // Two axes, mirroring the OpenAPI x-rbac extension:
-//   - roles: which of {super_admin, hr_admin, shift_leader, agent} may call
+//   - roles: which of {super_admin, hr_admin, shift_leader, agent, lead} may call
 //   - scope: global | company | self | company_or_global
+//
+// Company scope is single-company for shift_leader (Principal.CompanyID) and
+// multi-company for lead (Principal.CompanyIDs — the set of assigned client
+// companies). super_admin / hr_admin are global; agent is self-scoped.
 //
 // Handlers declare the allowed roles (RequireRole middleware); services enforce
 // row-level scope with the Guard* helpers once they know the resource's owner.
@@ -51,6 +55,11 @@ func GuardCompany(ctx context.Context, resourceCompanyID string) error {
 		return nil // global
 	case auth.RoleShiftLeader:
 		if p.CompanyID != "" && p.CompanyID == resourceCompanyID {
+			return nil
+		}
+		return apperr.OutOfScope()
+	case auth.RoleLead:
+		if slices.Contains(p.CompanyIDs, resourceCompanyID) {
 			return nil
 		}
 		return apperr.OutOfScope()

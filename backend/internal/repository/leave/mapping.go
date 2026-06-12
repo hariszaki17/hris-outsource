@@ -391,11 +391,36 @@ func mapQuotaFromModel(r sqlcgen.LeaveQuota) dom.LeaveQuota {
 		IsProrated:     r.IsProrated,
 		ProrateMonths:  int(r.ProrateMonths),
 		Closed:         r.Closed,
+		PeriodKey:      derefStr(r.PeriodKey),
+		EntitledDays:   int(r.EntitledDays),
+		UsedDays:       int(r.UsedDays),
+		PendingDays:    int(r.PendingDays),
+		Source:         dom.QuotaSource(r.Source),
+		Remark:         r.Remark,
+		ExpiresAt:      pgDatePtr(r.ExpiresAt),
+		CreatedBy:      r.CreatedBy,
 		LastAdjustment: unmarshalAdjustment(r.LastAdjustment),
 		LastOverride:   unmarshalOverride(r.LastOverride),
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,
 	}
+}
+
+// derefStr returns the pointed-to string or "" when nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// pgDatePtr converts a nullable pgtype.Date to *time.Time (nil when not valid).
+func pgDatePtr(d pgtype.Date) *time.Time {
+	if !d.Valid {
+		return nil
+	}
+	t := d.Time
+	return &t
 }
 
 // --- leave-grant / consumption mappers (F6.1 grant-lot ledger) ---

@@ -147,7 +147,7 @@ func New(d Deps) http.Handler {
 
 			// Reads: hr_admin, super_admin, shift_leader (company_or_global scope).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/client-companies", d.OrgCompanies.ListClientCompanies)
 				r.Get("/client-companies/{client_company_id}", d.OrgCompanies.GetClientCompany)
 				r.Get("/client-companies/{client_company_id}/sites", d.OrgCompanies.ListSites)
@@ -175,7 +175,7 @@ func New(d Deps) http.Handler {
 
 			// Service-line + position reads: all authenticated roles.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/service-lines", d.OrgServiceLines.ListServiceLines)
 				r.Get("/service-lines/{service_line_id}", d.OrgServiceLines.GetServiceLine)
 				r.Get("/service-lines/{service_line_id}/positions", d.OrgServiceLines.ListPositionsInServiceLine)
@@ -205,14 +205,14 @@ func New(d Deps) http.Handler {
 
 			// Leave-type + attendance-code reads: all roles (including agent).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/leave-types", d.OrgMasterData.ListLeaveTypes)
 				r.Get("/attendance-codes", d.OrgMasterData.ListAttendanceCodes)
 			})
 
 			// Overtime-rule reads: super_admin, hr_admin, shift_leader (agent excluded per spec x-rbac).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/overtime-rules", d.OrgMasterData.ListOvertimeRules)
 			})
 
@@ -245,7 +245,7 @@ func New(d Deps) http.Handler {
 			// have no roster view). The detail endpoint is split out below so agents
 			// can self-read.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/employees", d.People.ListEmployees)
 			})
 
@@ -254,7 +254,7 @@ func New(d Deps) http.Handler {
 			// the service hides anyone but the agent's own record as 404 (no leak).
 			// Split from the list group so the agent role applies to the detail only.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/employees/{employee_id}", d.People.GetEmployee)
 			})
 
@@ -310,7 +310,7 @@ func New(d Deps) http.Handler {
 			// company scope (rbac.GuardCompany) + bank gate (rbac.CanApproveBank).
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				// List + detail reads.
 				r.Get("/change-requests", d.PeopleChangeRequests.ListPendingChangeRequests)
 				r.Get("/change-requests/{change_request_id}", d.PeopleChangeRequests.GetChangeRequest)
@@ -348,7 +348,7 @@ func New(d Deps) http.Handler {
 
 			// Placement reads: super_admin, hr_admin, shift_leader (company_or_global).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/placements", d.Placement.ListPlacements)
 				// DEDICATED expiring endpoint — the FE useListExpiringPlacements toggle hits
 				// GET /placements/expiring?within_days=N. In chi a static segment wins over a
@@ -362,18 +362,27 @@ func New(d Deps) http.Handler {
 				r.Get("/client-companies/{company_id}/roster", d.Placement.GetCompanyRoster)
 			})
 
-			// Placement + shift-leader writes: super_admin, hr_admin (global).
+			// Placement LIFECYCLE writes: super_admin, hr_admin (global) + lead
+			// (scoped to its assigned client companies via rbac.GuardCompany
+			// in-service). Lead ARRANGES placements; HR/super keep global oversight.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
 				r.With(d.Idempotency.Handler).Post("/placements", d.Placement.CreatePlacement)
-				r.Patch("/placements/{id}", d.Placement.UpdatePlacement)
-				// Backfill the employment agreement onto a pending placement (awaiting_agreement).
-				r.With(d.Idempotency.Handler).Post("/placements/{id}/agreement", d.Placement.SetPlacementAgreement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:renew", d.Placement.RenewPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:transfer", d.Placement.TransferPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:end", d.Placement.EndPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:resign", d.Placement.ResignPlacement)
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:terminate", d.Placement.TerminatePlacement)
+			})
+
+			// Placement edit + agreement backfill + shift-leader-assignment (SLA)
+			// writes: super_admin, hr_admin ONLY (global). Lead is excluded from
+			// PATCH /placements, agreement backfill, and SLA management.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Patch("/placements/{id}", d.Placement.UpdatePlacement)
+				// Backfill the employment agreement onto a pending placement (awaiting_agreement).
+				r.With(d.Idempotency.Handler).Post("/placements/{id}/agreement", d.Placement.SetPlacementAgreement)
 				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments", d.Placement.CreateShiftLeaderAssignment)
 				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments/{id}:replace", d.Placement.ReplaceShiftLeaderAssignment)
 				r.With(d.Idempotency.Handler).Post("/shift-leader-assignments/{id}:end", d.Placement.EndShiftLeaderAssignment)
@@ -391,7 +400,7 @@ func New(d Deps) http.Handler {
 			// getShiftMaster x-rbac = [super_admin, hr_admin, shift_leader]). Writes stay
 			// super_admin/hr_admin only (see CreateShiftMaster below).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/shift-masters", d.Scheduling.ListShiftMasters)
 				r.Get("/shift-masters/{id}", d.Scheduling.GetShiftMaster)
 			})
@@ -399,7 +408,7 @@ func New(d Deps) http.Handler {
 			// Schedule ops: super_admin, hr_admin, shift_leader (leader scope enforced
 			// in the service via GuardCompany).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/schedule", d.Scheduling.ListSchedule)
 				r.With(d.Idempotency.Handler).Post("/schedule", d.Scheduling.CreateScheduleEntry)
 				r.With(d.Idempotency.Handler).Patch("/schedule/{id}", d.Scheduling.UpdateScheduleEntry)
@@ -413,7 +422,7 @@ func New(d Deps) http.Handler {
 			// ONE read; per-row scope (agent self-only / leader-company / staff
 			// any) is enforced in the service (SV-1).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/schedule/by-agent/{employee_id}", d.Scheduling.GetScheduleByAgent)
 			})
 
@@ -439,7 +448,7 @@ func New(d Deps) http.Handler {
 			// (agent self-scope is forced in the service: employee_id → caller).
 			// Corrections reads stay admin/leader-only (web surface).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/attendance", d.Attendance.ListAttendance)
 				r.Get("/attendance/{id}", d.Attendance.GetAttendance)
 			})
@@ -464,7 +473,7 @@ func New(d Deps) http.Handler {
 			// Attendance/corrections WRITES + corrections reads: super_admin,
 			// hr_admin, shift_leader (the web verify/reject/corrections surface).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				// corrections reads
 				r.Get("/corrections", d.Attendance.ListCorrections)
 				r.Get("/corrections/{id}", d.Attendance.GetCorrection)
@@ -493,7 +502,7 @@ func New(d Deps) http.Handler {
 			// SELF-scoped in the service (List forces employee_id; Get → 404 on
 			// another employee; balance-by-employee → 403 on another employee).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/leave-requests", d.Leave.ListLeaveRequests)
 				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
 				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
@@ -526,11 +535,19 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel", d.Leave.CancelLeaveRequest)
 			})
 
-			// Final/override approval + grant/quota writes: super_admin, hr_admin (global).
+			// L2 final/override approval: super_admin, hr_admin (global) + lead
+			// (scoped to the agent's company via rbac.GuardCompany in-service).
+			// Lead is the L2/final approver for leave; HR/super stay global L2.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-final", d.Leave.ApproveLeaveRequestFinal)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-override", d.Leave.ApproveLeaveRequestOverride)
+			})
+
+			// Leave shorten + grant/quota writes: super_admin, hr_admin (global).
+			// Lead excluded — grant-lot/quota administration stays HR/super.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:shorten", d.Leave.ShortenLeaveRequest)
 				// F6.1 grant-lot writes (global).
 				r.With(d.Idempotency.Handler).Post("/leave-grants", d.Leave.CreateLeaveGrant)
@@ -554,14 +571,14 @@ func New(d Deps) http.Handler {
 			// self-scoped in the service (cross-employee → 404); staff use
 			// GuardCompany. Holiday reads stay staff-only.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/overtime", d.Overtime.ListOvertime)
 				r.Get("/overtime/{id}", d.Overtime.GetOvertime)
 			})
 
 			// Holiday reads: super_admin, hr_admin, shift_leader.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/holidays", d.Overtime.ListHolidays)
 			})
 
@@ -585,10 +602,16 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/overtime:bulk-reject", d.Overtime.BulkReject)
 			})
 
-			// Final approval + holiday writes: super_admin, hr_admin (global).
+			// L2 final approval: super_admin, hr_admin (global) + lead (scoped to the
+			// agent's company via rbac.GuardCompany in-service). Lead is the OT L2.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
+				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-final", d.Overtime.ApproveFinal)
+			})
+
+			// Holiday writes: super_admin, hr_admin (global). Lead excluded.
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-final", d.Overtime.ApproveFinal)
 				r.With(d.Idempotency.Handler).Post("/holidays", d.Overtime.CreateHoliday)
 				r.With(d.Idempotency.Handler).Patch("/holidays/{id}", d.Overtime.UpdateHoliday)
 				r.Delete("/holidays/{id}", d.Overtime.DeleteHoliday)
@@ -635,7 +658,7 @@ func New(d Deps) http.Handler {
 			// this block (extending d.Reporting with new methods).
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/notifications", d.Reporting.ListNotifications)
 				r.With(d.Idempotency.Handler).Post("/notifications/{notification_id}:mark-read", d.Reporting.MarkNotificationRead)
 				r.With(d.Idempotency.Handler).Post("/notifications:mark-all-read", d.Reporting.MarkAllNotificationsRead)
@@ -650,11 +673,11 @@ func New(d Deps) http.Handler {
 			// {data:<body>} envelope the FE unwraps (query.data.data).
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/dashboards/me", d.Reporting.GetMyDashboard)
 			})
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/reports/attendance-billable", d.Reporting.GetBillableReport)
 			})
 
@@ -667,7 +690,7 @@ func New(d Deps) http.Handler {
 			// the `:cancel` action suffix natively.
 			// ---------------------------------------------------------------
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.With(d.Idempotency.Handler).Post("/exports", d.Reporting.CreateExport)
 				r.Get("/exports/{export_id}", d.Reporting.GetExport)
 				r.With(d.Idempotency.Handler).Post("/exports/{export_id}:cancel", d.Reporting.CancelExport)

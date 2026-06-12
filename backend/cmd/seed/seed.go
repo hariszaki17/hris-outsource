@@ -120,6 +120,20 @@ var extraPersonas = []persona{
 		employeeID: strPtr("SWP-EMP-3003"),
 		companyID:  nil,
 	},
+	{
+		// LEAD persona (service-line operational approver). users.role='lead' is a
+		// STORED role (not derived). companyID stays nil — a lead's company SET is
+		// resolved per-request from lead_assignments (see seedPlacements below). This
+		// lead covers SWP-CMP-0021 AND SWP-CMP-0022 so cross-company scope can be
+		// exercised end-to-end.
+		email:      "joko.lead@swp.test",
+		phone:      "+628110003004",
+		password:   "Joko-Pr4tama-2026!",
+		role:       "lead",
+		fullName:   "Joko Pratama",
+		employeeID: strPtr("SWP-EMP-3004"),
+		companyID:  nil,
+	},
 }
 
 // Seed inserts the deterministic test personas into the database. It is
@@ -1098,6 +1112,16 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 			joinAt:   "2022-04-01",
 			gender:   "MALE",
 		},
+		{
+			// Employee row backing the `lead` persona (Joko Pratama). Required so
+			// users.employee_id resolves and the lead's lead_assignments FK holds.
+			id:       "SWP-EMP-3004",
+			fullName: "Joko Pratama",
+			nik:      "3175001505903004",
+			nip:      "3004",
+			joinAt:   "2021-09-01",
+			gender:   "MALE",
+		},
 	}
 
 	// ON CONFLICT DO UPDATE so a re-seed enriches an existing row (e.g. Dewi's full
@@ -1391,9 +1415,12 @@ func seedAgreements(ctx context.Context, pool *db.Pool) error {
 // seedMasterData inserts Phase-3 operational master-data fixtures.
 // All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
 //
-// Leave types:
-//   - SWP-LT-001  "Cuti Tahunan"   code ANNUAL  is_annual=true  requires_document=false
-//   - SWP-LT-002  "Cuti Sakit"     code SICK    is_annual=false requires_document=true
+// Leave types: the SWP "Fitur Ijin" 18-code catalog (per-type ledger, EPICS §8
+// 2026-06-12). Each carries its own cap_basis (ANNUAL_POOL | PER_EVENT |
+// PER_MONTH | PER_YEAR_COUNT | UNCAPPED | LIFETIME_ONCE | SERVICE_UNPAID).
+//   - SWP-LT-001  CT     ANNUAL_POOL (12d)   — the annual type leave fixtures key off
+//   - SWP-LT-002  SDSKD  UNCAPPED, doc       — sick with doctor's letter
+//   - SWP-LT-003..018    CTHO/STSD/CH/CIM/CM/CKA/CMA/KGD/CKM/CRM/CTN/CAP/CIH/CIU/CPR/CLTP
 //
 // Attendance codes:
 //   - SWP-AC-001  code PRESENT  label "Hadir"     color #0F8B8D  is_workday=true  is_paid=true  is_billable=true  needs_verification=true
@@ -1403,51 +1430,72 @@ func seedAgreements(ctx context.Context, pool *db.Pool) error {
 //   - SWP-OTR-001  "Default OT"  service_line_id=NULL  weekday_rate=1.5 restday_rate=2.0 holiday_rate=3.0
 //     min_minutes=30 max_minutes_per_day=240 pre_approval_required=true
 func seedMasterData(ctx context.Context, pool *db.Pool) error {
-	// --- Leave types ---
+	// --- Leave types (SWP "Fitur Ijin" 18-code catalog; per-type ledger,
+	// EPICS §8 "E6 — Leave" 2026-06-12). Each type carries its own cap_basis so
+	// statutory/sick/religious leave meters in its own window and never depletes
+	// the annual pool. SWP-LT-001 stays the annual type (existing leave fixtures
+	// key off it by id). capValue nil = uncapped/variable (validated by document).
 	type leaveType struct {
-		id                 string
-		name               string
-		code               string
-		description        string
-		defaultAnnualQuota int
-		isAnnual           bool
-		requiresDocument   bool
-		color              string
+		id               string
+		code             string
+		name             string
+		description      string
+		category         string
+		capBasis         string
+		capValue         *int
+		capUnit          string
+		paid             bool
+		gender           string
+		requiresDocument bool
+		noticeDays       int
+		minServiceYears  int
+		leadDays         int
+		trailDays        int
+		color            string
 	}
+	ci := func(n int) *int { return &n }
 
 	leaveTypes := []leaveType{
-		{
-			id:                 "SWP-LT-001",
-			name:               "Cuti Tahunan",
-			code:               "ANNUAL",
-			description:        "Cuti tahunan wajib sesuai peraturan ketenagakerjaan.",
-			defaultAnnualQuota: 12,
-			isAnnual:           true,
-			requiresDocument:   false,
-			color:              "#188E4D",
-		},
-		{
-			id:                 "SWP-LT-002",
-			name:               "Cuti Sakit",
-			code:               "SICK",
-			description:        "Cuti sakit dengan surat dokter.",
-			defaultAnnualQuota: 0,
-			isAnnual:           false,
-			requiresDocument:   true,
-			color:              "#E07A2A",
-		},
+		{"SWP-LT-001", "CT", "Cuti Tahunan Pegawai PKWT", "Cuti tahunan 12 hari untuk pegawai PKWT.", "ANNUAL", "ANNUAL_POOL", ci(12), "DAYS", true, "ANY", false, 0, 0, 0, 0, "#188E4D"},
+		{"SWP-LT-002", "SDSKD", "Sakit dengan surat keterangan dokter", "Cuti sakit dengan surat dokter; durasi sesuai ketentuan.", "SICK", "UNCAPPED", nil, "DAYS", true, "ANY", true, 0, 0, 0, 0, "#E07A2A"},
+		{"SWP-LT-003", "CTHO", "Cuti Tahunan Head Office", "Cuti tahunan 12 hari untuk pegawai Head Office.", "ANNUAL", "ANNUAL_POOL", ci(12), "DAYS", true, "ANY", false, 0, 0, 0, 0, "#188E4D"},
+		{"SWP-LT-004", "STSD", "Sakit tanpa surat dokter", "Sakit tanpa surat dokter, maksimal 5 kali setahun.", "SICK", "PER_YEAR_COUNT", ci(5), "COUNT", true, "ANY", false, 0, 0, 0, 0, "#E07A2A"},
+		{"SWP-LT-005", "CH", "Cuti Haid", "Cuti haid hari ke-1 dan ke-2; per bulan.", "MENSTRUAL", "PER_MONTH", ci(2), "DAYS", true, "FEMALE", false, 0, 0, 0, 0, "#C0497B"},
+		{"SWP-LT-006", "CIM", "Istri melahirkan atau keguguran", "Istri pegawai melahirkan atau keguguran.", "LIFE_EVENT", "PER_EVENT", ci(2), "DAYS", true, "MALE", true, 0, 0, 0, 0, "#3D6FB4"},
+		{"SWP-LT-007", "CM", "Pernikahan sendiri (pertama)", "Pernikahan pertama pegawai sendiri.", "LIFE_EVENT", "LIFETIME_ONCE", ci(3), "DAYS", true, "ANY", true, 0, 0, 0, 0, "#3D6FB4"},
+		{"SWP-LT-008", "CKA", "Khitanan / Baptisan anak", "Khitanan atau baptisan anak pegawai.", "LIFE_EVENT", "PER_EVENT", ci(2), "DAYS", true, "ANY", true, 0, 0, 0, 0, "#3D6FB4"},
+		{"SWP-LT-009", "CMA", "Menikahkan anak", "Pegawai menikahkan anak.", "LIFE_EVENT", "PER_EVENT", ci(2), "DAYS", true, "ANY", true, 0, 0, 0, 0, "#3D6FB4"},
+		{"SWP-LT-010", "KGD", "Gawat darurat (antar keluarga ke RS)", "Mengantar orang tua/mertua/suami/istri/anak dalam keadaan gawat darurat; 2 hari dalam 1 bulan.", "IMPORTANT", "PER_MONTH", ci(2), "DAYS", true, "ANY", true, 0, 0, 0, 0, "#8A6D3B"},
+		{"SWP-LT-011", "CKM", "Kematian keluarga inti", "Suami/istri/orang tua/mertua/anak/menantu meninggal dunia.", "BEREAVEMENT", "PER_EVENT", ci(2), "DAYS", true, "ANY", false, 0, 0, 0, 0, "#5A5A5A"},
+		{"SWP-LT-012", "CRM", "Kematian anggota serumah lain", "Anggota keluarga lain yang tinggal serumah meninggal dunia.", "BEREAVEMENT", "PER_EVENT", ci(1), "DAYS", true, "ANY", false, 0, 0, 0, 0, "#5A5A5A"},
+		{"SWP-LT-013", "CTN", "Tugas negara / pengadilan / kewajiban UU", "Mengemban tugas negara, panggilan pengadilan, atau kewajiban berdasarkan UU; sesuai ketentuan.", "CIVIC", "UNCAPPED", nil, "DAYS", true, "ANY", true, 0, 0, 0, 0, "#8A6D3B"},
+		{"SWP-LT-014", "CAP", "Cuti Alasan Penting", "Cuti karena alasan penting; sesuai ketentuan dan persetujuan.", "IMPORTANT", "UNCAPPED", nil, "DAYS", true, "ANY", true, 0, 0, 0, 0, "#8A6D3B"},
+		{"SWP-LT-015", "CIH", "Cuti Ibadah Haji (pertama)", "Ibadah haji pertama; sesuai program haji + 5 hari sebelum berangkat + 5 hari sesudah tiba.", "RELIGIOUS", "LIFETIME_ONCE", nil, "DAYS", true, "ANY", true, 30, 0, 5, 5, "#188E4D"},
+		{"SWP-LT-016", "CIU", "Cuti Ibadah Umroh (pertama)", "Ibadah umroh pertama; maksimal 12 hari kerja.", "RELIGIOUS", "LIFETIME_ONCE", ci(12), "DAYS", true, "ANY", true, 30, 0, 0, 0, "#188E4D"},
+		{"SWP-LT-017", "CPR", "Cuti Perjalanan Rohani (pertama)", "Perjalanan rohani pertama; sesuai ketentuan.", "RELIGIOUS", "LIFETIME_ONCE", nil, "DAYS", true, "ANY", true, 30, 0, 0, 0, "#188E4D"},
+		{"SWP-LT-018", "CLTP", "Cuti di luar tanggungan Perusahaan", "Cuti di luar tanggungan; maks 12 bulan, sekali, min 5 tahun masa kerja, tidak dibayar.", "UNPAID", "SERVICE_UNPAID", ci(365), "DAYS", false, "ANY", true, 30, 5, 0, 0, "#5A5A5A"},
 	}
 
 	const ltQ = `
 		INSERT INTO leave_types
-			(id, name, code, description, default_annual_quota, is_annual, requires_document, color, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+			(id, code, name, description, category, cap_basis, cap_value, cap_unit,
+			 paid, gender, requires_document, notice_days, min_service_years,
+			 lead_days, trail_days, default_annual_quota, is_annual, color, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'active')
 		ON CONFLICT (id) DO NOTHING`
 
 	for _, lt := range leaveTypes {
+		// Back-compat: keep default_annual_quota / is_annual coherent with cap_basis.
+		isAnnual := lt.capBasis == "ANNUAL_POOL"
+		defaultAnnualQuota := 0
+		if isAnnual && lt.capValue != nil {
+			defaultAnnualQuota = *lt.capValue
+		}
 		if _, err := pool.Pool.Exec(ctx, ltQ,
-			lt.id, lt.name, lt.code, lt.description,
-			lt.defaultAnnualQuota, lt.isAnnual, lt.requiresDocument, lt.color,
+			lt.id, lt.code, lt.name, lt.description, lt.category, lt.capBasis,
+			lt.capValue, lt.capUnit, lt.paid, lt.gender, lt.requiresDocument,
+			lt.noticeDays, lt.minServiceYears, lt.leadDays, lt.trailDays,
+			defaultAnnualQuota, isAnnual, lt.color,
 		); err != nil {
 			return fmt.Errorf("seed leave_type %q: %w", lt.id, err)
 		}
@@ -1709,6 +1757,27 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("seed shift_leader_assignment SWP-SLA-3001: %w", err)
 	}
 	slog.Info("seed: upserted shift_leader_assignment", "id", "SWP-SLA-3001", "employee_id", "SWP-EMP-1108")
+
+	// Lead assignments: Joko (SWP-EMP-3004) is the `lead` covering BOTH seeded
+	// companies (SWP-CMP-0021 + SWP-CMP-0022). Two ACTIVE rows (unassigned_at NULL,
+	// one per company) — the auth middleware derives Principal.CompanyIDs from these
+	// at request time, scoping his placement arrangement + L2 approvals. Explicit
+	// SWP-LA-xxxx ids (the column DEFAULT only fires when id is omitted).
+	const laQ = `
+		INSERT INTO lead_assignments
+			(id, client_company_id, site_id, employee_id, assigned_by)
+		VALUES ($1, $2, NULL, $3, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`
+	leadRows := []struct{ id, companyID string }{
+		{"SWP-LA-4001", "SWP-CMP-0021"},
+		{"SWP-LA-4002", "SWP-CMP-0022"},
+	}
+	for _, lr := range leadRows {
+		if _, err := pool.Pool.Exec(ctx, laQ, lr.id, lr.companyID, "SWP-EMP-3004"); err != nil {
+			return fmt.Errorf("seed lead_assignment %q: %w", lr.id, err)
+		}
+		slog.Info("seed: upserted lead_assignment", "id", lr.id, "employee_id", "SWP-EMP-3004", "company_id", lr.companyID)
+	}
 
 	return nil
 }

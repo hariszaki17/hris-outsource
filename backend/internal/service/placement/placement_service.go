@@ -17,6 +17,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
 
 // --- dependency interfaces (consumer-defined) ---
@@ -390,6 +391,13 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		return domain.Placement{}, apperr.Conflict("COMPANY_INACTIVE")
 	}
 
+	// Scope guard: a lead may only arrange placements at its assigned client
+	// companies (no-op for super/hr = global). Done after the company FK is
+	// resolved so we guard the real target company.
+	if serr := rbac.GuardCompany(ctx, p.ClientCompanyID); serr != nil {
+		return domain.Placement{}, serr
+	}
+
 	// Site belongs to company (BR-3b).
 	site, err := s.repo.GetSite(ctx, p.SiteID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -729,6 +737,12 @@ func (s *PlacementService) resolve(ctx context.Context, id, status, endedReason 
 // resolveLoaded performs the shared end/resign/terminate write in one tx:
 // SetPlacementLifecycle + auto-vacate leadership + history + audit.
 func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placement, status, endedReason string, effective, endedAt, resignAt *time.Time, notes, actor, reason, terminationReason *string) (domain.Placement, error) {
+	// Scope guard: a lead may only end/resign/terminate placements at its
+	// assigned client companies (no-op for super/hr = global). Covers
+	// EndPlacement / ResignPlacement / TerminatePlacement, which all funnel here.
+	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
+		return domain.Placement{}, serr
+	}
 	before := cur.LifecycleStatus
 	var updated domain.Placement
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -814,6 +828,11 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 	if isTerminal(cur.LifecycleStatus) {
 		return TransferResult{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
 	}
+	// Scope guard (source): a lead must own the SOURCE company to move an agent
+	// out of it (no-op for super/hr = global).
+	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
+		return TransferResult{}, serr
+	}
 	// TR-1: must be an actual change.
 	if p.NewClientCompanyID == cur.ClientCompanyID && p.NewServiceLineID == cur.ServiceLineID {
 		return TransferResult{}, apperr.Rule("RULE_VIOLATION", map[string]string{"new_service_line_id": "Transfer harus mengubah perusahaan atau lini layanan. Gunakan :renew."})
@@ -828,6 +847,11 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 	}
 	if !strings.EqualFold(destCompany.Status, "active") {
 		return TransferResult{}, apperr.Conflict("COMPANY_INACTIVE")
+	}
+	// Scope guard (destination): a lead must ALSO own the destination company to
+	// move an agent into it (no-op for super/hr = global). Lead owns both ends.
+	if serr := rbac.GuardCompany(ctx, p.NewClientCompanyID); serr != nil {
+		return TransferResult{}, serr
 	}
 
 	// Agreement: default to the predecessor's (may be nil = pending). An explicit
@@ -984,6 +1008,11 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 	}
 	if isTerminal(cur.LifecycleStatus) {
 		return RenewResult{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
+	}
+	// Scope guard: a lead may only renew placements at its assigned client
+	// companies (no-op for super/hr = global). A renewal keeps the same company.
+	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
+		return RenewResult{}, serr
 	}
 
 	// Destination company must still be ACTIVE.

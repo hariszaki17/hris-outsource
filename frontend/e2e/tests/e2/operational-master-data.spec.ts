@@ -142,8 +142,10 @@ test('LT-3 · update leave type (toggle is_annual off) shows updated state', asy
 
   await expect(page.getByText('Cuti Tahunan').first()).toBeVisible({ timeout: 30_000 });
 
-  // Open the row-actions dropdown for Cuti Tahunan, then click the Edit item.
-  const ltRow = page.locator('div.border-b').filter({ hasText: 'Cuti Tahunan' }).first();
+  // Open the row-actions dropdown for the (uniquely-named) "Cuti Tahunan Head Office"
+  // leave type, then click the Edit item. Filter by the full unique name so the row
+  // pick is order-independent (multiple seed types now start with "Cuti Tahunan").
+  const ltRow = page.locator('div.border-b').filter({ hasText: 'Cuti Tahunan Head Office' }).first();
   await ltRow.getByRole('button', { name: 'Aksi baris' }).click();
   // Edit is the first menuitem (the menu is portaled to <body>).
   await page.getByRole('menuitem').first().click();
@@ -152,9 +154,9 @@ test('LT-3 · update leave type (toggle is_annual off) shows updated state', asy
   await expect(page.locator('#lt-name')).toBeVisible({ timeout: 10_000 });
 
   // Wait for the form to be hydrated with the editing row's values (useEffect timing).
-  // The useEffect calls form.reset({ name: 'Cuti Tahunan', code: 'ANNUAL', ... }).
+  // The useEffect calls form.reset({ name: 'Cuti Tahunan Head Office', code: 'ANNUAL', ... }).
   // We wait until the input shows the expected pre-filled value.
-  await expect(page.locator('#lt-name')).toHaveValue('Cuti Tahunan', { timeout: 5_000 });
+  await expect(page.locator('#lt-name')).toHaveValue('Cuti Tahunan Head Office', { timeout: 5_000 });
 
   // Update the name field — explicitly fill both name AND code to ensure form state is correct.
   await page.locator('#lt-name').fill('Cuti Tahunan (Updated)');

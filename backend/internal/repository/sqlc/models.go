@@ -279,6 +279,18 @@ type IdempotencyKey struct {
 	ExpiresAt      time.Time
 }
 
+type LeadAssignment struct {
+	ID              string
+	EmployeeID      string
+	ClientCompanyID string
+	SiteID          *string
+	AssignedAt      time.Time
+	UnassignedAt    *time.Time
+	AssignedBy      *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type LeaveApproval struct {
 	ID             int64
 	LeaveRequestID string
@@ -336,6 +348,14 @@ type LeaveQuota struct {
 	LastOverride   []byte
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	PeriodKey      *string
+	EntitledDays   int32
+	UsedDays       int32
+	PendingDays    int32
+	Source         string
+	Remark         string
+	ExpiresAt      pgtype.Date
+	CreatedBy      *string
 }
 
 type LeaveRequest struct {
@@ -367,6 +387,7 @@ type LeaveRequest struct {
 	DeletedAt               *time.Time
 	BalanceEarmark          *string
 	BalanceAllocation       []byte
+	QuotaID                 *string
 }
 
 type LeaveType struct {
@@ -382,6 +403,16 @@ type LeaveType struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
+	Category           string
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
+	Paid               bool
+	Gender             string
+	NoticeDays         int32
+	MinServiceYears    int32
+	LeadDays           int32
+	TrailDays          int32
 }
 
 type Notification struct {

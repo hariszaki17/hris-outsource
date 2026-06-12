@@ -25,12 +25,20 @@ type UserStateFunc func(ctx context.Context, userID string) (status string, toke
 // effect on their next request — no re-login, no drift.
 type CompanyResolverFunc func(ctx context.Context, employeeID string) (companyID string, err error)
 
+// LeadCompaniesResolverFunc returns the SET of client companies an employee currently
+// covers via active E3 lead_assignments. Used by the middleware to populate a `lead`
+// Principal's CompanyIDs at request time, so re-assigning a lead takes effect on their
+// next request. Unlike CompanyResolverFunc it does NOT derive the role: `lead` is a
+// STORED, authoritative users.role (like super/hr), not derived from a placement.
+type LeadCompaniesResolverFunc func(ctx context.Context, employeeID string) (companyIDs []string, err error)
+
 // Authenticator verifies the Bearer access token and injects the Principal.
 // Mount it on all routes except the public ones (login, forgot-password).
 type Authenticator struct {
-	issuer          *Issuer
-	userState       UserStateFunc
-	companyResolver CompanyResolverFunc
+	issuer                *Issuer
+	userState             UserStateFunc
+	companyResolver       CompanyResolverFunc
+	leadCompaniesResolver LeadCompaniesResolverFunc
 }
 
 func NewAuthenticator(issuer *Issuer) *Authenticator { return &Authenticator{issuer: issuer} }
@@ -50,6 +58,15 @@ func (a *Authenticator) WithUserState(fn UserStateFunc) *Authenticator {
 // chaining.
 func (a *Authenticator) WithCompanyResolver(fn CompanyResolverFunc) *Authenticator {
 	a.companyResolver = fn
+	return a
+}
+
+// WithLeadCompaniesResolver wires read-time `lead` company-set derivation: a verified
+// Principal with the stored role `lead` has its CompanyIDs populated from the live E3
+// lead_assignments instead of the JWT. Unlike WithCompanyResolver this never changes
+// the role (lead is authoritative/stored). Returns the receiver for chaining.
+func (a *Authenticator) WithLeadCompaniesResolver(fn LeadCompaniesResolverFunc) *Authenticator {
+	a.leadCompaniesResolver = fn
 	return a
 }
 
@@ -91,6 +108,16 @@ func (a *Authenticator) Require(next http.Handler) http.Handler {
 			} else {
 				p.Role = RoleShiftLeader
 				p.CompanyID = companyID
+			}
+		}
+		// Read-time `lead` company-SET derivation. `lead` is a STORED, authoritative
+		// role (not derived like shift_leader), so we never touch p.Role here — we only
+		// populate the multi-company scope from the live E3 lead_assignments. On resolver
+		// error the set is left empty → GuardCompany denies (fail-safe, never escalation).
+		if a.leadCompaniesResolver != nil && p.Role == RoleLead {
+			ids, err := a.leadCompaniesResolver(r.Context(), p.EmployeeID)
+			if err == nil {
+				p.CompanyIDs = ids
 			}
 		}
 		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), p)))

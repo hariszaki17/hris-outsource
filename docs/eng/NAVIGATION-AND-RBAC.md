@@ -72,7 +72,7 @@ Order matches `comp/Sidebar` `iCqTB` and `NAV_ITEMS`:
 The "8 modules" design lock (DESIGN-SYSTEM line 171) is **retired** — sidebar length is a
 per-role *outcome* (a shift leader sees ~8; a future finance role would see ~3), not a fixed count.
 
-[^db7]: `dashboard.view` gates the route for all four roles; the **Super Admin admin-widget block** (DB-7: users & access · audit feed · org rollups · pending grants) needs **no new permission key** — the server fills `HrDashboard.admin` only when the principal's effective role is `super_admin`, and the client renders those widgets conditionally on `role === 'super_admin'`. Defense-in-depth: the API is the gate (ENGINEERING C1). The shift-leader dashboard is dual-surface (web + mobile Beranda, DB-8) on the same `LeaderDashboard` payload.
+[^db7]: `dashboard.view` gates the route for all staff roles that hold it (`super_admin`, `hr_admin`, `shift_leader`, `lead`; agents use `self.dashboard`); the **Super Admin admin-widget block** (DB-7: users & access · audit feed · org rollups · pending grants) needs **no new permission key** — the server fills `HrDashboard.admin` only when the principal's effective role is `super_admin`, and the client renders those widgets conditionally on `role === 'super_admin'`. Defense-in-depth: the API is the gate (ENGINEERING C1). The shift-leader dashboard is dual-surface (web + mobile Beranda, DB-8) on the same `LeaderDashboard` payload.
 
 ### 3.2 Section sub-nav (tabs under the topbar)
 
@@ -129,6 +129,15 @@ Interim role bundles:
   `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`,
   `change_requests.read/.approve` (**not** `.approve.bank`). No clients,
   contracts, payroll, reports, master data, or settings.
+- **lead** *(2026-06-12)* — service-line operational approver ("parking lead", "facility lead", …):
+  `dashboard.view`, `employees.read`, `placements.read/.write` (placement lifecycle:
+  create/transfer/end/renew — **not** shift-leader-assignment, **not** placement master edits),
+  `schedule.read/.write`, `attendance.read/.verify`, `leave.read/.approve` (final/L2),
+  `overtime.read/.approve` (final/L2), `change_requests.read/.approve` (**not** `.approve.bank` —
+  bank-account changes escalate to HR). No clients, contracts, payroll, reports, master data, or
+  settings. Note: lead does **not** do L1 leave/overtime approval (that stays `shift_leader`; lead is
+  the L2/final approver scoped to the agent's company) and **cannot** add employees (tambah karyawan),
+  run payroll, write master data, or assign shift-leaders (SLA).
 - **agent** — the `self.*` self-service bundle: `self.dashboard`, `self.attendance`, `self.schedule`,
   `self.leave`, `self.overtime`, `self.profile`, `self.payslip`. *(Updated 2026-06-10: agents now
   have a **web self-service console** under `/me/*` — reverses the prior "none (mobile-only)". The
@@ -163,6 +172,21 @@ request-time derived role + scope. **Fail-safe:** on resolver error or no assign
 stripped and the role falls back to `agent` — deny, never escalate. **No re-login required:**
 assigning or revoking leadership in E3 takes effect on the next request, since nothing leader-related
 is baked into the token.
+
+**Lead role + multi-company scope (2026-06-12).** ✅ Unlike `shift_leader` (derived-from-placement),
+`lead` is **SWP staff with a stored `users.role = 'lead'`** — but its **company set is still resolved
+read-time, not stored on the user**. A `shift_leader` has `company` scope over **exactly one** company
+(its derived assignment); a `lead` has `company` scope over a **set of many** client companies,
+assigned via the `lead_assignments` table (mirrors `shift_leader_assignments`). The auth middleware
+resolves that set per request into **`Principal.CompanyIDs []string`** (in contrast to the single
+`Principal.CompanyID` used by `shift_leader`). `GuardCompany` passes for a `lead` when the **resource's
+company is a member of the lead's assigned set** (membership test over `CompanyIDs`), just as it passes
+for a `shift_leader` when the resource company equals its single `CompanyID`; `super_admin`/`hr_admin`
+stay global (no company guard). Lead is the L2/final approver for leave + overtime **scoped to the
+agent's company** via this same guard, and arranges placements only within its assigned set; HR keeps
+global oversight + override. **Fail-safe:** on resolver error or an empty assigned set the scope is
+stripped — deny, never escalate. `service_line` remains a **data label, not an RBAC axis** — scope is
+keyed on company membership only.
 
 ### 4.3 Day-one vs deferred
 

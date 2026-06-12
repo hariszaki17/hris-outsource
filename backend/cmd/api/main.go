@@ -204,6 +204,7 @@ func run() error {
 	// current leader), so wire the leader service into the placement service.
 	placementRepo := placementrepo.NewPlacementRepo(pool)
 	leaderRepo := placementrepo.NewShiftLeaderRepo(pool)
+	leadRepo := placementrepo.NewLeadRepo(pool)
 
 	// GAP 3: derive shift_leader company scope at request time from the live E3
 	// leader-assignment (instead of the baked-in JWT `cmp` claim), so reassigning a
@@ -211,6 +212,13 @@ func run() error {
 	// flows through as an error → the middleware strips scope (fail-safe deny).
 	authn.WithCompanyResolver(func(ctx context.Context, employeeID string) (string, error) {
 		return leaderRepo.GetActiveLeaderCompanyForEmployee(ctx, employeeID)
+	})
+
+	// Derive a `lead` Principal's company SET at request time from the live E3
+	// lead_assignments (the role itself is stored/authoritative, so only the scope
+	// is resolved here). Reassigning a lead takes effect on their next request.
+	authn.WithLeadCompaniesResolver(func(ctx context.Context, employeeID string) ([]string, error) {
+		return leadRepo.GetActiveLeadCompaniesForEmployee(ctx, employeeID)
 	})
 
 	placementSvc := placementsvc.NewPlacementService(placementRepo, txm)

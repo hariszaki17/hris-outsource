@@ -225,8 +225,13 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 		if rec.Status != dom.LeaveStatusPendingHR {
 			return stateConflict(rec.Status)
 		}
-		// HR/super only — RequireRole already gates the route; defense-in-depth here.
+		// L2 approvers: HR/super (global) or lead (scoped). RequireRole gates the
+		// route; defense-in-depth here. guardSelf blocks self-approval (LA-6);
+		// GuardCompany scopes a lead to the agent's company (no-op for super/hr).
 		if serr := guardSelf(ctx, rec); serr != nil {
+			return serr
+		}
+		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 			return serr
 		}
 

@@ -1,146 +1,162 @@
-# PRD · F6.1 — Leave Balance Ledger (grant-lots)
+# PRD · F6.1 — Leave Entitlement Ledger (per-type quotas)
 
 > **Epic:** E6 Leave Management · **Feature:** F6.1 · **Status:** Draft v1
 > **Parent:** [FEATURE.md](../FEATURE.md) · **Owner:** _TBD_
-> **Model:** per-employee **grant-lot ledger** *(resolved 2026-06-08 — supersedes the per-type `LeaveQuota` model; see [EPICS.md §8](../../../EPICS.md) "E6 — Leave" + FEATURE §4/§7)*.
+> **Model:** **per-type entitlement ledger** *(resolved 2026-06-12 — supersedes the 2026-06-08 grant-lot/one-pool model; see [EPICS.md §8](../../../EPICS.md) "E6 — Leave" + FEATURE §4/§7)*. Each `leave_type` carries its own `cap_basis`; entitlement is metered **per type, in its own window**.
 
 ---
 
 ## 1. Context & problem
 
-Leave balance is **one pool per employee**, held as **grant-lots**. Each lot is a single insert — an amount of days with its **own hard expiry** — sourced from the annual auto-grant, an HR adjustment, a bonus, or a pre-funded statutory/maternity allocation. A request **draws down** lots **FIFO by soonest expiry**; the drawdown is recorded per-lot so cancel/restore can reverse exactly what was taken.
+Leave entitlement is **per leave type**, not one pool. SWP's `Fitur Ijin` policy defines **18 types** each with its own statutory cap, and under Indonesian law (Pasal 93 vs Pasal 79 UU 13/2003 / PP 35/2021) event/sick/religious leave is **separate from** the 12-day annual leave — a marriage or bereavement must **not** deplete the annual pool. So `leave_type` is the **cap axis**: each type's `cap_basis` (E2 master) decides how it meters.
 
-`leave_type` is **no longer a balance axis**. It survives only as a **label + document gate (`requires_document`) + calendar color**. Ordinary requests of any type draw the **one unearmarked pool**; an **earmarked** lot (e.g. maternity) is drawn **only** by a request of that purpose and is invisible to ordinary FIFO. This replaces "one `LeaveQuota` row per (employee, leave_type, calendar-year) expiring at year-end."
+| `cap_basis` | Window | Stored as | Example codes |
+|---|---|---|---|
+| `ANNUAL_POOL` | calendar year, **expires year-end, no carryover** | `LeaveQuota` per (emp, type, year), `entitled` from E2 agreement | CTHO, CT |
+| `PER_MONTH` | calendar month, **resets monthly** | `LeaveQuota` per (emp, type, year-month), `entitled = cap_value` | CH, KGD |
+| `PER_YEAR_COUNT` | calendar year, counts **occurrences** | `LeaveQuota` per (emp, type, year), `entitled = cap_value` (COUNT) | STSD |
+| `LIFETIME_ONCE` | once per employment | `LeaveQuota` per (emp, type, `EMP`), one-time | CM, CIH, CIU, CPR |
+| `SERVICE_UNPAID` | once per employment, eligibility-gated, **unpaid** | `LeaveQuota` per (emp, type, `EMP`) | CLTP |
+| `PER_EVENT` | per occurrence, **no standing row** | validated at request: `duration ≤ cap_value` | CIM, CKA, CMA, CKM, CRM |
+| `UNCAPPED` | unbounded, **no standing row** | document gate only | SDSKD, CTN, CAP |
+
+This **reinstates** the per-type `LeaveQuota` (dropped 2026-06-08) and **drops** `LeaveGrant`/`LeaveConsumption` (the grant-lot pool, FIFO, earmark, and per-lot expiry are no longer used).
 
 ## 2. Goals & non-goals
 
 **Goals**
-- Hold balance as a **per-employee pool of `LeaveGrant` lots**, each with its own `expires_at`.
-- Auto-grant the annual entitlement as a single `ANNUAL` lot (`expires_at` = period end).
-- Let HR **grant / adjust** a lot (amount, `expires_at`, `earmark`, `remark`), audited — including **pre-funding** long/statutory leave.
-- **Allocate FIFO** by soonest expiry across eligible (unexpired, matching-earmark) lots; record per-lot `LeaveConsumption` rows.
-- **Reserve** at submit (`pending_days`), **commit** at approve (`consumed_days`), **release/reverse** on reject/cancel/shorten.
-- **Expire** lapsed lots (hard per-lot expiry; no carryover).
-- **Never** allow a negative balance.
+- Meter entitlement **per leave type** via its `cap_basis` window (table above).
+- Auto-grant the **`ANNUAL_POOL`** quota at year start from `employment_agreements.annual_leave_entitlement_days` (E2), pro-rated for probation / mid-year joiners; expire it at year-end (no carryover).
+- Auto-open quota-bearing windows on first use (`PER_MONTH`/`PER_YEAR_COUNT`/`LIFETIME_ONCE`/`SERVICE_UNPAID`) at `entitled = cap_value`.
+- Let HR **adjust** a quota (`entitled_days`, `remark`), audited.
+- **Reserve** at submit (`pending_days`), **commit** at approve (`used_days`), **release** on reject/cancel/shorten.
+- Enforce **eligibility gates** (gender, notice, min-service, lifetime-once) and **never** a negative balance.
 
 **Non-goals**
-- Requesting/approving leave (F6.2/F6.3 — they call the allocation primitives here). Schedule effect (F6.4).
-- A per-type quota axis (dropped). Half-day units (full days only).
+- Requesting/approving leave (F6.2/F6.3 — they call the metering primitives here). Schedule effect (F6.4).
+- The leave-type catalog/cap definitions themselves (E2 master, operational-master-data §5a). Half-day units (full days only).
+- Earmarks / grant-lots / FIFO across lots (dropped 2026-06-12).
 
 ## 3. Actors
 
-System (annual auto-grant, FIFO allocation, expiry sweep), HR/Super Admin (grants/adjustments/pre-funding), Agent (views balance).
+System (annual auto-grant, window auto-open, year/month rollover), HR/Super Admin (quota adjustments), Agent (views per-type balance).
 
 ## 4. Platform / clients
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | HR / Super Admin | View ledger; grant/adjust a lot; pre-fund statutory/maternity; bulk annual grant. |
-| **Mobile app** | Agent | View own balance — total pool + per-earmarked-lot lines with expiry. |
-| System | — | Annual auto-grant; FIFO reserve/commit/release; per-lot expiry sweep. |
+| **Web console** | HR / Super Admin | View per-type ledger; adjust a type's quota; bulk annual grant. |
+| **Mobile app** | Agent | View own balance — a line **per leave type** with its remaining + window. |
+| System | — | Annual auto-grant; window auto-open; reserve/commit/release; year/month rollover (expire/reset). |
 
 ## 5. Business rules
 
-> **ID remap note (2026-06-08):** LQ-* are renumbered to the grant-lot model. IDs referenced outside this PRD (LQ-1 grant, LQ-2/LQ-3 deduct/restore, LQ-5 no-negative, LQ-6 HR adjust) are **kept stable** but restated; **LQ-4** (year-end expiry) and **LQ-7** (one quota per type/period) are **superseded/dropped** and annotated. New rules LQ-9..LQ-12 cover lots, FIFO, earmark, and pre-funding.
+> **ID note (2026-06-12):** LQ-* are restored to the per-type model. LQ-1 (annual grant), LQ-2/LQ-3 (deduct/restore), LQ-4 (expiry), LQ-5 (no-negative), LQ-6 (HR adjust), LQ-7 (one quota per type/window) are **kept and restated**. The grant-lot rules LQ-9..LQ-12 (FIFO, earmark, pre-fund) are **dropped**. New rules LQ-13..LQ-16 cover `cap_basis` metering and gates.
 
 | Ref | Rule |
 |-----|------|
-| LQ-1 | **Grant = a lot, not a per-type row.** The annual auto-grant (period start) inserts **one** `LeaveGrant` with `source = ANNUAL`, `amount_days = entitlement`, `expires_at = period_end`, `earmark = null`. Entitlement sources `employment_agreements.annual_leave_entitlement_days` (E2). *(was: create a `LeaveQuota` per quota-tracked type.)* |
-| LQ-2 | On a leave **Approved** (F6.3), the request's **reservation is committed**: each reserved lot's `pending_days -= d_lot` and `consumed_days += d_lot`, and a `LeaveConsumption` row (`leave_request_id, grant_id, days`) is written per lot. *(restated from "deduct quota".)* |
-| LQ-3 | On an approved leave **cancelled/shortened**, the **exact** `LeaveConsumption` rows are reversed: each lot's `consumed_days -= row.days` (only for restored days, oldest-consumed-first on a shorten); deleted/zeroed consumption rows are audited. *(restated from "restore quota".)* |
-| LQ-4 | **Per-lot hard expiry.** A lot is zeroed by the expiry sweep when `now ≥ expires_at` (its remaining can no longer be allocated). **No year-end global expiry, no carryover minting.** *(supersedes the calendar-year "expire at period end" rule — 2026-06-08.)* |
-| LQ-5 | Balance can **never go negative** — a request allocates **only** available (unexpired, matching-earmark) lots; if `duration_days` exceeds available, it is **blocked** (F6.2 INV-1). The over-balance path is "HR adds a lot" (LQ-11), never a negative remaining. |
-| LQ-6 | HR may **grant or adjust a lot** with a required `remark` — set/adjust `amount_days`, `expires_at`, `earmark` — audited. A negative adjustment cannot bring a lot's `amount_days` below its `consumed_days + pending_days`. *(was: adjust `total`/`remaining`.)* |
-| LQ-7 | *(dropped 2026-06-08 — there are no per-type/period quota rows; a lot is the unit. Multiple unexpired lots per employee are normal.)* |
-| LQ-8 | **Pro-rate** the annual auto-grant for probation (first 12 months) and mid-year joiners — `amount_days ≈ entitlement × remaining_months / 12` (half-up). Applies to the `ANNUAL` lot's `amount_days` only. |
-| LQ-9 | **FIFO allocation.** A request allocates across eligible lots **ordered by soonest `expires_at`** (ties broken by `granted_at`, then `id`), taking from each lot's remaining (`amount − consumed − pending`) until `duration_days` is satisfied. Allocation may **span multiple lots**. |
-| LQ-10 | **Earmark isolation.** A lot with `earmark != null` is eligible **only** for a request whose purpose matches that earmark; it is **invisible** to ordinary (unearmarked) FIFO. Unearmarked lots (`earmark = null`) form the flat pool drawn by ordinary requests. |
-| LQ-11 | **HR pre-funds long/statutory leave** by inserting an earmarked lot (e.g. `source = MATERNITY, earmark = MATERNITY, amount_days, expires_at, remark`). The employee then files a request of that purpose, which draws **only** that lot (LQ-10). No bypass flag, no separate table. |
-| LQ-12 | **Reservation lifecycle.** Submit → FIFO **reserve** (`pending_days += d_lot` per allocated lot, recorded as a provisional allocation). Approve → **commit** (LQ-2). Reject/withdraw/expire-of-draft → **release** (`pending_days -= d_lot`). Reservations count against availability so the agent's pre-check matches approval. |
+| LQ-1 | **Annual auto-grant.** At year start the system inserts the employee's **`ANNUAL_POOL`** quota (whichever annual type applies — CTHO or CT) with `entitled_days = annual_leave_entitlement_days` (E2), `period_key = <year>`, `expires_at = <year>-12-31`, `source = AUTO`. |
+| LQ-2 | On a leave **Approved** (F6.3), the request **commits** its reservation on the type's window quota: `pending_days -= d` and `used_days += d`. |
+| LQ-3 | On an approved leave **cancelled/shortened**, the commit is reversed on the **same** window quota: `used_days -= d_restored` (audited). A `PER_EVENT`/`UNCAPPED` request has no quota row to adjust. |
+| LQ-4 | **Window expiry/reset.** `ANNUAL_POOL` quota expires at `expires_at` (year-end) — **no carryover, no carry-in**. `PER_MONTH` and `PER_YEAR_COUNT` windows **reset** each new month/year (a fresh quota opens at `cap_value`). `LIFETIME_ONCE`/`SERVICE_UNPAID` never reset. |
+| LQ-5 | A request's window **remaining = `entitled − used − pending`** can **never go negative** — over-cap is **blocked** (F6.2 INV-1). The over-cap path is "HR adjusts the quota" (LQ-6), never a negative remaining. |
+| LQ-6 | HR may **adjust** a type's quota with a required `remark` — set `entitled_days` — audited. A negative adjustment cannot bring `entitled_days` below `used_days + pending_days`. |
+| LQ-7 | **One quota per (employee, leave_type, window).** Quota-bearing bases hold exactly one row per window; `PER_EVENT`/`UNCAPPED` hold none. |
+| LQ-8 | **Pro-rate** the `ANNUAL_POOL` grant for probation (first 12 months) and mid-year joiners — `entitled ≈ entitlement × remaining_months / 12` (half-up). Other windows are not pro-rated (statutory caps apply in full). |
+| LQ-13 | **`cap_basis` metering.** `ANNUAL_POOL`/`PER_MONTH`/`SERVICE_UNPAID` charge **days** against the window; `PER_YEAR_COUNT` charges **1 occurrence** per request (and still records `duration_days` on the request); `LIFETIME_ONCE` charges the days and **exhausts** on first approval; `PER_EVENT` enforces `duration_days ≤ cap_value` per occurrence with **no** standing row; `UNCAPPED` enforces only the document gate. |
+| LQ-14 | **Auto-open windows.** When a request targets a quota-bearing window with no row yet, the system **opens** it at `entitled = cap_value` (`source = AUTO`), then reserves. `ANNUAL_POOL` is the exception — its `entitled` comes from E2 (LQ-1), not `cap_value`. |
+| LQ-15 | **Eligibility gates (INV-7).** Block at request time unless: `gender = ANY` **or** matches `employee.gender`; `start_date − today ≥ notice_days`; employee tenure `≥ min_service_years`; for `LIFETIME_ONCE`/`SERVICE_UNPAID` **no prior approved request** of that type. The failing gate is returned as the block reason. |
+| LQ-16 | **Paid flag.** `LeaveType.paid = false` (e.g. `CLTP`) marks the approved days **unpaid** — surfaced to payroll (E8); does not change metering. |
+| LQ-12 | **Reservation lifecycle.** Submit → **reserve** (`pending_days += d` on the window). Approve → **commit** (LQ-2). Reject/withdraw → **release** (`pending_days -= d`). Reservations count against `remaining` so the agent's pre-check matches approval. |
 
 ## 6. Data model
 
-**`LeaveGrant`** (`SWP-LG-*`) — one lot:
-`id, employee_id (FK), amount_days (int ≥0), granted_at (date), effective_from (date), expires_at (date), source (enum: ANNUAL | ADJUSTMENT | MATERNITY | STATUTORY | MIGRATION | BONUS), earmark (text, nullable — null = general pool; non-null = purpose code), remark (text), consumed_days (int ≥0), pending_days (int ≥0), created_by, created_at, updated_at`.
-Derived: `remaining_days = amount_days − consumed_days − pending_days`. A lot is **active** when `now < expires_at`.
+**`LeaveQuota`** (`SWP-LQ-*`) — one per-type window:
+`id, employee_id (FK), leave_type_id (FK), period_key (text — `<year>` | `<year-month>` | `EMP`), entitled_days (int ≥0 — occurrence count when `cap_unit = COUNT`), used_days (int ≥0), pending_days (int ≥0), expires_at (date, nullable — set for ANNUAL_POOL), source (enum: AUTO | ADJUSTMENT | MIGRATION), remark (text), created_by, created_at, updated_at`.
+Derived: `remaining = entitled_days − used_days − pending_days`. Unique on `(employee_id, leave_type_id, period_key)` among non-deleted rows.
 
-**`LeaveConsumption`** (`SWP-LC-*`) — one lot-drawdown row:
-`id, leave_request_id (FK → LeaveRequest), grant_id (FK → LeaveGrant), days (int >0), created_at`.
-One request produces one row **per lot** it drew from (multiple when allocation spans lots). Reversal on cancel/shorten deletes/zeroes the affected rows and restores `consumed_days`.
+**Reads `LeaveType`** (E2): `cap_basis, cap_value, cap_unit, paid, gender, requires_document, notice_days, min_service_years, lead_days, trail_days` — the metering rules.
 
-**Balance** (per employee, for the UI):
-`unearmarked_total = Σ(amount − consumed − pending)` over active lots with `earmark = null`; plus one line **per active earmarked lot** with `{ earmark, remaining, expires_at }`.
+**Balance** (per employee, for the UI): one line **per active leave type** — `{ code, name, cap_basis, remaining, window_label, expires_at? }`. `UNCAPPED` types show "sesuai ketentuan"; `PER_EVENT` show the per-occurrence cap.
 
 ## 7. Acceptance criteria (Gherkin)
 
 ```gherkin
-Feature: Leave balance ledger (grant-lots)
+Feature: Leave entitlement ledger (per-type)
 
-  Scenario: Annual auto-grant writes one ANNUAL lot
+  Scenario: Annual auto-grant opens the ANNUAL_POOL quota
     Given "Budi" has an employment agreement with annual_leave_entitlement_days = 12
-    When the period-start annual grant runs for 2026
-    Then one LeaveGrant lot is created with source ANNUAL, amount_days 12,
-      earmark null, and expires_at 2026-12-31
+    And his annual leave type is CT (cap_basis ANNUAL_POOL)
+    When the year-start annual grant runs for 2026
+    Then a LeaveQuota row exists for (Budi, CT, "2026") with entitled_days 12, source AUTO,
+      and expires_at 2026-12-31
 
-  Scenario: HR grants an adjustment lot
-    When HR grants Budi a lot of 2 days with source ADJUSTMENT, expires_at 2026-12-31, remark "Koreksi"
-    Then a new unearmarked LeaveGrant lot of amount_days 2 exists and the action is audited
-    And Budi's unearmarked pool increases by 2
+  Scenario: Statutory event leave does not touch the annual pool
+    Given Budi has 9 days remaining on his CT 2026 quota
+    When Budi takes 2 approved days of CKM (bereavement, PER_EVENT cap 2)
+    Then his CT 2026 remaining is still 9
+    And CKM is enforced as ≤ 2 days for that occurrence with no standing quota row
 
-  Scenario: FIFO consumption across lots by soonest expiry
-    Given Budi has lot A (amount 3, expires 2026-06-30) and lot B (amount 5, expires 2026-12-31), both unearmarked
-    When a 4-day ordinary leave is approved
-    Then 3 days are consumed from lot A and 1 day from lot B
-    And two LeaveConsumption rows are written (lot A: 3, lot B: 1)
-    And lot A remaining becomes 0 and lot B remaining becomes 4
+  Scenario: PER_MONTH cap resets each month
+    Given CH (menstrual) is PER_MONTH cap 2 and Budi's employee is female "Sari"
+    When Sari takes 2 approved CH days in March
+    Then her CH March remaining is 0
+    And in April a fresh CH window opens at 2
 
-  Scenario: Earmarked maternity lot is drawn only by a maternity request
-    Given HR pre-funds Budi a lot source MATERNITY earmark MATERNITY amount 90 expires 2027-03-31
-    And Budi also has an unearmarked pool of 8 days
-    When Budi files an ordinary annual request
-    Then the maternity lot is invisible to it (it draws only the unearmarked pool)
-    When Budi files a maternity request of 90 days
-    Then it draws only the MATERNITY lot and the unearmarked pool is untouched
+  Scenario: PER_YEAR_COUNT charges occurrences
+    Given STSD is PER_YEAR_COUNT cap 5
+    When the agent files a 1-day STSD request 5 times in 2026, all approved
+    Then the 6th STSD request in 2026 is blocked (count exhausted)
 
-  Scenario: Lot expiry zeroes remaining, no carryover
-    Given Budi has lot A with remaining 4 and expires_at 2026-12-31
-    When the expiry sweep runs on 2027-01-01
-    Then lot A's remaining can no longer be allocated and nothing carries to a new lot
+  Scenario: LIFETIME_ONCE exhausts after first use
+    Given CM (own marriage) is LIFETIME_ONCE cap 3
+    When the agent takes 3 approved CM days
+    Then any later CM request is blocked as already used
 
-  Scenario: HR pre-funds when a request exceeds the pool (no negative)
-    Given Budi's available pool is 2 days
-    When Budi requests 5 ordinary days
-    Then it is blocked for insufficient balance
-    When HR grants a lot of 3 days
-    Then Budi may resubmit and the 5 days allocate FIFO across lots — balance never goes negative
+  Scenario: Gender gate
+    Given CH is gender FEMALE
+    When a male employee requests CH
+    Then it is blocked with a gender-eligibility reason
+
+  Scenario: Notice gate for religious leave
+    Given CIU is LIFETIME_ONCE with notice_days 30
+    When the agent requests CIU starting in 10 days
+    Then it is blocked for insufficient advance notice
+
+  Scenario: HR adjusts a quota (no negative)
+    Given Budi's CT 2026 quota is entitled 12, used 9, pending 0
+    When HR adjusts entitled to 8 with a remark
+    Then it is blocked because 8 < used+pending (9)
 
   Scenario: Reserve at submit, commit at approve, release on reject
-    Given Budi has an unearmarked pool of 5 days
-    When Budi submits a 3-day request
-    Then 3 days are reserved as pending_days across lots (available drops to 2)
+    Given Budi's CT 2026 remaining is 5
+    When Budi submits a 3-day CT request
+    Then 3 days are reserved as pending_days (remaining drops to 2)
     When HR rejects it
-    Then the reservation is released and available returns to 5
+    Then the reservation is released and remaining returns to 5
 ```
 
 ## 8. Cases & edge cases
 
 | # | Case | Expected |
 |---|------|----------|
-| C-1 | Mid-period join | Pro-rate the `ANNUAL` lot's `amount_days` (LQ-8); other lots unaffected. |
-| C-2 | FIFO across differing expiries | Soonest `expires_at` consumed first (LQ-9); allocation may span lots, producing multiple `LeaveConsumption` rows. |
-| C-3 | Earmark isolation | An ordinary request **never** touches an earmarked lot; a purpose request draws **only** the matching earmark (LQ-10). |
-| C-4 | Lot expires mid-request | Eligibility is evaluated **at allocation time** (submit-reserve and approve-commit each re-check `now < expires_at`); a lot that lapses between submit and approve drops out of FIFO and the commit re-allocates from remaining active lots — if that now under-funds, the approval is blocked (LA-5 re-check) and HR pre-funds. |
-| C-5 | Concurrent approvals racing the balance | Reserve/commit are atomic per lot; the second approval re-checks lot remaining and re-allocates or blocks. |
-| C-6 | Cancel/shorten reversal | Reverse the **exact** `LeaveConsumption` rows (LQ-3); on shorten, restore only the trailing restored days. |
-| C-7 | Migration backfill | Legacy `employee_leave_quotas.leave_remaining` → **one `MIGRATION` lot per employee** with `amount_days = remaining`, `consumed_days = 0`, `earmark = null`, and `expires_at` = the legacy period end (or a configured cutover horizon). No per-type rows; see DATA-MAPPING. |
+| C-1 | Mid-period join | Pro-rate the `ANNUAL_POOL` quota (LQ-8); statutory caps apply in full. |
+| C-2 | Request spans a month boundary (`PER_MONTH` type) | Block in v1 — a `PER_MONTH` request must fall within one window; split across months not supported (confirm with SWP). |
+| C-3 | `UNCAPPED` sick (SDSKD) | No quota row; only the document gate applies; duration recorded on the request for reporting. |
+| C-4 | `PER_EVENT` over cap | A CKM request of 3 days is blocked (cap 2); no quota row is created. |
+| C-5 | Concurrent approvals racing a window | Reserve/commit are atomic on the window row; the second approval re-checks `remaining` and blocks if exhausted. |
+| C-6 | Cancel/shorten reversal | Reverse the commit on the **same** window quota (LQ-3); `PER_EVENT`/`UNCAPPED` have nothing to reverse. |
+| C-7 | Migration backfill | Legacy `employee_leave_quotas.leave_remaining` → **one `ANNUAL_POOL` `MIGRATION` quota** per employee (`entitled = remaining`, `used = 0`, `expires_at` = legacy period end). No per-statutory-type backfill (legacy had no per-type quotas); see DATA-MAPPING. |
+| C-8 | `CIH` hajj duration | Validated by the program dates on the document + `lead_days`/`trail_days`; `LIFETIME_ONCE`, no fixed `cap_value`. |
 
 ## 9. Dependencies
 
-E2 (leave-type label/gate; `employment_agreements.annual_leave_entitlement_days` as annual source), F6.2/F6.3 (request/approval call reserve/commit/release), E1 (audit), scheduled jobs (annual auto-grant, expiry sweep), E9 (migration backfill of a `MIGRATION` lot).
+E2 (leave-type cap mechanics; `employment_agreements.annual_leave_entitlement_days` as `ANNUAL_POOL` source; `employees.gender`, tenure for gates), F6.2/F6.3 (request/approval call reserve/commit/release), E1 (audit), scheduled jobs (annual auto-grant, year/month rollover), E8 (unpaid-leave payroll effect), E9 (migration backfill of the annual quota).
 
 ## 10. Decisions & open questions
 
-- ✅ **Per-employee grant-lot ledger** (2026-06-08) — one pool; lots with hard per-lot expiry; FIFO-by-soonest-expiry consumption; optional earmark; no negative; HR pre-funds statutory/long leave. `leave_type` = label + document gate + color only. See [EPICS.md §8](../../../EPICS.md) + [FEATURE §4/§7](../FEATURE.md).
-- ✅ **Pro-rated** annual lot for probation + mid-year joiners (LQ-8).
-- **Open:** does an `ANNUAL` lot's `expires_at` follow strict calendar-year end, or an anniversary horizon for late joiners? (Default: calendar-year end; confirm with SWP.)
-- **Open:** earmark vocabulary — is `earmark` free-text purpose codes or a closed enum aligned to statutory leave types? (Default: free-text purpose code matched to the request's leave_type code.)
+- ✅ **Per-type entitlement ledger** (2026-06-12) — `leave_type` is the cap axis; each type meters in its own `cap_basis` window; statutory/sick/religious leave never depletes the annual pool; no negative; HR adjusts a type's quota. Drops grant-lots/earmarks/FIFO. See [EPICS.md §8](../../../EPICS.md) + [FEATURE §4/§7](../FEATURE.md) + [E2 catalog §5a](../../E2-identity/prds/operational-master-data.md).
+- ✅ **Pro-rated** `ANNUAL_POOL` for probation + mid-year joiners (LQ-8); statutory caps in full.
+- **Open:** `PER_MONTH` request spanning a month boundary — block (C-2) or split? (Default: block; confirm with SWP.)
+- **Open:** does STSD count **occurrences** or **days** toward its yearly cap? Policy says "5 kali setahun" → occurrences (modeled as `PER_YEAR_COUNT`); confirm a multi-day STSD still counts as one occurrence and whether it then requires a doctor's letter (→ SDSKD).
+- **Open:** working-day vs calendar-day duration for 24/7 shift workers (FEATURE §7 still-open Q1) — affects how `duration_days` charges day-based windows.

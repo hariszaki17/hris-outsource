@@ -442,8 +442,13 @@ func (s *OvertimeService) ApproveFinal(ctx context.Context, id, note string, isO
 		if !legal {
 			return stateConflict(rec.Status)
 		}
-		// HR/super only — RequireRole gates the route; defense-in-depth self-guard.
+		// L2 approvers: HR/super (global) or lead (scoped). RequireRole gates the
+		// route; defense-in-depth here. guardSelf blocks self-approval (OA-5);
+		// GuardCompany scopes a lead to the agent's company (no-op for super/hr).
 		if serr := guardSelf(ctx, rec); serr != nil {
+			return serr
+		}
+		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 			return serr
 		}
 		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusApproved)

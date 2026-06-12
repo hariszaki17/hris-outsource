@@ -17,6 +17,12 @@ const (
 	RoleHRAdmin     Role = "hr_admin"
 	RoleShiftLeader Role = "shift_leader"
 	RoleAgent       Role = "agent"
+	// RoleLead is the service-line operational approver (parking/facility/building
+	// "lead"): a STORED SWP-staff role (users.role='lead'), unlike shift_leader
+	// which is derived from a placement. It arranges placements and is the L2 (final)
+	// leave/overtime approver, SCOPED to its set of assigned client companies
+	// (resolved per-request into Principal.CompanyIDs).
+	RoleLead Role = "lead"
 )
 
 // Principal is the authenticated caller, derived from a verified access token.
@@ -27,7 +33,8 @@ type Principal struct {
 	UserID     string // SWP-USR-…
 	EmployeeID string // SWP-EMP-… (may be empty)
 	Role       Role
-	CompanyID  string // SWP-CMP-… (shift_leader only)
+	CompanyID  string   // SWP-CMP-… (shift_leader only)
+	CompanyIDs []string // lead only — set of assigned client-company IDs; empty for other roles
 	// IssuedAt is the access token's iat, used by the middleware's F2.7 session-epoch
 	// check (reject if IssuedAt < users.tokens_valid_after).
 	IssuedAt time.Time
