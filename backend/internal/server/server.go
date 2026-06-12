@@ -484,7 +484,6 @@ func New(d Deps) http.Handler {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/leave-requests", d.Leave.ListLeaveRequests)
 				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
-				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
 				r.Get("/leave-balances/by-employee/{employee_id}/types", d.Leave.GetEmployeeTypeBalances) // per-type ledger (2026-06-12)
 			})
 

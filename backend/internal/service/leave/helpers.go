@@ -4,36 +4,13 @@ package leave
 
 import (
 	"context"
-	"encoding/json"
 	"strconv"
 	"time"
 
-	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 )
-
-// allocSnapshot is the jsonb shape persisted in leave_requests.balance_allocation
-// (mirrors the repository allocLine + the openapi BalanceCheck.allocation item).
-type allocSnapshot struct {
-	GrantID   string `json:"grant_id"`
-	Days      int    `json:"days"`
-	ExpiresAt string `json:"expires_at"`
-}
-
-// marshalAllocation serializes the FIFO split for the balance_allocation column. A
-// nil/empty allocation marshals to nil (clears the column).
-func marshalAllocation(alloc []dom.AllocationLine) ([]byte, error) {
-	if len(alloc) == 0 {
-		return nil, nil
-	}
-	lines := make([]allocSnapshot, 0, len(alloc))
-	for _, a := range alloc {
-		lines = append(lines, allocSnapshot{GrantID: a.GrantID, Days: a.Days, ExpiresAt: a.ExpiresAt.Format("2006-01-02")})
-	}
-	return json.Marshal(lines)
-}
 
 // clampLimit applies the documented default(50)/max(200).
 func clampLimit(limit int) int {

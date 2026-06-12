@@ -113,9 +113,7 @@ func capAnnual() dom.LeaveTypeCap {
 }
 
 func newMeterSvc(lr *fakeLeaveRepo, sp *fakeSchedule, store QuotaMeterStore, reader QuotaMeterReader) *LeaveService {
-	gs := NewGrantService(newFakeGrantRepo(), fakeRunner{})
-	gs.SetClock(func() time.Time { return fixedNow })
-	s := NewLeaveService(lr, gs, sp, fakeRunner{})
+	s := NewLeaveService(lr, sp, fakeRunner{})
 	s.SetClock(func() time.Time { return fixedNow })
 	s.SetMeter(NewQuotaMeter(store, reader))
 	return s

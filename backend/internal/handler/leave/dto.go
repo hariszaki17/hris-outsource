@@ -68,19 +68,11 @@ type routingResponse struct {
 	AssignedLeaderName *string `json:"assigned_leader_name"`
 }
 
-type allocationLineResponse struct {
-	GrantID   string `json:"grant_id"`
-	Days      int    `json:"days"`
-	ExpiresAt string `json:"expires_at"`
-}
-
 type balanceCheckResponse struct {
-	RequestedDays        *int                     `json:"requested_days,omitempty"`
-	RemainingDaysAtCheck *int                     `json:"remaining_days_at_check,omitempty"`
-	Earmark              *string                  `json:"earmark"`
-	Allocation           []allocationLineResponse `json:"allocation,omitempty"`
-	CheckedAt            *string                  `json:"checked_at,omitempty"`
-	RequiresOverride     bool                     `json:"requires_override"`
+	RequestedDays        *int    `json:"requested_days,omitempty"`
+	RemainingDaysAtCheck *int    `json:"remaining_days_at_check,omitempty"`
+	CheckedAt            *string `json:"checked_at,omitempty"`
+	RequiresOverride     bool    `json:"requires_override"`
 }
 
 type timelineEntryResponse struct {
@@ -133,89 +125,6 @@ type leaveRequestResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// --- grant-lot ledger (F6.1) ---
-
-type grantWriteRequest struct {
-	EmployeeID    string  `json:"employee_id"`
-	AmountDays    int     `json:"amount_days"`
-	ExpiresAt     string  `json:"expires_at"`
-	Source        string  `json:"source"`
-	Earmark       *string `json:"earmark"`
-	Remark        string  `json:"remark"`
-	EffectiveFrom *string `json:"effective_from"`
-}
-
-type grantPatchRequest struct {
-	AmountDays *int    `json:"amount_days"`
-	ExpiresAt  *string `json:"expires_at"`
-	Earmark    *string `json:"earmark"`
-	SetEarmark bool    `json:"-"`
-	Remark     string  `json:"remark"`
-}
-
-type leaveConsumptionResponse struct {
-	ID             string `json:"id"`
-	LeaveRequestID string `json:"leave_request_id"`
-	GrantID        string `json:"grant_id"`
-	Days           int    `json:"days"`
-	CreatedAt      string `json:"created_at"`
-}
-
-type leaveGrantResponse struct {
-	ID            string                     `json:"id"`
-	EmployeeID    string                     `json:"employee_id"`
-	EmployeeName  *string                    `json:"employee_name,omitempty"`
-	AmountDays    int                        `json:"amount_days"`
-	Source        string                     `json:"source"`
-	Earmark       *string                    `json:"earmark"`
-	Remark        *string                    `json:"remark,omitempty"`
-	GrantedAt     string                     `json:"granted_at"`
-	EffectiveFrom string                     `json:"effective_from"`
-	ExpiresAt     string                     `json:"expires_at"`
-	ConsumedDays  int                        `json:"consumed_days"`
-	PendingDays   int                        `json:"pending_days"`
-	RemainingDays int                        `json:"remaining_days"`
-	IsActive      bool                       `json:"is_active"`
-	Consumptions  []leaveConsumptionResponse `json:"consumptions,omitempty"`
-	CreatedBy     *string                    `json:"created_by,omitempty"`
-	CreatedAt     string                     `json:"created_at"`
-	UpdatedAt     string                     `json:"updated_at"`
-}
-
-type earmarkLineResponse struct {
-	GrantID       string `json:"grant_id"`
-	Earmark       string `json:"earmark"`
-	Source        string `json:"source,omitempty"`
-	RemainingDays int    `json:"remaining_days"`
-	ExpiresAt     string `json:"expires_at"`
-}
-
-type leaveBalanceResponse struct {
-	EmployeeID    string                `json:"employee_id"`
-	EmployeeName  *string               `json:"employee_name,omitempty"`
-	PoolRemaining int                   `json:"pool_remaining"`
-	PendingTotal  int                   `json:"pending_total"`
-	NextExpiry    *string               `json:"next_expiry"`
-	Earmarked     []earmarkLineResponse `json:"earmarked"`
-	AllLots       []leaveGrantResponse  `json:"all_lots,omitempty"`
-}
-
-// employeeLeaveBalanceResponse is one row in GET /leave-balances (openapi
-// EmployeeLeaveBalance) — the /leave/quotas screen, one aggregate row per employee.
-type employeeLeaveBalanceResponse struct {
-	ID                 string  `json:"id"`
-	EmployeeID         string  `json:"employee_id"`
-	FullName           string  `json:"full_name"`
-	NIK                string  `json:"nik"`
-	NIP                string  `json:"nip"`
-	PoolTotal          int     `json:"pool_total"`
-	PoolConsumed       int     `json:"pool_consumed"`
-	PoolPending        int     `json:"pool_pending"`
-	PoolRemaining      int     `json:"pool_remaining"`
-	EarmarkedRemaining int     `json:"earmarked_remaining"`
-	NextExpiry         *string `json:"next_expiry"`
-	LotCount           int     `json:"lot_count"`
-}
 
 // --- response: LeaveQuota ---
 
@@ -318,93 +227,11 @@ type dataResponse[T any] struct {
 func dateStr(t time.Time) string { return t.UTC().Format("2006-01-02") }
 func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-func toLeaveGrantResponse(g dom.LeaveGrant, now time.Time) leaveGrantResponse {
-	out := leaveGrantResponse{
-		ID:            g.ID,
-		EmployeeID:    g.EmployeeID,
-		EmployeeName:  g.EmployeeName,
-		AmountDays:    g.Amount,
-		Source:        string(g.Source),
-		Earmark:       g.Earmark,
-		Remark:        g.Remark,
-		GrantedAt:     dateStr(g.GrantedAt),
-		EffectiveFrom: dateStr(g.EffectiveFrom),
-		ExpiresAt:     dateStr(g.ExpiresAt),
-		ConsumedDays:  g.Consumed,
-		PendingDays:   g.Pending,
-		RemainingDays: g.Remaining(),
-		IsActive:      g.IsActive(now),
-		CreatedBy:     g.CreatedBy,
-		CreatedAt:     rfc3339(g.CreatedAt),
-		UpdatedAt:     rfc3339(g.UpdatedAt),
-	}
-	for _, c := range g.Consumptions {
-		out.Consumptions = append(out.Consumptions, leaveConsumptionResponse{
-			ID: c.ID, LeaveRequestID: c.LeaveRequestID, GrantID: c.GrantID,
-			Days: c.Days, CreatedAt: rfc3339(c.CreatedAt),
-		})
-	}
-	return out
-}
-
-func toEmployeeLeaveBalanceResponse(b dom.EmployeeLeaveBalance) employeeLeaveBalanceResponse {
-	out := employeeLeaveBalanceResponse{
-		ID:                 b.EmployeeID,
-		EmployeeID:         b.EmployeeID,
-		FullName:           b.FullName,
-		NIK:                b.NIK,
-		NIP:                b.NIP,
-		PoolTotal:          b.PoolTotal,
-		PoolConsumed:       b.PoolConsumed,
-		PoolPending:        b.PoolPending,
-		PoolRemaining:      b.PoolRemaining,
-		EarmarkedRemaining: b.EarmarkedRemaining,
-		LotCount:           b.LotCount,
-	}
-	if b.NextExpiry != nil {
-		s := dateStr(*b.NextExpiry)
-		out.NextExpiry = &s
-	}
-	return out
-}
-
-func toLeaveBalanceResponse(b dom.LeaveBalance, now time.Time) leaveBalanceResponse {
-	out := leaveBalanceResponse{
-		EmployeeID:    b.EmployeeID,
-		EmployeeName:  b.EmployeeName,
-		PoolRemaining: b.PoolRemaining,
-		PendingTotal:  b.PendingTotal,
-		Earmarked:     make([]earmarkLineResponse, 0, len(b.Earmarked)),
-	}
-	if b.NextExpiry != nil {
-		s := dateStr(*b.NextExpiry)
-		out.NextExpiry = &s
-	}
-	for _, e := range b.Earmarked {
-		out.Earmarked = append(out.Earmarked, earmarkLineResponse{
-			GrantID: e.GrantID, Earmark: e.Earmark, Source: string(e.Source),
-			RemainingDays: e.Remaining, ExpiresAt: dateStr(e.ExpiresAt),
-		})
-	}
-	for _, lot := range b.AllLots {
-		out.AllLots = append(out.AllLots, toLeaveGrantResponse(lot, now))
-	}
-	return out
-}
-
 func toBalanceCheckResponse(bc dom.BalanceCheck) balanceCheckResponse {
 	out := balanceCheckResponse{
 		RequestedDays:        bc.RequestedDays,
 		RemainingDaysAtCheck: bc.RemainingDaysAtCheck,
-		Earmark:              bc.Earmark,
 		RequiresOverride:     bc.RequiresOverride,
-	}
-	for _, a := range bc.Allocation {
-		out.Allocation = append(out.Allocation, allocationLineResponse{
-			GrantID:   a.GrantID,
-			Days:      a.Days,
-			ExpiresAt: a.ExpiresAt.Format("2006-01-02"),
-		})
 	}
 	if bc.CheckedAt != nil {
 		s := rfc3339(*bc.CheckedAt)

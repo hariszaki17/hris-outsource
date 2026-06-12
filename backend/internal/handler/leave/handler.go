@@ -12,18 +12,17 @@ import (
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 )
 
-// Handler holds the E6 services (one struct serves requests + grants/balances +
-// deprecated quotas + calendar).
+// Handler holds the E6 services (one struct serves requests + per-type quota
+// balances/adjust + calendar).
 type Handler struct {
 	leave    *svc.LeaveService
-	quota    *svc.QuotaService // DEPRECATED 2026-06-08 — /leave-quotas* only
-	grant    *svc.GrantService // F6.1 grant-lot ledger + balances (live path)
+	quota    *svc.QuotaService // per-type balances (F6.5) + HR adjust-entitled
 	calendar *svc.CalendarService
 }
 
 // NewHandler wires the handler to its services.
-func NewHandler(l *svc.LeaveService, q *svc.QuotaService, g *svc.GrantService, c *svc.CalendarService) *Handler {
-	return &Handler{leave: l, quota: q, grant: g, calendar: c}
+func NewHandler(l *svc.LeaveService, q *svc.QuotaService, c *svc.CalendarService) *Handler {
+	return &Handler{leave: l, quota: q, calendar: c}
 }
 
 // --- shared helpers ---

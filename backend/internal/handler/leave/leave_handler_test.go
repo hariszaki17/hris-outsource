@@ -260,8 +260,8 @@ func TestApproveL1_SelfApprove403(t *testing.T) {
 func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	// F6.1 grant-lot: 12 amount, 4 consumed → remaining 8 >= 3 (FIFO commit target).
-	h.seedGrant("SWP-LG-8001", empAgent, 12, 4, 0, "", ymd(2026, time.December, 31))
+	// per-type window: entitled 12, used 4 → remaining 8 >= 3 (commit target).
+	h.seedWindow("SWP-LQ-8001", empAgent, 12, 4, 0)
 	h.seedRequest("SWP-LR-8002", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 	// the loop-closer returns one cancelled schedule entry → schedule_impact[].
 	h.schedule.cancelReturns[empAgent] = []svc.ScheduleImpact{
@@ -276,9 +276,9 @@ func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	if d["status"] != "APPROVED" {
 		t.Errorf("status = %v, want APPROVED (ApprovedFinalExample)", d["status"])
 	}
-	// grant-lot consumed by the duration (4 + 3).
-	if g := h.grant.lots["SWP-LG-8001"]; g.Consumed != 7 {
-		t.Errorf("lot consumed = %d, want 7 (4+3)", g.Consumed)
+	// per-type window used grows by the duration (4 + 3).
+	if w := h.meterStore.windowFor(empAgent, leaveAnn, "2026"); w == nil || w.UsedDays != 7 {
+		t.Errorf("window used = %v, want 7 (4+3)", w)
 	}
 	// INV-3 fired: Cancel called once + 3 approved_leave_days inserted (one per day).
 	if len(h.schedule.cancelCalls) != 1 {
@@ -301,27 +301,24 @@ func TestApproveFinal_DeductsAndFiresINV3(t *testing.T) {
 	}
 }
 
-func TestApproveFinal_OverBalance422BalanceRecheck(t *testing.T) {
+func TestApproveFinal_OverBalance422QuotaExceeded(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	// F6.1 grant-lot: 12 amount, 11 consumed → remaining 1 < 3 (block target).
-	h.seedGrant("SWP-LG-8002", empAgent, 12, 11, 0, "", ymd(2026, time.December, 31))
+	// per-type window: entitled 12, used 11 → remaining 1 < 3 (block target).
+	h.seedWindow("SWP-LQ-8002", empAgent, 12, 11, 0)
 	h.seedRequest("SWP-LR-8003", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 
 	rr := h.do("POST", "/leave-requests/SWP-LR-8003:approve-final", nil)
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if got := errCode(t, rr); got != "BALANCE_RECHECK_FAILED" {
-		t.Fatalf("code = %s, want BALANCE_RECHECK_FAILED (ErrorBalanceRecheckExample)", got)
+	// Per-type meter blocks an over-cap commit with QUOTA_EXCEEDED (LA-5; override CTA).
+	if got := errCode(t, rr); got != "QUOTA_EXCEEDED" {
+		t.Fatalf("code = %s, want QUOTA_EXCEEDED", got)
 	}
-	f := errFields(t, rr)
-	if f["requires_override"] != "true" {
-		t.Errorf("fields.requires_override = %v, want \"true\"", f["requires_override"])
-	}
-	// no state change, no consume on a blocked approval (never negative).
-	if g := h.grant.lots["SWP-LG-8002"]; g.Consumed != 11 {
-		t.Errorf("lot consumed = %d, want 11 (no consume on block)", g.Consumed)
+	// no state change, no commit on a blocked approval (never negative).
+	if w := h.meterStore.windowFor(empAgent, leaveAnn, "2026"); w == nil || w.UsedDays != 11 {
+		t.Errorf("window used = %v, want 11 (no commit on block)", w)
 	}
 	if req := h.leave.requests["SWP-LR-8003"]; req.Status != dom.LeaveStatusPendingHR {
 		t.Errorf("status = %s, want PENDING_HR (unchanged)", req.Status)
@@ -338,8 +335,8 @@ func TestApproveFinal_OverBalance422BalanceRecheck(t *testing.T) {
 func TestApproveOverride_ForceApprovesOverBalance(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedLeaveType(leaveAnn, "ANNUAL", true)
-	// F6.1 grant-lot: 12 amount, 11 consumed → remaining 1 < 3 (override target).
-	h.seedGrant("SWP-LG-8002", empAgent, 12, 11, 0, "", ymd(2026, time.December, 31))
+	// per-type window: entitled 12, used 11 → remaining 1 < 3 (override target).
+	h.seedWindow("SWP-LQ-8002", empAgent, 12, 11, 0)
 	h.seedRequest("SWP-LR-8003", cmpLed, empAgent, dom.LeaveStatusPendingHR, leaveStart, leaveEnd, 3)
 	h.schedule.cancelReturns[empAgent] = []svc.ScheduleImpact{
 		{ScheduleID: "SWP-SCH-6002", Date: leaveStart, NewStatus: "CANCELLED_BY_LEAVE"},
@@ -370,10 +367,10 @@ func TestApproveOverride_ForceApprovesOverBalance(t *testing.T) {
 	if !sawOverride {
 		t.Errorf("timeline has no HR/OVERRIDE_APPROVED entry: %v", tl)
 	}
-	// Over-balance override force-approves; the grant-lot draws only the available
-	// 1 day (never negative — LQ-5; the shortfall is HR pre-funding a new lot).
-	if g := h.grant.lots["SWP-LG-8002"]; g.Consumed != 12 {
-		t.Errorf("lot consumed = %d, want 12 (11+1 available; never negative)", g.Consumed)
+	// Over-balance override force-commits the full duration onto the window
+	// (entitled 12, used 11 + 3 = 14; the override is the audited authorization).
+	if w := h.meterStore.windowFor(empAgent, leaveAnn, "2026"); w == nil || w.UsedDays != 14 {
+		t.Errorf("window used = %v, want 14 (11+3 forced)", w)
 	}
 	if len(h.schedule.insertedDays) != 3 {
 		t.Errorf("INV-3 approved_leave_days inserts = %d, want 3", len(h.schedule.insertedDays))

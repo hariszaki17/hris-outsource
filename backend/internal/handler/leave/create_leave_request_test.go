@@ -181,9 +181,9 @@ func TestCreateLeaveRequest_QuotaExceeded422(t *testing.T) {
 	if c := errCode(t, rr); c != "QUOTA_EXCEEDED" {
 		t.Errorf("code = %s, want QUOTA_EXCEEDED", c)
 	}
-	f := errFields(t, rr)
-	if f["requested_days"] == nil || f["remaining_days"] == nil {
-		t.Errorf("QUOTA_EXCEEDED missing requested_days/remaining_days: %v", f)
+	// Per-type meter reports the over-cap as a localized leave_type_id field message.
+	if f := errFields(t, rr); f["leave_type_id"] == nil {
+		t.Errorf("QUOTA_EXCEEDED missing leave_type_id detail: %v", f)
 	}
 }
 
@@ -265,24 +265,6 @@ func TestGetLeaveRequest_AgentSelf200(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// balance SELF guard
-// ---------------------------------------------------------------------------
-
-func TestGetLeaveBalanceByEmployee_AgentSelf200(t *testing.T) {
-	h := newHarness(t, auth.RoleAgent, cmpLed, empAgent)
-	h.seedGrant("SWP-LG-7050", empAgent, 12, 0, 0, "", ymd(2027, time.January, 1))
-	rr := h.do("GET", "/leave-balances/by-employee/"+empAgent, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestGetLeaveBalanceByEmployee_AgentOther403(t *testing.T) {
-	h := newHarness(t, auth.RoleAgent, cmpLed, empAgent)
-	h.seedGrant("SWP-LG-7051", "SWP-EMP-9999", 12, 0, 0, "", ymd(2027, time.January, 1))
-	rr := h.do("GET", "/leave-balances/by-employee/SWP-EMP-9999", nil)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
+// (The aggregate grant-pool GET /leave-balances/by-employee/{id} was retired with the
+// grant-lot ledger 2026-06-12; the per-type GET .../{id}/types replaces it and is
+// covered against the live meter elsewhere.)

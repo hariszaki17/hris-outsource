@@ -25,7 +25,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -403,7 +402,6 @@ func (r *fakeLeaveRepo) SetBalanceSnapshot(_ context.Context, _ pgx.Tx, p svc.Ba
 	if p.RequiresOverride != nil {
 		req.BalanceCheck.RequiresOverride = *p.RequiresOverride
 	}
-	req.BalanceCheck.Earmark = p.Earmark
 	r.requests[p.ID] = req
 	return nil
 }
@@ -665,292 +663,20 @@ func (r *fakeScheduleRepo) CountLeaveDuration(_ context.Context, _ string, start
 
 var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
 
-// ---------------------------------------------------------------------------
-// fakeGrantRepo — in-memory svc.GrantRepository (F6.1 grant-lot ledger).
-// ---------------------------------------------------------------------------
-
-type fakeEmp struct {
-	fullName, nik, nip string
-}
-
-type fakeGrantRepo struct {
-	lots map[string]*dom.LeaveGrant
-	emps map[string]fakeEmp // employee_id → name/nik/nip for ListLeaveBalances
-	cons []dom.LeaveConsumption
-	seq  int
-}
-
-func newFakeGrantRepo() *fakeGrantRepo {
-	return &fakeGrantRepo{lots: map[string]*dom.LeaveGrant{}, emps: map[string]fakeEmp{}}
-}
-
-func (r *fakeGrantRepo) put(g dom.LeaveGrant) { gg := g; r.lots[g.ID] = &gg }
-
-func (r *fakeGrantRepo) CreateLeaveGrant(_ context.Context, _ pgx.Tx, p svc.CreateGrantParams) (dom.LeaveGrant, error) {
-	r.seq++
-	id := "SWP-LG-" + itoa(8000+r.seq)
-	g := dom.LeaveGrant{ID: id, EmployeeID: p.EmployeeID, Amount: p.Amount, Source: p.Source, Earmark: p.Earmark, Remark: p.Remark, EffectiveFrom: p.EffectiveFrom, ExpiresAt: p.ExpiresAt, GrantedAt: fixedNow}
-	r.lots[id] = &g
-	return g, nil
-}
-func (r *fakeGrantRepo) GetLeaveGrant(_ context.Context, id string) (dom.LeaveGrant, error) {
-	if l, ok := r.lots[id]; ok {
-		return *l, nil
-	}
-	return dom.LeaveGrant{}, domain.ErrNotFound
-}
-func (r *fakeGrantRepo) GetLeaveGrantForUpdate(_ context.Context, _ pgx.Tx, id string) (dom.LeaveGrant, error) {
-	return r.GetLeaveGrant(context.Background(), id)
-}
-func (r *fakeGrantRepo) ListLeaveGrants(_ context.Context, f svc.GrantFilter, now time.Time) ([]dom.LeaveGrant, error) {
-	var out []dom.LeaveGrant
-	for _, l := range r.lots {
-		if f.EmployeeID != nil && l.EmployeeID != *f.EmployeeID {
-			continue
-		}
-		if !f.IncludeExpired && !l.IsActive(now) {
-			continue
-		}
-		out = append(out, *l)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].ExpiresAt.Equal(out[j].ExpiresAt) {
-			return out[i].ExpiresAt.Before(out[j].ExpiresAt)
-		}
-		return out[i].ID < out[j].ID
-	})
-	if f.Limit > 0 && len(out) > f.Limit {
-		out = out[:f.Limit]
-	}
-	return out, nil
-}
-func (r *fakeGrantRepo) ListLeaveBalances(_ context.Context, f svc.BalanceListFilter, now time.Time) ([]dom.EmployeeLeaveBalance, error) {
-	// Aggregate active lots per employee (mirrors the SQL). Only employees with >= 1
-	// active (non-expired) lot appear.
-	agg := map[string]*dom.EmployeeLeaveBalance{}
-	for _, l := range r.lots {
-		if !l.IsActive(now) {
-			continue
-		}
-		emp, ok := r.emps[l.EmployeeID]
-		if !ok {
-			continue
-		}
-		if f.Q != nil {
-			q := strings.ToLower(*f.Q)
-			if !strings.Contains(strings.ToLower(emp.fullName), q) &&
-				!strings.Contains(strings.ToLower(emp.nik), q) &&
-				!strings.Contains(strings.ToLower(emp.nip), q) {
-				continue
-			}
-		}
-		b := agg[l.EmployeeID]
-		if b == nil {
-			b = &dom.EmployeeLeaveBalance{EmployeeID: l.EmployeeID, FullName: emp.fullName, NIK: emp.nik, NIP: emp.nip}
-			agg[l.EmployeeID] = b
-		}
-		rem := l.Remaining()
-		if l.Earmark == nil {
-			b.PoolTotal += l.Amount
-			b.PoolConsumed += l.Consumed
-			b.PoolPending += l.Pending
-			b.PoolRemaining += rem
-		} else {
-			b.EarmarkedRemaining += rem
-		}
-		b.LotCount++
-		if rem > 0 {
-			exp := l.ExpiresAt
-			if b.NextExpiry == nil || exp.Before(*b.NextExpiry) {
-				b.NextExpiry = &exp
-			}
-		}
-	}
-	out := make([]dom.EmployeeLeaveBalance, 0, len(agg))
-	for _, b := range agg {
-		out = append(out, *b)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FullName != out[j].FullName {
-			return out[i].FullName < out[j].FullName
-		}
-		return out[i].EmployeeID < out[j].EmployeeID
-	})
-	// keyset cursor
-	if f.CursorFullName != nil && f.CursorID != nil {
-		var trimmed []dom.EmployeeLeaveBalance
-		for _, b := range out {
-			if b.FullName > *f.CursorFullName || (b.FullName == *f.CursorFullName && b.EmployeeID > *f.CursorID) {
-				trimmed = append(trimmed, b)
-			}
-		}
-		out = trimmed
-	}
-	if f.Limit > 0 && len(out) > f.Limit {
-		out = out[:f.Limit]
-	}
-	return out, nil
-}
-
-func (r *fakeGrantRepo) PatchLeaveGrant(_ context.Context, _ pgx.Tx, p svc.PatchGrantParams) (dom.LeaveGrant, error) {
-	l := r.lots[p.ID]
-	if l == nil {
-		return dom.LeaveGrant{}, domain.ErrNotFound
-	}
-	if p.Amount != nil {
-		l.Amount = *p.Amount
-	}
-	if p.ExpiresAt != nil {
-		l.ExpiresAt = *p.ExpiresAt
-	}
-	if p.SetEarmark {
-		l.Earmark = p.Earmark
-	}
-	return *l, nil
-}
-func (r *fakeGrantRepo) ListConsumptionsForGrant(_ context.Context, grantID string) ([]dom.LeaveConsumption, error) {
-	var out []dom.LeaveConsumption
-	for _, c := range r.cons {
-		if c.GrantID == grantID {
-			out = append(out, c)
-		}
-	}
-	return out, nil
-}
-func (r *fakeGrantRepo) ListConsumptionsForRequest(_ context.Context, requestID string) ([]dom.LeaveConsumption, error) {
-	var out []dom.LeaveConsumption
-	for _, c := range r.cons {
-		if c.LeaveRequestID == requestID {
-			out = append(out, c)
-		}
-	}
-	return out, nil
-}
-func (r *fakeGrantRepo) GetActiveLotsForAllocation(_ context.Context, _ pgx.Tx, employeeID, earmarkMatch string, now time.Time) ([]dom.LeaveGrant, error) {
-	var out []dom.LeaveGrant
-	for _, l := range r.lots {
-		if l.EmployeeID != employeeID || !l.IsActive(now) {
-			continue
-		}
-		if earmarkMatch == "__null" {
-			if l.Earmark != nil {
-				continue
-			}
-		} else if l.Earmark == nil || *l.Earmark != earmarkMatch {
-			continue
-		}
-		out = append(out, *l)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].ExpiresAt.Equal(out[j].ExpiresAt) {
-			return out[i].ExpiresAt.Before(out[j].ExpiresAt)
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out, nil
-}
-func (r *fakeGrantRepo) ReservePending(_ context.Context, _ pgx.Tx, id string, days int) error {
-	r.lots[id].Pending += days
-	return nil
-}
-func (r *fakeGrantRepo) CommitReservation(_ context.Context, _ pgx.Tx, id string, days int) error {
-	l := r.lots[id]
-	if l.Pending -= days; l.Pending < 0 {
-		l.Pending = 0
-	}
-	l.Consumed += days
-	return nil
-}
-func (r *fakeGrantRepo) ReleasePending(_ context.Context, _ pgx.Tx, id string, days int) error {
-	l := r.lots[id]
-	if l.Pending -= days; l.Pending < 0 {
-		l.Pending = 0
-	}
-	return nil
-}
-func (r *fakeGrantRepo) ReverseConsumption(_ context.Context, _ pgx.Tx, id string, days int) error {
-	l := r.lots[id]
-	if l.Consumed -= days; l.Consumed < 0 {
-		l.Consumed = 0
-	}
-	return nil
-}
-func (r *fakeGrantRepo) ApplyConsumption(_ context.Context, _ pgx.Tx, requestID, grantID string, days int) (dom.LeaveConsumption, error) {
-	r.seq++
-	c := dom.LeaveConsumption{ID: "SWP-LC-" + itoa(r.seq), LeaveRequestID: requestID, GrantID: grantID, Days: days, CreatedAt: fixedNow}
-	r.cons = append(r.cons, c)
-	return c, nil
-}
-func (r *fakeGrantRepo) DeleteConsumptionsForRequest(_ context.Context, _ pgx.Tx, requestID string) error {
-	var keep []dom.LeaveConsumption
-	for _, c := range r.cons {
-		if c.LeaveRequestID != requestID {
-			keep = append(keep, c)
-		}
-	}
-	r.cons = keep
-	return nil
-}
-func (r *fakeGrantRepo) SumActiveBalanceByEarmark(_ context.Context, employeeID string, now time.Time) ([]svc.EarmarkBalanceGroup, error) {
-	groups := map[string]*svc.EarmarkBalanceGroup{}
-	for _, l := range r.lots {
-		if l.EmployeeID != employeeID || !l.IsActive(now) {
-			continue
-		}
-		key := ""
-		if l.Earmark != nil {
-			key = *l.Earmark
-		}
-		g := groups[key]
-		if g == nil {
-			g = &svc.EarmarkBalanceGroup{}
-			if l.Earmark != nil {
-				e := *l.Earmark
-				g.Earmark = &e
-			}
-			groups[key] = g
-		}
-		g.Remaining += l.Remaining()
-		g.Pending += l.Pending
-		exp := l.ExpiresAt
-		if g.NextExpiry == nil || exp.Before(*g.NextExpiry) {
-			g.NextExpiry = &exp
-		}
-	}
-	var out []svc.EarmarkBalanceGroup
-	for _, g := range groups {
-		out = append(out, *g)
-	}
-	return out, nil
-}
-func (r *fakeGrantRepo) FindExpiredLotsWithPending(_ context.Context, today time.Time, _ int) ([]svc.ExpiredLot, error) {
-	var out []svc.ExpiredLot
-	for _, l := range r.lots {
-		if l.ExpiresAt.Before(today) && l.Pending > 0 {
-			out = append(out, svc.ExpiredLot{ID: l.ID, EmployeeID: l.EmployeeID, ExpiresAt: l.ExpiresAt, PendingDays: l.Pending})
-		}
-	}
-	return out, nil
-}
-func (r *fakeGrantRepo) ZeroLotPending(_ context.Context, _ pgx.Tx, id string) error {
-	r.lots[id].Pending = 0
-	return nil
-}
-
-var _ svc.GrantRepository = (*fakeGrantRepo)(nil)
 
 // ---------------------------------------------------------------------------
 // harness — mounts the REAL services + handler over the fakes.
 // ---------------------------------------------------------------------------
 
 type harness struct {
-	router    *chi.Mux
-	leave     *fakeLeaveRepo
-	quota     *fakeQuotaRepo
-	grant     *fakeGrantRepo
-	schedule  *fakeScheduleRepo
-	idem      *stubIdempotency
-	principal auth.Principal
+	router      *chi.Mux
+	leave       *fakeLeaveRepo
+	quota       *fakeQuotaRepo
+	meterStore  *fakeMeterStore
+	meterReader *fakeMeterReader
+	schedule    *fakeScheduleRepo
+	idem        *stubIdempotency
+	principal   auth.Principal
 }
 
 // newHarness builds the E6 leave slice over the fakes. principalRole is the
@@ -960,27 +686,28 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	t.Helper()
 	lrepo := newFakeLeaveRepo()
 	qrepo := newFakeQuotaRepo()
-	grepo := newFakeGrantRepo()
+	mstore := newFakeMeterStore()
+	mreader := newFakeMeterReader()
 	srepo := newFakeScheduleRepo()
 
-	gsvc := svc.NewGrantService(grepo, &fakeTxRunner{})
-	gsvc.SetClock(func() time.Time { return fixedNow })
-	lsvc := svc.NewLeaveService(lrepo, gsvc, srepo, &fakeTxRunner{})
+	lsvc := svc.NewLeaveService(lrepo, srepo, &fakeTxRunner{})
 	lsvc.SetClock(func() time.Time { return fixedNow })
+	lsvc.SetMeter(svc.NewQuotaMeter(mstore, mreader)) // per-type ledger (2026-06-12)
 	qsvc := svc.NewQuotaService(qrepo, &fakeTxRunner{})
 	qsvc.SetClock(func() time.Time { return fixedNow })
 	csvc := svc.NewCalendarService(lrepo)
 	csvc.SetClock(func() time.Time { return fixedNow })
 
-	handler := leavehandler.NewHandler(lsvc, qsvc, gsvc, csvc)
+	handler := leavehandler.NewHandler(lsvc, qsvc, csvc)
 	idem := newStubIdempotency()
 
 	h := &harness{
-		leave:    lrepo,
-		quota:    qrepo,
-		grant:    grepo,
-		schedule: srepo,
-		idem:     idem,
+		leave:       lrepo,
+		quota:       qrepo,
+		meterStore:  mstore,
+		meterReader: mreader,
+		schedule:    srepo,
+		idem:        idem,
 		principal: auth.Principal{
 			UserID:     "SWP-USR-0001",
 			Role:       principalRole,
@@ -1011,7 +738,7 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/leave-requests", handler.ListLeaveRequests)
 		r.Get("/leave-requests/{id}", handler.GetLeaveRequest)
-		r.Get("/leave-balances/by-employee/{employee_id}", handler.GetLeaveBalanceByEmployee)
+		r.Get("/leave-balances/by-employee/{employee_id}/types", handler.GetEmployeeTypeBalances)
 	})
 	// Staff-only reads + L1/reject/cancel-approved: super/hr/leader.
 	r.Group(func(r chi.Router) {
@@ -1020,9 +747,6 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/leave-requests/{id}:reject", handler.RejectLeaveRequest)
 		r.Get("/leave-quotas", handler.ListLeaveQuotas)
 		r.Get("/leave-calendar", handler.GetLeaveCalendar)
-		r.Get("/leave-grants", handler.ListLeaveGrants)
-		r.Get("/leave-grants/{id}", handler.GetLeaveGrant)
-		r.Get("/leave-balances", handler.ListLeaveBalances)
 		r.With(idem.Handler).Post("/leave-requests/{id}:cancel-approved", handler.CancelApprovedLeaveRequest)
 	})
 	// Agent file-a-request + own-request actions: agent/hr/super.
@@ -1040,8 +764,6 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-		r.With(idem.Handler).Post("/leave-grants", handler.CreateLeaveGrant)
-		r.With(idem.Handler).Patch("/leave-grants/{id}", handler.PatchLeaveGrant)
 		r.With(idem.Handler).Post("/leave-quotas/{id}:adjust", handler.AdjustLeaveQuota)
 		r.With(idem.Handler).Post("/leave-quotas:bulk-grant", handler.BulkGrantLeaveQuotas)
 	})
@@ -1136,30 +858,31 @@ func (h *harness) seedQuota(id, employee, leaveType string, period, total, used,
 	return q
 }
 
-// seedGrant plants a leave_grants lot (F6.1) for the FIFO allocator. earmark "" = pool.
-func (h *harness) seedGrant(id, employee string, amount, consumed, pending int, earmark string, expires time.Time) dom.LeaveGrant {
-	var em *string
-	if earmark != "" {
-		e := earmark
-		em = &e
+// seedGrant seeds an employee's leave balance under the per-type ledger: it sets the
+// annual entitlement (so Reserve auto-opens the ANNUAL_POOL window at `amount`), and —
+// when consumed/pending are non-zero — pre-opens the current-year window pre-loaded
+// with that usage. The `earmark`/`expires` params are retained for call-site
+// compatibility but no longer meaningful (the grant-lot ledger is gone). All callers
+// file against the annual type (leaveAnn).
+func (h *harness) seedGrant(id, employee string, amount, consumed, pending int, _ string, _ time.Time) {
+	h.meterReader.annual[employee] = amount
+	if consumed == 0 && pending == 0 {
+		return
 	}
-	g := dom.LeaveGrant{
-		ID: id, EmployeeID: employee, Amount: amount, Consumed: consumed, Pending: pending,
-		Source: dom.GrantSourceAnnual, Earmark: em, Remark: strp("seed lot"),
-		GrantedAt: ymd(2026, time.January, 1), EffectiveFrom: ymd(2026, time.January, 1), ExpiresAt: expires,
-		CreatedAt: fixedNow, UpdatedAt: fixedNow, EmployeeName: strp("Agent " + employee),
+	h.meterStore.byID[id] = &dom.LeaveQuota{
+		ID: id, EmployeeID: employee, LeaveTypeID: leaveAnn, PeriodKey: "2026",
+		EntitledDays: amount, UsedDays: consumed, PendingDays: pending,
 	}
-	h.grant.put(g)
-	if _, ok := h.grant.emps[employee]; !ok {
-		h.grant.emps[employee] = fakeEmp{fullName: "Agent " + employee, nik: "NIK-" + employee, nip: "NIP-" + employee}
-	}
-	return g
 }
 
-// seedEmp registers an employee's name/nik/nip for the ListLeaveBalances aggregate
-// (the JOIN employees source). Call before seedGrant to control the search fields.
-func (h *harness) seedEmp(employee, fullName, nik, nip string) {
-	h.grant.emps[employee] = fakeEmp{fullName: fullName, nik: nik, nip: nip}
+// seedWindow pre-opens a per-type quota window (employee, leaveAnn, current year)
+// with the given entitled/used/pending. Returns the window id for assertions.
+func (h *harness) seedWindow(id, employee string, entitled, used, pending int) {
+	h.meterReader.annual[employee] = entitled
+	h.meterStore.byID[id] = &dom.LeaveQuota{
+		ID: id, EmployeeID: employee, LeaveTypeID: leaveAnn, PeriodKey: "2026",
+		EntitledDays: entitled, UsedDays: used, PendingDays: pending,
+	}
 }
 
 // seedCalendarEntry plants a leave_calendar entry directly (status-filtered on read).

@@ -28,9 +28,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
-	leaverepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/leave"
 	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
-	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
 )
 
 // maxRunDuration bounds a single sweep invocation so a runaway job can't hang a
@@ -81,28 +79,10 @@ func run() error {
 		return nil
 	}
 
-	// leave-expiry-sweep (F6.1): release dangling pending_days on lapsed grant-lots.
-	runLeaveExpiry := func() error {
-		svc := leavesvc.NewLeaveExpirySweepService(leaverepo.NewGrantRepo(pool), txm, 0)
-		n, err := svc.Sweep(ctx)
-		if err != nil {
-			return fmt.Errorf("leave-expiry-sweep: %w", err)
-		}
-		slog.Info("leave-expiry-sweep done", "lots_swept", n)
-		return nil
-	}
-
 	switch job {
-	case "absence-sweep":
+	case "absence-sweep", "all":
 		return runAbsence()
-	case "leave-expiry-sweep":
-		return runLeaveExpiry()
-	case "all":
-		if err := runAbsence(); err != nil {
-			return err
-		}
-		return runLeaveExpiry()
 	default:
-		return fmt.Errorf("unknown job %q (want absence-sweep|leave-expiry-sweep|all)", job)
+		return fmt.Errorf("unknown job %q (want absence-sweep|all)", job)
 	}
 }

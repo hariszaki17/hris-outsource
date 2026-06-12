@@ -27,19 +27,16 @@ import (
 // LeaveService implements the leave-request approval business logic.
 type LeaveService struct {
 	repo     LeaveRepository
-	grants   *GrantService
-	gr       GrantRepository
-	meter    *QuotaMeter // per-type ledger (2026-06-12); when set, supersedes grants
+	meter    *QuotaMeter // per-type cap_basis ledger (2026-06-12; the sole balance model)
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
 	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
-// SetMeter wires the per-type QuotaMeter (EPICS §8 2026-06-12). When set, the
-// reserve/commit/release/reverse flows meter against per-type cap_basis windows
-// instead of grant-lots. Production (cmd/api) sets it; grant-era unit tests that
-// leave it nil keep exercising the legacy FIFO path until Phase 7 migrates them.
+// SetMeter wires the per-type QuotaMeter (EPICS §8 2026-06-12): reserve/commit/
+// release/reverse meter against per-type cap_basis windows. Production (cmd/api)
+// sets it; tests wire an in-memory meter via the same hook.
 func (s *LeaveService) SetMeter(m *QuotaMeter) { s.meter = m }
 
 // AdjustTypeQuota applies an HR per-type quota adjustment (LQ-6 / "Sesuaikan Kuota"):
@@ -85,34 +82,14 @@ func mapMeterErr(err error) error {
 	return err
 }
 
-// NewLeaveService wires the leave service. grants is the grant-lot allocator (FIFO
-// reserve/commit/release/reverse); the schedule port is the INV-3 loop-closer surface.
-func NewLeaveService(repo LeaveRepository, grants *GrantService, schedule SchedulePort, txm TxRunner) *LeaveService {
-	return &LeaveService{repo: repo, grants: grants, gr: grants.repo, schedule: schedule, txm: txm, now: time.Now}
+// NewLeaveService wires the leave service. The per-type QuotaMeter is attached via
+// SetMeter (production + tests); the schedule port is the INV-3 loop-closer surface.
+func NewLeaveService(repo LeaveRepository, schedule SchedulePort, txm TxRunner) *LeaveService {
+	return &LeaveService{repo: repo, schedule: schedule, txm: txm, now: time.Now}
 }
 
-// SetClock overrides the time source (tests only). Propagates to the allocator so FIFO
-// active-lot selection uses the same clock.
-func (s *LeaveService) SetClock(c Clock) {
-	s.now = c
-	if s.grants != nil {
-		s.grants.SetClock(c)
-	}
-}
-
-// LeaveTypeInfo gained an Earmark field (the purpose code) so the allocator can filter
-// to matching lots. earmarkForType maps a leave type to its earmark purpose: an
-// earmarked type (MATERNITY / STATUTORY) draws ONLY matching lots (LQ-10); an ordinary
-// type draws the flat pool (earmark nil).
-func earmarkForType(lt LeaveTypeInfo) *string {
-	switch lt.Earmark {
-	case "":
-		return nil
-	default:
-		e := lt.Earmark
-		return &e
-	}
-}
+// SetClock overrides the time source (tests only).
+func (s *LeaveService) SetClock(c Clock) { s.now = c }
 
 // SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe:
 // notify.Dispatch no-ops when the notifier is nil, so existing unit tests that
@@ -285,60 +262,20 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			return serr
 		}
 
-		// 1. resolve the leave type (quota-tracked gate + earmark purpose).
+		// 1. resolve the leave type (for the approved_leave_days code below).
 		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
 		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
 			return lterr
 		}
-		quotaTracked := lt.IsAnnual
-		earmark := earmarkForType(lt)
 
-		// 2. grant-lot allocation: commit the SUBMIT-time reservation, or allocate
-		// fresh at approve when no reservation was held (seeded / HR-on-behalf).
-		var remainingAtCheck *int
-		var committed []dom.AllocationLine
-		if s.meter != nil {
-			if cerr := s.meter.Commit(ctx, tx, CommitInput{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: rec.DurationDays, Override: override,
-			}); cerr != nil {
-				return mapMeterErr(cerr)
-			}
-		} else if quotaTracked {
-			alloc := rec.BalanceCheck.Allocation
-			if len(alloc) > 0 {
-				// Commit the reserved lots (pending→consumed + LeaveConsumption rows).
-				if cerr := s.grants.commit(ctx, tx, id, alloc); cerr != nil {
-					return cerr
-				}
-				committed = alloc
-			} else {
-				// No prior reservation — FIFO allocate fresh at approve time.
-				fresh, available, aerr := s.grants.allocate(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
-				if aerr != nil {
-					return aerr
-				}
-				rem := available
-				remainingAtCheck = &rem
-				if !override && rec.DurationDays > available {
-					return balanceRecheckFailed(rec.DurationDays, available)
-				}
-				// Reserve then commit each freshly-allocated lot (keeps the lot's
-				// pending/consumed bookkeeping consistent). Over-balance overrides commit
-				// only the available split — lots never go negative (LQ-5); the shortfall
-				// is HR's to pre-fund via POST /leave-grants.
-				for _, a := range fresh {
-					if rerr := s.gr.ReservePending(ctx, tx, a.GrantID, a.Days); rerr != nil {
-						return rerr
-					}
-				}
-				if cerr := s.grants.commit(ctx, tx, id, fresh); cerr != nil {
-					return cerr
-				}
-				committed = fresh
-			}
+		// 2. per-type meter: commit the SUBMIT-time reservation (pending→used) against
+		// the cap_basis window. Over-cap blocks unless override (LA-5/LA-8).
+		if cerr := s.meter.Commit(ctx, tx, CommitInput{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: rec.DurationDays, Override: override,
+		}); cerr != nil {
+			return mapMeterErr(cerr)
 		}
-		_ = remainingAtCheck
 
 		// 3. INV-3 loop-closer: cancel overlapping schedule entries (DB
 		// CANCELLED_BY_LEAVE) + INSERT approved_leave_days for each leave date.
@@ -365,7 +302,7 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			}
 		}
 
-		// 4. transition + commit the BalanceCheck snapshot (committed allocation).
+		// 4. transition + commit the BalanceCheck snapshot.
 		req := int(rec.DurationDays)
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 			ID:                      id,
@@ -374,14 +311,13 @@ func (s *LeaveService) finalize(ctx context.Context, id, note string, override b
 			AssignedLeaderID:        rec.Routing.AssignedLeaderID,
 			ClockInConflict:         rec.ClockInConflict,
 			BalanceRequestedDays:    &req,
-			BalanceRemainingAtCheck: remainingAtCheck,
 			BalanceRequiresOverride: boolPtr(override),
 		})
 		if uerr != nil {
 			return uerr
 		}
 		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, &req, remainingAtCheck, boolPtr(override), earmark, committed); serr != nil {
+		if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(override)); serr != nil {
 			return serr
 		}
 
@@ -461,14 +397,10 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 			stage = dom.StageL1
 		}
 		// Release the SUBMIT-time pending reservation (the request never consumed).
-		if s.meter != nil {
-			if rerr := s.meter.Release(ctx, tx, WindowOp{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: rec.DurationDays,
-			}); rerr != nil {
-				return rerr
-			}
-		} else if rerr := s.grants.release(ctx, tx, rec.BalanceCheck.Allocation); rerr != nil {
+		if rerr := s.meter.Release(ctx, tx, WindowOp{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: rec.DurationDays,
+		}); rerr != nil {
 			return rerr
 		}
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
@@ -482,7 +414,7 @@ func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.Leave
 			return uerr
 		}
 		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil); serr != nil {
 			return serr
 		}
 		rsn := reason
@@ -692,28 +624,14 @@ func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveReq
 	if rec.Status != dom.LeaveStatusDraft {
 		return dom.LeaveRequest{}, stateConflict(rec.Status)
 	}
-	lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
-	if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
-		return dom.LeaveRequest{}, lterr
-	}
-	earmark := earmarkForType(lt)
-
-	var alloc []dom.AllocationLine
-	var availPtr *int
-	if s.meter != nil {
-		if _, merr := s.meter.Reserve(ctx, tx, ReserveInput{
-			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-			Days: rec.DurationDays, StartDate: rec.StartDate, Now: s.now(),
-		}); merr != nil {
-			return dom.LeaveRequest{}, mapMeterErr(merr)
-		}
-	} else if lt.IsAnnual {
-		a, available, rerr := s.grants.reserve(ctx, tx, rec.EmployeeID, earmark, rec.DurationDays)
-		if rerr != nil {
-			return dom.LeaveRequest{}, rerr
-		}
-		alloc = a
-		availPtr = &available
+	// Per-type meter: reserve the duration against the type's cap_basis window
+	// (auto-opens a quota-bearing window if absent). QUOTA_EXCEEDED / gate failures
+	// surface here. PER_EVENT / UNCAPPED types reserve no window.
+	if _, merr := s.meter.Reserve(ctx, tx, ReserveInput{
+		EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+		Days: rec.DurationDays, StartDate: rec.StartDate, Now: s.now(),
+	}); merr != nil {
+		return dom.LeaveRequest{}, mapMeterErr(merr)
 	}
 
 	next := dom.LeaveStatusPendingL1
@@ -731,7 +649,7 @@ func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveReq
 		return dom.LeaveRequest{}, uerr
 	}
 	req := rec.DurationDays
-	if serr := s.writeSnapshot(ctx, tx, id, &req, availPtr, boolPtr(false), earmark, alloc); serr != nil {
+	if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(false)); serr != nil {
 		return dom.LeaveRequest{}, serr
 	}
 	if aerr := audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(next), actor, "SUBMIT")); aerr != nil {
@@ -760,14 +678,10 @@ func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.Leave
 		if serr := guardSelfOwn(ctx, rec); serr != nil {
 			return serr
 		}
-		if s.meter != nil {
-			if rerr := s.meter.Release(ctx, tx, WindowOp{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: rec.DurationDays,
-			}); rerr != nil {
-				return rerr
-			}
-		} else if rerr := s.grants.release(ctx, tx, rec.BalanceCheck.Allocation); rerr != nil {
+		if rerr := s.meter.Release(ctx, tx, WindowOp{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: rec.DurationDays,
+		}); rerr != nil {
 			return rerr
 		}
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
@@ -781,7 +695,7 @@ func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.Leave
 			return uerr
 		}
 		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil); serr != nil {
 			return serr
 		}
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "CANCELLED", actor, "CANCEL"))
@@ -815,14 +729,10 @@ func (s *LeaveService) CancelApproved(ctx context.Context, id, reason string) (d
 		if perr := s.guardCancelApprovedActor(ctx, rec); perr != nil {
 			return perr
 		}
-		if s.meter != nil {
-			if rerr := s.meter.Reverse(ctx, tx, WindowOp{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: rec.DurationDays,
-			}); rerr != nil {
-				return rerr
-			}
-		} else if _, rerr := s.grants.reverseConsumptions(ctx, tx, id); rerr != nil {
+		if rerr := s.meter.Reverse(ctx, tx, WindowOp{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: rec.DurationDays,
+		}); rerr != nil {
 			return rerr
 		}
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
@@ -836,7 +746,7 @@ func (s *LeaveService) CancelApproved(ctx context.Context, id, reason string) (d
 			return uerr
 		}
 		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil, nil, nil); serr != nil {
+		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil); serr != nil {
 			return serr
 		}
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", "APPROVED", "CANCELLED", actor, "CANCEL_APPROVED"))
@@ -877,45 +787,19 @@ func (s *LeaveService) Shorten(ctx context.Context, id string, newEnd time.Time,
 		if newDays < 1 {
 			newDays = 1
 		}
-		// Reverse the full consumption, then re-commit newDays.
-		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
-		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
-			return lterr
+		// Reverse the full window charge, then re-commit newDays (override: a shorten
+		// never over-caps relative to the already-approved charge).
+		if rerr := s.meter.Reverse(ctx, tx, WindowOp{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: rec.DurationDays,
+		}); rerr != nil {
+			return rerr
 		}
-		earmark := earmarkForType(lt)
-		var committed []dom.AllocationLine
-		if s.meter != nil {
-			if rerr := s.meter.Reverse(ctx, tx, WindowOp{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: rec.DurationDays,
-			}); rerr != nil {
-				return rerr
-			}
-			if cerr := s.meter.Commit(ctx, tx, CommitInput{
-				EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-				StartDate: rec.StartDate, Days: newDays, Override: true,
-			}); cerr != nil {
-				return mapMeterErr(cerr)
-			}
-		} else {
-			if _, rerr := s.grants.reverseConsumptions(ctx, tx, id); rerr != nil {
-				return rerr
-			}
-			if lt.IsAnnual && newDays > 0 {
-				fresh, _, aerr := s.grants.allocate(ctx, tx, rec.EmployeeID, earmark, newDays)
-				if aerr != nil {
-					return aerr
-				}
-				for _, a := range fresh {
-					if perr := s.gr.ReservePending(ctx, tx, a.GrantID, a.Days); perr != nil {
-						return perr
-					}
-				}
-				if cerr := s.grants.commit(ctx, tx, id, fresh); cerr != nil {
-					return cerr
-				}
-				committed = fresh
-			}
+		if cerr := s.meter.Commit(ctx, tx, CommitInput{
+			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+			StartDate: rec.StartDate, Days: newDays, Override: true,
+		}); cerr != nil {
+			return mapMeterErr(cerr)
 		}
 		updated, uerr := s.repo.UpdateLeaveRequestDates(ctx, tx, id, rec.StartDate, newEnd, newDays)
 		if uerr != nil {
@@ -923,7 +807,7 @@ func (s *LeaveService) Shorten(ctx context.Context, id string, newEnd time.Time,
 		}
 		out = updated
 		req := newDays
-		if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(false), earmark, committed); serr != nil {
+		if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(false)); serr != nil {
 			return serr
 		}
 		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", "APPROVED", "APPROVED", actor, "SHORTEN"))
@@ -1150,18 +1034,13 @@ func deref(p *string) string {
 func boolPtr(b bool) *bool { return &b }
 
 // writeSnapshot persists the openapi BalanceCheck snapshot (requested/remaining/
-// requires_override/earmark + the marshalled FIFO allocation) on the request.
-func (s *LeaveService) writeSnapshot(ctx context.Context, tx pgx.Tx, id string, requested, remaining *int, requiresOverride *bool, earmark *string, alloc []dom.AllocationLine) error {
-	raw, merr := marshalAllocation(alloc)
-	if merr != nil {
-		return merr
-	}
+// requires_override) on the request. Under the per-type ledger there is no per-lot
+// allocation or earmark split, so those snapshot columns are left null.
+func (s *LeaveService) writeSnapshot(ctx context.Context, tx pgx.Tx, id string, requested, remaining *int, requiresOverride *bool) error {
 	return s.repo.SetBalanceSnapshot(ctx, tx, BalanceSnapshotParams{
 		ID:               id,
 		RequestedDays:    requested,
 		RemainingAtCheck: remaining,
 		RequiresOverride: requiresOverride,
-		Earmark:          earmark,
-		Allocation:       raw,
 	})
 }
