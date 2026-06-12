@@ -73,7 +73,15 @@
 - Gate met: **85 leave tests pass** (was 80); build + vet clean.
 - **Deferred to Phase 8:** the legacy grant-era tests (`leave_service_test.go` grant cases, `leave_testkit_test.go` grant fakes) are **deleted alongside GrantService** — they validate the meter-nil fallback until then, so removing them now would lose coverage of a still-live path.
 
-## Phase 8 — Retire grant-lots (Opus, destructive) 🟡 PARTIAL
+## Phase 8 — Retire grant-lots (Opus, destructive) ✅ DONE (B1–B6)
+
+**Landed 2026-06-12** on `feat/backend-impl` in 2 green commits: `cb8124f` (B1–B4: meter-only `LeaveService`, grant code + the grant-lot expiry sweep deleted, tests migrated to an in-memory meter — `meter_fakes_test.go` + service `memStore`) + `eb4ffcf` (B5–B6: migration `00055_drop_grant_lots.sql` drops `leave_grants`/`leave_consumptions` + `leave_requests.balance_earmark/balance_allocation`; `make gen-sqlc`; seed de-granted). Verified: `go build ./...` + `go test ./...` (508 pass) + goose→v55 + `go run ./cmd/seed` on local pg. **Behavior change:** over-cap at approve now surfaces `QUOTA_EXCEEDED` (meter) instead of `BALANCE_RECHECK_FAILED`.
+
+**Deliberately deferred (separate follow-up, NOT in these commits):** the legacy `leave_quotas` columns (`total/used/pending/period/period_start/period_end/closed/is_prorated/prorate_months`) + the dead deprecated `QuotaService.List/Adjust/BulkGrant`/`CheckQuota` + `/leave-quotas` legacy handlers (`OpenQuotaWindow` still inserts the legacy `period*` cols transitionally → own migration + Go-surface removal); and the **OpenAPI grant/deprecated-quota path+schema removal + orval regen** (`docs/api/E6-leave/openapi.yaml` still describes the retired endpoints, ~225 lines).
+
+---
+
+### Original Phase 8 partial notes (kept for reference)
 
 **Done — production surface retired (build-safe):**
 - `internal/server/server.go`: removed the grant routes (`GET/POST/PATCH /leave-grants`, aggregate `GET /leave-balances`) + deprecated `/leave-quotas` (GET, `:adjust`, `:bulk-grant`). Handlers/`GrantService` remain as dead code (unrouted) so the tree + 85 tests stay green; testkit registers its own routes so handler tests are unaffected.
