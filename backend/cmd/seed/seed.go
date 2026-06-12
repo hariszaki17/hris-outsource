@@ -796,6 +796,34 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: upserted leave grant", "id", g.id, "employee_id", g.employeeID, "remaining", g.amount-g.consumed, "earmark", g.earmark)
 	}
 
+	// --- leave_quotas (per-type ledger, 2026-06-12; live path for the meter) ---
+	// ANNUAL_POOL (CT = SWP-LT-001) window per demo agent, mirroring the grant
+	// amounts so GET /leave-balances/by-employee/{id}/types is non-trivial. Legacy
+	// period/period_start/period_end/total are filled transitionally (NOT NULL).
+	// created_by is NULL (FK → users; no seed user row).
+	const lqQ = `
+		INSERT INTO leave_quotas
+			(id, employee_id, leave_type_id, period, period_start, period_end, total,
+			 period_key, entitled_days, used_days, pending_days, source, expires_at, remark, created_by)
+		VALUES ($1, $2, 'SWP-LT-001', $3, $4::date, $5::date, $6,
+		        $7, $6, $8, $9, 'AUTO', $5::date, $10, NULL)
+		ON CONFLICT (employee_id, leave_type_id, period_key) DO NOTHING`
+	pk := fmt.Sprint(year)
+	quotas := []struct {
+		id, employeeID string
+		entitled, used int
+		remark         string
+	}{
+		{"SWP-LQ-8001", "SWP-EMP-3001", 12, 4, "Kuota tahunan " + pk + " (Dewi)."},
+		{"SWP-LQ-8002", "SWP-EMP-2891", 12, 11, "Kuota tahunan " + pk + " (Budi)."},
+	}
+	for _, q := range quotas {
+		if _, err := pool.Pool.Exec(ctx, lqQ, q.id, q.employeeID, year, periodStart, periodEnd, q.entitled, pk, q.used, 0, q.remark); err != nil {
+			return fmt.Errorf("seed leave_quota %q: %w", q.id, err)
+		}
+		slog.Info("seed: upserted leave quota", "id", q.id, "employee_id", q.employeeID, "remaining", q.entitled-q.used)
+	}
+
 	// --- leave_requests (explicit ids; all Pending/terminal targets) ---
 	const lrQ = `
 		INSERT INTO leave_requests

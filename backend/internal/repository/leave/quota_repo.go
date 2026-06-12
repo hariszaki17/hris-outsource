@@ -203,6 +203,45 @@ func (r *QuotaRepo) ListActivePlacedEmployeesForGrant(ctx context.Context, perio
 // Phase 3/4). Window-mutating methods take a tx so the service can row-lock the
 // window (ResolveQuotaWindow ... FOR UPDATE) and mutate atomically.
 
+func derefI32(p *int32) int {
+	if p == nil {
+		return 0
+	}
+	return int(*p)
+}
+
+// ListEmployeeTypeBalances returns every active leave type with the employee's
+// current-window quota (F6.5 per-type balance). curYear="2026", curMonth="2026-06".
+func (r *QuotaRepo) ListEmployeeTypeBalances(ctx context.Context, employeeID, curYear, curMonth string) ([]dom.TypeBalance, error) {
+	rows, err := r.q.ListEmployeeLeaveBalances(ctx, sqlcgen.ListEmployeeLeaveBalancesParams{
+		EmployeeID: employeeID, CurMonth: curMonth, CurYear: curYear,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dom.TypeBalance, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, dom.TypeBalance{
+			LeaveTypeID:      row.ID,
+			Code:             row.Code,
+			Name:             row.Name,
+			CapBasis:         dom.LeaveTypeCapBasis(row.CapBasis),
+			CapValue:         i32ptrToIntPtr(row.CapValue),
+			CapUnit:          row.CapUnit,
+			Paid:             row.Paid,
+			Gender:           row.Gender,
+			RequiresDocument: row.RequiresDocument,
+			Color:            row.Color,
+			HasWindow:        row.QuotaID != nil,
+			Entitled:         derefI32(row.EntitledDays),
+			Used:             derefI32(row.UsedDays),
+			Pending:          derefI32(row.PendingDays),
+			ExpiresAt:        pgDatePtr(row.ExpiresAt),
+		})
+	}
+	return out, nil
+}
+
 func i32ptrToIntPtr(p *int32) *int {
 	if p == nil {
 		return nil

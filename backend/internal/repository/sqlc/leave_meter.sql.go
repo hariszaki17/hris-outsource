@@ -95,3 +95,91 @@ func (q *Queries) GetLeaveTypeCap(ctx context.Context, id string) (GetLeaveTypeC
 	)
 	return i, err
 }
+
+const listEmployeeLeaveBalances = `-- name: ListEmployeeLeaveBalances :many
+SELECT lt.id, lt.code, lt.name, lt.cap_basis, lt.cap_value, lt.cap_unit, lt.paid,
+       lt.gender, lt.requires_document, lt.color,
+       lq.id           AS quota_id,
+       lq.entitled_days,
+       lq.used_days,
+       lq.pending_days,
+       lq.expires_at,
+       lq.period_key
+FROM leave_types lt
+LEFT JOIN leave_quotas lq
+  ON lq.leave_type_id = lt.id
+ AND lq.employee_id   = $1
+ AND lq.period_key    = CASE lt.cap_basis
+        WHEN 'PER_MONTH'      THEN $2::text
+        WHEN 'LIFETIME_ONCE'  THEN 'EMP'
+        WHEN 'SERVICE_UNPAID' THEN 'EMP'
+        ELSE $3::text
+      END
+WHERE lt.deleted_at IS NULL AND lt.status = 'active'
+ORDER BY lt.code
+`
+
+type ListEmployeeLeaveBalancesParams struct {
+	EmployeeID string
+	CurMonth   string
+	CurYear    string
+}
+
+type ListEmployeeLeaveBalancesRow struct {
+	ID               string
+	Code             string
+	Name             string
+	CapBasis         string
+	CapValue         *int32
+	CapUnit          string
+	Paid             bool
+	Gender           string
+	RequiresDocument bool
+	Color            string
+	QuotaID          *string
+	EntitledDays     *int32
+	UsedDays         *int32
+	PendingDays      *int32
+	ExpiresAt        pgtype.Date
+	PeriodKey        *string
+}
+
+// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): every active
+// leave type, LEFT JOINed to the employee's quota row for the CURRENT window of that
+// type's cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no row.
+func (q *Queries) ListEmployeeLeaveBalances(ctx context.Context, arg ListEmployeeLeaveBalancesParams) ([]ListEmployeeLeaveBalancesRow, error) {
+	rows, err := q.db.Query(ctx, listEmployeeLeaveBalances, arg.EmployeeID, arg.CurMonth, arg.CurYear)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEmployeeLeaveBalancesRow{}
+	for rows.Next() {
+		var i ListEmployeeLeaveBalancesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.Name,
+			&i.CapBasis,
+			&i.CapValue,
+			&i.CapUnit,
+			&i.Paid,
+			&i.Gender,
+			&i.RequiresDocument,
+			&i.Color,
+			&i.QuotaID,
+			&i.EntitledDays,
+			&i.UsedDays,
+			&i.PendingDays,
+			&i.ExpiresAt,
+			&i.PeriodKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

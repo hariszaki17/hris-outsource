@@ -485,6 +485,7 @@ func New(d Deps) http.Handler {
 				r.Get("/leave-requests", d.Leave.ListLeaveRequests)
 				r.Get("/leave-requests/{id}", d.Leave.GetLeaveRequest)
 				r.Get("/leave-balances/by-employee/{employee_id}", d.Leave.GetLeaveBalanceByEmployee)
+				r.Get("/leave-balances/by-employee/{employee_id}/types", d.Leave.GetEmployeeTypeBalances) // per-type ledger (2026-06-12)
 			})
 
 			// Staff-only reads (calendar / quota / grant ledger / aggregate balance):
@@ -493,12 +494,9 @@ func New(d Deps) http.Handler {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-l1", d.Leave.ApproveLeaveRequestL1)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:reject", d.Leave.RejectLeaveRequest)
-				r.Get("/leave-quotas", d.Leave.ListLeaveQuotas) // DEPRECATED 2026-06-08
 				r.Get("/leave-calendar", d.Leave.GetLeaveCalendar)
-				// F6.1 grant-lot ledger + aggregate balance reads (company_or_global).
-				r.Get("/leave-grants", d.Leave.ListLeaveGrants)
-				r.Get("/leave-grants/{id}", d.Leave.GetLeaveGrant)
-				r.Get("/leave-balances", d.Leave.ListLeaveBalances)
+				// Grant-lot endpoints retired 2026-06-12 (per-type ledger). Handlers
+				// kept until GrantService is deleted (Phase 8 code/table removal).
 				// HR cancel-approved of an APPROVED leave (reverses the grant lots).
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel-approved", d.Leave.CancelApprovedLeaveRequest)
 			})
@@ -528,12 +526,10 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:shorten", d.Leave.ShortenLeaveRequest)
-				// F6.1 grant-lot writes (global).
-				r.With(d.Idempotency.Handler).Post("/leave-grants", d.Leave.CreateLeaveGrant)
-				r.With(d.Idempotency.Handler).Patch("/leave-grants/{id}", d.Leave.PatchLeaveGrant)
-				// DEPRECATED 2026-06-08 — migration-only.
-				r.With(d.Idempotency.Handler).Post("/leave-quotas/{id}:adjust", d.Leave.AdjustLeaveQuota)
-				r.With(d.Idempotency.Handler).Post("/leave-quotas:bulk-grant", d.Leave.BulkGrantLeaveQuotas)
+				// Per-type ledger (2026-06-12): HR adjusts a type's window entitlement.
+				// Grant-lot writes + deprecated /leave-quotas{:adjust,:bulk-grant}
+				// retired here; handlers deleted with GrantService (Phase 8 code removal).
+				r.With(d.Idempotency.Handler).Post("/leave-quotas:adjust-entitled", d.Leave.AdjustTypeQuota)
 			})
 			// LEAVE slice end (08-02). Phase 8+ appends after this line.
 

@@ -565,3 +565,64 @@ func toCalendarResponse(r svc.CalendarResult) calendarResponse {
 	}
 	return out
 }
+
+// typeBalanceResponse is one row in GET /leave-balances/by-employee/{id}/types
+// (openapi LeaveTypeBalance) — per-type current-window balance (F6.5, 2026-06-12).
+type typeBalanceResponse struct {
+	LeaveTypeID      string  `json:"leave_type_id"`
+	Code             string  `json:"code"`
+	Name             string  `json:"name"`
+	CapBasis         string  `json:"cap_basis"`
+	CapValue         *int    `json:"cap_value,omitempty"`
+	CapUnit          string  `json:"cap_unit"`
+	Paid             bool    `json:"paid"`
+	Gender           string  `json:"gender"`
+	RequiresDocument bool    `json:"requires_document"`
+	Color            string  `json:"color"`
+	HasWindow        bool    `json:"has_window"`
+	EntitledDays     *int    `json:"entitled_days,omitempty"`
+	UsedDays         int     `json:"used_days"`
+	PendingDays      int     `json:"pending_days"`
+	RemainingDays    *int    `json:"remaining_days,omitempty"`
+	ExpiresAt        *string `json:"expires_at,omitempty"`
+}
+
+func toTypeBalanceResponse(b dom.TypeBalance) typeBalanceResponse {
+	out := typeBalanceResponse{
+		LeaveTypeID:      b.LeaveTypeID,
+		Code:             b.Code,
+		Name:             b.Name,
+		CapBasis:         string(b.CapBasis),
+		CapValue:         b.CapValue,
+		CapUnit:          b.CapUnit,
+		Paid:             b.Paid,
+		Gender:           b.Gender,
+		RequiresDocument: b.RequiresDocument,
+		Color:            b.Color,
+		HasWindow:        b.HasWindow,
+		UsedDays:         b.Used,
+		PendingDays:      b.Pending,
+		RemainingDays:    b.Remaining(),
+	}
+	if b.HasWindow {
+		e := b.Entitled
+		out.EntitledDays = &e
+	} else if b.CapValue != nil {
+		e := *b.CapValue
+		out.EntitledDays = &e
+	}
+	if b.ExpiresAt != nil {
+		s := b.ExpiresAt.Format("2006-01-02")
+		out.ExpiresAt = &s
+	}
+	return out
+}
+
+// adjustEntitledRequest is the body of POST /leave-quotas:adjust-entitled (per-type).
+type adjustEntitledRequest struct {
+	EmployeeID  string `json:"employee_id"`
+	LeaveTypeID string `json:"leave_type_id"`
+	StartDate   string `json:"start_date"`
+	Delta       int    `json:"delta"`
+	Reason      string `json:"reason"`
+}

@@ -64,6 +64,10 @@ func (f *fakeStore) ReverseCommittedQuotaDays(_ context.Context, _ pgx.Tx, id st
 func (f *fakeStore) CountApprovedRequestsForType(context.Context, string, string, time.Time, time.Time) (int, error) {
 	return f.prior, nil
 }
+func (f *fakeStore) AdjustQuotaEntitled(_ context.Context, _ pgx.Tx, id string, d int, _ string, _ dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error) {
+	f.win.EntitledDays += d
+	return f.win, nil
+}
 
 // --- pure helpers ---
 

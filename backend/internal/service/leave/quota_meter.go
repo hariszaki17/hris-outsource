@@ -35,6 +35,7 @@ type QuotaMeterStore interface {
 	CommitQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)
 	ReleaseQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)
 	ReverseCommittedQuotaDays(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)
+	AdjustQuotaEntitled(ctx context.Context, tx pgx.Tx, id string, delta int, remark string, adj dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error)
 	CountApprovedRequestsForType(ctx context.Context, employeeID, leaveTypeID string, from, to time.Time) (int, error)
 }
 
@@ -128,26 +129,7 @@ func (m *QuotaMeter) Reserve(ctx context.Context, tx pgx.Tx, in ReserveInput) (R
 	}
 
 	// Quota-bearing: resolve (row-lock) or auto-open the window.
-	key, period, ps, pe, exp := windowFor(cap.CapBasis, in.StartDate)
-	win, err := m.store.ResolveQuotaWindow(ctx, tx, in.EmployeeID, in.LeaveTypeID, key)
-	if errors.Is(err, domain.ErrNotFound) {
-		entitled, eerr := m.entitlementFor(ctx, cap, in.EmployeeID)
-		if eerr != nil {
-			return ReserveResult{}, eerr
-		}
-		win, err = m.store.OpenQuotaWindow(ctx, tx, dom.QuotaWindowSpec{
-			EmployeeID:   in.EmployeeID,
-			LeaveTypeID:  in.LeaveTypeID,
-			PeriodKey:    key,
-			Period:       period,
-			PeriodStart:  ps,
-			PeriodEnd:    pe,
-			EntitledDays: entitled,
-			Source:       dom.QuotaSourceAuto,
-			Remark:       "auto-open " + string(cap.CapBasis),
-			ExpiresAt:    exp,
-		})
-	}
+	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -167,32 +149,130 @@ func (m *QuotaMeter) Reserve(ctx context.Context, tx pgx.Tx, in ReserveInput) (R
 	return ReserveResult{QuotaID: &id, Charge: charge, Paid: cap.Paid}, nil
 }
 
-// Commit moves a held reservation into used (final approval). No-op when quotaID
-// is nil (PER_EVENT / UNCAPPED).
-func (m *QuotaMeter) Commit(ctx context.Context, tx pgx.Tx, leaveTypeID string, quotaID *string, days int) error {
-	return m.move(ctx, tx, leaveTypeID, quotaID, days, m.store.CommitQuotaDays)
+// CommitInput finalizes a request's window charge (approve). The window is
+// re-resolved from (employee, type, start) — no quota_id needs to be persisted.
+type CommitInput struct {
+	EmployeeID  string
+	LeaveTypeID string
+	StartDate   time.Time
+	Days        int
+	Override    bool // HR force-approve past remaining (LA-8)
 }
 
-// Release drops a held reservation (reject / withdraw).
-func (m *QuotaMeter) Release(ctx context.Context, tx pgx.Tx, leaveTypeID string, quotaID *string, days int) error {
-	return m.move(ctx, tx, leaveTypeID, quotaID, days, m.store.ReleaseQuotaDays)
+// WindowOp targets a request's window for release/reverse (no override).
+type WindowOp struct {
+	EmployeeID  string
+	LeaveTypeID string
+	StartDate   time.Time
+	Days        int
 }
 
-// Reverse returns committed used to the balance (cancel / shorten an APPROVED leave).
-func (m *QuotaMeter) Reverse(ctx context.Context, tx pgx.Tx, leaveTypeID string, quotaID *string, days int) error {
-	return m.move(ctx, tx, leaveTypeID, quotaID, days, m.store.ReverseCommittedQuotaDays)
-}
-
-func (m *QuotaMeter) move(ctx context.Context, tx pgx.Tx, leaveTypeID string, quotaID *string, days int, fn func(context.Context, pgx.Tx, string, int) (dom.LeaveQuota, error)) error {
-	if quotaID == nil {
-		return nil
-	}
-	cap, err := m.reader.GetLeaveTypeCap(ctx, leaveTypeID)
+// Commit moves a held reservation into used (final approval). Re-resolves (or
+// opens) the window; for the not-pre-reserved portion it applies the remaining
+// recheck unless Override. No-op for PER_EVENT / UNCAPPED.
+func (m *QuotaMeter) Commit(ctx context.Context, tx pgx.Tx, in CommitInput) error {
+	cap, err := m.reader.GetLeaveTypeCap(ctx, in.LeaveTypeID)
 	if err != nil {
 		return err
 	}
-	_, err = fn(ctx, tx, *quotaID, chargeFor(cap, days))
+	if !cap.CapBasis.QuotaBearing() {
+		return nil
+	}
+	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
+	if err != nil {
+		return err
+	}
+	charge := chargeFor(cap, in.Days)
+	if win.PendingDays < charge && dayCapped(cap) {
+		shortfall := charge - win.PendingDays
+		if !in.Override && win.RemainingPerType() < shortfall {
+			return &GateError{Reason: GateOverCap, Message: "Sisa kuota jenis cuti ini tidak mencukupi."}
+		}
+	}
+	_, err = m.store.CommitQuotaDays(ctx, tx, win.ID, charge)
 	return err
+}
+
+// Release drops a held reservation (reject / withdraw). No-op when no window.
+func (m *QuotaMeter) Release(ctx context.Context, tx pgx.Tx, in WindowOp) error {
+	return m.adjust(ctx, tx, in, m.store.ReleaseQuotaDays)
+}
+
+// Reverse returns committed used to the balance (cancel / shorten an APPROVED leave).
+func (m *QuotaMeter) Reverse(ctx context.Context, tx pgx.Tx, in WindowOp) error {
+	return m.adjust(ctx, tx, in, m.store.ReverseCommittedQuotaDays)
+}
+
+func (m *QuotaMeter) adjust(ctx context.Context, tx pgx.Tx, in WindowOp, fn func(context.Context, pgx.Tx, string, int) (dom.LeaveQuota, error)) error {
+	cap, err := m.reader.GetLeaveTypeCap(ctx, in.LeaveTypeID)
+	if err != nil {
+		return err
+	}
+	if !cap.CapBasis.QuotaBearing() {
+		return nil
+	}
+	key, _, _, _, _ := windowFor(cap.CapBasis, in.StartDate)
+	win, err := m.store.ResolveQuotaWindow(ctx, tx, in.EmployeeID, in.LeaveTypeID, key)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil // nothing held; nothing to do
+	}
+	if err != nil {
+		return err
+	}
+	_, err = fn(ctx, tx, win.ID, chargeFor(cap, in.Days))
+	return err
+}
+
+// AdjustEntitledInput is an HR per-type quota adjustment (LQ-6).
+type AdjustEntitledInput struct {
+	EmployeeID  string
+	LeaveTypeID string
+	StartDate   time.Time // selects the window (cap_basis)
+	Delta       int
+	Actor       string
+	Reason      string
+	Now         time.Time
+}
+
+// AdjustEntitled applies an audited signed delta to a per-type window's entitled
+// days (HR "Sesuaikan Kuota"). Opens the window if absent; refuses dropping entitled
+// below used+pending (INV-6 / no-negative).
+func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEntitledInput) (dom.LeaveQuota, error) {
+	cap, err := m.reader.GetLeaveTypeCap(ctx, in.LeaveTypeID)
+	if err != nil {
+		return dom.LeaveQuota{}, err
+	}
+	if !cap.CapBasis.QuotaBearing() {
+		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Jenis cuti ini tidak punya kuota yang bisa disesuaikan."}
+	}
+	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
+	if err != nil {
+		return dom.LeaveQuota{}, err
+	}
+	if win.EntitledDays+in.Delta < win.UsedDays+win.PendingDays {
+		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Kuota tidak boleh di bawah hari terpakai + tertahan."}
+	}
+	adj := dom.LeaveQuotaAdjustment{Delta: in.Delta, Reason: in.Reason, AdjustedBy: in.Actor, AdjustedAt: in.Now}
+	return m.store.AdjustQuotaEntitled(ctx, tx, win.ID, in.Delta, in.Reason, adj)
+}
+
+// resolveOrOpen row-locks the window, auto-opening it at its entitlement if absent.
+func (m *QuotaMeter) resolveOrOpen(ctx context.Context, tx pgx.Tx, cap dom.LeaveTypeCap, employeeID string, start time.Time) (dom.LeaveQuota, error) {
+	key, period, ps, pe, exp := windowFor(cap.CapBasis, start)
+	win, err := m.store.ResolveQuotaWindow(ctx, tx, employeeID, cap.ID, key)
+	if !errors.Is(err, domain.ErrNotFound) {
+		return win, err
+	}
+	entitled, eerr := m.entitlementFor(ctx, cap, employeeID)
+	if eerr != nil {
+		return dom.LeaveQuota{}, eerr
+	}
+	return m.store.OpenQuotaWindow(ctx, tx, dom.QuotaWindowSpec{
+		EmployeeID: employeeID, LeaveTypeID: cap.ID, PeriodKey: key,
+		Period: period, PeriodStart: ps, PeriodEnd: pe,
+		EntitledDays: entitled, Source: dom.QuotaSourceAuto,
+		Remark: "auto-open " + string(cap.CapBasis), ExpiresAt: exp,
+	})
 }
 
 func (m *QuotaMeter) entitlementFor(ctx context.Context, cap dom.LeaveTypeCap, employeeID string) (int, error) {

@@ -564,6 +564,10 @@ type Querier interface {
 	//   employee_id maps to requester_id.
 	//   date_from/date_to: bound on attendance_shift_date.
 	ListCorrections(ctx context.Context, arg ListCorrectionsParams) ([]ListCorrectionsRow, error)
+	// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): every active
+	// leave type, LEFT JOINed to the employee's quota row for the CURRENT window of that
+	// type's cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no row.
+	ListEmployeeLeaveBalances(ctx context.Context, arg ListEmployeeLeaveBalancesParams) ([]ListEmployeeLeaveBalancesRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
 	// current_* come from the employee's single non-terminal placement (INV-1 → at most one);

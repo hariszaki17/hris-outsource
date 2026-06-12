@@ -35,31 +35,64 @@
 - `internal/service/leave/quota_meter_test.go`: 9 unit tests.
 - Gate met: `go build ./...` clean; **81 leave tests pass**; vet clean. **Meter not yet wired into `LeaveService`** (Phase 4). *(Annual pro-ration LQ-8 deferred to the auto-grant job; on-demand auto-open uses full entitlement.)*
 
-## Phase 4 — Rewire LeaveService (Opus, core swap)
+## Phase 4 — Rewire LeaveService ✅ DONE (Opus, core swap — strangler)
 
-- `leave_service.go`: replace every `s.grants.*` call in `submit/finalize/reject/cancelApproved/shorten` with `quotaMeter.*`. Set `leave_requests.quota_id` for quota-bearing types. LA-5 re-check at final approval reads the window remaining.
-- Wiring in `cmd/api/main.go` / `server.go`: construct `QuotaMeter`, inject into `LeaveService`.
-- Gate: build + existing leave_service tests adjusted minimally to green (full test rewrite in Phase 7).
+- `internal/service/leave/quota_meter.go`: `Commit`/`Release`/`Reverse` re-resolve the window from (employee, type, start_date) → **no `quota_id` persistence needed** (avoided churning domain/mapping/queries). `CommitInput`/`WindowOp`; `resolveOrOpen` helper; commit applies the LA-5 remaining recheck unless `Override`.
+- `leave_service.go`: added `meter` field + `SetMeter`. All 5 flows (submit / finalize-approve / reject / cancel / cancel-approved / shorten) branch **`if s.meter != nil` → meter path, else legacy grant path**. `mapMeterErr` (GateError → `QUOTA_EXCEEDED`/`RULE_VIOLATION`).
+- `cmd/api/main.go`: `leaveSvc.SetMeter(NewQuotaMeter(quotaRepo, quotaRepo))` — **production now meters per-type**.
+- Gate met: `go build ./...` clean; **80 leave tests pass**; vet clean; all test binaries compile.
+- **Strangler note:** the 2 grant-era service tests leave `meter` nil → still exercise the FIFO fallback (green). The meter path is unit-tested (`quota_meter_test.go`) but **not yet integration-tested through `LeaveService`** — Phase 7 migrates those tests to the meter and removes the grant branch; Phase 8 deletes GrantService.
 
-## Phase 5 — Handlers / DTO / routes / OpenAPI (Sonnet)
+## Phase 5 — Handlers / DTO / routes / OpenAPI 🟡 PARTIAL (Opus)
 
-- `dto.go` + handlers: balance views become per-type (`ListBalances`/`Balance` → per-type lines + window); add `POST /leave-quotas` (set/adjust a type quota) + `POST /leave-quotas/{id}:adjust`; deprecate/remove `/leave-grants*`.
-- `server.go`: route swap grants→quotas.
-- `docs/api/E6-leave/openapi.yaml`: flip `leave-balances` schemas `LeaveGrant`→`LeaveQuota` (per-type, `cap_basis`, `period_key`, `entitled/used/pending/remaining`); update paths. Then frontend `orval` regen.
+**Done — per-type balance read (the FE/mobile-blocking piece):**
+- `db/queries/leave/leave_meter.sql` `ListEmployeeLeaveBalances`: every active type LEFT JOIN the employee's current-window quota (CASE on `cap_basis` → year / year-month / EMP).
+- `internal/domain/leave/leave.go`: `TypeBalance` + `Remaining()`.
+- `internal/repository/leave/quota_repo.go`: `ListEmployeeTypeBalances`; `internal/service/leave/ports.go` interface + `quota_service.go` `EmployeeTypeBalances`; testkit mock updated.
+- `internal/handler/leave/{quota_handler,dto}.go`: `GetEmployeeTypeBalances` + `typeBalanceResponse`.
+- `internal/server/server.go`: `GET /leave-balances/by-employee/{employee_id}/types`.
+- `docs/api/E6-leave/openapi.yaml`: `LeaveTypeBalance` schema + the new path (YAML validated).
+- Gate met: `go build ./...` clean; **80 leave tests pass**; vet clean.
 
-## Phase 6 — Seed (Sonnet)
+**Done — HR per-type quota mutation:**
+- `quota_meter.go`: `AdjustEntitled` (resolve-or-open window, refuse entitled < used+pending, audited adj) + `AdjustQuotaEntitled` added to `QuotaMeterStore`.
+- `leave_service.go`: `AdjustTypeQuota` (tx + audit wrapper).
+- `quota_handler.go`/`dto.go`: `AdjustTypeQuota` + `adjustEntitledRequest`.
+- `server.go`: `POST /leave-quotas:adjust-entitled`. openapi path added (validated).
 
-- `cmd/seed/seed.go` `seedLeave`: seed `leave_quotas` per-type fixtures (annual `ANNUAL_POOL` + a couple statutory windows) instead of `leave_grants`/`leave_consumptions`; keep E2E loop-closers (INV-3) intact.
+**Deferred to Phase 8 (where GrantService is deleted):** remove `/leave-grants*` + the aggregate grant-pool `GET /leave-balances`; broader openapi `LeaveGrant`→`LeaveQuota`; frontend `orval` regen. *(Kept live now because the grant path is still the meter-nil test fallback.)*
 
-## Phase 7 — Tests (Sonnet, large)
+## Phase 6 — Seed ✅ DONE (Opus)
 
-- Rewrite `leave_service_test.go`, `leave_handler_test.go`, `quota_handler_test.go`, `balance_list_handler_test.go`, `leave_testkit_test.go`, `create_leave_request_test.go` for the per-type model. Add per-cap_basis cases.
+- `cmd/seed/seed.go` `seedLeave`: added `leave_quotas` ANNUAL_POOL windows (Dewi `SWP-LQ-8001` 12/4, Budi `SWP-LQ-8002` 12/11; `period_key=<year>`, expires year-end, `created_by` NULL) mirroring the grant amounts. Grant fixtures kept (harmless; removed Phase 8).
+- **DB-verified end-to-end:** `make migrate-up` (00050/00051 applied, schema v54) + `go run ./cmd/seed` clean; `leave_quotas` rows + `leave_requests.quota_id` present; the per-type balance CASE-join returns all 18 types with CT joining the annual window (`has_win=t`, 12/4) and the rest `has_win=f`.
 
-## Phase 8 — Retire grant-lots (Opus, destructive migration)
+## Phase 7 — Tests ✅ DONE (meter integration; Opus)
 
-- Migration: drop `leave_grants`, `leave_consumptions`; drop legacy `leave_quotas` cols (`total/used/pending/period/period_start/period_end/closed/is_prorated/prorate_months`) + the legacy unique index; drop `leave_requests.balance_earmark/balance_allocation`.
-- Delete `grant_service.go`, `grant_repo.go`, `grant_handler.go`, `db/queries/leave/leave_grants.sql`, grant DTOs; remove `LeaveGrantSource`/grant domain types; un-deprecate or remove old quota endpoints.
-- Gate: `make gen` clean, full `go test ./...` green.
+- `internal/service/leave/leave_service_meter_test.go` (new): in-memory `QuotaMeterStore`/`Reader` + `newMeterSvc` wires the meter THROUGH `LeaveService`. 5 integration tests — submit opens+reserves, approve-final commits (pending→used), over-cap block, PER_EVENT opens no window, gender gate. Closes the "meter not integration-tested through LeaveService" gap.
+- Gate met: **85 leave tests pass** (was 80); build + vet clean.
+- **Deferred to Phase 8:** the legacy grant-era tests (`leave_service_test.go` grant cases, `leave_testkit_test.go` grant fakes) are **deleted alongside GrantService** — they validate the meter-nil fallback until then, so removing them now would lose coverage of a still-live path.
+
+## Phase 8 — Retire grant-lots (Opus, destructive) 🟡 PARTIAL
+
+**Done — production surface retired (build-safe):**
+- `internal/server/server.go`: removed the grant routes (`GET/POST/PATCH /leave-grants`, aggregate `GET /leave-balances`) + deprecated `/leave-quotas` (GET, `:adjust`, `:bulk-grant`). Handlers/`GrantService` remain as dead code (unrouted) so the tree + 85 tests stay green; testkit registers its own routes so handler tests are unaffected.
+
+**Remaining (atomic destructive — fresh-session runbook below). Start from green: `go build ./... && go test ./internal/...` (85 leave tests pass at this checkpoint).**
+
+### Phase 8 fresh-session runbook (execute in order; build between blocks)
+
+**B1 — meter-only `leave_service.go` (remove fallback).** In each of the 5 flows the pattern is `if s.meter != nil { <meter> } else { <grant> }` (approve ~L300, reject ~L464, submit ~L703, cancel ~L763, cancel-approved ~L818, shorten ~L887). Keep the meter block, delete the `else`/`else if` grant block. Then delete now-unused locals: `quotaTracked`, `earmark`, `committed`, `var alloc`, `availPtr` (and adjust the `writeSnapshot(... earmark, alloc/committed)` calls → pass `nil, nil`). Delete the `grants *GrantService` + `gr GrantRepository` struct fields, the `NewLeaveService` `grants` param (→ `NewLeaveService(repo, schedule, txm)`), and the `if s.grants != nil { s.grants.SetClock(c) }` in `SetClock`.
+
+**B2 — wiring.** `cmd/api/main.go`: drop `grantRepo`/`grantSvc`; `leaveSvc := leavesvc.NewLeaveService(leaveRepo, scheduleRepo, txm)`; keep `SetMeter(NewQuotaMeter(quotaRepo, quotaRepo))`. Delete `quotaSvc := NewQuotaService(...)` if only the deprecated handlers used it (the per-type `EmployeeTypeBalances`/`AdjustTypeQuota` are on `QuotaService` → **keep `QuotaService`**, just drop the grant svc).
+
+**B3 — delete grant code.** `rm` `internal/service/leave/grant_service.go`, `internal/repository/leave/grant_repo.go`, `internal/handler/leave/grant_handler.go`, `db/queries/leave/leave_grants.sql`. Remove from `internal/domain/leave/leave.go`: `LeaveGrant`, `LeaveConsumption`, `LeaveGrantSource`+`ValidGrantSource`, `AllocationLine`, `BalanceCheck.Allocation`/`Earmark` (and the grant `EmployeeLeaveBalance`/`LeaveBalance` types if grant-only). Remove `GrantRepository`/`GrantService` ports + `Grant*Params` from `ports.go`. Remove grant DTOs (`leaveGrantResponse`, `employeeLeaveBalanceResponse`, `leaveBalanceResponse`, `toLeaveBalanceResponse`, grant mappers) from `dto.go`/`mapping.go`. Remove grant handler fields from `Handler` struct + `NewHandler` param.
+
+**B4 — tests.** `rm internal/handler/leave/{grant_handler_test,balance_list_handler_test}.go` (grant endpoints gone). In `leave_service_test.go`: delete the grant-balance assertion tests (those touching `gr`/`lot`/`newFakeGrantRepo`/alloc/maternity); point `newSvc` at an in-memory meter (reuse `memStore`/`memReader` from `leave_service_meter_test.go`) so the surviving state-machine/auth tests run the meter path. In `leave_testkit_test.go`: delete `fakeGrantRepo` + grant route registrations; flows now meter-backed. The new `leave_service_meter_test.go` already covers reserve/commit/release/per-event/gender.
+
+**B5 — drop migration** `000NN_drop_grant_lots.sql`: `DROP TABLE leave_consumptions; DROP TABLE leave_grants;` · `ALTER TABLE leave_requests DROP COLUMN balance_earmark, DROP COLUMN balance_allocation;` · `ALTER TABLE leave_quotas DROP COLUMN total, used, pending, period, period_start, period_end, closed, is_prorated, prorate_months;` + `DROP INDEX leave_quotas_emp_type_period_uq;` (the legacy `period`-keyed unique). Keep a `-- +goose Down` that recreates them (or document irreversibility).
+
+**B6 — verify.** `make gen-sqlc` (clean — no orphaned grant queries) · `go build ./...` · `go test ./...` · `make migrate-up` against local pg. Update openapi: remove `LeaveGrant*`/grant paths + the deprecated `/leave-quotas*`; `orval` regen for the frontend.
 
 ## Sequencing notes
 

@@ -326,6 +326,44 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /leave-balances/by-employee/{employee_id}/types:
+    get:
+      tags: [leave-balances]
+      summary: Per-type leave balance (per-type ledger, 2026-06-12)
+      description: |
+        The **per-type** balance view (supersedes the grant-lot pool for the per-type
+        ledger, EPICS §8). One row per **active leave type**, each joined to the
+        employee's quota row for the **current window** of that type's `cap_basis`
+        (year · year-month · `EMP`). `PER_EVENT`/`UNCAPPED` types have no standing
+        window (`has_window=false`); `remaining_days` is null for `UNCAPPED` / nil-cap
+        types ("sesuai ketentuan"). Mobile flat list (`o1BUa`) reads from here.
+      operationId: getEmployeeTypeBalances
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - "o1BUa"  # Agen · Cuti Saya — per-type flat list
+      parameters:
+        - name: employee_id
+          in: path
+          required: true
+          schema: { type: string, example: SWP-EMP-1042 }
+      responses:
+        '200':
+          description: The employee's per-type balances.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaveTypeBalance' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /leave-balances:
     get:
       tags: [leave-balances]
@@ -367,6 +405,48 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
 
   # ──────────────  LEAVE QUOTAS — DEPRECATED 2026-06-08 (migration only)  ──────────────
+  /leave-quotas:adjust-entitled:
+    post:
+      tags: [leave-balances]
+      summary: HR per-type quota adjust (per-type ledger, 2026-06-12)
+      description: |
+        Applies a signed `delta` to a (employee, leave_type, window) entitlement
+        (LQ-6 / "Sesuaikan Kuota"). `start_date` selects the window by the type's
+        `cap_basis`; the window is opened if absent. Refuses dropping entitled below
+        used+pending (422). `reason` required; audited.
+      operationId: adjustTypeQuota
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: all
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [employee_id, leave_type_id, start_date, delta, reason]
+              properties:
+                employee_id: { type: string, example: SWP-EMP-1042 }
+                leave_type_id: { type: string, example: SWP-LT-001 }
+                start_date: { type: string, format: date, description: Any date inside the target window. }
+                delta: { type: integer, example: 2 }
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200':
+          description: The adjusted quota.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LeaveQuota' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /leave-quotas:
     get:
       deprecated: true
@@ -1502,6 +1582,31 @@ components:
 
   # ──────────────────────────────  SCHEMAS  ─────────────────────────────
   schemas:
+
+    # ── per-type ledger (2026-06-12) ──
+    LeaveTypeBalance:
+      type: object
+      description: One active leave type's current-window balance (per-type ledger, F6.5).
+      required: [leave_type_id, code, name, cap_basis, cap_unit, paid, gender, requires_document, color, has_window, used_days, pending_days]
+      properties:
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        code: { type: string, example: CT }
+        name: { type: string, example: Cuti Tahunan Pegawai PKWT }
+        cap_basis:
+          type: string
+          enum: [ANNUAL_POOL, PER_EVENT, PER_MONTH, PER_YEAR_COUNT, UNCAPPED, LIFETIME_ONCE, SERVICE_UNPAID]
+        cap_value: { type: integer, nullable: true, description: Day/occurrence cap; null = uncapped/variable. }
+        cap_unit: { type: string, enum: [DAYS, COUNT] }
+        paid: { type: boolean }
+        gender: { type: string, enum: [ANY, FEMALE, MALE] }
+        requires_document: { type: boolean }
+        color: { type: string, example: '#188E4D' }
+        has_window: { type: boolean, description: A standing quota row exists for the current window. }
+        entitled_days: { type: integer, nullable: true }
+        used_days: { type: integer }
+        pending_days: { type: integer }
+        remaining_days: { type: integer, nullable: true, description: null for UNCAPPED / nil-cap ("sesuai ketentuan"). }
+        expires_at: { type: string, format: date, nullable: true }
 
     # ── enums ──
     LeaveStatus:

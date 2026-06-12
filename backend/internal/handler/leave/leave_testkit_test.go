@@ -536,6 +536,10 @@ func (r *fakeQuotaRepo) FindQuotaForEmployeeTypePeriod(_ context.Context, emp, l
 	return dom.LeaveQuota{}, domain.ErrNotFound
 }
 
+func (r *fakeQuotaRepo) ListEmployeeTypeBalances(_ context.Context, _, _, _ string) ([]dom.TypeBalance, error) {
+	return nil, nil
+}
+
 func (r *fakeQuotaRepo) UpsertLeaveQuota(_ context.Context, _ pgx.Tx, p svc.UpsertQuotaParams) (dom.LeaveQuota, error) {
 	// Find existing (employee,type,period); preserve used/pending.
 	for id, q := range r.byID {

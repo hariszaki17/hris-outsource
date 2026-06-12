@@ -354,6 +354,45 @@ type EmployeeGateInfo struct {
 	JoinAt time.Time // tenure source for min_service_years
 }
 
+// TypeBalance is one leave type's current-window balance for an employee (F6.5 /
+// mobile "Saldo per jenis"). HasWindow=false for PER_EVENT/UNCAPPED types (and for
+// quota-bearing types not yet opened); Entitled defaults to the type cap then.
+type TypeBalance struct {
+	LeaveTypeID      string
+	Code             string
+	Name             string
+	CapBasis         LeaveTypeCapBasis
+	CapValue         *int
+	CapUnit          string
+	Paid             bool
+	Gender           string
+	RequiresDocument bool
+	Color            string
+
+	HasWindow bool
+	Entitled  int
+	Used      int
+	Pending   int
+	ExpiresAt *time.Time
+}
+
+// Remaining is the displayed remaining for quota-bearing capped types
+// (entitled-used-pending). nil for UNCAPPED / nil-cap types ("sesuai ketentuan").
+func (b TypeBalance) Remaining() *int {
+	if !b.CapBasis.QuotaBearing() && b.CapBasis != CapBasisPerEvent {
+		return nil // UNCAPPED
+	}
+	if b.CapBasis == CapBasisAnnualPool || b.CapValue != nil {
+		entitled := b.Entitled
+		if !b.HasWindow && b.CapValue != nil {
+			entitled = *b.CapValue
+		}
+		r := entitled - b.Used - b.Pending
+		return &r
+	}
+	return nil // quota-bearing but no day cap (e.g. hajj)
+}
+
 // QuotaWindowSpec opens (or upserts) a per-type quota window. Legacy Period/
 // PeriodStart/PeriodEnd are supplied transitionally (NOT NULL until Phase 8).
 type QuotaWindowSpec struct {

@@ -211,6 +211,10 @@ type QuotaRepository interface {
 	GetLeaveQuotaForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveQuota, error)
 	FindQuotaForEmployeeTypePeriod(ctx context.Context, employeeID, leaveTypeID string, period int) (dom.LeaveQuota, error)
 
+	// Per-type ledger (2026-06-12): every active leave type + the employee's
+	// current-window quota (F6.5 balance). curYear="2026", curMonth="2026-06".
+	ListEmployeeTypeBalances(ctx context.Context, employeeID, curYear, curMonth string) ([]dom.TypeBalance, error)
+
 	UpsertLeaveQuota(ctx context.Context, tx pgx.Tx, p UpsertQuotaParams) (dom.LeaveQuota, error)
 	AdjustLeaveQuotaTotal(ctx context.Context, tx pgx.Tx, id string, delta int, adj dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error)
 	DeductLeaveQuota(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)

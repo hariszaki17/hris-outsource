@@ -257,6 +257,8 @@ func run() error {
 	grantRepo := leaverepo.NewGrantRepo(pool)
 	grantSvc := leavesvc.NewGrantService(grantRepo, txm) // F6.1 grant-lot ledger + FIFO allocator
 	leaveSvc := leavesvc.NewLeaveService(leaveRepo, grantSvc, scheduleRepo, txm)
+	// Per-type ledger (EPICS §8 2026-06-12): meter against per-type cap_basis windows.
+	leaveSvc.SetMeter(leavesvc.NewQuotaMeter(quotaRepo, quotaRepo))
 	leaveSvc.SetNotifier(jobsClient)                     // E10 (11-02): real notify on approve-final/reject
 	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm) // DEPRECATED 2026-06-08 — kept for /leave-quotas*
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)

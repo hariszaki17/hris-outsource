@@ -8,6 +8,7 @@ package leave
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -34,6 +35,15 @@ func NewQuotaService(repo QuotaRepository, txm TxRunner) *QuotaService {
 
 // SetClock overrides the time source (tests only).
 func (s *QuotaService) SetClock(c Clock) { s.now = c }
+
+// EmployeeTypeBalances returns the per-type balance for an employee (F6.5) — every
+// active leave type with its current-window quota (resolved by cap_basis).
+func (s *QuotaService) EmployeeTypeBalances(ctx context.Context, employeeID string) ([]dom.TypeBalance, error) {
+	now := s.now()
+	curYear := fmt.Sprintf("%04d", now.Year())
+	curMonth := fmt.Sprintf("%04d-%02d", now.Year(), int(now.Month()))
+	return s.repo.ListEmployeeTypeBalances(ctx, employeeID, curYear, curMonth)
+}
 
 // --- list ---
 
