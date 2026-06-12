@@ -8,20 +8,21 @@ type BillableGroupBy string
 
 const (
 	GroupByEmployee    BillableGroupBy = "employee"
+	GroupByPosition    BillableGroupBy = "position"
 	GroupByDay         BillableGroupBy = "day"
 	GroupByShiftMaster BillableGroupBy = "shift_master"
 )
 
 // BillableFilters echoes the filter set used for a billable-report run (openapi
-// BillableReport.filters). Company/ServiceLine ids + names are nullable.
+// BillableReport.filters). CompanyID/CompanyName are nullable; Position is the
+// optional free-text position filter echo (null when unfiltered).
 type BillableFilters struct {
-	CompanyID       *string
-	CompanyName     *string
-	ServiceLineID   *string
-	ServiceLineName *string
-	PeriodStart     string // ISO date
-	PeriodEnd       string // ISO date
-	GroupBy         BillableGroupBy
+	CompanyID   *string
+	CompanyName *string
+	Position    *string // free-text position filter echo (nullable)
+	PeriodStart string  // ISO date
+	PeriodEnd   string  // ISO date
+	GroupBy     BillableGroupBy
 }
 
 // BillableSummary is BillableReport.summary (verified-only totals, INV-4).
@@ -43,15 +44,15 @@ type BillablePendingSummary struct {
 }
 
 // BillableReportRow is one aggregated row (openapi schemas.BillableReportRow).
-// group_key semantics depend on GroupBy: employee→SWP-EMP-*, day→ISO date,
-// shift_master→SWP-SHF-*.
+// group_key semantics depend on GroupBy: employee→SWP-EMP-*, position→free-text
+// position, day→ISO date, shift_master→SWP-SHF-*. Position is the row's grouping
+// value when GroupBy=position, otherwise the agent's position for context (nullable).
 type BillableReportRow struct {
 	GroupKey              string
 	GroupLabel            string
 	CompanyID             *string
 	CompanyName           *string
-	ServiceLineID         *string
-	ServiceLineName       *string
+	Position              *string
 	WorkedHours           float64
 	BillableHours         float64
 	PayableHours          float64

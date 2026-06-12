@@ -7,7 +7,7 @@
 -- Queue / list load. Keyset cursor (created_at,id) DESC. Filters (all optional via
 -- narg): company_id, status, status__in (text[] → status = ANY), employee_id,
 -- leave_type_id, start_date >= / <=, q free-text (ILIKE employee name + id + reason).
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -42,7 +42,7 @@ LIMIT sqlc.arg(lim);
 
 -- name: GetLeaveRequest :one
 -- Single request with denormalized names.
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -63,7 +63,7 @@ WHERE lr.id = sqlc.arg(id)
 -- name: GetLeaveRequestForUpdate :one
 -- Row-lock for the state-machine transitions (approve-l1/final/override/reject).
 -- Omits joins; the service re-reads via GetLeaveRequest for the DTO.
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -79,7 +79,7 @@ FOR UPDATE;
 -- Seed / HR-on-behalf path (FE/web does not create — mobile/agent does). id
 -- allocated by the column DEFAULT ('SWP-LR-' || swp_next_id('LR')) when omitted.
 INSERT INTO leave_requests (
-    employee_id, placement_id, company_id, service_line_id, leave_type_id,
+    employee_id, placement_id, company_id, leave_type_id,
     start_date, end_date, duration_days, reason, notes, status,
     delegate_id, document_file_id, backdated, clock_in_conflict,
     no_leader, assigned_leader_id,
@@ -89,7 +89,6 @@ INSERT INTO leave_requests (
     sqlc.arg(employee_id),
     sqlc.narg(placement_id),
     sqlc.narg(company_id),
-    sqlc.narg(service_line_id),
     sqlc.arg(leave_type_id),
     sqlc.arg(start_date),
     sqlc.arg(end_date),
@@ -109,7 +108,7 @@ INSERT INTO leave_requests (
     sqlc.narg(balance_requires_override),
     sqlc.narg(created_by)
 )
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -119,7 +118,7 @@ RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type
 -- name: CreateLeaveRequestWithID :one
 -- Seed / test variant that supplies an explicit id (deterministic E2E targets).
 INSERT INTO leave_requests (
-    id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+    id, employee_id, placement_id, company_id, leave_type_id,
     start_date, end_date, duration_days, reason, notes, status,
     delegate_id, document_file_id, backdated, clock_in_conflict,
     no_leader, assigned_leader_id,
@@ -130,7 +129,6 @@ INSERT INTO leave_requests (
     sqlc.arg(employee_id),
     sqlc.narg(placement_id),
     sqlc.narg(company_id),
-    sqlc.narg(service_line_id),
     sqlc.arg(leave_type_id),
     sqlc.arg(start_date),
     sqlc.arg(end_date),
@@ -151,7 +149,7 @@ INSERT INTO leave_requests (
     sqlc.narg(created_by)
 )
 ON CONFLICT (id) DO NOTHING
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -189,7 +187,7 @@ SET status                     = sqlc.arg(status),
     updated_at                 = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -206,7 +204,7 @@ SET start_date    = sqlc.arg(start_date),
     updated_at    = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,

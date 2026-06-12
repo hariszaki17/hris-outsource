@@ -141,7 +141,7 @@ type auditEntryResp struct {
 }
 
 type orgRollupResp struct {
-	ServiceLine      string `json:"service_line"`
+	Position         string `json:"position"`
 	Headcount        int    `json:"headcount"`
 	ActivePlacements int    `json:"active_placements"`
 }
@@ -367,7 +367,7 @@ func toSuperAdminWidgets(w *dom.SuperAdminWidgets) *superAdminWidgetsResp {
 	rollups := make([]orgRollupResp, 0, len(w.OrgRollups))
 	for _, r := range w.OrgRollups {
 		rollups = append(rollups, orgRollupResp{
-			ServiceLine:      string(r.ServiceLine),
+			Position:         r.Position,
 			Headcount:        r.Headcount,
 			ActivePlacements: r.ActivePlacements,
 		})
@@ -400,13 +400,12 @@ func toTrendPoints(pts []dom.BillableTrendPoint) []billableTrendPointResp {
 // ================================================================
 
 type billableFiltersResp struct {
-	CompanyID       *string `json:"company_id"`
-	CompanyName     *string `json:"company_name"`
-	ServiceLineID   *string `json:"service_line_id"`
-	ServiceLineName *string `json:"service_line_name"`
-	PeriodStart     string  `json:"period_start"`
-	PeriodEnd       string  `json:"period_end"`
-	GroupBy         string  `json:"group_by"`
+	CompanyID   *string `json:"company_id"`
+	CompanyName *string `json:"company_name"`
+	Position    *string `json:"position"`
+	PeriodStart string  `json:"period_start"`
+	PeriodEnd   string  `json:"period_end"`
+	GroupBy     string  `json:"group_by"`
 }
 
 type billableSummaryResp struct {
@@ -428,8 +427,7 @@ type billableRowResp struct {
 	GroupLabel            string  `json:"group_label"`
 	CompanyID             *string `json:"company_id"`
 	CompanyName           *string `json:"company_name"`
-	ServiceLineID         *string `json:"service_line_id"`
-	ServiceLineName       *string `json:"service_line_name"`
+	Position              *string `json:"position"`
 	WorkedHours           float64 `json:"worked_hours"`
 	BillableHours         float64 `json:"billable_hours"`
 	PayableHours          float64 `json:"payable_hours"`
@@ -453,8 +451,7 @@ func toBillableReport(r dom.BillableReport) billableReportResp {
 			GroupLabel:            row.GroupLabel,
 			CompanyID:             row.CompanyID,
 			CompanyName:           row.CompanyName,
-			ServiceLineID:         row.ServiceLineID,
-			ServiceLineName:       row.ServiceLineName,
+			Position:              row.Position,
 			WorkedHours:           row.WorkedHours,
 			BillableHours:         row.BillableHours,
 			PayableHours:          row.PayableHours,
@@ -465,13 +462,12 @@ func toBillableReport(r dom.BillableReport) billableReportResp {
 	return billableReportResp{
 		GeneratedAt: rfc3339(r.GeneratedAt),
 		Filters: billableFiltersResp{
-			CompanyID:       r.Filters.CompanyID,
-			CompanyName:     r.Filters.CompanyName,
-			ServiceLineID:   r.Filters.ServiceLineID,
-			ServiceLineName: r.Filters.ServiceLineName,
-			PeriodStart:     r.Filters.PeriodStart,
-			PeriodEnd:       r.Filters.PeriodEnd,
-			GroupBy:         string(r.Filters.GroupBy),
+			CompanyID:   r.Filters.CompanyID,
+			CompanyName: r.Filters.CompanyName,
+			Position:    r.Filters.Position,
+			PeriodStart: r.Filters.PeriodStart,
+			PeriodEnd:   r.Filters.PeriodEnd,
+			GroupBy:     string(r.Filters.GroupBy),
 		},
 		Summary: billableSummaryResp{
 			TotalBillableHours:   r.Summary.TotalBillableHours,

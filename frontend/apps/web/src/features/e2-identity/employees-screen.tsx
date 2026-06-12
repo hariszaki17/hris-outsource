@@ -6,7 +6,7 @@
  *   n3wi1w SL scoped list — same screen, read-only, scope note different
  *
  * Design: TitleBand → 4× StatCards → RoleNote banner → TableCard (Tabs, FilterRow, DataTable,
- * Pagination). Columns: Karyawan (avatar+name+NIK) | Posisi | Lini Layanan | Penempatan |
+ * Pagination). Columns: Karyawan (avatar+name+NIK) | Posisi | Penempatan |
  * Login | Status | kebab.
  *
  * ENGINEERING.md D1 — typed URL search params + cursor pagination.
@@ -52,7 +52,6 @@ const PAGE_SIZE = 50;
 export type EmployeesSearch = {
   q?: string;
   status?: EmployeeStatus;
-  service_line?: string;
   client_company?: string;
   /** Status-tab shortcut: 'all' | 'active' | 'inactive' */
   tab?: 'all' | 'active' | 'inactive';
@@ -209,29 +208,13 @@ export function EmployeesScreen() {
         </div>
       ),
     },
-    // POSISI / LINI LAYANAN / PENEMPATAN come from the employee's current (non-terminal)
+    // POSISI / PENEMPATAN come from the employee's current (non-terminal)
     // placement, resolved by the list query's LATERAL join. "—" = genuinely unplaced.
     {
       id: 'posisi',
       header: t('colPosisi'),
       flex: 1.5,
-      cell: (emp) => (
-        <span className="text-[13px] text-text">{emp.current_position?.name ?? '—'}</span>
-      ),
-    },
-    {
-      id: 'liniLayanan',
-      header: t('colLiniLayanan'),
-      flex: 1.5,
-      cell: (emp) =>
-        emp.current_service_line ? (
-          <div className="flex items-center gap-[7px]">
-            <span className="size-[8px] rounded-full bg-info-tx shrink-0" aria-hidden />
-            <span className="text-[13px] text-text-2">{emp.current_service_line.name}</span>
-          </div>
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
+      cell: (emp) => <span className="text-[13px] text-text">{emp.current_position ?? '—'}</span>,
     },
     {
       id: 'penempatan',

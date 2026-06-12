@@ -31,7 +31,7 @@ type fakeClockRepo struct {
 func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (PlacementInfo, bool, error) {
 	return PlacementInfo{
 		PlacementID: "SWP-PL-0001", CompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", PositionID: "SWP-POS-014", ServiceLine: "parking",
+		SiteID: "SWP-SITE-0001", Position: "Petugas Parkir",
 	}, true, nil
 }
 

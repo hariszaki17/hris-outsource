@@ -33,10 +33,9 @@ func NewHandler(m *svc.ShiftMasterService, s *svc.ScheduleService) *Handler {
 func (h *Handler) ListShiftMasters(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := domain.ShiftMasterFilter{
-		ServiceLineID: strPtrParam(q.Get("service_line_id")),
-		Status:        strPtrParam(q.Get("status")),
-		Q:             strPtrParam(q.Get("q")),
-		Limit:         int32(intParam(q.Get("limit"))),
+		Status: strPtrParam(q.Get("status")),
+		Q:      strPtrParam(q.Get("q")),
+		Limit:  int32(intParam(q.Get("limit"))),
 	}
 	if cursor := q.Get("cursor"); cursor != "" {
 		var c struct {
@@ -76,14 +75,13 @@ func (h *Handler) CreateShiftMaster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := h.masters.CreateShiftMaster(r.Context(), svc.ShiftMasterWrite{
-		Name:          req.Name,
-		StartTime:     req.StartTime,
-		EndTime:       req.EndTime,
-		BreakStart:    req.BreakStart,
-		BreakEnd:      req.BreakEnd,
-		ServiceLineID: req.ServiceLineID,
-		IsActive:      req.IsActive,
-		CreatedBy:     actorPtr(r),
+		Name:       req.Name,
+		StartTime:  req.StartTime,
+		EndTime:    req.EndTime,
+		BreakStart: req.BreakStart,
+		BreakEnd:   req.BreakEnd,
+		IsActive:   req.IsActive,
+		CreatedBy:  actorPtr(r),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -133,12 +131,6 @@ func (h *Handler) UpdateShiftMaster(w http.ResponseWriter, r *http.Request) {
 		var s *string
 		_ = json.Unmarshal(v, &s)
 		patch.BreakEnd = s
-	}
-	if v, ok := raw["service_line_id"]; ok {
-		patch.ServiceLineIDSet = true
-		var s *string
-		_ = json.Unmarshal(v, &s)
-		patch.ServiceLineID = s
 	}
 	if v, ok := raw["is_active"]; ok {
 		var b bool

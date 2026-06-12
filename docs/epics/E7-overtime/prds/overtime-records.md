@@ -13,7 +13,7 @@ Approved overtime needs to be visible and aggregable: an agent wants to see thei
 
 **Goals**
 - Agent view of own approved OT (mobile).
-- Aggregated OT reporting: hours by day-type tier, per agent / company / service line / period.
+- Aggregated OT reporting: hours by day-type tier, per agent / company / position / period.
 - Exports feeding payroll context (E8) and billing (E10).
 
 **Non-goals**
@@ -36,7 +36,7 @@ Agent (self), Shift Leader (own company), HR/Super Admin (all), System (query, s
 | Ref | Rule |
 |-----|------|
 | OR-1 | **Scope:** agent sees own; leader sees own company; HR/Super Admin see all. |
-| OR-2 | Reports aggregate **approved** OT `duration` grouped by `day_type` (Workday/RestDay/Holiday), agent, company, service line, and period. |
+| OR-2 | Reports aggregate **approved** OT `duration` grouped by `day_type` (Workday/RestDay/Holiday), agent, company, position (free-text), and period. |
 | OR-3 | The applicable rule `multiplier` is shown as **reference** alongside hours (no money computed in v1). |
 | OR-4 | Pending/Rejected OT is **excluded** from approved totals (may show separately). |
 | OR-5 | Exports (Excel/CSV/PDF) reflect filters, are **audited**, and are structured for **payroll import (E8)** and **billing (E10)**. |
@@ -45,7 +45,7 @@ Agent (self), Shift Leader (own company), HR/Super Admin (all), System (query, s
 
 ## 6. Data model
 
-Read-only projection over `OvertimeRecord` + `OvertimeRule` + `Employee` + `Placement` + `ServiceLine`. No new entities.
+Read-only projection over `OvertimeRecord` + `OvertimeRule` + `Employee` + `Placement`. The `position` axis is the free-text position carried from the placement. No new entities.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -89,7 +89,7 @@ Feature: Overtime records & reporting
 
 ## 9. Dependencies
 
-F7.1–F7.3 (data/tiers), E2 (service line), E3 (placement/company), E8 (payroll import), E10 (billing/export), E1 (scope/audit).
+F7.1–F7.3 (data/tiers), E3 (placement/company), E8 (payroll import), E10 (billing/export), E1 (scope/audit).
 
 ## 10. Decisions & open questions
 

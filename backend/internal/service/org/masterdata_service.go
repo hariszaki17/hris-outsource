@@ -98,7 +98,6 @@ type UpdateAttendanceCodeParams struct {
 // CreateOvertimeRuleParams carries the fields for inserting a new overtime rule.
 type CreateOvertimeRuleParams struct {
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float64
 	RestdayRate         float64
 	HolidayRate         float64
@@ -111,7 +110,6 @@ type CreateOvertimeRuleParams struct {
 type UpdateOvertimeRuleParams struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float64
 	RestdayRate         float64
 	HolidayRate         float64
@@ -512,13 +510,6 @@ func (s *MasterDataService) UpdateOvertimeRule(ctx context.Context, p UpdateOver
 	if p.HolidayRate == 0 {
 		p.HolidayRate = current.HolidayRate
 	}
-	// ServiceLineID: nil means "keep current" (pointer semantics).
-	// If caller explicitly wants to clear it, they pass a pointer to empty string — but
-	// the spec doesn't support clearing; keep current when not sent.
-	if p.ServiceLineID == nil {
-		p.ServiceLineID = current.ServiceLineID
-	}
-
 	if err := validateMinMinutes(p.MinMinutes); err != nil {
 		return domain.OvertimeRule{}, err
 	}

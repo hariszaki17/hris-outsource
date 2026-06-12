@@ -161,6 +161,23 @@ func (r *fakePlacementRepo) ListPlacements(_ context.Context, f domain.Placement
 	return out, nil
 }
 
+func (r *fakePlacementRepo) SearchPositions(_ context.Context, pattern string) ([]string, error) {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, p := range r.placements {
+		if p.Position == "" {
+			continue
+		}
+		if _, dup := seen[p.Position]; dup {
+			continue
+		}
+		seen[p.Position] = struct{}{}
+		out = append(out, p.Position)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (r *fakePlacementRepo) ListExpiringPlacements(_ context.Context, f domain.ExpiringFilter) ([]domain.Placement, error) {
 	var out []domain.Placement
 	for _, p := range r.placements {
@@ -301,8 +318,7 @@ func (r *fakePlacementRepo) CreatePlacement(_ context.Context, _ pgx.Tx, p svc.C
 		AwaitingAgreement: p.AgreementID == nil,
 		ClientCompanyID:   p.ClientCompanyID,
 		SiteID:            p.SiteID,
-		ServiceLineID:     p.ServiceLineID,
-		PositionID:        p.PositionID,
+		Position:          p.Position,
 		StartDate:         p.StartDate,
 		EndDate:           p.EndDate,
 		Notes:             p.Notes,
@@ -324,8 +340,8 @@ func (r *fakePlacementRepo) UpdatePlacementFields(_ context.Context, _ pgx.Tx, p
 	if !ok {
 		return domain.Placement{}, domain.ErrNotFound
 	}
-	if p.PositionID != "" {
-		cur.PositionID = p.PositionID
+	if p.Position != "" {
+		cur.Position = p.Position
 	}
 	if p.EndDate != nil {
 		cur.EndDate = p.EndDate
@@ -571,11 +587,9 @@ func TestListPlacements_ShapeAndEnvelope(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	p := domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", AgreementID: strp("SWP-AG-7003"),
-		ClientCompanyID: "SWP-CMP-0021", SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001",
-		PositionID: "SWP-POS-014", StartDate: jktDate(2026, 1, 1), EndDate: &end,
+		ClientCompanyID: "SWP-CMP-0021", SiteID: "SWP-SITE-0001", Position: "SWP-POS-014", StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 		EmployeeName:    strp("Rudi Wijaya"), SiteName: strp("Main Site"),
-		ServiceLineName: strp("Parking"), PositionName: strp("Parking Attendant"),
 	}
 	h.seedPlacement(p)
 
@@ -596,8 +610,8 @@ func TestListPlacements_ShapeAndEnvelope(t *testing.T) {
 	first := data[0].(map[string]any)
 	for _, k := range []string{
 		"id", "employee_id", "employee_name", "client_company_id", "client_company_name",
-		"site_id", "site_name", "service_line_id", "service_line_name",
-		"position_id", "position_name", "lifecycle_status", "start_date", "end_date",
+		"site_id", "site_name",
+		"position_name", "lifecycle_status", "start_date", "end_date",
 	} {
 		if _, ok := first[k]; !ok {
 			t.Errorf("data[0] missing key: %s", k)
@@ -614,13 +628,13 @@ func TestListPlacements_SearchAndStatusFilterPassthrough(t *testing.T) {
 	endA := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5003", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-002", PositionID: "SWP-POS-015",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-015",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &endA,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("Sari Hadi"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7003"), StartDate: jktDate(2026, 1, 1), EndDate: &endA,
 		LifecycleStatus: "ENDED", EmployeeName: strp("Rudi Wijaya"),
 	})
@@ -665,19 +679,19 @@ func TestListExpiringPlacements_WithinWindowSortedAscAndDefaults(t *testing.T) {
 	endFar := jktDate(2026, 12, 1)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-A25", EmployeeID: "SWP-EMP-A", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-1"), StartDate: jktDate(2026, 1, 1), EndDate: &end25,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("A"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-B15", EmployeeID: "SWP-EMP-B", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-2"), StartDate: jktDate(2026, 1, 1), EndDate: &end15,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("B"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-CFAR", EmployeeID: "SWP-EMP-C", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-3"), StartDate: jktDate(2026, 1, 1), EndDate: &endFar,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("C"),
 	})
@@ -721,7 +735,7 @@ func TestGetPlacement_DetailShape_200(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7003"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -830,7 +844,7 @@ func TestCreatePlacement_INV1Violation_409_Details(t *testing.T) {
 	endX := jktDate(2026, 8, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-988", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0009",
-		SiteID: "SWP-SITE-0009", ServiceLineID: "SWP-SVC-003", PositionID: "SWP-POS-021",
+		SiteID: "SWP-SITE-0009", Position: "SWP-POS-021",
 		AgreementID: strp("SWP-AG-OLD"), StartDate: jktDate(2025, 9, 1), EndDate: &endX,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -975,7 +989,7 @@ func TestSetPlacementAgreement_Backfill_200(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-7700", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
 		AgreementID: nil, AwaitingAgreement: true,
 	})
@@ -1006,7 +1020,7 @@ func TestSetPlacementAgreement_OutsideContract_422(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-7701", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
 		AwaitingAgreement: true,
 	})
@@ -1033,7 +1047,7 @@ func TestSetPlacementAgreement_NotOwned_422(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-7702", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
 		AwaitingAgreement: true,
 	})
@@ -1085,7 +1099,7 @@ func TestUpdatePlacement_TerminalImmutable_409(t *testing.T) {
 	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-DEAD", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2025, 1, 1),
 		LifecycleStatus: "ENDED",
 	})
@@ -1108,7 +1122,7 @@ func (h *placementHarness) seedActivePlacement(id, empID, companyID string) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: id, EmployeeID: empID, ClientCompanyID: companyID,
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -1254,7 +1268,7 @@ func TestRenewPlacement_Happy_201_PredecessorSuperseded(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-RNW", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -1284,7 +1298,7 @@ func TestRenewPlacement_BufferOverlap_422(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-OVL", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})

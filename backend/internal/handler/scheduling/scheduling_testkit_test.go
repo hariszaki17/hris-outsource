@@ -158,9 +158,6 @@ func (r *fakeShiftMasterRepo) ListShiftMasters(_ context.Context, f domain.Shift
 				continue
 			}
 		}
-		if f.ServiceLineID != nil && (m.ServiceLineID == nil || *m.ServiceLineID != *f.ServiceLineID) {
-			continue
-		}
 		out = append(out, m)
 	}
 	// id-desc keyset (mirror the real ListShiftMasters cursor).
@@ -205,7 +202,6 @@ func (r *fakeShiftMasterRepo) CreateShiftMaster(_ context.Context, _ pgx.Tx, p s
 		EndTime:       p.EndTime,
 		BreakStart:    p.BreakStart,
 		BreakEnd:      p.BreakEnd,
-		ServiceLineID: p.ServiceLineID,
 		CrossMidnight: p.CrossMidnight,
 		IsActive:      p.IsActive,
 		CreatedBy:     p.CreatedBy,
@@ -231,7 +227,6 @@ func (r *fakeShiftMasterRepo) UpdateShiftMaster(_ context.Context, _ pgx.Tx, p s
 	cur.EndTime = p.EndTime
 	cur.BreakStart = p.BreakStart
 	cur.BreakEnd = p.BreakEnd
-	cur.ServiceLineID = p.ServiceLineID
 	cur.CrossMidnight = p.CrossMidnight
 	cur.IsActive = p.IsActive
 	cur.UpdatedAt = fixedNow
@@ -481,7 +476,6 @@ func (r *fakeScheduleRepo) CreateScheduleEntry(_ context.Context, _ pgx.Tx, p sv
 		EmployeeID:      p.EmployeeID,
 		PlacementID:     p.PlacementID,
 		CompanyID:       cover.CompanyID,
-		ServiceLineID:   p.ServiceLineID,
 		ShiftMasterID:   p.ShiftMasterID,
 		StartTime:       p.StartTime,
 		EndTime:         p.EndTime,
@@ -509,7 +503,6 @@ func (r *fakeScheduleRepo) UpdateScheduleEntry(_ context.Context, _ pgx.Tx, p sv
 		return domain.ScheduleEntry{}, domain.ErrNotFound
 	}
 	cur.ShiftMasterID = p.ShiftMasterID
-	cur.ServiceLineID = p.ServiceLineID
 	cur.StartTime = p.StartTime
 	cur.EndTime = p.EndTime
 	cur.CrossMidnight = p.CrossMidnight
@@ -625,14 +618,14 @@ func (h *harness) do(method, path string, body any) *httptest.ResponseRecorder {
 // ---------------------------------------------------------------------------
 
 // seedMaster inserts a shift master directly (bypasses the create path) so tests
-// can pin its id/service-line/active flags.
-func (h *harness) seedMaster(id, name, start, end string, serviceLine *string, active bool) domain.ShiftMaster {
+// can pin its id/active flags. The serviceLine arg is retained for call-site
+// stability but ignored — shift masters are service-line independent (2026-06-12).
+func (h *harness) seedMaster(id, name, start, end string, _ *string, active bool) domain.ShiftMaster {
 	m := domain.ShiftMaster{
 		ID:            id,
 		Name:          name,
 		StartTime:     start,
 		EndTime:       end,
-		ServiceLineID: serviceLine,
 		CrossMidnight: end <= start,
 		IsActive:      active,
 		CreatedAt:     fixedNow,
@@ -643,14 +636,14 @@ func (h *harness) seedMaster(id, name, start, end string, serviceLine *string, a
 	return m
 }
 
-// seedPlacement registers the agent's active placement cover.
-func (h *harness) seedPlacement(empID, placementID, companyID, serviceLineID string, start time.Time, end *time.Time) {
+// seedPlacement registers the agent's active placement cover. The serviceLineID
+// arg is retained for call-site stability but ignored (service_line removed).
+func (h *harness) seedPlacement(empID, placementID, companyID, _ string, start time.Time, end *time.Time) {
 	h.schedule.placements[empID] = svc.PlacementCover{
-		PlacementID:   placementID,
-		CompanyID:     companyID,
-		ServiceLineID: serviceLineID,
-		StartDate:     start,
-		EndDate:       end,
+		PlacementID: placementID,
+		CompanyID:   companyID,
+		StartDate:   start,
+		EndDate:     end,
 	}
 }
 

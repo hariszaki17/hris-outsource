@@ -96,7 +96,7 @@ tags:
       including HR override when balance is exceeded (LA-5 / LA-8) and HR shorten / cancel
       of approved leave with schedule restore (LI-4).
   - name: leave-calendar
-    description: F6.5 — Team leave calendar (leader / HR) with service-line-aware coverage clash detection.
+    description: F6.5 — Team leave calendar (leader / HR).
   - name: leave-types
     description: |
       Read-through of E2 master data for client convenience (forms, filters). All writes live
@@ -391,10 +391,6 @@ paths:
           in: query
           description: Scope balances to one client company (resolved via the employee's active placement). Required for `shift_leader` callers (server enforces own-company).
           schema: { type: string, example: SWP-CMP-014 }
-        - name: service_line
-          in: query
-          description: Filter by service line slug (`facility_services` | `building_management` | `parking`).
-          schema: { type: string }
         - name: include_closed
           in: query
           description: Include period-end-closed quotas (LQ-4). Defaults to false (current period only).
@@ -595,9 +591,6 @@ paths:
         - name: company_id
           in: query
           schema: { type: string, example: SWP-CMP-014 }
-        - name: service_line
-          in: query
-          schema: { type: string }
         - name: start_date__gte
           in: query
           schema: { type: string, format: date }
@@ -1330,9 +1323,7 @@ paths:
       tags: [leave-calendar]
       summary: Team / cross-company leave calendar (LC-1, LV-3, LV-4)
       description: |
-        Returns aggregated leave entries for the calendar grid plus per-day **coverage-clash**
-        flags. The clash is **service-line-aware** (LV-4 / resolved 2026-05-31): a day is flagged
-        only when **≥2 agents of the same service line** are off at the **same client company**.
+        Returns aggregated leave entries for the calendar grid.
 
         ### `show_pending` toggle (per audit M10)
         - `false` (default per FEATURE.md §7 D6) — only `APPROVED` entries.
@@ -1350,9 +1341,6 @@ paths:
           in: query
           description: Required when caller is `shift_leader` (server enforces own-company match).
           schema: { type: string, example: SWP-CMP-014 }
-        - name: service_line
-          in: query
-          schema: { type: string }
         - name: leave_type_id
           in: query
           schema: { type: string }
@@ -1370,7 +1358,7 @@ paths:
           schema: { type: boolean, default: false }
       responses:
         '200':
-          description: Calendar grid (entries + clash flags).
+          description: Calendar grid (entries).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LeaveCalendarResponse' }
@@ -2004,7 +1992,6 @@ components:
         employee_name: { type: string, example: "Budi Santoso" }
         employee_company_id: { type: string, example: SWP-CMP-014 }
         employee_company_name: { type: string, example: "Plaza Senayan" }
-        employee_service_line: { type: string, example: "parking" }
         leave_type_id: { type: string, example: SWP-LT-001 }
         leave_type_name: { type: string, example: "Cuti Tahunan" }
         start_date: { type: string, format: date, example: "2026-06-15" }
@@ -2259,12 +2246,6 @@ components:
         entries:
           type: array
           items: { $ref: '#/components/schemas/LeaveCalendarEntry' }
-        clashes:
-          type: array
-          description: |
-            Service-line-aware clash days (LV-4 / resolved 2026-05-31). One entry per
-            `(date, company_id, service_line)` triple with ≥2 agents off.
-          items: { $ref: '#/components/schemas/LeaveCalendarClash' }
 
     LeaveCalendarEntry:
       type: object
@@ -2275,7 +2256,6 @@ components:
         employee_name: { type: string, example: "Budi Santoso" }
         company_id: { type: string, example: SWP-CMP-014 }
         company_name: { type: string, example: "Plaza Senayan" }
-        service_line: { type: string, example: parking }
         leave_type_id: { type: string, example: SWP-LT-001 }
         leave_type_code: { type: string, example: ANNUAL }
         start_date: { type: string, format: date, example: "2026-06-15" }
@@ -2283,27 +2263,6 @@ components:
         status: { $ref: '#/components/schemas/LeaveStatus' }
         delegate_id: { type: string, nullable: true, example: SWP-EMP-1055 }
         delegate_name: { type: string, nullable: true, example: "Citra Putri" }
-
-    LeaveCalendarClash:
-      type: object
-      required: [date, company_id, service_line, agent_count]
-      properties:
-        date: { type: string, format: date, example: "2026-06-23" }
-        company_id: { type: string, example: SWP-CMP-014 }
-        company_name: { type: string, example: "Plaza Senayan" }
-        service_line: { type: string, example: parking }
-        agent_count:
-          type: integer
-          description: Number of same-service-line agents off on this date at this company.
-          example: 3
-        leave_request_ids:
-          type: array
-          items: { type: string }
-          example: [SWP-LR-2026-0042, SWP-LR-2026-0051, SWP-LR-2026-0067]
-        label:
-          type: string
-          description: Human-readable highlight label (mirrors the calendar cell tag).
-          example: "Parking · perlu pengganti"
 
     # ── shared ──
     UploadedFile:
@@ -2697,7 +2656,6 @@ components:
             employee_name: "Budi Santoso"
             employee_company_id: SWP-CMP-014
             employee_company_name: "Plaza Senayan"
-            employee_service_line: parking
             leave_type_id: SWP-LT-001
             leave_type_name: "Cuti Tahunan"
             start_date: "2026-06-15"
@@ -2773,7 +2731,6 @@ components:
         employee_name: "Budi Santoso"
         employee_company_id: SWP-CMP-014
         employee_company_name: "Plaza Senayan"
-        employee_service_line: parking
         leave_type_id: SWP-LT-001
         leave_type_name: "Cuti Tahunan"
         start_date: "2026-06-15"
@@ -2812,7 +2769,6 @@ components:
         employee_name: "Andika Pratama"
         employee_company_id: SWP-CMP-027
         employee_company_name: "Menara Kuningan"
-        employee_service_line: facility_services
         leave_type_id: SWP-LT-001
         leave_type_name: "Cuti Tahunan"
         start_date: "2026-06-20"
@@ -2851,7 +2807,6 @@ components:
         employee_name: "Budi Santoso"
         employee_company_id: SWP-CMP-014
         employee_company_name: "Plaza Senayan"
-        employee_service_line: parking
         leave_type_id: SWP-LT-001
         leave_type_name: "Cuti Tahunan"
         start_date: "2026-06-15"
@@ -2900,7 +2855,6 @@ components:
         employee_name: "Andika Pratama"
         employee_company_id: SWP-CMP-027
         employee_company_name: "Menara Kuningan"
-        employee_service_line: facility_services
         leave_type_id: SWP-LT-001
         leave_type_name: "Cuti Tahunan"
         start_date: "2026-06-20"
@@ -2940,7 +2894,6 @@ components:
         employee_name: "Budi Santoso"
         employee_company_id: SWP-CMP-014
         employee_company_name: "Plaza Senayan"
-        employee_service_line: parking
         leave_type_id: SWP-LT-002
         leave_type_name: "Cuti Sakit"
         start_date: "2026-06-01"
@@ -3254,7 +3207,7 @@ components:
         uploaded_at: "2026-06-03T07:30:00Z"
 
     CalendarHRJuneExample:
-      summary: HR cross-company calendar — June 2026, with a Parking clash on 23–24.
+      summary: HR cross-company calendar — June 2026.
       value:
         period: 2026
         month: 6
@@ -3265,7 +3218,6 @@ components:
             employee_name: "Budi Santoso"
             company_id: SWP-CMP-014
             company_name: "Plaza Senayan"
-            service_line: parking
             leave_type_id: SWP-LT-001
             leave_type_code: ANNUAL
             start_date: "2026-06-15"
@@ -3273,21 +3225,6 @@ components:
             status: APPROVED
             delegate_id: SWP-EMP-1055
             delegate_name: "Citra Putri"
-        clashes:
-          - date: "2026-06-23"
-            company_id: SWP-CMP-014
-            company_name: "Plaza Senayan"
-            service_line: parking
-            agent_count: 3
-            leave_request_ids: [SWP-LR-2026-0050, SWP-LR-2026-0051, SWP-LR-2026-0052]
-            label: "Parking · perlu pengganti"
-          - date: "2026-06-24"
-            company_id: SWP-CMP-014
-            company_name: "Plaza Senayan"
-            service_line: parking
-            agent_count: 2
-            leave_request_ids: [SWP-LR-2026-0050, SWP-LR-2026-0051]
-            label: "Parking · perlu pengganti"
 
     LeaveTypesExample:
       summary: Active leave types.

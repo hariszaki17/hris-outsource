@@ -41,8 +41,7 @@ erDiagram
         bigint attendance_code_id FK
         bigint company_id FK "denormalized from placement (scope/filter)"
         bigint site_id FK "denormalized from placement (scope/filter)"
-        bigint position_id FK "denormalized from placement (filter)"
-        string service_line "denormalized from placement (filter)"
+        string position "denormalized from placement (free-text, filter)"
         datetime check_in_at "nullable (null when Absent)"
         datetime check_out_at "nullable"
         decimal lat_in
@@ -80,7 +79,7 @@ erDiagram
 - **INV-5:** **`Absent` is set only for a scheduled shift with no clock-in by shift end** — the record carries `check_in_at = null` (and no clock-in geofence). An `Absent` record is **resolvable via a `check_in` correction (F5.4)**, whose approval re-evaluates `status` (`Absent → Present/Late` per `shift_start_at` + grace). An approved leave suppresses `Absent` → `On Leave` (F5.2, E6).
 - **INV-6:** **`shift_start_at` is fixed at clock-in; `shift_end_at` tracks master edits until clock-out, then fixed** (see E4 INV-5; detail in F5.1 CI-9). INV-4's auto-close and F5.2's lateness/early evaluation always use the entry's current effective end until checkout.
 
-**Denormalization:** `company_id`, `site_id`, `service_line`, and `position_id` are **denormalized onto `Attendance`** (resolved from the agent's placement → site/position) so the high-volume records list (F5.5) can **filter and scope by company · site · service line · position** without a JOIN — the same pattern as `company_id`/`service_line` carried for leader scope.
+**Denormalization:** `company_id`, `site_id`, and `position` (free-text) are **denormalized onto `Attendance`** (resolved from the agent's placement → site/position) so the high-volume records list (F5.5) can **filter and scope by company · site · position** without a JOIN — the same pattern as `company_id` carried for leader scope.
 
 ## 5. Features
 
@@ -223,7 +222,7 @@ flowchart LR
         R1([My attendance]) --> R2[History + status + corrections]
     end
     subgraph LH[Leader / HR - web]
-        R3([Team attendance]) --> R4[Filter by company, site, service line, position, date, status, exceptions]
+        R3([Team attendance]) --> R4[Filter by company, site, position, date, status, exceptions]
         R4 --> R5{Export?}
         R5 -- Yes --> R6[Billable/payable rollup -> E10]
     end
@@ -266,7 +265,7 @@ HR/Shift-Leader creates attendance record for any employee who forgot clock-in o
 - **MR-14:** autofill also returns any **existing attendance** for the employee + date (`existing_attendance_id`/`_status`/`_verification_status`); when present the web form disables create and steers to verify/correct it (F5.3/F5.4) — avoiding duplicate rows.
 - **MR-15:** autofill `422 NO_ACTIVE_PLACEMENT` is a **non-blocking informational warning** in the web form (re-validate employee/date), not a hard error; create still re-validates per MR-1. Genuine network/5xx → blocking error with retry.
 
-**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position, service line) + today's schedule (schedule_id, shift_start_at, shift_end_at) + existing-attendance fields (existing_attendance_id, existing_attendance_status, existing_verification_status) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement. Placement resolution: `lifecycle_status IN (ACTIVE, EXPIRING, EXTENDED)` whose term covers the date (`end_date IS NULL` = open-ended PKWTT).
+**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position) + today's schedule (schedule_id, shift_start_at, shift_end_at) + existing-attendance fields (existing_attendance_id, existing_attendance_status, existing_verification_status) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement. Placement resolution: `lifecycle_status IN (ACTIVE, EXPIRING, EXTENDED)` whose term covers the date (`end_date IS NULL` = open-ended PKWTT).
 
 ```mermaid
 flowchart TD
@@ -337,6 +336,6 @@ flowchart TD
 - ✅ **Anti-spoofing** = post-v1; early clock-out flagged if >15 min early.
 
 **Resolved (2026-06-08):**
-- ✅ **Site & position denormalized onto `Attendance`** (alongside company / service line) so the records list (F5.5) filters and scopes by **company · site · service line · position**.
+- ✅ **Site & position denormalized onto `Attendance`** (alongside company) so the records list (F5.5) filters and scopes by **company · site · position** (position is free-text). *(Service-line denormalization dropped 2026-06-12; `position_id` FK → `position` free-text — service line and the position master removed project-wide.)*
 - ✅ **`check_in_at` nullable** — a true `Absent` record (scheduled shift, no clock-in) carries `check_in_at = null` (INV-5).
 - ✅ **Correction re-evaluates status** — an approved `check_in` correction on an `Absent` record re-runs F5.2 (`Absent → Present/Late` by `shift_start_at` + grace) and recomputes `is_late` / `late_minutes`.

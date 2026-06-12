@@ -62,12 +62,11 @@ type AttendanceCodeFilter struct {
 
 // --- Overtime Rules ---
 
-// OvertimeRule represents a pay-rate rule for overtime work. ServiceLineID is
-// nil for the global default rule.
+// OvertimeRule represents a pay-rate rule for overtime work. Overtime rules are
+// GLOBAL ONLY (the service_line scope axis was dropped 2026-06-12).
 type OvertimeRule struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float64
 	RestdayRate         float64
 	HolidayRate         float64
@@ -83,7 +82,6 @@ type OvertimeRule struct {
 // GET /overtime-rules.
 type OvertimeRuleFilter struct {
 	Status          *string
-	ServiceLine     *string
 	Limit           int
 	CursorCreatedAt *time.Time
 	CursorID        *string

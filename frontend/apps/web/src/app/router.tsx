@@ -41,8 +41,6 @@ import { EmployeesScreen, type EmployeesSearch } from '@/features/e2-identity/em
 import { LeaveTypesScreen } from '@/features/e2-identity/leave-types-screen.tsx';
 import { MasterDataHubScreen } from '@/features/e2-identity/master-data-hub-screen.tsx';
 import { OvertimeRulesScreen } from '@/features/e2-identity/overtime-rules-screen.tsx';
-import { ServiceLineDetailScreen } from '@/features/e2-identity/service-line-detail-screen.tsx';
-import { ServiceLinesScreen } from '@/features/e2-identity/service-lines-screen.tsx';
 import {
   CompanyRosterScreen,
   type CompanyRosterSearch,
@@ -222,8 +220,6 @@ const employeesRoute = createRoute({
     if (search.status === EmployeeStatus.ACTIVE || search.status === EmployeeStatus.INACTIVE) {
       out.status = search.status;
     }
-    if (typeof search.service_line === 'string' && search.service_line)
-      out.service_line = search.service_line;
     if (typeof search.client_company === 'string' && search.client_company)
       out.client_company = search.client_company;
     if (search.tab === 'all' || search.tab === 'active' || search.tab === 'inactive') {
@@ -244,30 +240,6 @@ const employeeDetailRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/employees/$employeeId',
   component: EmployeeDetailScreen,
-});
-
-// E2 — Lini Layanan (service lines list + detail)
-const serviceLinesRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/service-lines',
-  component: ServiceLinesScreen,
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { status?: 'ACTIVE' | 'INACTIVE'; cursor?: string } => {
-    const out: { status?: 'ACTIVE' | 'INACTIVE'; cursor?: string } = {};
-    if (search.status === 'ACTIVE' || search.status === 'INACTIVE') out.status = search.status;
-    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
-    return out;
-  },
-});
-
-const serviceLineDetailRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/service-lines/$serviceLineId',
-  component: function ServiceLineDetailRoute() {
-    const { serviceLineId } = serviceLineDetailRoute.useParams();
-    return <ServiceLineDetailScreen serviceLineId={serviceLineId} />;
-  },
 });
 
 // E2 — Antrian Persetujuan Perubahan Data (HR change-request approval queue)
@@ -376,8 +348,6 @@ const clientCompaniesRoute = createRoute({
     ) {
       out.status = search.status;
     }
-    if (typeof search.service_line === 'string' && search.service_line)
-      out.service_line = search.service_line;
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
     return out;
   },
@@ -414,8 +384,6 @@ const placementsRoute = createRoute({
     if (typeof search.q === 'string' && search.q) out.q = search.q;
     if (typeof search.company_id === 'string' && search.company_id)
       out.company_id = search.company_id;
-    if (typeof search.service_line_id === 'string' && search.service_line_id)
-      out.service_line_id = search.service_line_id;
     if (
       search.status === PlacementLifecycleStatus.PENDING_START ||
       search.status === PlacementLifecycleStatus.ACTIVE ||
@@ -449,8 +417,6 @@ const companyRosterRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): CompanyRosterSearch => {
     const out: CompanyRosterSearch = {};
     if (typeof search.q === 'string' && search.q) out.q = search.q;
-    if (typeof search.service_line_id === 'string' && search.service_line_id)
-      out.service_line_id = search.service_line_id;
     if (
       search.status === PlacementLifecycleStatus.PENDING_START ||
       search.status === PlacementLifecycleStatus.ACTIVE ||
@@ -520,8 +486,7 @@ const attendanceDashboardRoute = createRoute({
     if (typeof search.company_id === 'string' && search.company_id)
       out.company_id = search.company_id;
     if (typeof search.site_id === 'string' && search.site_id) out.site_id = search.site_id;
-    if (typeof search.position_id === 'string' && search.position_id)
-      out.position_id = search.position_id;
+    if (typeof search.position === 'string' && search.position) out.position = search.position;
     if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
     if (typeof search.date_from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(search.date_from))
       out.date_from = search.date_from;
@@ -799,8 +764,6 @@ const routeTree = rootRoute.addChildren([
     agreementsRoute,
     agreementNewRoute,
     agreementDetailRoute,
-    serviceLinesRoute,
-    serviceLineDetailRoute,
     masterDataRoute,
     leaveTypesRoute,
     attendanceCodesRoute,

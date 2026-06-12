@@ -235,8 +235,8 @@ func (r *DashboardRepo) AgentTodayShift(ctx context.Context, employeeID string, 
 }
 
 // SuperAdminWidgets runs the four global admin-block aggregations (DB-7). The
-// service maps the raw rows to the domain shape (service-line name → enum, audit
-// columns → labels).
+// service maps the raw rows to the domain shape (org rollups by free-text position,
+// audit columns → labels).
 func (r *DashboardRepo) SuperAdminWidgets(ctx context.Context, now time.Time, auditLimit int) (svc.SuperAdminWidgetsData, error) {
 	var d svc.SuperAdminWidgetsData
 
@@ -258,14 +258,14 @@ func (r *DashboardRepo) SuperAdminWidgets(ctx context.Context, now time.Time, au
 	}
 	d.BankApprovalsPending = int(bank)
 
-	rollups, err := r.q.OrgRollupsByServiceLine(ctx)
+	rollups, err := r.q.OrgRollupsByPosition(ctx)
 	if err != nil {
 		return d, err
 	}
 	d.OrgRollups = make([]svc.OrgRollupRow, 0, len(rollups))
 	for _, row := range rollups {
 		d.OrgRollups = append(d.OrgRollups, svc.OrgRollupRow{
-			ServiceLineName:  row.ServiceLineName,
+			Position:         row.Position,
 			Headcount:        int(row.Headcount),
 			ActivePlacements: int(row.ActivePlacements),
 		})

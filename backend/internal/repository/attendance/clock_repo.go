@@ -2,15 +2,13 @@
 // service port (F5.1) over the clock.sql queries + the existing placement/site
 // generated queries. Reads run on the pool; the clock-in INSERT / clock-out UPDATE run
 // via q.WithTx(tx) so they share the audit row's transaction. The ON CONFLICT DO
-// NOTHING clock-in yields pgx.ErrNoRows on a no-op → created=false. service_line is
-// derived from the placement's service-line name as lower(replace(name,' ','_')) (no
-// slug column; same 1:1 mapping as absence.sql).
+// NOTHING clock-in yields pgx.ErrNoRows on a no-op → created=false. position is the
+// free-text label carried on the placement (no service_line).
 package attendance
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,8 +34,8 @@ func NewClockRepo(pool *db.Pool) *ClockRepo {
 }
 
 // GetActivePlacement resolves the agent's single active placement → the denormalized
-// company/site/position/service_line. found=false when no active placement exists
-// (the service maps that to NO_ACTIVE_PLACEMENT).
+// company/site/position. found=false when no active placement exists (the service maps
+// that to NO_ACTIVE_PLACEMENT). Position is the free-text label from the placement.
 func (r *ClockRepo) GetActivePlacement(ctx context.Context, employeeID string) (svc.PlacementInfo, bool, error) {
 	row, err := r.q.GetActivePlacementForEmployee(ctx, employeeID)
 	if err != nil {
@@ -46,16 +44,11 @@ func (r *ClockRepo) GetActivePlacement(ctx context.Context, employeeID string) (
 		}
 		return svc.PlacementInfo{}, false, err
 	}
-	serviceLine := ""
-	if row.ServiceLineName != nil {
-		serviceLine = strings.ToLower(strings.ReplaceAll(*row.ServiceLineName, " ", "_"))
-	}
 	return svc.PlacementInfo{
 		PlacementID: row.ID,
 		CompanyID:   row.ClientCompanyID,
 		SiteID:      row.SiteID,
-		PositionID:  row.PositionID,
-		ServiceLine: serviceLine,
+		Position:    row.Position,
 	}, true, nil
 }
 
@@ -136,9 +129,8 @@ func (r *ClockRepo) ClockIn(ctx context.Context, tx pgx.Tx, p svc.ClockInRow) (s
 		PlacementID:        p.PlacementID,
 		ScheduleID:         p.ScheduleID,
 		CompanyID:          p.CompanyID,
-		ServiceLine:        p.ServiceLine,
 		SiteID:             p.SiteID,
-		PositionID:         p.PositionID,
+		Position:           p.Position,
 		ShiftStartAt:       p.ShiftStartAt,
 		ShiftEndAt:         p.ShiftEndAt,
 		CheckInAt:          &checkIn,

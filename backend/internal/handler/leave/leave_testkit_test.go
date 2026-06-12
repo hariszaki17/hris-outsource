@@ -327,7 +327,6 @@ func (r *fakeLeaveRepo) CreateLeaveRequest(_ context.Context, _ pgx.Tx, p svc.Cr
 		EmployeeID:     p.EmployeeID,
 		PlacementID:    p.PlacementID,
 		CompanyID:      p.CompanyID,
-		ServiceLineID:  p.ServiceLineID,
 		LeaveTypeID:    p.LeaveTypeID,
 		StartDate:      p.StartDate,
 		EndDate:        p.EndDate,
@@ -1076,12 +1075,10 @@ func (h *harness) doWithHeaders(method, path string, body any, headers map[strin
 // status/dates/duration). Defaults annual leave type SWP-LT-001 + denorm names.
 func (h *harness) seedRequest(id, company, employee string, status dom.LeaveStatus, start, end time.Time, days int) dom.LeaveRequest {
 	c := company
-	line := dom.ServiceLineParking
 	req := dom.LeaveRequest{
 		ID:            id,
 		EmployeeID:    employee,
 		CompanyID:     &c,
-		ServiceLineID: &line,
 		LeaveTypeID:   "SWP-LT-001",
 		StartDate:     start,
 		EndDate:       end,
@@ -1164,14 +1161,12 @@ func (h *harness) seedEmp(employee, fullName, nik, nip string) {
 // seedCalendarEntry plants a leave_calendar entry directly (status-filtered on read).
 func (h *harness) seedCalendarEntry(id, company, employee string, status dom.LeaveStatus, start, end time.Time) {
 	c := company
-	line := dom.ServiceLineParking
 	h.leave.calendar = append(h.leave.calendar, dom.LeaveCalendarEntry{
 		LeaveRequestID: id,
 		EmployeeID:     employee,
 		EmployeeName:   strp("Agent " + employee),
 		CompanyID:      &c,
 		CompanyName:    strp("Company " + company),
-		ServiceLine:    &line,
 		LeaveTypeID:    "SWP-LT-001",
 		LeaveTypeCode:  strp("ANNUAL"),
 		StartDate:      start,

@@ -38,7 +38,7 @@ HR / Super Admin (run, review, adjust, post), System (assemble, recompute, enfor
 
 | Ref | Rule |
 |-----|------|
-| PR-1 | A run targets one **period** (`year`, `month`) and a **scope** (all / service line / client company); the scope filter is snapshotted on the run. |
+| PR-1 | A run targets one **period** (`year`, `month`) and a **scope** (all / client company); the scope filter is snapshotted on the run. |
 | PR-2 | The run has a **cutoff_date**; only upstream records **verified/approved on or before cutoff** are assembled (INV-7). |
 | PR-3 | **Eligibility:** an agent is included if they have an active `EmploymentAgreement` (E2) overlapping the period within scope. One draft payslip per eligible agent per run. |
 | PR-4 | **Base line** = `EmploymentAgreement.base_salary` (monthly, INV-6), prorated only for mid-period join/leave and unpaid days. *(default: calendar-day divisor — see §10)* |

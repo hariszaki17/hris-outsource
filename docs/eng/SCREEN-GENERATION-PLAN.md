@@ -112,8 +112,9 @@ Remaining masters → components:
       one `NotifCard`(+`unread` prop), renders `<button>` when `onClick` given. *(E10 batch.)*
 - [x] **AuditTrail** — `AuditTrailViewer` `jzBi0` · `AuditTrailDrawer` `BUAHW` · `AuditTrailInline` `qtz6q` →
       `audit-trail.tsx`: data-driven (`AuditEntry[]`); Drawer on Radix Dialog (right sheet — generic `Drawer` extraction is a follow-up).
-- [ ] **Pickers** — `PickerEmployee` `ZOZ5x` · `PickerClientCompany` `GpyLu` · `PickerServiceLine`
-      `vkwQo` · `PickerPosition` `Nz6iR` · `PickerShiftLeader` `fg4kI` (cross-epic FK pickers). *(deferred → E2/E3 forms)*
+- [ ] **Pickers** — `PickerEmployee` `ZOZ5x` · `PickerClientCompany` `GpyLu` · `PickerShiftLeader`
+      `fg4kI` (cross-epic FK pickers). Position is **not** a picker — it is a free-text typeahead over
+      `GET /positions:search` (DISTINCT existing values, no master/FK). *(deferred → E2/E3 forms)*
 - [x] **Fields** — `SearchField` `vJBJZ` · `FilterSelect` `t60nEC` (native select) · `Toggle` `Uma0O` (role=switch)
       → `primitives/{search-field,filter-select,toggle}.tsx`. *(`TextField` `nVepR` reconciled to existing `FormField`+`Input`; `Checkbox` already exists.)*
 - [x] **Button variants** — `BtnPrimary` `Y7IwcG`/`BtnSecondary` `TR9pR`/`BtnGhost` `AEl1Q`/`BtnDanger` `d5HQSI`
@@ -181,14 +182,13 @@ Remaining masters → components:
 
 ### E2 — Identity / Karyawan & Master Data ✅  · web container `G0D87V`
 - [x] Reconciled against live `.pen` *(23 web frames; Admin POV + SL scoped variants)*
-- [x] **Pickers** (comp/* → generic `Combobox` in `@swp/ui` + 5 domain pickers) · `ZOZ5x`,`GpyLu`,`vkwQo`,`Nz6iR`,`fg4kI` → `features/e2-identity/pickers/*`
+- [x] **Pickers** (comp/* → generic `Combobox` in `@swp/ui` + domain pickers: employee/client-company/shift-leader; position = free-text typeahead over `GET /positions:search`) · `ZOZ5x`,`GpyLu`,`fg4kI` → `features/e2-identity/pickers/*`
 - [x] Daftar Karyawan — list + stat cards + tabs + filters + row-kebab + **SL scoped** · `→ employees-screen.tsx` · frames `WElYh`,`n3wi1w`
 - [x] Karyawan Detail — Profil + cross-epic tabs (Penempatan/Kehadiran/Cuti&Lembur deep-links) + SL read-only · `→ employee-detail-screen.tsx` · frames `JBjBb`,`rtKzk`
 - [x] Tambah/Edit Karyawan — form (RHF + hand-zod) + overlays · `→ employee-form.tsx`,`employee-overlays.tsx` · frame `h6bDz`,`tNMfN`
 - [x] HR change-request queue + detail drawer + reject modal · `→ change-requests-screen.tsx`,`change-request-overlays.tsx` · frame `Ckteo`
 - [x] **F2.2 Employment Agreement** — list · detail · create (PKWT/PKWTT) · renew · close · `→ agreements-screen.tsx`,`agreement-detail-screen.tsx`,`agreement-form.tsx` · frames `mS8rP`,`Cu0qg`,`gxqjg`
 - [x] **F2.3 Client Company** — list (row action = Aktifkan/Nonaktifkan only, **no row kebab**) · detail (**Profil** tab = statutory/billing + `leader_scope`; **Lokasi & Site** tab owns geofence_radius_m editor + map placeholder + geofence-disabled banner D11 — Profil no longer duplicates sites/geofence) · create + **full-page edit from detail** (`/client-companies/$id/edit`; **no edit drawer**) · `→ client-companies-screen.tsx`,`client-company-detail-screen.tsx`,`client-company-form.tsx` · frames `qIpsj`,`OmuQT`,`ZmJnZ`,`oYgYe` *(EditClientCompanyDrawer removed 2026-06-07, EPICS §8)*
-- [x] **F2.4 Service Lines + Positions** — list (Edit **routes to detail page**) · detail = consolidated maintenance (rename line + add/update/remove positions; no rename-only modal) · `→ service-lines-screen.tsx`,`service-line-detail-screen.tsx` · frames `vV79c`,`I8WeKy`,`IwKfo`,`hb7vL` *(consolidated to detail 2026-06-07, EPICS §8)*
 - [x] **F2.5 Operational Master Data** — hub + Leave Types · Attendance Codes (color+flags) · Overtime Rules (30-min min) CRUD + modals · `→ master-data-hub-screen.tsx`,`leave-types-screen.tsx`,`attendance-codes-screen.tsx`,`overtime-rules-screen.tsx` · frames `f8mBr`,`HII8C`,`R5xoi`,`SnXpE`,`rMNJT`,`u8eXaW`,`JYmgi`
 
 ### E3 — Placement / Penempatan ✅  · web container `j2giE`
@@ -245,7 +245,7 @@ Remaining masters → components:
 ### E10 — Reporting & Notifications ✅  · web container `JifD6`
 - [x] Reconciled against live `.pen` *(HR row: dashboard/billable/export-modal/notif-center/super-admin; SL dashboard; export + notif + dashboard-empty showcases)*
 - [x] Dashboards (F10.2) — role-branched `useGetMyDashboard` union: HR (`ETi5H`) · SL team (`RiSPW`) · agent-fallback · `→ features/e10-reporting/dashboard-screen.tsx` · route `/`
-  - [ ] **Super Admin superset (DB-7, 2026-06-11)** — `DhzyL` becomes HR cockpit **+ admin widgets** (users & access · recent audit · org rollups by service line · pending grants) from `HrDashboard.admin`; render only when `role==='super_admin'`. `.pen` frame enhancement pending (renderer issue this session — finish in a clean design session).
+  - [ ] **Super Admin superset (DB-7, 2026-06-11)** — `DhzyL` becomes HR cockpit **+ admin widgets** (users & access · recent audit · org rollups by position · pending grants) from `HrDashboard.admin`; render only when `role==='super_admin'`. `.pen` frame enhancement pending (renderer issue this session — finish in a clean design session).
 - [x] **Approval-inbox panel** ("Perlu Tindakan") + empty (`biFs5`) + filtered-zero (`elJj3`) · `→ approval-inbox-panel.tsx`
 - [x] Notification center (F10.1) + filters + **mark-read transition** (optimistic + toast) + mark-all + empty (`P2CO7C`) + stale-link note · `→ notifications-screen.tsx` (uses `NotifCard`) · frames `i0qW8`,`R0d1wC` · route `/notifications`
 - [x] Attendance/billable report (F10.3) + summary KPIs + per-row table + **pending-records callout** (verified-only) + export entry · `→ billable-report-screen.tsx` · frame `EF8AZ` · route `/reports`
@@ -279,7 +279,7 @@ Remaining masters → components:
 | Phase 0 — components | ~18 groups | 27 of ~27 masters ✅ (chrome+feedback + data/form + Drawer + **ExportModal + NotifCard** + Pickers — all built) |
 | Phase 1 — shell + login | 3 | 3 (providers, login, **app shell**) ✅ |
 | E1 Foundations (web) | 12 | 12 ✅ (auth set + Users CRUD/overlays + Audit list+drawer + Settings hub/general + global states) |
-| E2 Karyawan (web) | ~9 features | 9 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · service-lines+positions · master-data×3 · **Pickers/Combobox**) |
+| E2 Karyawan (web) | ~8 features | 8 ✅ (employees+SL · detail · form · change-req queue · agreements · client-companies+geofence · master-data×3 · **Pickers/Combobox**) |
 | E3 Penempatan (web) | ~6 | 6 ✅ (list+roster · detail w/ 9 lifecycle states · create+INV-1 · transfer/renew/end/terminate/resign · SL assign/replace/end INV-2/3/4) |
 | E4 Jadwal (web) | ~5 | 5 ✅ (shift master catalog+modal · weekly schedule grid · shift-picker popover · conflict toasts · bulk apply) |
 | E5 Kehadiran (web) | ~4 | 4 ✅ (dashboard HR+SL · verification queue+detail+bulk · corrections queue+detail) |

@@ -109,7 +109,7 @@ func (s *OvertimeService) computeCalculation(ctx context.Context, ot dom.Overtim
 // applied rule. Falls back to the stored reference_multiplier, then 0 (INV-2:
 // reference only; never applied to money).
 func (s *OvertimeService) tierMultiplier(ctx context.Context, ot dom.Overtime) float64 {
-	if rule, err := s.rules.FindOvertimeRule(ctx, ot.ServiceLineID); err == nil {
+	if rule, err := s.rules.FindOvertimeRule(ctx); err == nil {
 		switch ot.DayType {
 		case dom.OvertimeTierHoliday:
 			return rule.HolidayRate
@@ -141,7 +141,7 @@ type CreateOvertimeInput struct {
 // source REQUESTED. Scope: an agent caller may only request for themselves (403 if a
 // different employee_id is supplied). The work_date must fall within an ACTIVE
 // placement (OC-6) and must NOT overlap an APPROVED leave (OT_OVERLAPS_LEAVE / 409).
-// Placement/company/service_line are denormalized from the resolved placement.
+// Placement/company are denormalized from the resolved placement.
 func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (dom.Overtime, Calculation, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
@@ -207,11 +207,7 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 	}
 
 	// Resolve the day_type tier (HOLIDAY/RESTDAY/WORKDAY) for the record.
-	serviceLineID := &cover.ServiceLineID
-	if cover.ServiceLineID == "" {
-		serviceLineID = nil
-	}
-	tier, holidayID := s.ClassifyDayType(ctx, employeeID, in.WorkDate, serviceLineID)
+	tier, holidayID := s.ClassifyDayType(ctx, employeeID, in.WorkDate)
 
 	companyID := &cover.CompanyID
 	if cover.CompanyID == "" {
@@ -227,7 +223,6 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 			EmployeeID:       employeeID,
 			CompanyID:        companyID,
 			PlacementID:      cover.PlacementID,
-			ServiceLineID:    serviceLineID,
 			WorkDate:         in.WorkDate,
 			PlannedStartTime: &pst,
 			PlannedEndTime:   &pet,
@@ -634,11 +629,12 @@ func (s *OvertimeService) BulkReject(ctx context.Context, ids []string, reason s
 
 // --- day_type classification + OT_BELOW_MIN (exported seams for 09-03 + seed) ---
 
-// ClassifyDayType resolves the OT tier for (employee, work_date, service line):
+// ClassifyDayType resolves the OT tier for (employee, work_date):
 // GetHolidayForDate → HOLIDAY (+ holiday id); else a live schedule entry → WORKDAY;
 // else RESTDAY. TierPrecedence (HOLIDAY>RESTDAY>WORKDAY) resolves overlaps. Returns
-// the resolved tier + the matched holiday id (nil unless HOLIDAY).
-func (s *OvertimeService) ClassifyDayType(ctx context.Context, employeeID string, workDate time.Time, serviceLineID *string) (dom.OvertimeTier, *string) {
+// the resolved tier + the matched holiday id (nil unless HOLIDAY). Holidays are
+// GLOBAL (decision 2026-06-12) so there is no per-service-line applicability filter.
+func (s *OvertimeService) ClassifyDayType(ctx context.Context, employeeID string, workDate time.Time) (dom.OvertimeTier, *string) {
 	scheduleTier := dom.OvertimeTierRestday
 	if live, err := s.schedule.FindLiveEntryForAgentDate(ctx, employeeID, workDate); err == nil && live.ID != "" && !live.IsDayOff {
 		scheduleTier = dom.OvertimeTierWorkday
@@ -661,8 +657,8 @@ func (s *OvertimeService) ClassifyDayType(ctx context.Context, employeeID string
 // counted minutes fall below the applicable rule's min_minutes. Exposed as a seam
 // for 09-03 contract tests + the seed validation path (the openapi returns this on
 // the create path, which is OUT of web scope).
-func (s *OvertimeService) EnforceMinMinutes(ctx context.Context, countedMinutes int, serviceLineID *string) error {
-	rule, err := s.rules.FindOvertimeRule(ctx, serviceLineID)
+func (s *OvertimeService) EnforceMinMinutes(ctx context.Context, countedMinutes int) error {
+	rule, err := s.rules.FindOvertimeRule(ctx)
 	min := 30
 	if err == nil && rule.MinMinutes > 0 {
 		min = rule.MinMinutes

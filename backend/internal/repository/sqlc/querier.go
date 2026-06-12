@@ -47,7 +47,7 @@ type Querier interface {
 	// LIVE from VERIFIED attendance (INV-4 / BR-1) on billable attendance codes
 	// (E2 attendance_codes.is_billable). Hours only — no rates/amounts (EPICS §8).
 	//
-	// SCHEMA-ALIGNMENT NOTE [11-01 DECISION]:
+	// SCHEMA-ALIGNMENT NOTE [11-01 DECISION; service_line removed 2026-06-12]:
 	//   * "verified" = attendance.verification_status = 'VERIFIED' (00026; the plan
 	//     prose mentioned is_verified — there is no such column, verification_status
 	//     is the source of truth).
@@ -58,16 +58,19 @@ type Querier interface {
 	//     worked_minutes is NULL (open shift) it contributes 0.
 	//   * billable_hours counts only billable-code minutes; worked_hours counts ALL
 	//     verified worked minutes in the group; the GROUP filter is applied per-variant.
-	//   * company/service-line names come from a JOIN to placements -> client_companies
-	//     / service_lines (attendance.company_id is the denormalized scope key;
-	//     placements.service_line_id is the line).
+	//   * company name comes from a JOIN to placements -> client_companies. Position is
+	//     a FREE-TEXT column on placements (no master/FK; decision 2026-06-12) — the
+	//     report groups/filters on placements.position directly.
 	//   * shift date = check_in_at::date (no attendance_shift_date column exists).
 	//
-	// Three GROUP BY variants (employee / day / shift_master) are provided as distinct
-	// typed queries rather than a single @group_by CASE — keeps sqlc row types precise
-	// and the service maps each to BillableReportRow. The shared filter is identical.
+	// Four GROUP BY variants (employee / position / day / shift_master) are provided as
+	// distinct typed queries rather than a single @group_by CASE — keeps sqlc row types
+	// precise and the service maps each to BillableReportRow. The shared filter is
+	// identical (company_id + free-text position).
 	// group_by=employee: group_key = SWP-EMP-*, group_label = employee full_name.
 	BillableAggregateByEmployee(ctx context.Context, arg BillableAggregateByEmployeeParams) ([]BillableAggregateByEmployeeRow, error)
+	// group_by=position: group_key = group_label = the free-text placement position.
+	BillableAggregateByPosition(ctx context.Context, arg BillableAggregateByPositionParams) ([]BillableAggregateByPositionRow, error)
 	// group_by=shift_master: group_key = SWP-SHF-*, group_label = shift master name.
 	// shift_master resolved via the schedule_entries row linked by attendance.schedule_id.
 	BillableAggregateByShiftMaster(ctx context.Context, arg BillableAggregateByShiftMasterParams) ([]BillableAggregateByShiftMasterRow, error)
@@ -117,8 +120,6 @@ type Querier interface {
 	CountActiveCompanies(ctx context.Context) (int64, error)
 	// HrDashboard.kpis.active_placements.
 	CountActivePlacements(ctx context.Context) (int64, error)
-	// Used to populate position_count in the ServiceLine DTO and to guard :discontinue.
-	CountActivePositionsForLine(ctx context.Context, serviceLineID string) (int64, error)
 	// Used to populate site_count in the ClientCompany DTO.
 	CountActiveSitesForCompany(ctx context.Context, clientCompanyID string) (int64, error)
 	// =====================================================================
@@ -240,16 +241,13 @@ type Querier interface {
 	// the SWP-EMP-* of the HR/admin who created the record.
 	// Returns the full row for the domain mapper.
 	CreateManualAttendance(ctx context.Context, arg CreateManualAttendanceParams) (CreateManualAttendanceRow, error)
-	// Allocates the SWP-OTR id inline from the per-prefix sequence.
+	// Allocates the SWP-OTR id inline from the per-prefix sequence. Overtime rules are
+	// GLOBAL ONLY (decision 2026-06-12 — service_line_id dropped).
 	CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error)
 	// id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
 	CreatePlacement(ctx context.Context, arg CreatePlacementParams) (CreatePlacementRow, error)
-	// Allocates the SWP-POS id inline from the per-prefix sequence.
-	CreatePosition(ctx context.Context, arg CreatePositionParams) (CreatePositionRow, error)
 	// id allocated by the column DEFAULT ('SWP-SCH-' || swp_next_id('SCH')).
 	CreateScheduleEntry(ctx context.Context, arg CreateScheduleEntryParams) (CreateScheduleEntryRow, error)
-	// Allocates the SWP-SVC id inline from the per-prefix sequence.
-	CreateServiceLine(ctx context.Context, name string) (CreateServiceLineRow, error)
 	// id allocated by the column DEFAULT ('SWP-SLA-' || swp_next_id('SLA')).
 	CreateShiftLeaderAssignment(ctx context.Context, arg CreateShiftLeaderAssignmentParams) (ShiftLeaderAssignment, error)
 	// id allocated by the column DEFAULT ('SWP-SHF-' || swp_next_id('SHF')).
@@ -300,16 +298,15 @@ type Querier interface {
 	// grace with NO clock-in as ABSENT. schedule_entries carries NO stored shift
 	// timestamptz — the window is computed from work_date + start_time/end_time (HH:MM,
 	// Asia/Jakarta wall-clock) via `... AT TIME ZONE 'Asia/Jakarta'` (CLAUDE.md TZ layer:
-	// 07:00 WIB → 00:00 UTC). cross_midnight adds a day to the end. service_line is the
-	// attendance text enum (facility_services|building_management|parking) derived from the
-	// placement's service_lines row as lower(replace(name,' ','_')) — there is no slug
-	// column, the three seeded names map 1:1 ("Facility Services"→facility_services, etc).
-	// `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// 07:00 WIB → 00:00 UTC). cross_midnight adds a day to the end. position is FREE-TEXT,
+	// resolved from the placement's positions.name and stored directly on the ABSENT row;
+	// there is no service_line column. `make gen` writes internal/repository/sqlc (NEVER
+	// hand-edit).
 	// Candidate scheduled shifts that ended before :cutoff (now - grace) and have no
-	// attendance row yet. Joins placements for the denormalized company/site/position/
-	// service_line the ABSENT row must carry. Deterministic order (work_date, id) so
-	// batching is stable across ticks. is_day_off and CANCELLED_BY_LEAVE entries are
-	// never absences; only live (deleted_at IS NULL) entries with both times present.
+	// attendance row yet. Joins placements for the denormalized company/site/position the
+	// ABSENT row must carry (position is the free-text positions.name). Deterministic order
+	// (work_date, id) so batching is stable across ticks. is_day_off and CANCELLED_BY_LEAVE
+	// entries are never absences; only live (deleted_at IS NULL) entries with both times present.
 	FindUnreportedAbsences(ctx context.Context, arg FindUnreportedAbsencesParams) ([]FindUnreportedAbsencesRow, error)
 	// EA-2 pre-check + predecessor lookup for :renew/:close operations.
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
@@ -330,6 +327,9 @@ type Querier interface {
 	// INV-4 lock: the agent's active placement at a specific company, row-locked.
 	GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Context, arg GetActivePlacementForEmployeeAtCompanyForUpdateParams) (GetActivePlacementForEmployeeAtCompanyForUpdateRow, error)
 	GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error)
+	// ANNUAL_POOL entitlement source: the employee's active employment agreement
+	// (annual_leave_entitlement_days, migr. 00040). NULL when unset.
+	GetAnnualEntitlementForEmployee(ctx context.Context, employeeID string) (*int32, error)
 	// Returns file metadata + blob for the authenticated file-download handler.
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
 	// Single record with denormalized names.
@@ -348,10 +348,13 @@ type Querier interface {
 	GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error)
 	// current_* come from the employee's single non-terminal placement (INV-1 → at most
 	// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
-	// employee still resolves (current_* null).
+	// employee still resolves (current_* null). current_position is the free-text
+	// placement label (no master / FK / ID; service_line dropped 2026-06-12).
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
+	// Gender (nullable) + tenure source (join_at) for the request-time gates.
+	GetEmployeeGateInfo(ctx context.Context, id string) (GetEmployeeGateInfoRow, error)
 	GetExportJob(ctx context.Context, id string) (GetExportJobRow, error)
 	// Status poll / GET /exports/{id}. Requester scope enforced in the service.
 	// Named *Generic to avoid colliding with the Phase-10 payroll GetExportJob
@@ -379,6 +382,10 @@ type Querier interface {
 	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
 	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
+	// E6 per-type meter read queries (Phase 3, EPICS §8 2026-06-12). Source data the
+	// QuotaMeter needs to pick the window, gate eligibility, and size the annual pool.
+	// Cap mechanics for a leave type (leave_types, migr. 00050).
+	GetLeaveTypeCap(ctx context.Context, id string) (GetLeaveTypeCapRow, error)
 	// Resolve the active placement + today's schedule for manual attendance (F5.6).
 	// Returns placement details and (if scheduled) the live schedule's shift window.
 	// Returns zero rows (pgx.ErrNoRows) when the employee has no active placement.
@@ -413,7 +420,6 @@ type Querier interface {
 	// All placements sharing a predecessor/successor chain with the given placement
 	// (for history_chain). Walks both directions from the seed via a recursive CTE.
 	GetPlacementChain(ctx context.Context, id string) ([]GetPlacementChainRow, error)
-	GetPositionByID(ctx context.Context, id string) (GetPositionByIDRow, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (GetRefreshTokenByHashRow, error)
 	// Looks up a reset token by its SHA-256 hash (AU-4 verify step).
 	GetResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
@@ -421,10 +427,9 @@ type Querier interface {
 	GetScheduleEntry(ctx context.Context, id string) (GetScheduleEntryRow, error)
 	// Row-lock for PATCH / soft-delete (omits joins; service re-reads for DTO).
 	GetScheduleEntryForUpdate(ctx context.Context, id string) (GetScheduleEntryForUpdateRow, error)
-	GetServiceLineByID(ctx context.Context, id string) (GetServiceLineByIDRow, error)
 	GetShiftLeaderAssignmentByID(ctx context.Context, id string) (GetShiftLeaderAssignmentByIDRow, error)
 	GetShiftMaster(ctx context.Context, id string) (GetShiftMasterRow, error)
-	// Row-lock for the update / activate-toggle path (omits joins; service re-reads for DTO).
+	// Row-lock for the update / activate-toggle path (service re-reads for DTO).
 	GetShiftMasterForUpdate(ctx context.Context, id string) (GetShiftMasterForUpdateRow, error)
 	GetSiteByID(ctx context.Context, id string) (GetSiteByIDRow, error)
 	// Today's (Asia/Jakarta) live schedule entry for the employee — the basis for the
@@ -513,15 +518,17 @@ type Querier interface {
 	// LEFT JOIN employees to surface the employee full name on each row.
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
 	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
-	// employee_name, client_companies for company_name, client_sites for site_name,
-	// and positions for position_name. Cursor lists keyset on (check_in_at DESC, id).
-	// `make gen` writes internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/
-	// auto-close are STORED columns (07-01 decision); no runtime compute.
+	// employee_name, client_companies for company_name, and client_sites for site_name.
+	// position is FREE-TEXT (stored directly on the row; no positions JOIN, no service_line).
+	// Cursor lists keyset on (check_in_at DESC, id). `make gen` writes
+	// internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/auto-close are STORED
+	// columns (07-01 decision); no runtime compute.
 	// Verification queue / history for a company over filters, newest first.
 	// Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
 	// (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
 	//   verification_status_in / status_in: text[] = ANY membership.
-	//   site_id / position_id: narrow within the (leader-pinned) company scope.
+	//   site_id / position: narrow within the (leader-pinned) company scope (position is
+	//     a free-text exact-match on the stored label).
 	//   date_from/date_to: bound on the shift-date basis (check_in_at::date).
 	//   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 	ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error)
@@ -535,15 +542,15 @@ type Querier interface {
 	// index; cursor page ordered by (submitted_at desc, id desc), fetch limit+1.
 	ListBankPendingChangeRequests(ctx context.Context, arg ListBankPendingChangeRequestsParams) ([]ListBankPendingChangeRequestsRow, error)
 	// E6 leave-calendar query (GET /leave-calendar). Returns leave entries overlapping
-	// a [from,to] date range, scoped by company / service-line / leave-type. The status
-	// filter is a text[] the service builds: APPROVED only when show_pending=false, else
+	// a [from,to] date range, scoped by company / leave-type. The status filter is a
+	// text[] the service builds: APPROVED only when show_pending=false, else
 	// APPROVED + PENDING_L1 + PENDING_HR. Denormalized names via LEFT JOINs.
 	ListCalendarEntries(ctx context.Context, arg ListCalendarEntriesParams) ([]ListCalendarEntriesRow, error)
 	// Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: status, employee_id, request_type.
 	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ListChangeRequestsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: q (ILIKE name), status, service_line, has_leader.
+	// Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
 	// GET /leave-grants/{id} consumptions[] embed.
 	ListConsumptionsForGrant(ctx context.Context, grantID string) ([]LeaveConsumption, error)
@@ -560,7 +567,8 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
 	// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
-	// LEFT JOINs so unplaced employees still list (current_* null).
+	// LEFT JOINs so unplaced employees still list (current_* null). current_position is
+	// the free-text placement label (no master / FK / ID; service_line dropped 2026-06-12).
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
@@ -569,9 +577,9 @@ type Querier interface {
 	// that feeds OT day_type classification. holiday_date comes back as pgtype.Date
 	// (09-02 repo converts <-> time.Time). Keyset cursor on (holiday_date ASC, id) per
 	// CONVENTIONS §11 (calendar reads ascend by date).
-	// Calendar / list load. Keyset cursor (holiday_date,id) ASC. Filters (all optional
-	// via narg): category, service_line_id (matches when applicable_service_lines is
-	// empty=global OR contains the line), year (EXTRACT(year FROM holiday_date)).
+	// Calendar / list load. Keyset cursor (holiday_date,id) ASC. Holidays are GLOBAL
+	// ONLY (decision 2026-06-12) — no service-line filter. Filters (all optional via
+	// narg): category, year (EXTRACT(year FROM holiday_date)).
 	ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]ListHolidaysRow, error)
 	// E3 lead_assignments queries. A lead (service-line operational approver) covers
 	// MANY client companies; the auth middleware derives Principal.CompanyIDs from the
@@ -633,7 +641,8 @@ type Querier interface {
 	// The approval timeline for GET /overtime/{id} (Overtime.approvals[]), chronological.
 	ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]OvertimeApproval, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: status, service_line (scopes to a specific line or global).
+	// Overtime rules are GLOBAL ONLY (decision 2026-06-12 — the service_line scope axis
+	// + line-vs-global precedence were dropped). Filter: status.
 	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
 	// E8 payslip audit-note queries (PA-7, §8). Append-only HR annotations keyed to
 	// a payslip. The id is a composite "{payslip_id}-NOTE-{seq}" assigned by the
@@ -662,17 +671,17 @@ type Querier interface {
 	ListPlacementHistory(ctx context.Context, placementID string) ([]PlacementHistory, error)
 	// E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
 	// master tables to fill the denormalized *_name fields the spec returns.
+	// Position is FREE-TEXT (no master, no FK, no ID) — selected directly from the
+	// placements.position text column (service_line dropped entirely 2026-06-12).
 	// Param→column note: the FE/spec params are `status` / `status__in`; both filter
 	// the `lifecycle_status` column. No param is literally named `lifecycle_status`.
 	// Cursor page ordered by (status_changed_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: company_id, service_line_id, employee_id, agreement_id,
+	// Filters: company_id, position (exact free-text), employee_id, agreement_id,
 	//   status (single → lifecycle_status =), status__in (CSV → lifecycle_status = ANY),
-	//   q (ILIKE over agent name / employee_id / company name),
+	//   q (ILIKE over agent name / employee_id / company name / position),
 	//   end_date__lte (expiring cutoff), include_history (exclude terminal states unless true).
 	ListPlacements(ctx context.Context, arg ListPlacementsParams) ([]ListPlacementsRow, error)
 	ListPlatformSettings(ctx context.Context) ([]ListPlatformSettingsRow, error)
-	// Cursor page ordered by (created_at desc, id desc), scoped to one service line.
-	ListPositionsForLine(ctx context.Context, arg ListPositionsForLineParams) ([]ListPositionsForLineRow, error)
 	// E4 shift-time propagation (F4.1 SM-2 ripple → F4.2 entries, with E5 attendance
 	// freezing). When a shift master's start_time/end_time/cross_midnight change, the
 	// snapshot times on its FUTURE schedule_entries are re-synced — UNLESS an
@@ -703,17 +712,15 @@ type Querier interface {
 	// TODO(SV-3): include_company geo/address enrichment (company_geo/address) is
 	//   deferred — this query returns the base ScheduleEntry projection only.
 	ListScheduleByAgent(ctx context.Context, arg ListScheduleByAgentParams) ([]ListScheduleByAgentRow, error)
-	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-	ListServiceLines(ctx context.Context, arg ListServiceLinesParams) ([]ListServiceLinesRow, error)
 	// E3 shift_leader_assignments queries (F3.4 / SL-*). Reads LEFT JOIN the company
 	// and employee tables to fill the denormalized *_name fields.
 	// Filters: company_id, employee_id, active (unassigned_at IS NULL).
 	ListShiftLeaderAssignments(ctx context.Context, arg ListShiftLeaderAssignmentsParams) ([]ListShiftLeaderAssignmentsRow, error)
-	// E4 shift-master queries (F4.1 / SM-* / SWP-SHF-*). Reads LEFT JOIN service_lines
-	// for service_line_name and compute in_use_count via a correlated subquery over
-	// live schedule_entries. Times are text columns (HH:MM, Asia/Jakarta).
+	// E4 shift-master queries (F4.1 / SM-* / SWP-SHF-*). Shift masters are fully
+	// INDEPENDENT (service_line removed entirely, 2026-06-12). in_use_count is a
+	// correlated subquery over live schedule_entries. Times are text columns
+	// (HH:MM, Asia/Jakarta).
 	// Cursor page ordered by id desc. Filters:
-	//   service_line_id → masters tagged to that line OR untagged (NULL applies to all, SM-3),
 	//   status (ACTIVE→is_active=true / INACTIVE→false) via the is_active narg,
 	//   q ILIKE over name. in_use_count = live schedule_entries referencing this master.
 	ListShiftMasters(ctx context.Context, arg ListShiftMastersParams) ([]ListShiftMastersRow, error)
@@ -738,12 +745,11 @@ type Querier interface {
 	// Auto-open a per-type window at its entitlement (annual: agreement days; other
 	// quota-bearing: cap_value). Idempotent on the (emp,type,period_key) unique index.
 	OpenQuotaWindow(ctx context.Context, arg OpenQuotaWindowParams) (LeaveQuota, error)
-	// org_rollups: per-service-line headcount (distinct placed employees) + active
+	// org_rollups: per-position headcount (distinct placed employees) + active
 	// placement count, over non-terminal placements (mirrors CountActivePlacements).
-	// service_lines.name is free text ("Facility Services" / "Building Management" /
-	// "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
-	// the raw name so the mapping stays in Go (no enum in the schema).
-	OrgRollupsByServiceLine(ctx context.Context) ([]OrgRollupsByServiceLineRow, error)
+	// Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
+	// removed, position is a plain text column on placements — no master/enum).
+	OrgRollupsByPosition(ctx context.Context) ([]OrgRollupsByPositionRow, error)
 	// HR PATCH /leave-grants/{id}: adjust amount_days/expires_at/earmark (+ remark). The
 	// service guards amount_days >= consumed_days+pending_days (422) before calling. nargs
 	// left NULL keep the current value (COALESCE).
@@ -802,12 +808,20 @@ type Querier interface {
 	RevokeFamily(ctx context.Context, familyID string) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
 	// Company roster (RO-*). Filters: status (single), status__in (CSV),
-	// service_line_id, include_history. Keyset on (status_changed_at desc, id desc).
+	// position (exact free-text), include_history. Keyset on (status_changed_at desc, id desc).
 	RosterForCompany(ctx context.Context, arg RosterForCompanyParams) ([]RosterForCompanyRow, error)
-	// CompanyRosterSummary by_service_line counts (active placements only).
-	RosterSummaryByServiceLine(ctx context.Context, clientCompanyID string) ([]RosterSummaryByServiceLineRow, error)
+	// CompanyRosterSummary by_position counts (active placements only), grouped by the
+	// free-text position label (service_line rollup dropped 2026-06-12).
+	RosterSummaryByPosition(ctx context.Context, clientCompanyID string) ([]RosterSummaryByPositionRow, error)
 	// CompanyRosterSummary by_status counts (non-deleted; non-terminal unless caller filters).
 	RosterSummaryByStatus(ctx context.Context, clientCompanyID string) ([]RosterSummaryByStatusRow, error)
+	// Position typeahead query (E2 GET /positions:search, backed by E3 placements).
+	// Position is FREE-TEXT (no master, no FK, no ID) — the typeahead just surfaces
+	// the DISTINCT existing labels already recorded across placements so admins can
+	// reuse a consistent string or type a new one (decision 2026-06-12).
+	// Distinct existing free-text position labels matching the (case-insensitive)
+	// substring. The handler passes '%' || q || '%' so an empty q matches everything.
+	SearchPositions(ctx context.Context, q_ string) ([]string, error)
 	// Drives :close (status='closed') and supersede-on-renew (status='superseded').
 	// Also sets closed_reason, closed_at, successor_id as applicable.
 	SetAgreementStatus(ctx context.Context, arg SetAgreementStatusParams) (SetAgreementStatusRow, error)
@@ -840,10 +854,6 @@ type Querier interface {
 	SetPlacementLifecycle(ctx context.Context, arg SetPlacementLifecycleParams) (SetPlacementLifecycleRow, error)
 	SetPlacementPredecessor(ctx context.Context, arg SetPlacementPredecessorParams) error
 	SetPlacementSuccessor(ctx context.Context, arg SetPlacementSuccessorParams) error
-	// Drives soft-delete-like deactivation (status='inactive') or reactivation.
-	SetPositionStatus(ctx context.Context, arg SetPositionStatusParams) (SetPositionStatusRow, error)
-	// Drives :discontinue (status='inactive') and :reactivate (status='active').
-	SetServiceLineStatus(ctx context.Context, arg SetServiceLineStatusParams) (SetServiceLineStatusRow, error)
 	// Drives :deactivate (active=false) / :reactivate (active=true).
 	SetShiftMasterActive(ctx context.Context, arg SetShiftMasterActiveParams) (SetShiftMasterActiveRow, error)
 	SetSitePrimary(ctx context.Context, id string) (SetSitePrimaryRow, error)
@@ -857,8 +867,6 @@ type Querier interface {
 	SoftDeleteHoliday(ctx context.Context, id string) (string, error)
 	SoftDeleteLeaveType(ctx context.Context, id string) error
 	SoftDeleteOvertimeRule(ctx context.Context, id string) error
-	// Hard soft-delete: sets deleted_at so the position is invisible to all queries.
-	SoftDeletePosition(ctx context.Context, id string) error
 	SoftDeleteScheduleEntry(ctx context.Context, id string) (int64, error)
 	// Computed balance over ACTIVE lots (now < expires_at), grouped by earmark. The
 	// unearmarked group (earmark IS NULL) is the flat pool; each non-null earmark is one
@@ -887,7 +895,7 @@ type Querier interface {
 	// (DONE/FAILED/CANCELLED). filename mirrors artifact_ref on the wire (11-02b DTO).
 	UpdateExportJobStatusGeneric(ctx context.Context, arg UpdateExportJobStatusGenericParams) (UpdateExportJobStatusGenericRow, error)
 	// Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
-	// the current value (applicable_service_lines is whole-array replace when supplied).
+	// the current value. Holidays are GLOBAL ONLY (decision 2026-06-12).
 	UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (UpdateHolidayRow, error)
 	// HR :shorten — sets a new (earlier) end_date + recomputed duration on an APPROVED
 	// request. Status unchanged (stays APPROVED).
@@ -903,15 +911,13 @@ type Querier interface {
 	// Sets a new password hash after a reset/change (AU-4). The user has chosen their
 	// own password, so any temp-password rotation requirement is cleared.
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
-	// Limited-field PATCH (position_id, end_date, notes).
+	// Limited-field PATCH (position, end_date, notes).
 	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
-	UpdatePosition(ctx context.Context, arg UpdatePositionParams) (UpdatePositionRow, error)
 	UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error)
 	// Focused update of just the three snapshot time columns (start/end/cross), used
 	// by the propagation loop. Status / is_day_off / shift_master_id are untouched —
 	// this is a re-sync of the window only, not a reschedule.
 	UpdateScheduleEntryTimes(ctx context.Context, arg UpdateScheduleEntryTimesParams) (int64, error)
-	UpdateServiceLine(ctx context.Context, arg UpdateServiceLineParams) (UpdateServiceLineRow, error)
 	// Full overwrite of the editable fields (06-02 builds the full param set from the
 	// current row + the PATCH overlay). cross_midnight re-derived by the service.
 	UpdateShiftMaster(ctx context.Context, arg UpdateShiftMasterParams) (UpdateShiftMasterRow, error)

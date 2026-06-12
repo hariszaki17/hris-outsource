@@ -223,7 +223,7 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
-// billableQueryFromFilters extracts the period/company/service-line/group from a
+// billableQueryFromFilters extracts the period/company/position/group from a
 // generic filters map for the size guard. ok=false when the period is missing.
 func billableQueryFromFilters(f map[string]any) (BillableQuery, bool) {
 	ps, _ := f["period_start"].(string)
@@ -235,8 +235,8 @@ func billableQueryFromFilters(f map[string]any) (BillableQuery, bool) {
 	if cid, ok := f["company_id"].(string); ok && cid != "" {
 		q.CompanyID = &cid
 	}
-	if sid, ok := f["service_line_id"].(string); ok && sid != "" {
-		q.ServiceLineID = &sid
+	if pos, ok := f["position"].(string); ok && pos != "" {
+		q.Position = &pos
 	}
 	if gb, ok := f["group_by"].(string); ok && gb != "" {
 		q.GroupBy = dom.BillableGroupBy(gb)

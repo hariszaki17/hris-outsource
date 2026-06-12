@@ -1,6 +1,6 @@
 -- name: ListClientCompanies :many
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
--- Filters: q (ILIKE name), status, service_line, has_leader.
+-- Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
        status, created_at, updated_at,
        EXISTS (
@@ -12,7 +12,6 @@ FROM client_companies
 WHERE deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(q)::text IS NULL OR name ILIKE '%' || sqlc.narg(q)::text || '%')
-  AND (sqlc.narg(service_line)::text IS NULL OR TRUE)
   AND (sqlc.narg(has_leader)::boolean IS NULL OR
        EXISTS (
          SELECT 1 FROM shift_leader_assignments sla

@@ -20,11 +20,11 @@ const maxReportSpan = 366 * 24 * time.Hour
 
 // BillableParams is the decoded request (pre-scope).
 type BillableParams struct {
-	CompanyID     *string
-	ServiceLineID *string
-	PeriodStart   string // ISO date (required)
-	PeriodEnd     string // ISO date (required)
-	GroupBy       dom.BillableGroupBy
+	CompanyID   *string
+	Position    *string // free-text position filter (exact match)
+	PeriodStart string  // ISO date (required)
+	PeriodEnd   string  // ISO date (required)
+	GroupBy     dom.BillableGroupBy
 }
 
 // BillableService implements GET /reports/attendance-billable.
@@ -70,27 +70,23 @@ func (s *BillableService) GetBillableReport(ctx context.Context, in BillablePara
 		pending.Note = "Belum dapat ditagih hingga diverifikasi."
 	}
 
-	// Echo the company/service-line display names from the first row when present.
-	var companyName, serviceLineName *string
+	// Echo the company display name from the first row when present.
+	var companyName *string
 	for _, r := range rows {
 		if q.CompanyID != nil && r.CompanyName != nil {
 			companyName = r.CompanyName
-		}
-		if q.ServiceLineID != nil && r.ServiceLineName != nil {
-			serviceLineName = r.ServiceLineName
 		}
 	}
 
 	return dom.BillableReport{
 		GeneratedAt: time.Now().UTC(),
 		Filters: dom.BillableFilters{
-			CompanyID:       q.CompanyID,
-			CompanyName:     companyName,
-			ServiceLineID:   q.ServiceLineID,
-			ServiceLineName: serviceLineName,
-			PeriodStart:     q.PeriodStart,
-			PeriodEnd:       q.PeriodEnd,
-			GroupBy:         q.GroupBy,
+			CompanyID:   q.CompanyID,
+			CompanyName: companyName,
+			Position:    q.Position, // free-text position filter echo (nil = unfiltered)
+			PeriodStart: q.PeriodStart,
+			PeriodEnd:   q.PeriodEnd,
+			GroupBy:     q.GroupBy,
 		},
 		Summary:        summary,
 		PendingSummary: pending,
@@ -125,11 +121,11 @@ func resolveBillableScope(ctx context.Context, in BillableParams) (BillableQuery
 	}
 
 	q := BillableQuery{
-		CompanyID:     in.CompanyID,
-		ServiceLineID: in.ServiceLineID,
-		PeriodStart:   in.PeriodStart,
-		PeriodEnd:     in.PeriodEnd,
-		GroupBy:       groupBy,
+		CompanyID:   in.CompanyID,
+		Position:    in.Position,
+		PeriodStart: in.PeriodStart,
+		PeriodEnd:   in.PeriodEnd,
+		GroupBy:     groupBy,
 	}
 
 	// Scope: a shift_leader is locked to their own company (E3 INV-3).

@@ -48,7 +48,6 @@ type scheduleEntryResponse struct {
 	CompanyID       string  `json:"company_id"`
 	CompanyName     *string `json:"company_name"`
 	PlacementID     string  `json:"placement_id"`
-	ServiceLineID   *string `json:"service_line_id"`
 	ShiftMasterID   *string `json:"shift_master_id"`
 	ShiftMasterName *string `json:"shift_master_name"`
 	StartTime       *string `json:"start_time"`
@@ -128,7 +127,6 @@ func toScheduleEntryResponse(e domain.ScheduleEntry) scheduleEntryResponse {
 		CompanyID:       e.CompanyID,
 		CompanyName:     e.CompanyName,
 		PlacementID:     e.PlacementID,
-		ServiceLineID:   e.ServiceLineID,
 		ShiftMasterID:   e.ShiftMasterID,
 		ShiftMasterName: e.ShiftMasterName,
 		StartTime:       e.StartTime,

@@ -14,13 +14,13 @@ import (
 )
 
 // seedActivePlacement plants an active placement covering (employee, date) so the
-// OC-6 resolution succeeds; company/service line are denormalized onto the OT.
-func seedActivePlacement(h *harness, employee string, date time.Time, company, line string) {
+// OC-6 resolution succeeds; company is denormalized onto the OT (service_line removed
+// 2026-06-12).
+func seedActivePlacement(h *harness, employee string, date time.Time, company string) {
 	h.schedule.placements[liveKey(employee, date)] = schedulingsvc.PlacementCover{
-		PlacementID:   "SWP-PL-5001",
-		CompanyID:     company,
-		ServiceLineID: line,
-		StartDate:     date.AddDate(0, -1, 0),
+		PlacementID: "SWP-PL-5001",
+		CompanyID:   company,
+		StartDate:   date.AddDate(0, -1, 0),
 	}
 }
 
@@ -41,7 +41,7 @@ func createBody(employeeID string) map[string]any {
 func TestCreateOvertime_AgentSelf_201(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, "", empAgent)
 	workDate := ymd(2026, time.June, 10)
-	seedActivePlacement(h, empAgent, workDate, cmpLed, "SWP-SVC-001")
+	seedActivePlacement(h, empAgent, workDate, cmpLed)
 	h.schedule.live[liveKey(empAgent, workDate)] = schedulingsvc.LiveEntry{ID: "SWP-SCH-1", Status: "PUBLISHED"}
 
 	// employee_id omitted: server fills from the token.
@@ -83,7 +83,7 @@ func TestCreateOvertime_AgentSelf_201(t *testing.T) {
 func TestCreateOvertime_AgentOtherEmployee_403(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, "", empAgent)
 	workDate := ymd(2026, time.June, 10)
-	seedActivePlacement(h, "SWP-EMP-9999", workDate, cmpLed, "SWP-SVC-001")
+	seedActivePlacement(h, "SWP-EMP-9999", workDate, cmpLed)
 
 	rr := h.do("POST", "/overtime", createBody("SWP-EMP-9999"))
 	if rr.Code != http.StatusForbidden {
@@ -114,7 +114,7 @@ func TestCreateOvertime_NoActivePlacement_422(t *testing.T) {
 func TestCreateOvertime_OverlapsLeave_409(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, "", empAgent)
 	workDate := ymd(2026, time.June, 10)
-	seedActivePlacement(h, empAgent, workDate, cmpLed, "SWP-SVC-001")
+	seedActivePlacement(h, empAgent, workDate, cmpLed)
 	lr := "SWP-LR-7001"
 	lt := "ANNUAL"
 	h.schedule.leaves[liveKey(empAgent, workDate)] = schedulingsvc.ApprovedLeave{LeaveRequestID: &lr, LeaveType: &lt}

@@ -76,7 +76,7 @@ func (q *Queries) CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPe
 
 const createLeaveRequest = `-- name: CreateLeaveRequest :one
 INSERT INTO leave_requests (
-    employee_id, placement_id, company_id, service_line_id, leave_type_id,
+    employee_id, placement_id, company_id, leave_type_id,
     start_date, end_date, duration_days, reason, notes, status,
     delegate_id, document_file_id, backdated, clock_in_conflict,
     no_leader, assigned_leader_id,
@@ -103,10 +103,9 @@ INSERT INTO leave_requests (
     $18,
     $19,
     $20,
-    $21,
-    $22
+    $21
 )
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -118,7 +117,6 @@ type CreateLeaveRequestParams struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -144,7 +142,6 @@ type CreateLeaveRequestRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -176,7 +173,6 @@ func (q *Queries) CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequest
 		arg.EmployeeID,
 		arg.PlacementID,
 		arg.CompanyID,
-		arg.ServiceLineID,
 		arg.LeaveTypeID,
 		arg.StartDate,
 		arg.EndDate,
@@ -202,7 +198,6 @@ func (q *Queries) CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequest
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,
@@ -231,7 +226,7 @@ func (q *Queries) CreateLeaveRequest(ctx context.Context, arg CreateLeaveRequest
 
 const createLeaveRequestWithID = `-- name: CreateLeaveRequestWithID :one
 INSERT INTO leave_requests (
-    id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+    id, employee_id, placement_id, company_id, leave_type_id,
     start_date, end_date, duration_days, reason, notes, status,
     delegate_id, document_file_id, backdated, clock_in_conflict,
     no_leader, assigned_leader_id,
@@ -259,11 +254,10 @@ INSERT INTO leave_requests (
     $19,
     $20,
     $21,
-    $22,
-    $23
+    $22
 )
 ON CONFLICT (id) DO NOTHING
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -276,7 +270,6 @@ type CreateLeaveRequestWithIDParams struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -302,7 +295,6 @@ type CreateLeaveRequestWithIDRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -334,7 +326,6 @@ func (q *Queries) CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveR
 		arg.EmployeeID,
 		arg.PlacementID,
 		arg.CompanyID,
-		arg.ServiceLineID,
 		arg.LeaveTypeID,
 		arg.StartDate,
 		arg.EndDate,
@@ -360,7 +351,6 @@ func (q *Queries) CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveR
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,
@@ -388,7 +378,7 @@ func (q *Queries) CreateLeaveRequestWithID(ctx context.Context, arg CreateLeaveR
 }
 
 const getLeaveRequest = `-- name: GetLeaveRequest :one
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -412,7 +402,6 @@ type GetLeaveRequestRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -450,7 +439,6 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, id string) (GetLeaveReque
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,
@@ -482,7 +470,7 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, id string) (GetLeaveReque
 }
 
 const getLeaveRequestForUpdate = `-- name: GetLeaveRequestForUpdate :one
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -500,7 +488,6 @@ type GetLeaveRequestForUpdateRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -535,7 +522,6 @@ func (q *Queries) GetLeaveRequestForUpdate(ctx context.Context, id string) (GetL
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,
@@ -564,7 +550,7 @@ func (q *Queries) GetLeaveRequestForUpdate(ctx context.Context, id string) (GetL
 
 const listLeaveRequests = `-- name: ListLeaveRequests :many
 
-SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id, lr.service_line_id,
+SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.duration_days,
        lr.reason, lr.notes, lr.status, lr.delegate_id, lr.document_file_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
@@ -617,7 +603,6 @@ type ListLeaveRequestsRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -679,7 +664,6 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, arg ListLeaveRequestsPa
 			&i.EmployeeID,
 			&i.PlacementID,
 			&i.CompanyID,
-			&i.ServiceLineID,
 			&i.LeaveTypeID,
 			&i.StartDate,
 			&i.EndDate,
@@ -761,7 +745,7 @@ SET start_date    = $1,
     updated_at    = now()
 WHERE id = $4
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -781,7 +765,6 @@ type UpdateLeaveRequestDatesRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -821,7 +804,6 @@ func (q *Queries) UpdateLeaveRequestDates(ctx context.Context, arg UpdateLeaveRe
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,
@@ -861,7 +843,7 @@ SET status                     = $1,
     updated_at                 = now()
 WHERE id = $9
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+RETURNING id, employee_id, placement_id, company_id, leave_type_id,
           start_date, end_date, duration_days, reason, notes, status,
           delegate_id, document_file_id, backdated, clock_in_conflict,
           no_leader, assigned_leader_id, balance_quota_id, balance_requested_days,
@@ -886,7 +868,6 @@ type UpdateLeaveRequestStatusRow struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -931,7 +912,6 @@ func (q *Queries) UpdateLeaveRequestStatus(ctx context.Context, arg UpdateLeaveR
 		&i.EmployeeID,
 		&i.PlacementID,
 		&i.CompanyID,
-		&i.ServiceLineID,
 		&i.LeaveTypeID,
 		&i.StartDate,
 		&i.EndDate,

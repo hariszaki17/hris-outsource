@@ -151,7 +151,6 @@ export const SECTION_SUBNAV: Record<string, readonly SubnavItem[]> = {
   ],
   '/client-companies': [
     { to: '/client-companies', labelKey: 'nav.clientCompanies', requires: 'clients.read' },
-    { to: '/service-lines', labelKey: 'nav.serviceLines', requires: 'service_lines.read' },
   ],
   '/schedule': [
     { to: '/schedule', labelKey: 'nav.schedule', requires: 'schedule.read' },
@@ -253,7 +252,6 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   [/^\/client-companies\/[^/]+\/roster/, 'placements.read'],
   [/^\/client-companies/, 'clients.read'],
   [/^\/employees/, 'employees.read'],
-  [/^\/service-lines/, 'service_lines.read'],
   [/^\/change-requests/, 'change_requests.read'],
   [/^\/agreements/, 'agreements.read'],
   [/^\/master-data/, 'masterdata.manage'],

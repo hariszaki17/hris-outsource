@@ -44,7 +44,6 @@ type CreateShiftMasterParams struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -59,7 +58,6 @@ type UpdateShiftMasterParams struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 }
@@ -127,14 +125,13 @@ func (s *ShiftMasterService) GetShiftMaster(ctx context.Context, id string) (dom
 
 // ShiftMasterWrite is the validated write payload (shared by create/update).
 type ShiftMasterWrite struct {
-	Name          string
-	StartTime     string
-	EndTime       string
-	BreakStart    *string
-	BreakEnd      *string
-	ServiceLineID *string
-	IsActive      *bool
-	CreatedBy     *string
+	Name       string
+	StartTime  string
+	EndTime    string
+	BreakStart *string
+	BreakEnd   *string
+	IsActive   *bool
+	CreatedBy  *string
 }
 
 // CreateShiftMaster inserts a new template, deriving cross_midnight and
@@ -158,7 +155,6 @@ func (s *ShiftMasterService) CreateShiftMaster(ctx context.Context, w ShiftMaste
 			EndTime:       w.EndTime,
 			BreakStart:    w.BreakStart,
 			BreakEnd:      w.BreakEnd,
-			ServiceLineID: w.ServiceLineID,
 			CrossMidnight: cross,
 			IsActive:      active,
 			CreatedBy:     w.CreatedBy,
@@ -197,12 +193,11 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 
 		// Overlay PATCH fields onto the current row.
 		w := ShiftMasterWrite{
-			Name:          cur.Name,
-			StartTime:     cur.StartTime,
-			EndTime:       cur.EndTime,
-			BreakStart:    cur.BreakStart,
-			BreakEnd:      cur.BreakEnd,
-			ServiceLineID: cur.ServiceLineID,
+			Name:       cur.Name,
+			StartTime:  cur.StartTime,
+			EndTime:    cur.EndTime,
+			BreakStart: cur.BreakStart,
+			BreakEnd:   cur.BreakEnd,
 		}
 		if p.Name != nil {
 			w.Name = *p.Name
@@ -218,9 +213,6 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 		}
 		if p.BreakEndSet {
 			w.BreakEnd = p.BreakEnd
-		}
-		if p.ServiceLineIDSet {
-			w.ServiceLineID = p.ServiceLineID
 		}
 		isActive := cur.IsActive
 		if p.IsActive != nil {
@@ -239,7 +231,6 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 			EndTime:       w.EndTime,
 			BreakStart:    w.BreakStart,
 			BreakEnd:      w.BreakEnd,
-			ServiceLineID: w.ServiceLineID,
 			CrossMidnight: cross,
 			IsActive:      isActive,
 		})
@@ -253,7 +244,7 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 		// SM-2 ripple: if the shift window actually moved, re-sync the snapshot
 		// times on this master's FUTURE schedule_entries (attendance-frozen rows
 		// excepted). Runs in the SAME tx so the master edit + its ripple commit
-		// atomically. Name/service-line/break-only edits don't move the window.
+		// atomically. Name/break-only edits don't move the window.
 		if w.StartTime != cur.StartTime || w.EndTime != cur.EndTime || cross != cur.CrossMidnight {
 			if perr := s.propagateShiftMasterTimeChange(ctx, tx, id, w.StartTime, w.EndTime, cross, s.now()); perr != nil {
 				return perr
@@ -270,7 +261,7 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 	}); err != nil {
 		return domain.ShiftMaster{}, asAppErr(err)
 	}
-	// Re-read for the denormalized service_line_name + in_use_count on the DTO.
+	// Re-read for the denormalized in_use_count on the DTO.
 	full, gerr := s.repo.GetShiftMaster(ctx, updated.ID)
 	if gerr == nil {
 		return full, nil
@@ -281,16 +272,14 @@ func (s *ShiftMasterService) UpdateShiftMaster(ctx context.Context, id string, p
 // ShiftMasterPatch is the partial-update payload. The *Set flags distinguish an
 // explicit JSON null (clear) from an absent field (keep).
 type ShiftMasterPatch struct {
-	Name             *string
-	StartTime        *string
-	EndTime          *string
-	BreakStart       *string
-	BreakStartSet    bool
-	BreakEnd         *string
-	BreakEndSet      bool
-	ServiceLineID    *string
-	ServiceLineIDSet bool
-	IsActive         *bool
+	Name          *string
+	StartTime     *string
+	EndTime       *string
+	BreakStart    *string
+	BreakStartSet bool
+	BreakEnd      *string
+	BreakEndSet   bool
+	IsActive      *bool
 }
 
 // --- deactivate / reactivate ---
@@ -341,7 +330,7 @@ func (s *ShiftMasterService) setActive(ctx context.Context, id string, active bo
 	}); err != nil {
 		return domain.ShiftMaster{}, asAppErr(err)
 	}
-	// Re-read for in_use_count + service_line_name on the response DTO.
+	// Re-read for in_use_count on the response DTO.
 	if full, gerr := s.repo.GetShiftMaster(ctx, out.ID); gerr == nil {
 		return full, nil
 	}

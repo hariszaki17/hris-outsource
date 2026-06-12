@@ -136,19 +136,19 @@ func TestListAttendance_LeaderCrossCompany_OutOfScope(t *testing.T) {
 	}
 }
 
-// withSitePosition pins site_id/position_id on a just-seeded record and re-stores it.
-func (h *harness) withSitePosition(rec att.Attendance, siteID, positionID string) {
+// withSitePosition pins site_id/position (free-text) on a just-seeded record and re-stores it.
+func (h *harness) withSitePosition(rec att.Attendance, siteID, position string) {
 	rec.SiteID = siteID
-	rec.PositionID = positionID
+	rec.Position = position
 	h.attendance.records[rec.ID] = rec
 }
 
 func TestListAttendance_SitePositionFilterNarrows(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	a := h.seedAttendance("SWP-ATT-9002", cmpLed, empOther, att.VerificationPending, checkInA, att.FlagLate)
-	h.withSitePosition(a, "SWP-SITE-031", "SWP-POS-009")
+	h.withSitePosition(a, "SWP-SITE-031", "Petugas Kebersihan")
 	b := h.seedAttendance("SWP-ATT-9003", cmpLed, empOther, att.VerificationPending, checkInB, att.FlagLate)
-	h.withSitePosition(b, "SWP-SITE-099", "SWP-POS-077")
+	h.withSitePosition(b, "SWP-SITE-099", "Teknisi Gedung")
 
 	// site_id narrows to the matching record only.
 	rr := h.do("GET", "/attendance?company_id="+cmpLed+"&site_id=SWP-SITE-031", nil)
@@ -166,15 +166,15 @@ func TestListAttendance_SitePositionFilterNarrows(t *testing.T) {
 	if row["site_id"] != "SWP-SITE-031" {
 		t.Errorf("row site_id = %v, want SWP-SITE-031", row["site_id"])
 	}
-	if _, ok := row["position_id"]; !ok {
-		t.Errorf("row missing position_id")
+	if _, ok := row["position"]; !ok {
+		t.Errorf("row missing position")
 	}
 
-	// position_id narrows independently.
-	rr2 := h.do("GET", "/attendance?company_id="+cmpLed+"&position_id=SWP-POS-077", nil)
+	// position (free-text) narrows independently.
+	rr2 := h.do("GET", "/attendance?company_id="+cmpLed+"&position=Teknisi+Gedung", nil)
 	data2 := decodeBody(t, rr2)["data"].([]any)
 	if len(data2) != 1 || data2[0].(map[string]any)["id"] != "SWP-ATT-9003" {
-		t.Fatalf("position_id filter wrong result: %v", data2)
+		t.Fatalf("position filter wrong result: %v", data2)
 	}
 }
 
@@ -572,7 +572,7 @@ func TestManualAutofill_Success(t *testing.T) {
 	if !ok {
 		t.Fatalf("data missing: %T", body["data"])
 	}
-	for _, k := range []string{"employee_name", "company_name", "service_line", "site_name", "position_name"} {
+	for _, k := range []string{"employee_name", "company_name", "site_name", "position"} {
 		if _, ok := data[k]; !ok {
 			t.Errorf("response missing key: %s", k)
 		}

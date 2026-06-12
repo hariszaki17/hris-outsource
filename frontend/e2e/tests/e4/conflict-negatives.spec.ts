@@ -12,7 +12,9 @@
  *   CONF-shift-over-leave         EMP-3001 on the seeded approved-leave Thu (SWP-LR-44210) → 409 SHIFT_OVER_LEAVE
  *                                 (details.leave_request_id === 'SWP-LR-44210') — honest seed, not mocked
  *   CONF-shift-deactivated        deactivate SWP-SHF-002, then assign it → 422 SHIFT_DEACTIVATED
- *   CONF-shift-not-for-line       assign SVC-003 "Malam" to EMP-1042 (SVC-002 placement) → 422 SHIFT_NOT_FOR_SERVICE_LINE
+ *
+ * (The former SHIFT_NOT_FOR_SERVICE_LINE conflict is dropped: shift master is now
+ *  service-line-independent — locked 2026-06-12. Any active shift is assignable to any agent.)
  *
  * Login shiftLeader (Rudi @ CMP-0021) — all targets are in his scope so the BE reaches the
  * 422/409 conflict checks (not OUT_OF_SCOPE). Seeded anchors per 06-02 SUMMARY.
@@ -140,7 +142,7 @@ test('CONF-shift-deactivated · assigning a deactivated master → 422 SHIFT_DEA
   const deact = await apiAs(page, 'POST', '/shift-masters/SWP-SHF-002:deactivate', {});
   expect(deact.status).toBe(200);
 
-  // Assign the now-inactive Malam (SVC-003) to Dewi (SVC-003 placement) on a free in-window date.
+  // Assign the now-inactive Malam to Dewi on a free in-window date.
   const res = await apiAs(page, 'POST', '/schedule', {
     ...SINGLE,
     employee_id: 'SWP-EMP-3001',
@@ -150,30 +152,4 @@ test('CONF-shift-deactivated · assigning a deactivated master → 422 SHIFT_DEA
   });
   expect(res.status).toBe(422);
   expect(errorCode(res.body)).toBe('SHIFT_DEACTIVATED');
-});
-
-// ---------------------------------------------------------------------------
-// CONF-shift-not-for-service-line (422) — master tagged to a different line
-// ---------------------------------------------------------------------------
-
-test('CONF-shift-not-for-service-line · SVC-003 "Malam" → EMP-1042 (SVC-002 placement) → 422 SHIFT_NOT_FOR_SERVICE_LINE', async ({
-  page,
-}) => {
-  await loginAs(page, PERSONAS.shiftLeader);
-  await page.goto('/schedule');
-  await waitForToken(page);
-
-  // EMP-1042 (Sari) is placed at CMP-0021 (in Rudi's scope) on SWP-PL-5003 = SVC-002 (Building Mgmt).
-  // "Malam" (SWP-SHF-002) is tagged SVC-003 (Parking) → service-line mismatch.
-  const res = await apiAs(page, 'POST', '/schedule', {
-    ...SINGLE,
-    employee_id: 'SWP-EMP-1042',
-    shift_master_id: 'SWP-SHF-002',
-    date: SEED.freeDate(),
-    is_day_off: false,
-  });
-  expect(res.status).toBe(422);
-  expect(errorCode(res.body)).toBe('SHIFT_NOT_FOR_SERVICE_LINE');
-  expect(errorDetails(res.body)?.placement_service_line_id).toBeTruthy();
-  expect(errorDetails(res.body)?.shift_service_line_id).toBeTruthy();
 });

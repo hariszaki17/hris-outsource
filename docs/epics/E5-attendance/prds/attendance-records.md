@@ -13,7 +13,7 @@ Everyone needs to *see* attendance: agents review their own history, shift leade
 
 **Goals**
 - Agent self-history (mobile); leader/HR team views with exception highlighting.
-- Filters (company, site, service line, position, date, status, exception) + billable/payable rollups.
+- Filters (company, site, position, date, status, exception) + billable/payable rollups.
 - Export feeding E10.
 
 **Non-goals**
@@ -37,8 +37,8 @@ Agent (self), Shift Leader (own company), HR/Super Admin (all), System (query, s
 |-----|------|
 | AR-1 | **Scope:** agent sees only own; leader sees own company; HR/Super Admin see all. |
 | AR-2 | Records show: date, scheduled shift, check-in/out times, geofence result, status, verification status, attendance code, corrections. |
-| AR-3 | Filters: **company, site, service line, position**, date range, status (Present/Late/Incomplete/Absent), verification status, exception-only. (`company`/`site`/`service_line`/`position` map 1:1 to the denormalized columns on `Attendance`.) |
-| AR-4 | **Billable rollup:** sum worked records whose attendance code `is_billable` (E2), grouped by company/service line/period — feeds client billing reports (E10). |
+| AR-3 | Filters: **company, site, position**, date range, status (Present/Late/Incomplete/Absent), verification status, exception-only. (`company`/`site`/`position` map 1:1 to the denormalized columns on `Attendance`; `position` is free-text.) |
+| AR-4 | **Billable rollup:** sum worked records whose attendance code `is_billable` (E2), grouped by company/position/period — feeds client billing reports (E10). |
 | AR-5 | **Payable rollup:** records whose code `is_payable`, for payroll context (E8). |
 | AR-6 | Exports (Excel/PDF/CSV) reflect applied filters and are **audited** (who exported what). |
 | AR-7 | Read-only; row actions deep-link to verify (F5.3) or correct (F5.4). |
@@ -68,10 +68,10 @@ Feature: Attendance records & dashboard
   Scenario: Billable rollup for a client
     Given I am HR
     When I run the billable rollup for "Plaza Senayan" for June
-    Then I get worked hours for billable attendance codes grouped by service line
+    Then I get worked hours for billable attendance codes grouped by position
 
   Scenario: Export reflects filters and is audited
-    Given I filtered by service line "Parking" and status "Present"
+    Given I filtered by position "Security Guard" and status "Present"
     When I export to Excel
     Then the file contains only those records
     And the export is recorded in the audit log

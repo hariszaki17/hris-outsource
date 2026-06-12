@@ -40,8 +40,8 @@ import (
 //
 //   client_companies          SWP-CMP-1001 .. SWP-CMP-1008
 //   client_sites              SWP-SITE-2001 ..                 (~25 sites)
-//   service_lines             reuse SWP-SVC-001/002/003 (global, from seed.go)
-//   positions                 SWP-POS-201 .. SWP-POS-206       (Facility/Building/Parking)
+//   positions                 FREE-TEXT (positions master removed 2026-06-12;
+//                             labels chosen per company's dominant service line)
 //   employees (agents)        SWP-EMP-20001 .. SWP-EMP-20120
 //   employment_agreements     SWP-AG-20001 .. SWP-AG-20120
 //   placements                SWP-PL-20001 ..                  (active + terminal/history)
@@ -108,9 +108,6 @@ func SeedDemo(ctx context.Context, pool *db.Pool) error {
 	if err != nil {
 		return fmt.Errorf("demo companies/sites: %w", err)
 	}
-	if err := seedDemoPositions(ctx, pool); err != nil {
-		return fmt.Errorf("demo positions: %w", err)
-	}
 	if err := seedDemoEmployees(ctx, pool, d); err != nil {
 		return fmt.Errorf("demo employees/agreements: %w", err)
 	}
@@ -170,8 +167,9 @@ type demoCompany struct {
 	id          string
 	name        string
 	address     string
-	serviceLine string // dominant service line id (SWP-SVC-00x)
-	slSlug      string // attendance service_line slug
+	serviceLine string // dominant service line id (SWP-SVC-00x) — IN-MEMORY ONLY,
+	// used to pick a free-text position label set (service_lines table removed 2026-06-12)
+	slSlug string // dominant service line slug — IN-MEMORY ONLY (no longer stored)
 	sites       []*demoSite
 }
 
@@ -185,7 +183,7 @@ type demoAgent struct {
 	siteID    string
 	svcID     string
 	slSlug    string
-	posID     string
+	position  string // free-text position label (positions master removed 2026-06-12)
 	plID      string // active placement id
 	isLeader  bool
 	terminal  bool // this agent's placement is terminal/history (not active)
@@ -349,40 +347,22 @@ func sanitizeSlug(s string) string {
 }
 
 // -----------------------------------------------------------------------------
-// Step 2: positions (Facility + Building + Parking) in the demo band
+// Step 2: position labels (FREE-TEXT — the positions master was removed
+// 2026-06-12). Positions are now plain text on placements + attendance, so there
+// is nothing to seed: demoPositionFor just returns deterministic free-text labels
+// per dominant service line of the company.
 // -----------------------------------------------------------------------------
 
-func seedDemoPositions(ctx context.Context, pool *db.Pool) error {
-	const posQ = `
-		INSERT INTO positions (id, service_line_id, name, alias, status)
-		VALUES ($1, $2, $3, $4, 'active')
-		ON CONFLICT (id) DO NOTHING`
-	positions := []struct{ id, svc, name, alias string }{
-		{"SWP-POS-201", "SWP-SVC-001", "Petugas Kebersihan", "Cleaning Service"},
-		{"SWP-POS-202", "SWP-SVC-001", "Pengawas Kebersihan", "Cleaning Supervisor"},
-		{"SWP-POS-203", "SWP-SVC-002", "Teknisi Gedung", "Building Technician"},
-		{"SWP-POS-204", "SWP-SVC-002", "Koordinator Gedung", "Building Coordinator"},
-		{"SWP-POS-205", "SWP-SVC-003", "Petugas Parkir Demo", "Parking Attendant (Demo)"},
-		{"SWP-POS-206", "SWP-SVC-003", "Supervisor Parkir Demo", "Parking Supervisor (Demo)"},
-	}
-	for _, p := range positions {
-		if _, err := pool.Pool.Exec(ctx, posQ, p.id, p.svc, p.name, p.alias); err != nil {
-			return fmt.Errorf("seed demo position %q: %w", p.id, err)
-		}
-	}
-	slog.Info("demo: seeded positions", "count", len(positions))
-	return nil
-}
-
-// demoPositionFor returns the attendant + supervisor position ids for a svc line.
+// demoPositionFor returns the attendant + supervisor free-text position labels for
+// a company's dominant service line slug (svcID retained only to pick a label set).
 func demoPositionFor(svcID string) (attendant, supervisor string) {
 	switch svcID {
 	case "SWP-SVC-001":
-		return "SWP-POS-201", "SWP-POS-202"
+		return "Petugas Kebersihan", "Pengawas Kebersihan"
 	case "SWP-SVC-002":
-		return "SWP-POS-203", "SWP-POS-204"
-	default: // SWP-SVC-003 parking
-		return "SWP-POS-205", "SWP-POS-206"
+		return "Teknisi Gedung", "Koordinator Gedung"
+	default: // parking
+		return "Petugas Parkir", "Koordinator Lokasi"
 	}
 }
 
@@ -494,11 +474,10 @@ func seedDemoEmployees(ctx context.Context, pool *db.Pool, d *demoData) error {
 			return fmt.Errorf("seed demo agreement %q: %w", agID, err)
 		}
 
-		attendantPos := pos
 		d.agents = append(d.agents, &demoAgent{
 			empID: empID, agID: agID, name: name, gender: gender,
 			companyID: c.id, siteID: site.id, svcID: c.serviceLine, slSlug: c.slSlug,
-			posID: attendantPos, isLeader: isLeaderCandidate,
+			position: pos, isLeader: isLeaderCandidate,
 		})
 	}
 
@@ -541,10 +520,10 @@ func seedDemoEmployees(ctx context.Context, pool *db.Pool, d *demoData) error {
 func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const plQ = `
 		INSERT INTO placements
-			(id, employee_id, agreement_id, client_company_id, site_id, service_line_id,
-			 position_id, start_date, end_date, lifecycle_status,
+			(id, employee_id, agreement_id, client_company_id, site_id,
+			 position, start_date, end_date, lifecycle_status,
 			 status_changed_at, ended_reason, ended_at, resign_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, now(), $11, $12, $13, 'system-seed')
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, now(), $10, $11, $12, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	const histQ = `
@@ -615,7 +594,7 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 		}
 
 		if _, err := pool.Pool.Exec(ctx, plQ,
-			plID, a.empID, a.agID, a.companyID, a.siteID, a.svcID, a.posID,
+			plID, a.empID, a.agID, a.companyID, a.siteID, a.position,
 			startStr, endStr, lifecycle, endedReason, endedAt, resignAt,
 		); err != nil {
 			return fmt.Errorf("seed demo placement %q: %w", plID, err)
@@ -702,8 +681,8 @@ func seedDemoSchedules(ctx context.Context, pool *db.Pool, d *demoData) error {
 	// Three demo shift masters: Pagi / Sore / Malam (24/7 coverage).
 	const shfQ = `
 		INSERT INTO shift_masters
-			(id, name, start_time, end_time, break_start, break_end, service_line_id, cross_midnight, is_active, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, true, 'system-seed')
+			(id, name, start_time, end_time, break_start, break_end, cross_midnight, is_active, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 	bs, be := "12:00", "13:00"
 	masters := []struct {
@@ -733,9 +712,9 @@ func seedDemoSchedules(ctx context.Context, pool *db.Pool, d *demoData) error {
 
 	const schQ = `
 		INSERT INTO schedule_entries
-			(id, employee_id, placement_id, service_line_id, shift_master_id,
+			(id, employee_id, placement_id, shift_master_id,
 			 start_time, end_time, cross_midnight, work_date, status, is_day_off, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, 'SCHEDULED', $10, 'system-seed')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, 'SCHEDULED', $9, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	// Only ACTIVE-placement agents are scheduled.
@@ -763,14 +742,14 @@ func seedDemoSchedules(ctx context.Context, pool *db.Pool, d *demoData) error {
 			schSeq++
 			if isDayOff {
 				if _, err := pool.Pool.Exec(ctx, schQ,
-					schID, a.empID, a.plID, a.svcID, nil, nil, nil, false, workStr, true,
+					schID, a.empID, a.plID, nil, nil, nil, false, workStr, true,
 				); err != nil {
 					return fmt.Errorf("seed demo schedule(day-off) %q: %w", schID, err)
 				}
 			} else {
 				s := shifts[rotation]
 				if _, err := pool.Pool.Exec(ctx, schQ,
-					schID, a.empID, a.plID, a.svcID, s.masterID, s.start, s.end, s.cross, workStr, false,
+					schID, a.empID, a.plID, s.masterID, s.start, s.end, s.cross, workStr, false,
 				); err != nil {
 					return fmt.Errorf("seed demo schedule %q: %w", schID, err)
 				}
@@ -794,23 +773,23 @@ func dayFloor(t time.Time) time.Time {
 func seedDemoAttendance(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const attQ = `
 		INSERT INTO attendance
-			(id, employee_id, placement_id, schedule_id, company_id, service_line,
-			 site_id, position_id, attendance_code_id,
+			(id, employee_id, placement_id, schedule_id, company_id,
+			 site_id, position, attendance_code_id,
 			 shift_start_at, shift_end_at, check_in_at, check_out_at,
 			 lat_in, lng_in, lat_out, lng_out, wfo,
 			 is_late, late_minutes, worked_minutes, auto_closed,
 			 in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
 			 status, verification_status, flags)
 		VALUES
-			($1, $2, $3, NULL, $4, $5,
+			($1, $2, $3, NULL, $4,
 			 (SELECT site_id FROM placements WHERE id = $3),
-			 (SELECT position_id FROM placements WHERE id = $3),
-			 $6,
-			 $7, $8, $9, $10,
-			 $11, $12, $13, $14, true,
-			 $15, $16, $17, $18,
-			 $19, $20, $21, $22, $23,
-			 $24, $25, $26)
+			 (SELECT position FROM placements WHERE id = $3),
+			 $5,
+			 $6, $7, $8, $9,
+			 $10, $11, $12, $13, true,
+			 $14, $15, $16, $17,
+			 $18, $19, $20, $21, $22,
+			 $23, $24, $25)
 		ON CONFLICT (id) DO NOTHING`
 
 	const corQ = `
@@ -917,7 +896,7 @@ func seedDemoAttendance(ctx context.Context, pool *db.Pool, d *demoData) error {
 			}
 
 			if _, err := pool.Pool.Exec(ctx, attQ,
-				attID, a.empID, a.plID, a.companyID, a.slSlug, codeID,
+				attID, a.empID, a.plID, a.companyID, codeID,
 				shiftStart.Format(time.RFC3339), shiftEnd.Format(time.RFC3339),
 				checkIn.Format(time.RFC3339), checkOut,
 				lat, lng, latOut, lngOut,
@@ -967,9 +946,9 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 
 	const lrQ = `
 		INSERT INTO leave_requests
-			(id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+			(id, employee_id, placement_id, company_id, leave_type_id,
 			 start_date, end_date, duration_days, reason, status, no_leader, assigned_leader_id, created_by)
-		VALUES ($1, $2, $3, $4, $5, 'SWP-LT-001', $6::date, $7::date, $8, $9, $10, $11, $12, 'system-seed')
+		VALUES ($1, $2, $3, $4, 'SWP-LT-001', $5::date, $6::date, $7, $8, $9, $10, $11, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	const laQ = `
@@ -1041,7 +1020,6 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 		start := dayFloor(base)
 		end := start.AddDate(0, 0, days-1)
 
-		var svc any = a.svcID
 		leader := leaderByCompany[a.companyID]
 		var assignedLeader any
 		noLeader := false
@@ -1053,7 +1031,7 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 		}
 
 		if _, err := pool.Pool.Exec(ctx, lrQ,
-			lrID, a.empID, a.plID, a.companyID, svc,
+			lrID, a.empID, a.plID, a.companyID,
 			start.Format("2006-01-02"), end.Format("2006-01-02"), days,
 			demoPick(reasons), state, noLeader, assignedLeader,
 		); err != nil {
@@ -1099,8 +1077,8 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 
 func seedDemoHolidays(ctx context.Context, pool *db.Pool) error {
 	const hQ = `
-		INSERT INTO holidays (id, name, holiday_date, category, recurring, applicable_service_lines)
-		VALUES ($1, $2, $3::date, $4, $5, '{}')
+		INSERT INTO holidays (id, name, holiday_date, category, recurring)
+		VALUES ($1, $2, $3::date, $4, $5)
 		ON CONFLICT (id) DO NOTHING`
 	year := demoNow.Year()
 	holidays := []struct {
@@ -1124,16 +1102,16 @@ func seedDemoHolidays(ctx context.Context, pool *db.Pool) error {
 func seedDemoOvertime(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const otQ = `
 		INSERT INTO overtime
-			(id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+			(id, employee_id, company_id, placement_id, attendance_id,
 			 work_date, planned_start_time, planned_end_time, actual_start_time, actual_end_time,
 			 cross_midnight, source, status, day_type, worked_minutes, counted_minutes,
 			 min_minutes_threshold, skipped_too_short, reference_multiplier, overtime_rule_id,
 			 holiday_id, flagged_no_preapproval, reason, created_by)
-		VALUES ($1, $2, $3, $4, NULL, $5,
-			$6::date, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15, $16,
-			30, $17, $18, 'SWP-OTR-001',
-			$19, $20, $21, 'system-seed')
+		VALUES ($1, $2, $3, $4, NULL,
+			$5::date, $6, $7, $8, $9,
+			$10, $11, $12, $13, $14, $15,
+			30, $16, $17, 'SWP-OTR-001',
+			$18, $19, $20, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	const oaQ = `
@@ -1207,7 +1185,7 @@ func seedDemoOvertime(ctx context.Context, pool *db.Pool, d *demoData) error {
 		actualEnd := fmt.Sprintf("%02d:%02d", 17+worked/60, worked%60)
 
 		if _, err := pool.Pool.Exec(ctx, otQ,
-			otID, a.empID, a.companyID, a.plID, a.svcID,
+			otID, a.empID, a.companyID, a.plID,
 			workStr, "17:00", "20:00", actualStart, actualEnd,
 			false, st.source, st.status, tier.dayType, worked, counted,
 			skipped, tier.multiplier, holidayID, flagged, "Lembur operasional (demo).",

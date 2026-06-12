@@ -5,6 +5,7 @@ package leave
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,12 @@ type QuotaRepo struct {
 }
 
 var _ svc.QuotaRepository = (*QuotaRepo)(nil)
+
+// Per-type ledger (2026-06-12): QuotaRepo also drives the QuotaMeter.
+var (
+	_ svc.QuotaMeterStore  = (*QuotaRepo)(nil)
+	_ svc.QuotaMeterReader = (*QuotaRepo)(nil)
+)
 
 // NewQuotaRepo returns a QuotaRepo backed by pool.
 func NewQuotaRepo(pool *db.Pool) *QuotaRepo {
@@ -195,6 +202,56 @@ func (r *QuotaRepo) ListActivePlacedEmployeesForGrant(ctx context.Context, perio
 // These are the new live-path primitives (wired by the QuotaMeter service in
 // Phase 3/4). Window-mutating methods take a tx so the service can row-lock the
 // window (ResolveQuotaWindow ... FOR UPDATE) and mutate atomically.
+
+func i32ptrToIntPtr(p *int32) *int {
+	if p == nil {
+		return nil
+	}
+	v := int(*p)
+	return &v
+}
+
+// GetLeaveTypeCap reads a leave type's cap mechanics (QuotaMeterReader).
+func (r *QuotaRepo) GetLeaveTypeCap(ctx context.Context, leaveTypeID string) (dom.LeaveTypeCap, error) {
+	row, err := r.q.GetLeaveTypeCap(ctx, leaveTypeID)
+	if err != nil {
+		return dom.LeaveTypeCap{}, mapErr(err)
+	}
+	return dom.LeaveTypeCap{
+		ID: row.ID, Code: row.Code, Name: row.Name,
+		CapBasis:         dom.LeaveTypeCapBasis(row.CapBasis),
+		CapValue:         i32ptrToIntPtr(row.CapValue),
+		CapUnit:          row.CapUnit,
+		Paid:             row.Paid,
+		Gender:           row.Gender,
+		RequiresDocument: row.RequiresDocument,
+		NoticeDays:       int(row.NoticeDays),
+		MinServiceYears:  int(row.MinServiceYears),
+		LeadDays:         int(row.LeadDays),
+		TrailDays:        int(row.TrailDays),
+	}, nil
+}
+
+// GetEmployeeGateInfo reads gender + join date for the gates (QuotaMeterReader).
+func (r *QuotaRepo) GetEmployeeGateInfo(ctx context.Context, employeeID string) (dom.EmployeeGateInfo, error) {
+	row, err := r.q.GetEmployeeGateInfo(ctx, employeeID)
+	if err != nil {
+		return dom.EmployeeGateInfo{}, mapErr(err)
+	}
+	return dom.EmployeeGateInfo{Gender: row.Gender, JoinAt: pgDateToTime(row.JoinAt)}, nil
+}
+
+// GetAnnualEntitlement reads the active agreement's annual entitlement (QuotaMeterReader).
+func (r *QuotaRepo) GetAnnualEntitlement(ctx context.Context, employeeID string) (*int, error) {
+	v, err := r.q.GetAnnualEntitlementForEmployee(ctx, employeeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, mapErr(err)
+	}
+	return i32ptrToIntPtr(v), nil
+}
 
 func pgDateFromPtr(t *time.Time) pgtype.Date {
 	if t == nil {

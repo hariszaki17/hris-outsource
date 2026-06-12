@@ -8,9 +8,9 @@
 
 ## 1. Context
 
-**Company:** PT Saranawisesa Properindo (SWP) — an outsourcing provider supplying agents across three **service lines**: **Facility Services, Building Management, Parking**. Work is shift-heavy, 24/7, on client sites.
+**Company:** PT Saranawisesa Properindo (SWP) — an outsourcing provider supplying agents across a range of service types (e.g. facility services, building management, parking). Work is shift-heavy, 24/7, on client sites.
 
-**Why a rebuild (not editing ims-system):** The legacy system (`ims-system`, Laravel Lumen + Next.js, MySQL) is a 200+ table monolith where HRIS is only ~50 tables, the user model is generic multi-tenant, and "placement" is just a string field. The outsource domain (first-class placement, shift leaders, service-line rules) diverges enough that a clean rebuild + data migration beats surgery on the monolith.
+**Why a rebuild (not editing ims-system):** The legacy system (`ims-system`, Laravel Lumen + Next.js, MySQL) is a 200+ table monolith where HRIS is only ~50 tables, the user model is generic multi-tenant, and "placement" is just a string field. The outsource domain (first-class placement, shift leaders) diverges enough that a clean rebuild + data migration beats surgery on the monolith.
 
 **What we keep:** only the HRIS subset. **Migration source:** SWP prod, MySQL DB `lumen_swp`.
 
@@ -22,10 +22,10 @@
 |---|---|
 | Tenancy | **Internal only.** Only SWP staff use the system. Client companies are *data*, not tenants/logins. |
 | Roles | super admin · HR/placement admin · **shift leader** · agent |
-| Placement | An agent placed at a **client company**, in a **service line**, for a **contract period** (the employment agreement may be backfilled — optional at create, §8 2026-06-11); tracked with history. |
+| Placement | An agent placed at a **client company**, in a **position** (free-text), for a **contract period** (the employment agreement may be backfilled — optional at create, §8 2026-06-11); tracked with history. |
 | Shift leader | **1 per client company/placement.** Verifies attendance, approves OT & leave, manages roster, sees team dashboards. |
 | Shifts | A **work-shift master** (working hours + break) is admin-defined; the shift leader **picks from master** to schedule each agent. |
-| Service line | **Drives shift & attendance rules** (e.g. Parking = 24/7 rotating, Building Mgmt = office hours). |
+| Position | **Free-text** designation on the placement (no master, no FK), with a typeahead over existing values. *(service line removed entirely — §8 2026-06-12)* |
 | Payroll | **Compute-assist** in v1 — migrate history (read-only) **and** run a monthly payroll: system assembles agent pay from E2/E5/E6/E7, HR posts immutable payslips, **manual** transfer + evidence (no bank/BPJS/tax API). Agent pay = **monthly wage**, not billable hours. *(flipped from data-only 2026-06-11; see §8 E8)* |
 | MVP | **All core modules together** (attendance + shift + leave + overtime), one release; build order dependency-driven. |
 | Migration | **Everything** from SWP prod incl. payroll + full history. MySQL → Postgres **transform-and-load** (not a copy). |
@@ -44,7 +44,7 @@
 
 ```
 Employee ──< Placement >── ClientCompany
-   │            │  (service line, period, status, history)
+   │            │  (position, period, status, history)
    │            └── ShiftLeaderAssignment (1 leader per company)
    │
 Schedule (agent + ShiftMaster + date)  ← shift leader builds from ShiftMaster catalog
@@ -68,20 +68,20 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E2 — Identity, Org & Master Data
 **Goal:** model people and the reference data everything hangs on.
-**Features:** Employee/Agent profile · Client/Partner Company directory · Service Lines · Positions · Leave types · Attendance codes/policies · Overtime rules.
-**Entities:** Employee, ClientCompany, ServiceLine, Position, LeaveType, AttendanceCode, OvertimeRule.
+**Features:** Employee/Agent profile · Client/Partner Company directory · Leave types · Attendance codes/policies · Overtime rules.
+**Entities:** Employee, ClientCompany, LeaveType, AttendanceCode, OvertimeRule. *(Position is free-text on the placement — no master entity; service line removed, §8 2026-06-12.)*
 **Depends on:** E1
 
 ### E3 — Placement Management ⭐ (differentiator)
-**Goal:** place agents at client companies, in a service line, for a period; track history; assign the company's shift leader.
-**Features:** Agent placement (agent + company + service line + period; employment agreement may be backfilled — optional at create, see §8 2026-06-11) · Placement lifecycle/status · Re-placement & transfer with history · Shift-leader assignment (1 per company) · Company placement roster view.
+**Goal:** place agents at client companies, in a position, for a period; track history; assign the company's shift leader.
+**Features:** Agent placement (agent + company + position (free-text) + period; employment agreement may be backfilled — optional at create, see §8 2026-06-11) · Placement lifecycle/status · Re-placement & transfer with history · Shift-leader assignment (1 per company) · Company placement roster view.
 **Entities:** Placement (≈ legacy `employee_contract`), ShiftLeaderAssignment.
 **Depends on:** E2
 
 ### E4 — Shift Configuration & Scheduling
-**Goal:** define shift master templates and let shift leaders schedule agents per placement; service line drives rules.
-**Features:** Work-shift master catalog (hours + breaks) · Service-line shift/attendance policies · Roster/schedule builder (leader picks from master, assigns agents to dates) · Rotation patterns · Schedule calendar & publish/notify · **Roster-compliance indicators** (holiday-shift badge + holiday day-column tint; missing-weekly-rest flag; >6-consecutive-workday cap warning) — derives from roster + `/holidays`, surfaces to the shift leader (§8 D1/D3).
-**Entities:** ShiftMaster, ServiceLineShiftPolicy, Schedule, RotationPattern.
+**Goal:** define shift master templates and let shift leaders schedule agents per placement.
+**Features:** Work-shift master catalog (hours + breaks; **independent of service line**) · Roster/schedule builder (leader picks from master, assigns agents to dates) · Rotation patterns · Schedule calendar & publish/notify · **Roster-compliance indicators** (holiday-shift badge + holiday day-column tint; missing-weekly-rest flag; >6-consecutive-workday cap warning) — derives from roster + `/holidays`, surfaces to the shift leader (§8 D1/D3).
+**Entities:** ShiftMaster, Schedule, RotationPattern.
 **Depends on:** E3, E2
 
 ### E5 — Attendance
@@ -98,7 +98,7 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E7 — Overtime Tracking
 **Goal:** OT capture/request, approval (shift leader), duration calc per rules.
-**Features:** OT request · OT detection vs schedule · Approval workflow · OT calculation (per service-line rules) · OT status · OT reporting · **Holiday calendar bootstrap** ("Import {tahun}" prefill → HR confirm + cuti bersama, §8 D4) · **statutory OT multiplier seeding** (PP 35/2021 defaults: workday 1.5×→2×; rest-day/holiday progressive 2×/3×/4×, stored as reference).
+**Features:** OT request · OT detection vs schedule · Approval workflow · OT calculation (per **global** rules) · OT status · OT reporting · **Holiday calendar bootstrap** ("Import {tahun}" prefill → HR confirm + cuti bersama, §8 D4) · **statutory OT multiplier seeding** (PP 35/2021 defaults: workday 1.5×→2×; rest-day/holiday progressive 2×/3×/4×, stored as reference).
 **Entities:** Overtime, OvertimeStatus.
 **Depends on:** E4, E5, E3
 
@@ -144,7 +144,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | Epic | Feature doc | PRDs | Data map |
 |------|-------------|------|----------|
 | **E1** Foundations & Platform | [FEATURE](epics/E1-foundations/FEATURE.md) | authentication · rbac-roles · audit-log · platform-conventions | — (uses E2) |
-| **E2** Identity, Org & Master | [FEATURE](epics/E2-identity/FEATURE.md) | employee-profile · employment-agreement · client-company-directory · client-sites-geofence · service-lines-positions · operational-master-data | [✓](epics/E2-identity/DATA-MAPPING.md) |
+| **E2** Identity, Org & Master | [FEATURE](epics/E2-identity/FEATURE.md) | employee-profile · employment-agreement · client-company-directory · client-sites-geofence · operational-master-data | [✓](epics/E2-identity/DATA-MAPPING.md) |
 | **E3** Placement ⭐ | [FEATURE](epics/E3-placement/FEATURE.md) | agent-placement · placement-lifecycle · replacement-transfer · shift-leader-assignment · company-roster | [✓](epics/E3-placement/DATA-MAPPING.md) |
 | **E4** Shift & Scheduling | [FEATURE](epics/E4-shift-scheduling/FEATURE.md) | shift-master-catalog · daily-schedule-assignment · schedule-views · schedule-changes-swaps | [✓](epics/E4-shift-scheduling/DATA-MAPPING.md) |
 | **E5** Attendance | [FEATURE](epics/E5-attendance/FEATURE.md) | clock-in-out · attendance-evaluation · attendance-verification · attendance-corrections · attendance-records | [✓](epics/E5-attendance/DATA-MAPPING.md) |
@@ -177,7 +177,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - ✅ **Geofence model = single circle per site** *(2026-06-03)* — one center (lat/lng) + radius; out-of-geofence stays **allowed + flagged** (E5). Multi-circle / polygon are post-v1.
 - ✅ **Shift-leader scope = configurable per company** *(2026-06-03)* — `ClientCompany.leader_scope ∈ {company, site}` (default `company`). `company` → one leader for the whole company (today's behavior); `site` → one leader **per site**. Rewrites E3 INV-2/3/4 to a "leadership unit" (company **or** site). See [E3 FEATURE §4].
 - Agent mobile-editable fields: phone, address, bank (HR-approved) *(default)*
-- Service lines: the 3 are seeded but **admin-extendable** *(default)*
+- ~~Service lines: the 3 are seeded but **admin-extendable**~~ — **superseded 2026-06-12** by "Service line removed entirely" (below).
 - ✅ **Compensation & annual-leave entitlement are employment-agreement (E2) terms, not placement (E3) terms** *(resolved 2026-06-07)* — under alih-daya law the employment relationship is SWP↔agent; a placement is only a work *designation* to a client. So **base salary** stays the single source on E2 `CompensationRecord`, and the **annual leave entitlement** moves onto the **EmploymentAgreement** as new field `annual_leave_entitlement_days` (int, ≥0, nullable). The duplicated `Placement.annual_leave_entitlement` + `Placement.base_salary_ref` are **removed from E3**; transfer/replacement no longer carry comp overrides. E6 leave-quota already sources the annual entitlement from E2, so this aligns the model. **E3 BR-9 (position is selected per-placement and may differ across companies) is unaffected — only the compensation/leave duplication is removed.** See [E2 employment-agreement PRD] + [E3 FEATURE §4].
 - ✅ **Every employee auto-provisions a login; phone-or-email identifier (reverses "data-only employees")** *(resolved 2026-06-07)* — supersedes the E1 "email-less agents: assign an email at provisioning" default. Cross-cutting (E1 auth · E2 employee create · E9 migration):
   - **D1 — auto-provision, 1:1 non-null.** Creating an employee **always** provisions a User in the same step. `Employee`↔`User` is now **1:1 NON-NULL** (no nullable `user_id`). The **"data-only / no-login employee" concept is removed entirely** — and with it the separate `:provision-login` endpoint, the `provision_login` flag, the `has_user`/`HasLogin` filter, the "Tanpa Login" list tab/stat, and the "Punya Akun" column.
@@ -191,9 +191,9 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **A — edit is a full-page screen, not a drawer.** Client-company **edit** is a dedicated full-page screen launched from the company **detail page** (route `/client-companies/$id/edit`). The previous edit Drawer (`EditClientCompanyDrawer`) is **removed**.
   - **B — list row action = activate/deactivate only.** The client-company **list** drops its per-row kebab menu; the sole row action is **Aktifkan/Nonaktifkan** (still guarded by the active-placement guard, CC-5). Edit moved entirely to the detail page (A).
   - **C — Profil tab no longer duplicates Sites/geofence.** The company **detail "Profil" tab** shows only statutory/billing fields + `leader_scope`; **Sites & geofence live ONLY in the "Lokasi & Site" tab** (F2.6, INV-5).
-  - **D — service-line maintenance consolidated on the detail page.** Renaming a service line **and** adding/updating/removing its **positions** all happen on the service-line **detail page**; the service-line list's "Edit" action now **navigates to that detail page** instead of opening a rename-only modal.
-  - See [E2 F2.3 PRD], [E2 F2.4 PRD], [E2 FEATURE §F2.3/F2.4].
-- ✅ **Service-line create may seed initial positions atomically** *(resolved 2026-06-08)* — `POST /service-lines` accepts an **optional `positions` array**; when provided, the line **and all its positions** are created in a **single all-or-nothing transaction** — if any position is invalid or duplicates another within the line, **nothing is persisted** (no line, no positions). Per-line name uniqueness (F2.4 SP-3) is enforced **across the batch**, not just against already-stored rows. The web "Tambah Lini Layanan" modal supports adding initial positions inline; the dedicated `POST /service-lines/{id}/positions` endpoint still exists for adding positions later from the detail page. No domain/invariant or soft-delete change. See [E2 F2.4 PRD], [E2 FEATURE §F2.4].
+  - ~~**D — service-line maintenance consolidated on the detail page.**~~ — **superseded 2026-06-12** by "Service line removed entirely" (below); the service-line detail page no longer exists, and position is free-text (no master to maintain).
+  - See [E2 F2.3 PRD], [E2 FEATURE §F2.3].
+- ~~✅ **Service-line create may seed initial positions atomically** *(resolved 2026-06-08)*~~ — **superseded 2026-06-12** by "Service line removed entirely" (below). Service lines no longer exist as an entity, so there is no `POST /service-lines` and no per-line position seeding; position is now a free-text field with a typeahead over DISTINCT existing values (no master, no FK).
 
 **E3 — Placement & Shift-Leader Assignment**
 - ✅ **Shift-leader identity is fully assignment-driven; role + scope are derived, never stored** *(resolved 2026-06-08)* — cross-cutting (E1 auth · E2 client-companies · E3 leader assignment · E4 schedule). A "shift leader" is **not** a separately-managed auth role:
@@ -210,12 +210,20 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
   - **D — renew/transfer propagate pending.** Renewing or transferring a placement that has no agreement produces a **successor that is also pending** (null `agreement_id` propagates; no auto-cap) until its own agreement is backfilled.
   - **E — legal basis still required eventually.** Under alih-daya law the employment relationship is SWP↔agent, so a finalized PKWT/PKWTT is still mandatory for the *employment* — this decision only removes it as a **blocking precondition at the placement-create step**; `awaiting_agreement` exists precisely so the outstanding paperwork stays visible and gets closed.
   - See [E3 F3.1 PRD agent-placement BR-1/BR-1b + new backfill BR], [E3 FEATURE §F3.1/§4], [E3 openapi `createPlacement` / `backfillPlacementAgreement`].
-- ✅ **New `lead` role — service-line operational approver** *(resolved 2026-06-12)* — cross-cutting (E1 auth · E3 placement · E6 leave · E7 overtime). A generic `lead` system role replaces modelling service-line as an RBAC axis — **`service_line` stays a data label only**, never a permission boundary.
+- ✅ **New `lead` role — company-scoped operational approver** *(resolved 2026-06-12)* — cross-cutting (E1 auth · E3 placement · E6 leave · E7 overtime). A generic `lead` system role is a company-scoped operational approver over a set of assigned client companies; scope is keyed on company membership only.
   - **A — who/scope.** A lead is **SWP staff** with a **stored** auth role (`users.role = 'lead'`), unlike the derived `shift_leader`. Each lead is assigned to a **set of client companies** via **`lead_assignments`** (one lead covers many companies), and that company set is **resolved per request** into the principal's **`CompanyIDs []string`** scope.
   - **B — arranges placements.** Within its assigned companies, a lead is the routine placement arranger — **creates, transfers, renews, and ends** placements. **HR retains global oversight + override** (and stays the arranger outside any lead's scope).
   - **C — L2/final approver.** A lead is the **Level-2 (final) approver for leave + overtime**, scoped to the agent's company; **L1 stays the on-site `shift_leader`**; **HR remains a global L2**. A lead **cannot approve its own** request (same separation rule as shift_leader).
   - **D — cannot.** A lead **cannot** add employees (tambah karyawan), run payroll, do master-data writes, assign shift-leaders (SLA), or approve bank-account changes (those **escalate to HR**).
   - See [E3 FEATURE §2], [E6 leave-approval LA-3], [E7 overtime-approval OA-3], [NAVIGATION-AND-RBAC §4].
+- ✅ **Service line removed entirely** *(resolved 2026-06-12)* — the **service-line concept is dropped** from the whole model and every epic that referenced it. Cross-cutting (E2 master data · E3 placement · E4 scheduling · E5 attendance · E6 leave · E7 overtime · E8 payroll · E9 migration · E10 reporting). Supersedes the prior service-line sub-decisions (the 2026-06-07 "Klien consolidation" service-line maintenance bullet, the 2026-06-08 "service-line create seeds positions atomically", and the seeded-3-lines default).
+  - **A — no master entity.** `ServiceLine`/`Position` masters, the `SWP-SVC`/`SWP-POS` IDs, the `/service-lines` and `/service-lines/{id}/positions` endpoints, and the service-line nav/master-data surfaces are all removed.
+  - **B — position is free-text.** **Position** becomes a **free-text** field on the placement (no master, no FK, no ID), with a **typeahead** that suggests over DISTINCT existing values via `GET /positions:search`. E3 BR-9 (position is per-placement and may differ across companies) is preserved — it is just free-text now.
+  - **C — service line dropped from operations.** Placement, scheduling, attendance, leave, and overtime no longer carry or branch on service line. **Shift master is independent** (no service-line scoping on the shift catalog or the schedule shift-picker). **Overtime rules are GLOBAL ONLY** (the service-line scope axis + its precedence are dropped). **Leave coverage-clash is DROPPED entirely** (was service-line-aware). **Holidays are GLOBAL ONLY** (drop `applicable_service_lines` / per-service-line `HolidayCategory` scoping).
+  - **D — reporting + payroll by position.** Dashboard org rollups and billable/SLA reports **GROUP BY position** (free-text) instead of service line. Payroll history carries no service-line dimension.
+  - **E — migration simplified.** E9 drops the `unclassified_service_line` classification and any service-line transform; legacy service-line strings map to the free-text **position** where applicable, otherwise discarded.
+  - The `lead` role is a **company-scoped** operational approver (see above) — there is no service-line RBAC axis.
+  - See [API CONVENTIONS §18], [NAVIGATION-AND-RBAC §3.2/§4], [E2 FEATURE], [E3 FEATURE], [E4 FEATURE], [E7 FEATURE], [E9 DATA-MAPPING].
 
 **E4 — Shift & Scheduling**
 - ✅ Agent shift-swap / day-off requests: **deferred to post-v1** (v1 = leader-driven schedule edits only; F4.4 swaps drop from v1 scope)
@@ -267,7 +275,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 - ✅ Minimum OT counted = **30 minutes** *(superseded 2026-06-02 — was 60 min in 2026-05-29 review; PRDs were authoritative)*
 - Pre-approval: worked-without-request OT still approvable after the fact (flagged); Holiday tier beats Rest-day when both apply; cross-midnight OT → start date *(default)*
 - ✅ **Holiday & weekly-rest operating model (cross-cutting E4·E6·E7·E10)** *(resolved 2026-06-08)* — grounds the 24/7 outsourced blue-collar reality (client sites keep operating on public holidays; agents work them):
-  - **D1 — Holiday calendar is classification-only, never suppresses shifts.** The `/holidays` master (global, with optional per-service-line `HolidayCategory` scoping already in the E7 spec) is a **date-level classification** consumed by E7 OT day-type resolution (HOLIDAY tier) and E6 working-day exclusion. It does **not** drive schedule generation — the roster still rosters on holidays. The E4 grid surfaces a holiday tint/badge (visual only).
+  - **D1 — Holiday calendar is classification-only, never suppresses shifts.** The `/holidays` master (**global only** — per-service-line `HolidayCategory` scoping dropped, §8 2026-06-12) is a **date-level classification** consumed by E7 OT day-type resolution (HOLIDAY tier) and E6 working-day exclusion. It does **not** drive schedule generation — the roster still rosters on holidays. The E4 grid surfaces a holiday tint/badge (visual only).
   - **D2 — worked weekly rest day = RestDay OT premium only.** Under PP 35/2021, working the agent's weekly rest day is compensated as **RestDay-tier OT premium** (reference multiplier in v1, no monetary calc). **No TOIL/substitute-rest-day ledger and no conversion into `cuti tahunan`** — the statutory annual-leave accounting stays untouched. Rest day is **per-agent, derived from the roster** (not a fixed Sunday); HOLIDAY beats RESTDAY when both apply (existing E7 precedence).
   - **D3 — rest-day shortfall is a compliance flag, not a balance.** "No rest day in the week" / **>6 consecutive scheduled workdays** raises a **compliance alert to the shift leader** — never a silent leave credit. Computed rolling-consecutive for the legal flag; rendered as a per-week rest indicator on the (week-scoped) E4 grid.
   - **D4 — holiday calendar seeding = HR-confirmed yearly import, not live-sync.** A yearly **"Import {tahun}"** bootstrap (e.g. Nager.Date / `date-holidays`) prefills candidate holidays; **HR reviews/confirms** and adds **cuti bersama**. The **SKB 3 Menteri decree is authoritative** for cuti bersama (APIs lag; Islamic dates shift by rukyat). HR-maintained master stays the source of truth (no live external sync).
@@ -292,7 +300,7 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 **E10 — Reporting & Notifications**
 - ✅ Billable = **verified-only** (consistent with E5)
 - Notifications all-on in v1 (mute non-critical later); billing math = **hours only** (rates applied outside the system) *(default)*
-- ✅ **Super Admin dashboard = HR cockpit + admin-only widgets (extends the dashboard D1 "same body, distinct label")** *(resolved 2026-06-11)* — the `super_admin` dashboard now **adds** an admin-only section to the shared `HrDashboard` payload, making it a **superset** rather than a relabel. Four widgets, all `super_admin`-scoped, each deep-linking into its owning epic: **(a) User & access** (active users · accounts pending provisioning · offboarded/disabled ≤30d — E2/F2.7); **(b) Recent audit feed** (last sensitive actions — E1 audit); **(c) Org rollups by service line** (headcount + active placements across Facility / Building / Parking — E3); **(d) Pending grants** (bank-account approval escalations + role-change requests awaiting super-admin action). Carried on `HrDashboard.admin` (present **only** for `super_admin`); the `hr_admin` payload is unchanged. See [F10.2 PRD DB-7], [E10 `openapi` `HrDashboard.admin`].
+- ✅ **Super Admin dashboard = HR cockpit + admin-only widgets (extends the dashboard D1 "same body, distinct label")** *(resolved 2026-06-11)* — the `super_admin` dashboard now **adds** an admin-only section to the shared `HrDashboard` payload, making it a **superset** rather than a relabel. Four widgets, all `super_admin`-scoped, each deep-linking into its owning epic: **(a) User & access** (active users · accounts pending provisioning · offboarded/disabled ≤30d — E2/F2.7); **(b) Recent audit feed** (last sensitive actions — E1 audit); **(c) Org rollups by position** (headcount + active placements grouped by the free-text position — E3); **(d) Pending grants** (bank-account approval escalations + role-change requests awaiting super-admin action). Carried on `HrDashboard.admin` (present **only** for `super_admin`); the `hr_admin` payload is unchanged. See [F10.2 PRD DB-7], [E10 `openapi` `HrDashboard.admin`].
 - ✅ **Shift-leader dashboard is dual-surface (web + mobile)** *(resolved 2026-06-11)* — the existing `LeaderDashboard` payload now also backs a **mobile Beranda** (the shift leader is on-site, phone-first), at parity with the web team dashboard. **No new endpoint** — `GET /dashboards/me` already returns `LeaderDashboard` for `shift_leader`; this adds the mobile surface only. See [F10.2 PRD DB-8], [`.pen` frame `UMzuO`].
 
 **Deferred to the build/tech phase (not product):** auth session model (JWT vs server sessions) + token lifetimes + password policy; API pagination style; push provider (FCM/APNs); migration batch sizes/parallelism; audit & export storage/retention infrastructure; dashboard caching/freshness thresholds.

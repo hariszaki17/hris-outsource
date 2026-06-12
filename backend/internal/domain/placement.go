@@ -17,8 +17,7 @@ type Placement struct {
 	AgreementID       *string // nil = pending agreement (awaiting_agreement = true)
 	ClientCompanyID   string
 	SiteID            string // INV-5: required
-	ServiceLineID     string
-	PositionID        string
+	Position          string // free-text position label (no master / FK); per-placement
 	StartDate         time.Time
 	EndDate           *time.Time // nil = open-ended (PKWTT)
 	Notes             *string
@@ -41,8 +40,6 @@ type Placement struct {
 	EmployeeName      *string
 	ClientCompanyName *string
 	SiteName          *string
-	ServiceLineName   *string
-	PositionName      *string
 	AgreementType     *string
 	// Warnings are non-blocking soft warnings attached at write time (not persisted).
 	Warnings []string
@@ -92,15 +89,15 @@ type CompanyRosterSummary struct {
 	TotalActive    int
 	TotalScheduled int
 	TotalExpiring  int
-	ByServiceLine  []RosterServiceLineCount
+	ByPosition     []RosterPositionCount
 	ByStatus       []RosterStatusCount
 }
 
-// RosterServiceLineCount is one by_service_line bucket of CompanyRosterSummary.
-type RosterServiceLineCount struct {
-	ServiceLineID   string
-	ServiceLineName string
-	Count           int
+// RosterPositionCount is one by_position bucket of CompanyRosterSummary
+// (grouped by the free-text position label; no master / FK).
+type RosterPositionCount struct {
+	Position string
+	Count    int
 }
 
 // RosterStatusCount is one by_status bucket of CompanyRosterSummary.
@@ -125,7 +122,7 @@ type PlacementStats struct {
 // Status (single) and StatusIn (CSV) both filter the lifecycle_status column.
 type PlacementFilter struct {
 	CompanyID             *string
-	ServiceLineID         *string
+	Position              *string // exact free-text position label filter
 	EmployeeID            *string
 	AgreementID           *string
 	Status                *string  // single → lifecycle_status =

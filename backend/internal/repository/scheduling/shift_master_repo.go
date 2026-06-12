@@ -42,11 +42,10 @@ func (r *ShiftMasterRepo) ListShiftMasters(ctx context.Context, f domain.ShiftMa
 		}
 	}
 	rows, err := r.q.ListShiftMasters(ctx, sqlcgen.ListShiftMastersParams{
-		ServiceLineID: f.ServiceLineID,
-		IsActive:      isActive,
-		Q:             f.Q,
-		CursorID:      f.Cursor,
-		RowLimit:      f.Limit,
+		IsActive: isActive,
+		Q:        f.Q,
+		CursorID: f.Cursor,
+		RowLimit: f.Limit,
 	})
 	if err != nil {
 		return nil, err
@@ -81,7 +80,6 @@ func (r *ShiftMasterRepo) CreateShiftMaster(ctx context.Context, tx pgx.Tx, p sv
 		EndTime:       p.EndTime,
 		BreakStart:    p.BreakStart,
 		BreakEnd:      p.BreakEnd,
-		ServiceLineID: p.ServiceLineID,
 		CrossMidnight: p.CrossMidnight,
 		IsActive:      p.IsActive,
 		CreatedBy:     p.CreatedBy,
@@ -99,7 +97,6 @@ func (r *ShiftMasterRepo) UpdateShiftMaster(ctx context.Context, tx pgx.Tx, p sv
 		EndTime:       p.EndTime,
 		BreakStart:    p.BreakStart,
 		BreakEnd:      p.BreakEnd,
-		ServiceLineID: p.ServiceLineID,
 		CrossMidnight: p.CrossMidnight,
 		IsActive:      p.IsActive,
 		ID:            p.ID,

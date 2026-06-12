@@ -4,7 +4,7 @@
  * .pen frame: qIpsj — E2 · Perusahaan Klien — Daftar
  *
  * Layout: TitleBand → 4× StatCards → TableCard (FilterRow, THead, rows, pagination).
- * Columns: Perusahaan (icon+name+alamat) | Lini Layanan | Pemimpin Shift | Penempatan |
+ * Columns: Perusahaan (icon+name+alamat) | Pemimpin Shift | Penempatan |
  * Geofence | Status | inline action.
  * Row action: inline Deactivate / Reactivate (opens ConfirmDialog). Edit is on the detail page.
  *
@@ -48,13 +48,6 @@ const PAGE_SIZE = 50;
 export type ClientCompaniesSearch = {
   q?: string;
   status?: ClientCompanyStatus;
-  /**
-   * Reserved: parsed by the route's validateSearch but NOT applied — the directory PRD
-   * (client-company-directory.md) specifies only search + active/inactive status filtering,
-   * and there is no service-line options source on this screen. Kept for URL/route-type
-   * compatibility; intentionally not wired into the query or `hasFilters`.
-   */
-  service_line?: string;
   cursor?: string;
 };
 
@@ -153,7 +146,7 @@ export function ClientCompaniesScreen() {
     );
   }
 
-  // Table columns (matches .pen THead: Perusahaan | Lini Layanan | Pemimpin Shift | Penempatan | Geofence | Status | kebab)
+  // Table columns (matches .pen THead: Perusahaan | Pemimpin Shift | Penempatan | Geofence | Status | kebab)
   const columns: Column<ClientCompany>[] = [
     {
       id: 'name',

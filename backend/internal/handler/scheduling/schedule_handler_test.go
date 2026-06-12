@@ -5,7 +5,7 @@
 // openapi.yaml EXACTLY:
 //
 //	OUT_OF_SCOPE 403 · OUTSIDE_PLACEMENT_PERIOD 422 · SHIFT_DEACTIVATED 422
-//	SHIFT_NOT_FOR_SERVICE_LINE 422 · SHIFT_OVER_LEAVE 409 · DOUBLE_SHIFT 409
+//	SHIFT_OVER_LEAVE 409 · DOUBLE_SHIFT 409
 //
 // plus force_replace (201 MODIFIED + replaced_entry_id), :check no-side-effect,
 // bulk-apply 200/422 + weekdays_mask, list envelope {data,warnings}, DELETE 204 /
@@ -128,32 +128,6 @@ func TestConflict_ShiftDeactivated(t *testing.T) {
 	}
 	if code := errCode(t, rr); code != "SHIFT_DEACTIVATED" {
 		t.Errorf("error.code = %q, want SHIFT_DEACTIVATED", code)
-	}
-}
-
-func TestConflict_ShiftNotForServiceLine(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "")
-	// Placement is on SVC-001; master is tagged to SVC-003 (Parking).
-	h.seedPlacement("SWP-EMP-1108", "SWP-PL-5001", "SWP-CMP-0021", "SWP-SVC-001", placementStart, placementEnd)
-	h.seedMaster("SWP-SHF-002", "Malam", "23:00", "07:00", strp("SWP-SVC-003"), true)
-
-	rr := h.do("POST", "/schedule", createSingleBody("SWP-EMP-1108", "SWP-SHF-002", dateStr(dateInWindow), false))
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
-	}
-	e := errObject(t, decodeBody(t, rr))
-	if e["code"] != "SHIFT_NOT_FOR_SERVICE_LINE" {
-		t.Fatalf("error.code = %v, want SHIFT_NOT_FOR_SERVICE_LINE", e["code"])
-	}
-	details, ok := e["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("error.details missing: %T", e["details"])
-	}
-	if details["placement_service_line_id"] != "SWP-SVC-001" {
-		t.Errorf("details.placement_service_line_id = %v, want SWP-SVC-001", details["placement_service_line_id"])
-	}
-	if details["shift_service_line_id"] != "SWP-SVC-003" {
-		t.Errorf("details.shift_service_line_id = %v, want SWP-SVC-003", details["shift_service_line_id"])
 	}
 }
 

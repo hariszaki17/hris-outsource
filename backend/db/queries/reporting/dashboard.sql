@@ -160,22 +160,20 @@ WHERE deleted_at IS NULL
   AND status = 'disabled'
   AND tokens_valid_after >= (sqlc.arg(now_ts)::timestamptz - INTERVAL '30 days');
 
--- name: OrgRollupsByServiceLine :many
--- org_rollups: per-service-line headcount (distinct placed employees) + active
+-- name: OrgRollupsByPosition :many
+-- org_rollups: per-position headcount (distinct placed employees) + active
 -- placement count, over non-terminal placements (mirrors CountActivePlacements).
--- service_lines.name is free text ("Facility Services" / "Building Management" /
--- "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
--- the raw name so the mapping stays in Go (no enum in the schema).
+-- Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
+-- removed, position is a plain text column on placements — no master/enum).
 SELECT
-    sl.name                                  AS service_line_name,
+    p.position                                AS position,
     count(DISTINCT p.employee_id)::bigint     AS headcount,
     count(*)::bigint                          AS active_placements
 FROM placements p
-JOIN service_lines sl ON sl.id = p.service_line_id
 WHERE p.deleted_at IS NULL
   AND p.lifecycle_status IN ('ACTIVE','EXTENDED','EXPIRING','PENDING_START')
-GROUP BY sl.id, sl.name
-ORDER BY sl.name;
+GROUP BY p.position
+ORDER BY p.position;
 
 -- name: CountBankApprovalsPending :one
 -- pending_grants.bank_approvals: change-requests with a bank change escalated to

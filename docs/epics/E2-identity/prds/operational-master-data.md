@@ -78,8 +78,8 @@ Religious leave (`CIH`/`CIU`/`CPR`) requires applying ≥1 month ahead (`notice_
 ### Overtime rules (net-new)
 | Ref | Rule |
 |-----|------|
-| OR-1 | Fields: `name`, `service_line_id` (nullable = global), `multiplier`, `min_minutes`, `requires_preapproval`. |
-| OR-2 | A rule may be **scoped to a service line** (e.g., Parking 24/7 vs office hours) or global. |
+| OR-1 | Fields: `name`, `multiplier`, `min_minutes`, `requires_preapproval`. |
+| OR-2 | Overtime rules are **global only** — there is no service-line (or any other) scope axis *(2026-06-12, EPICS §8 — service_line removed entirely)*. |
 | OR-3 | Field set is **provisional** — to be confirmed against Indonesian OT regulation and SWP practice in E7. |
 
 ### Common
@@ -93,7 +93,7 @@ Religious leave (`CIH`/`CIU`/`CPR`) requires applying ≥1 month ahead (`notice_
 
 `LeaveType`: `id, code (unique), name (unique), description, category, cap_basis (enum), cap_value (int, nullable), cap_unit (DAYS|COUNT), paid (bool), gender (ANY|FEMALE|MALE), requires_document (bool), notice_days (int), min_service_years (int), lead_days (int), trail_days (int), color, status`. *(2026-06-12 — `is_annual` is replaced by `cap_basis = ANNUAL_POOL`.)*
 `AttendanceCode`: `id, name (unique), description, is_workday, is_payable, is_billable, needs_verification, color, status`.
-`OvertimeRule`: `id, name (unique), service_line_id (FK nullable), multiplier, min_minutes, requires_preapproval, status`.
+`OvertimeRule`: `id, name (unique), multiplier, min_minutes, requires_preapproval, status` — **global only** (no scope FK).
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -109,9 +109,9 @@ Feature: Operational master data
     When I create an attendance code "Overtime Present" with is_billable=true and needs_verification=true
     Then attendance using this code is flagged billable and must be verified by a shift leader (E5)
 
-  Scenario: Create a service-line-scoped overtime rule
-    When I create an overtime rule "Parking Night OT" scoped to "Parking" with multiplier 2.0 and min_minutes 60
-    Then it applies only to Parking overtime calculations (E7)
+  Scenario: Create a global overtime rule
+    When I create an overtime rule "Night OT" with multiplier 2.0 and min_minutes 60
+    Then it applies globally to overtime calculations (E7)
 
   Scenario: Cannot delete a referenced leave type
     Given leave requests reference "Annual Leave"
@@ -130,8 +130,6 @@ Feature: Operational master data
 |---|------|----------|
 | C-1 | Deactivate a leave type with open requests | New requests can't use it; in-flight ones complete. |
 | C-2 | Migration: per-company `attendance_codes` | Collapse to one SWP-wide set, dedupe by name (DATA-MAPPING G-6). |
-| C-3 | OvertimeRule with no service line | Treated as global default. |
-| C-4 | Conflicting OT rules (global + line) for the same OT | Line-scoped rule wins over global (confirm precedence in E7). |
 | C-5 | Color clash between attendance codes | Allowed (cosmetic); optionally warn. |
 
 ## 9. Dependencies
@@ -142,5 +140,5 @@ E1 (RBAC/audit), E5 (attendance codes), E6 (leave types/quotas), E7 (overtime ru
 
 - ✅ E2 owns master definitions; behavior in E5/E6/E7.
 - ✅ **`leave_type` is the cap axis (2026-06-12)** — each type carries its own `cap_basis`/`cap_value` mechanics (LT-1..LT-4); seeded from SWP's 18-code `Fitur Ijin` policy (§5a). Reverses the 2026-06-08 "one pool / label-only" model. See [EPICS.md §8](../../../EPICS.md).
-- **Open (defer to E7):** confirm the OvertimeRule field set + precedence against Indonesian OT regulation (e.g., 1.5× first hour, 2× subsequent) and SWP practice.
-- **Open:** are leave types / attendance codes ever genuinely per-service-line, or one SWP-wide set? (assumed: SWP-wide.)
+- ✅ **OvertimeRule is global only** *(2026-06-12, EPICS §8)* — the service-line scope axis and global-vs-line precedence are dropped along with `service_line`. One SWP-wide rule set.
+- **Open (defer to E7):** confirm the OvertimeRule field set against Indonesian OT regulation (e.g., 1.5× first hour, 2× subsequent) and SWP practice.

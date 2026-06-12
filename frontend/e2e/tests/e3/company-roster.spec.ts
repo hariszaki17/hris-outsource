@@ -6,7 +6,7 @@
  *
  * Coverage:
  *   RO-render          hr_admin opens SWP-CMP-0021 roster → active placements (Rudi, Sari, Dewi) + current leader Rudi
- *                      (leader chip) + summary counters + by_service_line pills
+ *                      (leader chip) + summary counters + by_position pills (free-text position rollup)
  *   RO-filter-status   Status filter (FilterSelect) narrows the list
  *   RO-include-history include_history Toggle (role=switch) shows terminal rows after one placement is ended
  *   RO-rbac-scope      shift_leader (rudi.wijaya) opens HIS company (0021) → 200; opens SWP-CMP-0022 → 403 OUT_OF_SCOPE

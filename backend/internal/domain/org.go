@@ -49,7 +49,6 @@ type Site struct {
 type CompanyFilter struct {
 	Q               *string
 	Status          *string
-	ServiceLine     *string
 	HasLeader       *bool
 	CursorCreatedAt *time.Time
 	CursorID        *string

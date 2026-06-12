@@ -318,9 +318,8 @@ func (h *MasterDataHandler) ListOvertimeRules(w http.ResponseWriter, r *http.Req
 	q := r.URL.Query()
 
 	filter := domain.OvertimeRuleFilter{
-		Status:      queryStringPtr(q.Get("status")),
-		ServiceLine: queryStringPtr(q.Get("service_line")),
-		Limit:       parseLimit(q.Get("limit")),
+		Status: queryStringPtr(q.Get("status")),
+		Limit:  parseLimit(q.Get("limit")),
 	}
 
 	if cursor := q.Get("cursor"); cursor != "" {
@@ -372,7 +371,6 @@ func (h *MasterDataHandler) CreateOvertimeRule(w http.ResponseWriter, r *http.Re
 
 	params := svc.CreateOvertimeRuleParams{
 		Name:                derefString(req.Name),
-		ServiceLineID:       req.ServiceLineID,
 		PreApprovalRequired: derefBool(req.PreApprovalRequired),
 	}
 	if req.WeekdayRate != nil {
@@ -416,7 +414,6 @@ func (h *MasterDataHandler) UpdateOvertimeRule(w http.ResponseWriter, r *http.Re
 	params := svc.UpdateOvertimeRuleParams{
 		ID:                  id,
 		Name:                derefString(req.Name),
-		ServiceLineID:       req.ServiceLineID,
 		PreApprovalRequired: derefBool(req.PreApprovalRequired),
 	}
 	if req.WeekdayRate != nil {

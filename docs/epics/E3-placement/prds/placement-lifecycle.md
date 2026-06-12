@@ -19,7 +19,7 @@ A placement is not static — it activates, ages toward its end date, gets renew
 
 **Non-goals**
 - Creating the first placement → F3.1.
-- Moving an agent to a *different* company/service line → F3.3 (transfer).
+- Moving an agent to a *different* company/site/position → F3.3 (transfer).
 - Assigning/vacating the shift leader → F3.4 (this PRD only *triggers* a vacancy check).
 
 ## 3. Actors
@@ -66,7 +66,7 @@ stateDiagram-v2
 | LC-4 | There is **no system auto-end**. Once `end_date` passes, an `Expiring` placement **stays `Expiring`** (grace); HR explicitly ends it via the Inbox decision task — **Continue** = renew (LC-7) or **End** = offboard (closes the EmploymentAgreement, E2/F2.7). The agent's **login stays valid** throughout the grace window until HR ends employment (F2.7 OB-6). |
 | LC-5 | HR admin may **terminate** an `Active`/`Expiring`/`Scheduled` placement early with a **reason** + effective date → `Terminated`. |
 | LC-6 | Recording an agent **resignation** closes the active placement → `Resigned` with `resign_at`. (The employment agreement itself is closed in E2.) |
-| LC-7 | **Renewal** (same company + service line) creates a **successor placement** (`predecessor_id` → old) and sets the prior placement to `Superseded` effective the successor's `start_date`. The successor obeys F3.1 rules (incl. the 1-day buffer). |
+| LC-7 | **Renewal** (same company + site + position) creates a **successor placement** (`predecessor_id` → old) and sets the prior placement to `Superseded` effective the successor's `start_date`. The successor obeys F3.1 rules (incl. the 1-day buffer). |
 | LC-8 | Any transition into a terminal state for a placement whose agent is that company's **shift leader** triggers a **leader-vacancy check** (F3.4). |
 | LC-9 | Every transition writes an audit-log entry (actor or `system`, before/after, reason) and fires the matching notification (E10). |
 | LC-10 | `Expiring`/expiry notifications go to HR admin + the company shift leader; activation notifications go to the agent + shift leader. |
@@ -121,7 +121,7 @@ Feature: Placement lifecycle
     And the reason is stored and audited
 
   Scenario: Renewal creates a linked successor
-    Given an expiring placement P1 for "Budi" at "Plaza Senayan" in "Parking"
+    Given an expiring placement P1 for "Budi" at "Plaza Senayan" as "Parking Attendant"
     When an HR admin renews it with a new period starting the day after P1 ends
     Then a new placement P2 is created with predecessor set to P1
     And P1 becomes "Superseded" effective P2's start date

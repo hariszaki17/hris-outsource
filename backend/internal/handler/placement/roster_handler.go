@@ -16,7 +16,7 @@ func (h *Handler) GetCompanyRoster(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	filter := domain.PlacementFilter{
-		ServiceLineID:  strPtrParam(q.Get("service_line_id")),
+		Position:       strPtrParam(q.Get("position")),
 		Status:         strPtrParam(q.Get("status")),
 		StatusIn:       csvParam(q.Get("status__in")),
 		Q:              strPtrParam(q.Get("q")),

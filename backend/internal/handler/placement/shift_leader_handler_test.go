@@ -228,7 +228,7 @@ func (h *placementHarness) seedActivePlacementWithLine(id, empID, companyID, sit
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: id, EmployeeID: empID, ClientCompanyID: companyID,
-		SiteID: siteID, ServiceLineID: line, PositionID: "SWP-POS-014",
+		SiteID: siteID, Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: status, EmployeeName: strp("Emp " + empID),
 	})
@@ -439,7 +439,7 @@ func TestCreateSLA_PendingStartFailsINV4_409_C2(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-PEND", EmployeeID: "SWP-EMP-7000", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 6, 20), EndDate: &end,
 		LifecycleStatus: "PENDING_START", EmployeeName: strp("Future"),
 	})
@@ -482,7 +482,7 @@ func TestCreateSLA_PendingStartButStarted_OK_201(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-STARTED", EmployeeID: "SWP-EMP-7001", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 6, 4), EndDate: &end,
 		LifecycleStatus: "PENDING_START", EmployeeName: strp("Jana"),
 	})

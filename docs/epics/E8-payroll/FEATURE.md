@@ -57,7 +57,7 @@ erDiagram
         bigint id PK
         int year
         int month
-        json scope "filter snapshot: all|service_line|company"
+        json scope "filter snapshot: all|company"
         date cutoff_date "attendance/OT cutoff"
         string status "Draft|Posted|Closed"
         int payslip_count

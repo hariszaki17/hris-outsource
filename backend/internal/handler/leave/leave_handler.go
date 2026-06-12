@@ -20,7 +20,6 @@ func (h *Handler) ListLeaveRequests(w http.ResponseWriter, r *http.Request) {
 		CompanyID:   strPtrParam(q.Get("company_id")),
 		EmployeeID:  strPtrParam(q.Get("employee_id")),
 		LeaveTypeID: strPtrParam(q.Get("leave_type_id")),
-		ServiceLine: strPtrParam(q.Get("service_line")),
 		Status:      strPtrParam(q.Get("status")),
 		StatusIn:    csvParam(q.Get("status__in")),
 		StartFrom:   parseDateParam(q.Get("start_date__gte")),

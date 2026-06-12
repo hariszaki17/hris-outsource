@@ -158,8 +158,9 @@ func TestDashboard_SuperAdminSameShapeDifferentLabel(t *testing.T) {
 }
 
 // TestDashboard_SuperAdminWidgets exercises the populated admin block (DB-7): the
-// four sub-widgets, the free-text service-line name → FACILITY|BUILDING|PARKING
-// enum mapping, and the audit actor/target label composition.
+// four sub-widgets, the free-text position org-rollup (decision 2026-06-12:
+// service_line removed; rollups GROUP BY the free-text placement position), and the
+// audit actor/target label composition.
 func TestDashboard_SuperAdminWidgets(t *testing.T) {
 	h := newHarness(t, auth.RoleSuperAdmin, "", "SWP-EMP-9001")
 	h.dash.adminData = svc.SuperAdminWidgetsData{
@@ -167,10 +168,9 @@ func TestDashboard_SuperAdminWidgets(t *testing.T) {
 		OffboardedUsers30d:   7,
 		BankApprovalsPending: 3,
 		OrgRollups: []svc.OrgRollupRow{
-			{ServiceLineName: "Facility Services", Headcount: 312, ActivePlacements: 298},
-			{ServiceLineName: "Building Management", Headcount: 90, ActivePlacements: 88},
-			{ServiceLineName: "Parking", Headcount: 80, ActivePlacements: 80},
-			{ServiceLineName: "Catering (legacy)", Headcount: 5, ActivePlacements: 5}, // unknown → skipped
+			{Position: "Cleaning Service", Headcount: 312, ActivePlacements: 298},
+			{Position: "Security", Headcount: 90, ActivePlacements: 88},
+			{Position: "Parking Attendant", Headcount: 80, ActivePlacements: 80},
 		},
 		RecentAudit: []svc.AuditRow{
 			{ID: "SWP-AL-90412", ActorUserID: strp("SWP-USR-7"), ActorRole: strp("hr_admin"), Action: "ROLE_GRANTED", EntityType: "user", EntityID: "SWP-USR-42", CreatedAt: fixedNow},
@@ -205,26 +205,26 @@ func TestDashboard_SuperAdminWidgets(t *testing.T) {
 		t.Errorf("pending_grants.role_requests = %v, want 0", pg["role_requests"])
 	}
 
-	// org_rollups: 3 mapped service lines (the unknown "Catering" line is skipped).
+	// org_rollups: 3 free-text positions (no master/enum; all rows pass through).
 	rollups := admin["org_rollups"].([]any)
 	if len(rollups) != 3 {
-		t.Fatalf("org_rollups = %d rows, want 3 (unknown line skipped)", len(rollups))
+		t.Fatalf("org_rollups = %d rows, want 3", len(rollups))
 	}
-	wantSL := map[string][2]float64{ // service_line → {headcount, active_placements}
-		"FACILITY": {312, 298},
-		"BUILDING": {90, 88},
-		"PARKING":  {80, 80},
+	wantPos := map[string][2]float64{ // position → {headcount, active_placements}
+		"Cleaning Service":  {312, 298},
+		"Security":          {90, 88},
+		"Parking Attendant": {80, 80},
 	}
 	for _, row := range rollups {
 		r := row.(map[string]any)
-		sl := r["service_line"].(string)
-		want, found := wantSL[sl]
+		pos := r["position"].(string)
+		want, found := wantPos[pos]
 		if !found {
-			t.Errorf("unexpected org_rollups service_line %s", sl)
+			t.Errorf("unexpected org_rollups position %s", pos)
 			continue
 		}
 		if r["headcount"] != want[0] || r["active_placements"] != want[1] {
-			t.Errorf("org_rollups[%s] = %v, want headcount %v / active_placements %v", sl, r, want[0], want[1])
+			t.Errorf("org_rollups[%s] = %v, want headcount %v / active_placements %v", pos, r, want[0], want[1])
 		}
 	}
 

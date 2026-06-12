@@ -8,7 +8,7 @@
  * Coverage:
  *   SA-1-assign-autopublish        empty in-window cell → popover → pick Pagi → published toast → chip appears
  *   SA-2-replace                   existing cell → pick a different shift → replace (status MODIFIED) → chip changes
- *   SA-4-picker-filtered-by-line   SVC-003 agent (Dewi) → popover lists Malam (SVC-003) + untagged Pagi (SM-3)
+ *   SA-4-picker-lists-all-shifts   shift master is service-line-independent (2026-06-12) → popover lists ALL active shifts (Pagi + Malam) for any agent
  *   SA-7-mark-day-off              popover → "Tandai Libur (OFF)" → cell shows Libur
  *   CH-1-clear-cell                existing cell → "Hapus jadwal" → cell empties (real DELETE 204)
  *   CH-2-edit-swap                 existing entry → change shift → status MODIFIED (real PATCH)
@@ -90,7 +90,7 @@ test('SA-2-replace · existing Pagi cell → pick a different shift → replace 
   await loginAs(page, PERSONAS.shiftLeader);
   await openGrid(page);
 
-  // Dewi's Wednesday cell has the seeded Pagi entry (SVC-003 placement → Malam is allowed).
+  // Dewi's Wednesday cell has the seeded Pagi entry; any active shift (e.g. Malam) is assignable.
   const dewiDate = SEED.dewiEntryDate();
   const cell = cellButton(page, DEWI, dewiDate);
   await expect(cell.getByText('Pagi')).toBeVisible({ timeout: 20_000 });
@@ -104,21 +104,22 @@ test('SA-2-replace · existing Pagi cell → pick a different shift → replace 
 });
 
 // ---------------------------------------------------------------------------
-// SA-4 · picker filtered by the agent's service line (untagged always included)
+// SA-4 · picker lists all active shifts (shift master is service-line-independent)
 // ---------------------------------------------------------------------------
 
-test('SA-4-picker-filtered-by-service-line · SVC-003 agent → popover lists Malam (SVC-003) + untagged Pagi', async ({
+test('SA-4-picker-lists-all-shifts · shift master is service-line-independent → popover lists every active shift (Pagi + Malam)', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.shiftLeader);
   await openGrid(page);
 
-  // Dewi's placement is SVC-003 (Parking). Open her free Friday cell.
+  // Shift master no longer carries a service-line tag (locked 2026-06-12): the picker offers
+  // ALL active shifts to any agent regardless of position. Open Dewi's free Friday cell.
   await openCell(page, DEWI, SEED.freeDate());
   const pop = popover(page);
   await expect(pop).toBeVisible({ timeout: 10_000 });
 
-  // Malam (tagged SVC-003) appears AND untagged Pagi appears (SM-3: untagged available to all).
+  // Both seeded active shifts are listed.
   await expect(pop.locator('button', { hasText: 'Malam' }).first()).toBeVisible({ timeout: 10_000 });
   await expect(pop.locator('button', { hasText: 'Pagi' }).first()).toBeVisible({ timeout: 10_000 });
 });

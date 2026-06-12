@@ -38,7 +38,6 @@ type Attendance struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -73,8 +72,8 @@ type Attendance struct {
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
 	SiteID             string
-	PositionID         string
 	CreatedBy          *string
+	Position           string
 }
 
 type AttendanceCode struct {
@@ -254,15 +253,14 @@ type ExportJob struct {
 }
 
 type Holiday struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	DeletedAt              *time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
 }
 
 type IDCounter struct {
@@ -363,7 +361,6 @@ type LeaveRequest struct {
 	EmployeeID              string
 	PlacementID             *string
 	CompanyID               *string
-	ServiceLineID           *string
 	LeaveTypeID             string
 	StartDate               pgtype.Date
 	EndDate                 pgtype.Date
@@ -437,7 +434,6 @@ type Overtime struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -476,7 +472,6 @@ type OvertimeApproval struct {
 type OvertimeRule struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -552,8 +547,6 @@ type Placement struct {
 	AgreementID       *string
 	ClientCompanyID   string
 	SiteID            string
-	ServiceLineID     string
-	PositionID        string
 	StartDate         pgtype.Date
 	EndDate           pgtype.Date
 	Notes             *string
@@ -570,6 +563,7 @@ type Placement struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+	Position          string
 }
 
 type PlacementHistory struct {
@@ -593,17 +587,6 @@ type PlatformSetting struct {
 	Sort   int32
 }
 
-type Position struct {
-	ID            string
-	ServiceLineID string
-	Name          string
-	Alias         string
-	Status        string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
-}
-
 type RefreshToken struct {
 	ID          int64
 	UserID      string
@@ -621,7 +604,6 @@ type ScheduleEntry struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -634,15 +616,6 @@ type ScheduleEntry struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       *time.Time
-}
-
-type ServiceLine struct {
-	ID        string
-	Name      string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time
 }
 
 type ShiftLeaderAssignment struct {
@@ -666,7 +639,6 @@ type ShiftMaster struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string

@@ -14,7 +14,7 @@ import (
 
 const getOvertime = `-- name: GetOvertime :one
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -35,7 +35,6 @@ type GetOvertimeRow struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -71,7 +70,6 @@ func (q *Queries) GetOvertime(ctx context.Context, id string) (GetOvertimeRow, e
 		&i.CompanyID,
 		&i.PlacementID,
 		&i.AttendanceID,
-		&i.ServiceLineID,
 		&i.WorkDate,
 		&i.PlannedStartTime,
 		&i.PlannedEndTime,
@@ -101,7 +99,7 @@ func (q *Queries) GetOvertime(ctx context.Context, id string) (GetOvertimeRow, e
 
 const getOvertimeForUpdate = `-- name: GetOvertimeForUpdate :one
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -119,7 +117,6 @@ type GetOvertimeForUpdateRow struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -154,7 +151,6 @@ func (q *Queries) GetOvertimeForUpdate(ctx context.Context, id string) (GetOvert
 		&i.CompanyID,
 		&i.PlacementID,
 		&i.AttendanceID,
-		&i.ServiceLineID,
 		&i.WorkDate,
 		&i.PlannedStartTime,
 		&i.PlannedEndTime,
@@ -182,7 +178,7 @@ func (q *Queries) GetOvertimeForUpdate(ctx context.Context, id string) (GetOvert
 
 const insertOvertime = `-- name: InsertOvertime :one
 INSERT INTO overtime (
-    id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+    id, employee_id, company_id, placement_id, attendance_id,
     work_date, planned_start_time, planned_end_time, actual_start_time,
     actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
     counted_minutes, min_minutes_threshold, skipped_too_short, reference_multiplier,
@@ -211,11 +207,10 @@ INSERT INTO overtime (
     $21,
     $22,
     $23,
-    $24,
-    $25
+    $24
 )
 ON CONFLICT (id) DO NOTHING
-RETURNING id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+RETURNING id, employee_id, company_id, placement_id, attendance_id,
           work_date, planned_start_time, planned_end_time, actual_start_time,
           actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
           counted_minutes, min_minutes_threshold, skipped_too_short,
@@ -229,7 +224,6 @@ type InsertOvertimeParams struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -257,7 +251,6 @@ type InsertOvertimeRow struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -291,7 +284,6 @@ func (q *Queries) InsertOvertime(ctx context.Context, arg InsertOvertimeParams) 
 		arg.CompanyID,
 		arg.PlacementID,
 		arg.AttendanceID,
-		arg.ServiceLineID,
 		arg.WorkDate,
 		arg.PlannedStartTime,
 		arg.PlannedEndTime,
@@ -319,7 +311,6 @@ func (q *Queries) InsertOvertime(ctx context.Context, arg InsertOvertimeParams) 
 		&i.CompanyID,
 		&i.PlacementID,
 		&i.AttendanceID,
-		&i.ServiceLineID,
 		&i.WorkDate,
 		&i.PlannedStartTime,
 		&i.PlannedEndTime,
@@ -396,7 +387,7 @@ func (q *Queries) InsertOvertimeApproval(ctx context.Context, arg InsertOvertime
 const listOvertime = `-- name: ListOvertime :many
 
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -446,7 +437,6 @@ type ListOvertimeRow struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -508,7 +498,6 @@ func (q *Queries) ListOvertime(ctx context.Context, arg ListOvertimeParams) ([]L
 			&i.CompanyID,
 			&i.PlacementID,
 			&i.AttendanceID,
-			&i.ServiceLineID,
 			&i.WorkDate,
 			&i.PlannedStartTime,
 			&i.PlannedEndTime,
@@ -587,7 +576,7 @@ SET status     = $1,
     updated_at = now()
 WHERE id = $2
   AND deleted_at IS NULL
-RETURNING id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+RETURNING id, employee_id, company_id, placement_id, attendance_id,
           work_date, planned_start_time, planned_end_time, actual_start_time,
           actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
           counted_minutes, min_minutes_threshold, skipped_too_short,
@@ -606,7 +595,6 @@ type UpdateOvertimeStatusRow struct {
 	CompanyID            *string
 	PlacementID          string
 	AttendanceID         *string
-	ServiceLineID        *string
 	WorkDate             pgtype.Date
 	PlannedStartTime     *string
 	PlannedEndTime       *string
@@ -641,7 +629,6 @@ func (q *Queries) UpdateOvertimeStatus(ctx context.Context, arg UpdateOvertimeSt
 		&i.CompanyID,
 		&i.PlacementID,
 		&i.AttendanceID,
-		&i.ServiceLineID,
 		&i.WorkDate,
 		&i.PlannedStartTime,
 		&i.PlannedEndTime,

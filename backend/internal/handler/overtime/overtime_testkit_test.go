@@ -254,7 +254,7 @@ func (b *bodyReader) Close() error               { return nil }
 type fakeOvertimeRepo struct {
 	records   map[string]dom.Overtime
 	approvals map[string][]dom.OvertimeApproval
-	rules     map[string]svc.OvertimeRule // keyed by service_line id; "" = global default
+	rules     map[string]svc.OvertimeRule // "" = the single GLOBAL rule (service_line removed 2026-06-12)
 	seq       int                         // InsertOvertime id allocator
 }
 
@@ -343,7 +343,6 @@ func (r *fakeOvertimeRepo) InsertOvertime(_ context.Context, _ pgx.Tx, p svc.Ove
 		EmployeeID:       p.EmployeeID,
 		CompanyID:        p.CompanyID,
 		PlacementID:      p.PlacementID,
-		ServiceLineID:    p.ServiceLineID,
 		WorkDate:         p.WorkDate,
 		PlannedStartTime: p.PlannedStartTime,
 		PlannedEndTime:   p.PlannedEndTime,
@@ -378,14 +377,9 @@ func (r *fakeOvertimeRepo) ListOvertimeApprovals(_ context.Context, overtimeID s
 	return r.approvals[overtimeID], nil
 }
 
-// FindOvertimeRule serves svc.RuleRepository: the line-scoped active rule wins
-// over the NULL-line global default (OR-2), else the global default.
-func (r *fakeOvertimeRepo) FindOvertimeRule(_ context.Context, serviceLineID *string) (svc.OvertimeRule, error) {
-	if serviceLineID != nil {
-		if rule, ok := r.rules[*serviceLineID]; ok {
-			return rule, nil
-		}
-	}
+// FindOvertimeRule serves svc.RuleRepository: the single GLOBAL rule (service_line
+// scope + line-vs-global precedence removed 2026-06-12), keyed by "".
+func (r *fakeOvertimeRepo) FindOvertimeRule(_ context.Context) (svc.OvertimeRule, error) {
 	if rule, ok := r.rules[""]; ok {
 		return rule, nil
 	}
@@ -485,14 +479,13 @@ func (r *fakeHolidayRepo) InsertHoliday(_ context.Context, _ pgx.Tx, p svc.Holid
 		id = "SWP-HOL-" + itoa(9000+r.seq)
 	}
 	h := dom.Holiday{
-		ID:                     id,
-		Name:                   p.Name,
-		Date:                   p.Date,
-		Category:               dom.HolidayCategory(p.Category),
-		Recurring:              p.Recurring,
-		ApplicableServiceLines: p.ApplicableServiceLines,
-		CreatedAt:              fixedNow,
-		UpdatedAt:              fixedNow,
+		ID:        id,
+		Name:      p.Name,
+		Date:      p.Date,
+		Category:  dom.HolidayCategory(p.Category),
+		Recurring: p.Recurring,
+		CreatedAt: fixedNow,
+		UpdatedAt: fixedNow,
 	}
 	r.byID[id] = h
 	return h, nil
@@ -514,9 +507,6 @@ func (r *fakeHolidayRepo) UpdateHoliday(_ context.Context, _ pgx.Tx, id string, 
 	}
 	if p.Recurring != nil {
 		h.Recurring = *p.Recurring
-	}
-	if p.ApplicableServiceLines != nil {
-		h.ApplicableServiceLines = p.ApplicableServiceLines
 	}
 	h.UpdatedAt = fixedNow
 	r.byID[id] = h
@@ -714,7 +704,6 @@ func (h *harness) doWithHeaders(method, path string, body any, headers map[strin
 // the calculation + employee/company refs serialize.
 func (h *harness) seedOvertime(id, company, employee string, status dom.OvertimeStatus, dayType dom.OvertimeTier) dom.Overtime {
 	c := company
-	line := "SWP-SVC-001"
 	rec := dom.Overtime{
 		ID:                   id,
 		EmployeeID:           employee,
@@ -722,7 +711,6 @@ func (h *harness) seedOvertime(id, company, employee string, status dom.Overtime
 		CompanyID:            &c,
 		CompanyName:          strp("Company " + company),
 		PlacementID:          "SWP-PL-5001",
-		ServiceLineID:        &line,
 		WorkDate:             ymd(2026, time.June, 2),
 		ActualStartTime:      strp("15:00"),
 		ActualEndTime:        strp("18:30"),
@@ -757,13 +745,12 @@ func (h *harness) seedRule(lineID string, minMinutes int) {
 // guard + the in_use_by_overtime flag).
 func (h *harness) seedHoliday(id, name string, date time.Time, category dom.HolidayCategory, inUse int64) dom.Holiday {
 	hol := dom.Holiday{
-		ID:                     id,
-		Name:                   name,
-		Date:                   date,
-		Category:               category,
-		ApplicableServiceLines: []string{},
-		CreatedAt:              fixedNow,
-		UpdatedAt:              fixedNow,
+		ID:        id,
+		Name:      name,
+		Date:      date,
+		Category:  category,
+		CreatedAt: fixedNow,
+		UpdatedAt: fixedNow,
 	}
 	h.holiday.byID[id] = hol
 	h.holiday.inUse[id] = inUse

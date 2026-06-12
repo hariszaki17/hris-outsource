@@ -47,8 +47,7 @@ type autofillResponse struct {
 	EmployeeName string  `json:"employee_name"`
 	CompanyName  string  `json:"company_name"`
 	SiteName     *string `json:"site_name"`
-	PositionName *string `json:"position_name"`
-	ServiceLine  string  `json:"service_line"`
+	Position     *string `json:"position"`
 	// Schedule info (null when no schedule for the date).
 	ScheduleID   *string `json:"schedule_id"`
 	ShiftStartAt *string `json:"shift_start_at"`
@@ -109,9 +108,7 @@ type attendanceResponse struct {
 	CompanyName      *string `json:"company_name,omitempty"`
 	SiteID           string  `json:"site_id"`
 	SiteName         *string `json:"site_name,omitempty"`
-	ServiceLine      string  `json:"service_line"`
-	PositionID       string  `json:"position_id"`
-	PositionName     *string `json:"position_name,omitempty"`
+	Position         string  `json:"position"`
 	AttendanceCodeID *string `json:"attendance_code_id"`
 
 	ShiftStartAt *string `json:"shift_start_at"`
@@ -231,9 +228,7 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		CompanyName:        a.CompanyName,
 		SiteID:             a.SiteID,
 		SiteName:           a.SiteName,
-		ServiceLine:        a.ServiceLine,
-		PositionID:         a.PositionID,
-		PositionName:       a.PositionName,
+		Position:           a.Position,
 		AttendanceCodeID:   a.AttendanceCodeID,
 		ShiftStartAt:       rfc3339Ptr(a.ShiftStartAt),
 		ShiftEndAt:         rfc3339Ptr(a.ShiftEndAt),

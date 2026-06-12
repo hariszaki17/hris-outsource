@@ -7,7 +7,7 @@
 
 ## 1. Why this is non-trivial
 
-The legacy system packs **employment terms + work placement into a single `employee_contracts` row**, with the client site stored as **free text** and the service line **not stored at all**. hris-outsource splits this into three clean entities — **EmploymentAgreement** (E2), **Placement** (E3), and **ClientCompany** (E2) — so the migration is a **decompose + reconcile**, not a column copy.
+The legacy system packs **employment terms + work placement into a single `employee_contracts` row**, with the client site stored as **free text** and the job role in `recruitment_roles`. hris-outsource splits this into three clean entities — **EmploymentAgreement** (E2), **Placement** (E3), and **ClientCompany** (E2) — so the migration is a **decompose + reconcile**, not a column copy. *(2026-06-12: `service_line` is removed entirely and **position is free-text** — the legacy role label copies straight onto `Placement.position`, no master to classify.)*
 
 ```mermaid
 flowchart LR
@@ -19,18 +19,15 @@ flowchart LR
     end
     subgraph NEW[hris-outsource Postgres]
         EA[EmploymentAgreement<br/>PKWT/PKWTT @ SWP]
-        PL[Placement<br/>designation @ client]
+        PL[Placement<br/>designation @ client<br/>position = free-text]
         CC[ClientCompany]
-        PO[Position master]
-        SL[ServiceLine<br/>NEW - must classify]
     end
     EC -->|terms, dates, payroll| EA
     EC -->|client, period, role| PL
     EC -.->|placement string ~ name| CC
     CO -->|role = 2| CC
-    RR --> PO
-    EC -->|role_id| PO
-    PL -.->|must assign| SL
+    RR -->|role label → position text| PL
+    EC -->|role_id → position string| PL
 ```
 
 ## 2. Source tables (Placement-relevant)
@@ -40,7 +37,7 @@ flowchart LR
 | `employee_contracts` | primary source — splits into EmploymentAgreement + Placement | `id, employee_id, placement, new_office, role_id, contract_status_id, pkwt_reference, contract_start_at, contract_end_at, resign_at, annual_leave, gaji_pokok, bpjs_*, pph21, is_employee_active, show_all_benefit, created_by` |
 | `employees` | the agent | `id, name, nip, nik, join_at, user_id, last_contract_id, …` |
 | `companies` | client companies (`role=2`) + hierarchy | `id, parent_id, top_parent_id, name, address, lat/long_address, role, npwp, penanggung_jawab, is_enabled` |
-| `recruitment_roles` (via `role_id`) | job role → Position master | `id, role, alias` |
+| `recruitment_roles` (via `role_id`) | job role → free-text `Placement.position` (no master) | `id, role` |
 | `recruitment_role_types` (via `contract_status_id`) | contract status / type lookup | `id, …` |
 
 > ⚠️ `EmployeeContract` model: `$timestamps = false`; payroll columns use the `DBEncryption` cast (`app/Casts/DBEncryption.php`). `employee_contracts.role_id` → `RecruitmentRole`, `contract_status_id` → `RecruitmentRoleType`. Identity is split: attendance keys on `users.id`, HR keys on `employees.id` (`employees.user_id` bridges them) — relevant for E9.
@@ -64,12 +61,11 @@ flowchart LR
 | `placement` | **string (free text)** | `client_company_id` | **Placement** | **reconcile** string → `ClientCompany` by matching `companies.name` (role 2/4); manual cleanup for unmatched |
 | — (none) | — | `site_id` | **Placement** | ❗ no legacy site → set to the matched company's auto **primary "Main Site"** (E2 F2.6 / DATA-MAPPING G-8). HR re-points to a real site post-cutover. |
 | `new_office` | string | placement note / transfer hint | Placement `notes` | likely a transfer destination note — keep as note or drop |
-| `role_id` | string→`RecruitmentRole` | `position_id` | **Placement** (Position master) | map each `RecruitmentRole` → `Position`; build lookup |
+| `role_id` | string→`RecruitmentRole` | `position` (text) | **Placement** | resolve `recruitment_roles.role` → copy the **label as a free-text string**; **no Position master, no lookup table** (2026-06-12). Feeds the position typeahead's `DISTINCT` set. |
 | `is_employee_active` | string | active flag | Employee / Placement status | normalize ("1"/"0"/text) → boolean/status |
 | `created_by` | bigint | `created_by` | both | remap `users.id` → new user id |
 | `created_at`,`updated_at` | datetime | timestamps | both | carry |
 | `deleted_at` | softDelete | soft delete | both | carry (exclude or migrate as archived) |
-| — (none) | — | `service_line_id` | **Placement** | ❗ **no source** — must classify (see §5) |
 | — (none) | — | `predecessor_id` | Placement | reconstruct renewal/transfer chains by `employee_id` + date order (best-effort) |
 
 ## 4. Field mapping — `companies` (role=2) → `ClientCompany`
@@ -89,7 +85,7 @@ flowchart LR
 
 | # | Gap | Proposed handling |
 |---|-----|-------------------|
-| G-1 | **Service line absent** in legacy data | **Decision: manual classification**, done later once SWP confirms the approach. Initial load leaves `service_line_id` unset (pending); classify via a manual sheet post-confirmation. |
+| G-1 | **Service line removed entirely; position is free-text** *(2026-06-12, EPICS §8 — supersedes the prior "manual classification" decision)* | No `service_line` is migrated, classified, or stored anywhere. The legacy `recruitment_roles.role` label (via `employee_contracts.role_id`) copies **directly** onto `Placement.position` as a free-text string — no master, no lookup, no uniqueness. |
 | G-2 | **`placement` is free text** | Build a name-match reconciliation (placement string → `companies.name`, role 2/4). Unmatched rows go to a review queue for manual mapping. Expect typos/aliases. |
 | G-3 | **Encrypted payroll fields** | Decrypt with legacy app key via the `DBEncryption` logic during extract; re-store in hris-outsource (encrypted). Treat as read-only (E8). |
 | G-4 | **PKWT vs PKWTT not explicit** | Derive from `contract_status_id` (`RecruitmentRoleType` values — need to read) and/or null `contract_end_at`. Confirm rule. |
@@ -102,5 +98,5 @@ flowchart LR
 
 1. **Idempotent + re-runnable** via legacy-id crosswalks (`legacy_contract_id`, `legacy_company_id`, `legacy_employee_id`, `legacy_user_id`).
 2. **No destructive transforms** — every source row maps to target(s) or lands in a **review queue**; nothing silently dropped.
-3. **Reconciliation report** per run: counts in/out, unmatched `placement` strings, unclassified service lines, decrypt failures.
+3. **Reconciliation report** per run: counts in/out, unmatched `placement` strings, decrypt failures. *(No service-line classification step — `service_line` is removed; position copies straight from the role label.)*
 4. Detailed extract/load mechanics live in **E9**; this doc owns the *field-level* Placement mapping + decisions.

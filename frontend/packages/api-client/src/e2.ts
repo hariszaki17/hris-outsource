@@ -9,7 +9,7 @@ export * from './gen/e2/employees/employees.ts';
 export * from './gen/e2/agreements/agreements.ts';
 export * from './gen/e2/client-companies/client-companies.ts';
 export * from './gen/e2/sites/sites.ts';
-export * from './gen/e2/service-lines-positions/service-lines-positions.ts';
+export * from './gen/e2/people/people.ts';
 export * from './gen/e2/master-data/master-data.ts';
 export * from './gen/e2/model/index.ts';
 

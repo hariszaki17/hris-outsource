@@ -18,7 +18,7 @@ func (h *placementHarness) seedRosterPlacement(id, companyID, status string) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: id, EmployeeID: "SWP-EMP-" + id, ClientCompanyID: companyID,
-		SiteID: "SWP-SITE-0001", ServiceLineID: "SWP-SVC-001", PositionID: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: status, EmployeeName: strp("Emp " + id),
 	})
@@ -29,8 +29,8 @@ func TestGetRoster_HRAdmin_ShapeAndSummary_200(t *testing.T) {
 	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
 	h.leaderRepo().rosterSummary = domain.CompanyRosterSummary{
 		TotalActive: 2, TotalScheduled: 0, TotalExpiring: 1,
-		ByServiceLine: []domain.RosterServiceLineCount{{ServiceLineID: "SWP-SVC-001", ServiceLineName: "Parking", Count: 2}},
-		ByStatus:      []domain.RosterStatusCount{{Status: "ACTIVE", Count: 2}},
+		ByPosition: []domain.RosterPositionCount{{Position: "Petugas Parkir", Count: 2}},
+		ByStatus:   []domain.RosterStatusCount{{Status: "ACTIVE", Count: 2}},
 	}
 	h.seedRosterPlacement("R1", "SWP-CMP-0021", "ACTIVE")
 	h.seedRosterPlacement("R2", "SWP-CMP-0021", "ACTIVE")
@@ -49,13 +49,13 @@ func TestGetRoster_HRAdmin_ShapeAndSummary_200(t *testing.T) {
 	if !ok {
 		t.Fatalf("summary is not an object: %T", body["summary"])
 	}
-	for _, k := range []string{"total_active", "total_scheduled", "total_expiring", "by_service_line", "by_status"} {
+	for _, k := range []string{"total_active", "total_scheduled", "total_expiring", "by_position", "by_status"} {
 		if _, ok := summary[k]; !ok {
 			t.Errorf("summary missing key: %s", k)
 		}
 	}
-	if _, ok := summary["by_service_line"].([]any); !ok {
-		t.Errorf("summary.by_service_line is not an array: %T", summary["by_service_line"])
+	if _, ok := summary["by_position"].([]any); !ok {
+		t.Errorf("summary.by_position is not an array: %T", summary["by_position"])
 	}
 	if _, ok := body["placements"].([]any); !ok {
 		t.Errorf("placements is not an array: %T", body["placements"])

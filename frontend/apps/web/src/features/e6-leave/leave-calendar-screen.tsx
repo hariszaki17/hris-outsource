@@ -16,7 +16,6 @@ import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type GetLeaveCalendarParams,
-  type LeaveCalendarClash,
   type LeaveCalendarEntry,
   LeaveStatus,
   useGetLeaveCalendar,
@@ -116,12 +115,11 @@ interface DayCellProps {
   day: number;
   isToday: boolean;
   isOutsideMonth: boolean;
-  isClash: boolean;
   entries: LeaveCalendarEntry[];
   showPending: boolean;
 }
 
-function DayCell({ day, isToday, isOutsideMonth, isClash, entries, showPending }: DayCellProps) {
+function DayCell({ day, isToday, isOutsideMonth, entries, showPending }: DayCellProps) {
   const { t } = useTranslation('leaveCalendar');
 
   const visibleEntries = entries.filter((e) => {
@@ -141,7 +139,7 @@ function DayCell({ day, isToday, isOutsideMonth, isClash, entries, showPending }
     <div
       className={[
         'flex flex-col gap-1 p-[7px] min-h-[98px] w-full border-r border-border-soft last:border-r-0',
-        isOutsideMonth ? 'bg-surface-2' : isClash ? 'bg-warn-bg' : 'bg-surface',
+        isOutsideMonth ? 'bg-surface-2' : 'bg-surface',
         isToday ? 'ring-1 ring-inset ring-primary' : '',
       ]
         .filter(Boolean)
@@ -186,14 +184,6 @@ function DayCell({ day, isToday, isOutsideMonth, isClash, entries, showPending }
           {t('moreEntries', { count: visibleEntries.length - 3 })}
         </span>
       )}
-      {isClash && !isOutsideMonth && (
-        <span
-          className="mt-auto text-[10px] font-medium text-warn-tx border border-warn-bd rounded px-1"
-          title={t('clashTitle')}
-        >
-          {t('clash')}
-        </span>
-      )}
     </div>
   );
 }
@@ -205,11 +195,10 @@ interface CalendarGridProps {
   year: number;
   month: number;
   entries: LeaveCalendarEntry[];
-  clashes: LeaveCalendarClash[];
   showPending: boolean;
 }
 
-function CalendarGrid({ year, month, entries, clashes, showPending }: CalendarGridProps) {
+function CalendarGrid({ year, month, entries, showPending }: CalendarGridProps) {
   const { t } = useTranslation('leaveCalendar');
   const today = todayInJakarta();
   const total = daysInMonth(year, month);
@@ -229,8 +218,6 @@ function CalendarGrid({ year, month, entries, clashes, showPending }: CalendarGr
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
   }
-
-  const clashDates = new Set(clashes.map((c) => c.date));
 
   // Build grid: leading empty cells, days, trailing empty cells to fill last week
   const cells: Array<{ day: number; isOutsideMonth: boolean }> = [];
@@ -262,7 +249,6 @@ function CalendarGrid({ year, month, entries, clashes, showPending }: CalendarGr
               ? `outside-${cell.day}-${ci}`
               : isoDate(year, month, cell.day);
             const cellEntries = cell.isOutsideMonth ? [] : (entryMap.get(cellKey) ?? []);
-            const isClash = !cell.isOutsideMonth && clashDates.has(cellKey);
             const isToday =
               !cell.isOutsideMonth &&
               today.year === year &&
@@ -274,7 +260,6 @@ function CalendarGrid({ year, month, entries, clashes, showPending }: CalendarGr
                 day={cell.day}
                 isToday={isToday}
                 isOutsideMonth={cell.isOutsideMonth}
-                isClash={isClash}
                 entries={cellEntries}
                 showPending={showPending}
               />
@@ -418,8 +403,6 @@ export function LeaveCalendarScreen() {
 
   const entries: LeaveCalendarEntry[] =
     calendarData && 'entries' in calendarData ? calendarData.entries : [];
-  const clashes: LeaveCalendarClash[] =
-    calendarData && 'clashes' in calendarData ? (calendarData.clashes ?? []) : [];
 
   const isEmpty = !isLoading && !isError && entries.length === 0;
 
@@ -489,7 +472,6 @@ export function LeaveCalendarScreen() {
         <LegendDot colorClass="bg-accent-blue" label={t('legend.annual')} />
         <LegendDot colorClass="bg-bad-tx" label={t('legend.sick')} />
         <LegendDot colorClass="bg-accent-green" label={t('legend.other')} />
-        <LegendBox bgClass="bg-warn-bg" borderClass="border-warn-bd" label={t('legend.clash')} />
         <LegendBox
           bgClass="bg-accent-blue"
           borderClass="border-accent-blue"
@@ -527,13 +509,7 @@ export function LeaveCalendarScreen() {
       )}
 
       {!isLoading && !isError && !isEmpty && (
-        <CalendarGrid
-          year={year}
-          month={month}
-          entries={entries}
-          clashes={clashes}
-          showPending={showPending}
-        />
+        <CalendarGrid year={year} month={month} entries={entries} showPending={showPending} />
       )}
     </div>
   );

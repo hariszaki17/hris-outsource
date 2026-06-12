@@ -1,21 +1,21 @@
 # E3 — Placement Management · Feature Document
 
 > **Epic:** E3 Placement Management (the differentiator) · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
-> Placing agents at client companies, in a service line, for a contract period — with history, lifecycle, and the per-company shift leader.
+> Placing agents at client companies, in a free-text position, for a contract period — with history, lifecycle, and the per-company shift leader.
 
 ---
 
 ## 1. Goal & outcome
 
-Make **placement a first-class entity** (in the legacy system it was just a string on `employee_contracts`). After this epic, SWP can place an agent at a client company in a service line for a defined period, track the full placement history of every agent, and know exactly which shift leader owns each company's on-site team. Every downstream module (shift scheduling, attendance, leave, overtime) hangs off the placement record.
+Make **placement a first-class entity** (in the legacy system it was just a string on `employee_contracts`). After this epic, SWP can place an agent at a client company in a (free-text) position for a defined period, track the full placement history of every agent, and know exactly which shift leader owns each company's on-site team. Every downstream module (shift scheduling, attendance, leave, overtime) hangs off the placement record.
 
 ## 2. Actors & roles
 
 | Actor | Involvement in this epic |
 |---|---|
 | **HR / Placement Admin** | Keeps **global oversight + override** — creates, activates, transfers, and ends placements anywhere, assigns shift leaders. The routine arranger within scope is now the Lead; HR is the fallback outside any lead's scope and the final authority everywhere. |
-| **Lead (Service Lead)** | Service-line operational lead (parking/facility/building). **Arranges placements** — creates, transfers, renews, and ends placements — within their **assigned client companies** (scoped). Cannot add employees, run payroll, or assign shift leaders. |
-| **Super Admin** | Same powers as HR admin + can override/correct any placement; manages master data (companies, service lines). |
+| **Lead** | Company-scoped operational approver/arranger. **Arranges placements** — creates, transfers, renews, and ends placements — within their **assigned client companies** (scoped). Cannot add employees, run payroll, or assign shift leaders. |
+| **Super Admin** | Same powers as HR admin + can override/correct any placement; manages master data (companies, sites). |
 | **Shift Leader** | Designated per company; consumes the roster (read) and is assigned/unassigned by HR admin. |
 | **Agent** | Subject of a placement; views own active placement & history (read-only). |
 | **System** | Validates rules, manages status transitions, emits notifications, writes audit log. |
@@ -24,6 +24,8 @@ Make **placement a first-class entity** (in the legacy system it was just a stri
 
 **In scope:** placement creation (located at a **Site**, E2 F2.6), lifecycle/status, re-placement & transfer with history, shift-leader assignment (1 per **leadership unit** — company or site, per `leader_scope`), company roster view.
 **Out of scope (other epics):** the shift master & rostering (E4), attendance (E5), leave (E6), overtime (E7), payroll figures (E8 read-only), and the migration of legacy placement data (E9).
+
+> **Position** is a **free-text string per placement** *(2026-06-12, EPICS §8 — `service_line` and the Position master are removed entirely)*. There is no service line and no Position master/FK; a typeahead endpoint searches `DISTINCT` existing position values for entry consistency only (BR-9).
 
 ## 4. Domain entities
 
@@ -34,8 +36,6 @@ erDiagram
     CLIENT_COMPANY ||--o{ PLACEMENT : "hosts"
     CLIENT_COMPANY ||--|{ SITE : "has one or more"
     SITE ||--o{ PLACEMENT : "located at"
-    SERVICE_LINE ||--o{ PLACEMENT : "categorizes"
-    POSITION ||--o{ PLACEMENT : "role at site"
     CLIENT_COMPANY ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit (scope)"
     SITE ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit when scope=site"
     EMPLOYEE ||--o{ SHIFT_LEADER_ASSIGNMENT : "serves as"
@@ -55,8 +55,7 @@ erDiagram
         bigint employment_agreement_id FK "nullable; null = awaiting agreement (backfillable)"
         bigint client_company_id FK
         bigint site_id FK "required; site.client_company_id = client_company_id"
-        bigint service_line_id FK
-        bigint position_id FK
+        string position "free-text; no master/FK"
         date start_date
         date end_date "null = open-ended"
         string status
@@ -99,14 +98,14 @@ erDiagram
 
 ### F3.1 — Agent Placement (create & activate)
 
-HR admin places an agent at a client company, in a service line, for a contract period, **optionally** referencing the agent's employment agreement (PKWT/PKWTT) and selecting the per-placement position. The **employment agreement is optional at create and may be backfilled** *(2026-06-11, EPICS §8 — supersedes the prior mandatory rule)*: a placement created without one is flagged `awaiting_agreement` and the agreement is attached later (re-running the period validation). Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
+HR admin places an agent at a client company, for a contract period, **optionally** referencing the agent's employment agreement (PKWT/PKWTT) and entering the per-placement **free-text position**. The **employment agreement is optional at create and may be backfilled** *(2026-06-11, EPICS §8 — supersedes the prior mandatory rule)*: a placement created without one is flagged `awaiting_agreement` and the agreement is attached later (re-running the period validation). Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         A1([Start: new placement]) --> A2[Select agent]
-        A2 --> A3[Select client company + service line]
-        A3 --> A4[Set period + position<br/>dates]
+        A2 --> A3[Select client company + site]
+        A3 --> A4[Set period + position<br/>free-text + dates]
         A4 --> A5{Employment agreement<br/>finalized yet?}
         A5 -- Yes --> A4b[Attach agreement<br/>PKWT/PKWTT ref]
         A5 -- "No (paperwork pending)" --> A7
@@ -133,7 +132,7 @@ flowchart TD
     end
 ```
 
-**Entities:** `Placement` (create), reads `Employee`, `ClientCompany`, `ServiceLine`. **Depends on:** E2 (master data).
+**Entities:** `Placement` (create), reads `Employee`, `ClientCompany`, `Site`. **Depends on:** E2 (master data).
 
 ---
 
@@ -169,13 +168,13 @@ stateDiagram-v2
 
 ### F3.3 — Re-placement & Transfer (with history)
 
-Move an agent from one company/service line to another. Ends the current placement (reason = `Transferred`) and opens a new one, preserving the full chain so an agent's placement history is always queryable.
+Move an agent from one company (or site/position) to another. Ends the current placement (reason = `Transferred`) and opens a new one, preserving the full chain so an agent's placement history is always queryable.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         T1([Start: transfer agent]) --> T2[Pick agent w/ active placement]
-        T2 --> T3[Choose new company + service line + period]
+        T2 --> T3[Choose new company + site + position + period]
         T3 --> T6[Confirm transfer]
     end
     subgraph SYS[System]
@@ -232,12 +231,12 @@ flowchart TD
 
 ### F3.5 — Company Placement Roster
 
-A per-company view listing all agents placed there, their service line, status, period, and the company's shift leader — with filters and export. This is the HR admin's and shift leader's day-to-day view.
+A per-company view listing all agents placed there, their position, status, period, and the company's shift leader — with filters and export. This is the HR admin's and shift leader's day-to-day view.
 
 ```mermaid
 flowchart LR
     subgraph User[HR Admin / Shift Leader]
-        R1([Open company]) --> R2[Apply filters:<br/>service line, status, period]
+        R1([Open company]) --> R2[Apply filters:<br/>position, status, period]
     end
     subgraph SYS[System]
         R2 --> Q1[Query active + historical placements]
@@ -287,12 +286,12 @@ flowchart LR
 - ✅ **Expiring threshold = 30 days**, hardcoded (no config yet).
 - ✅ **Headcount targets** are **reporting only** (E10) — not modeled at placement level.
 - ✅ **1-day buffer** between placements — no overlap, no same-day handover. → F3.1 / PRD BR-2
-- ✅ **Position** comes from master data (E2) but is set **per placement**, so the same agent may hold a different position at a different company.
+- ✅ **Position** is **free-text, set per placement** *(2026-06-12, EPICS §8 — supersedes "comes from master data"; the Position master and `service_line` are removed entirely)*, so the same agent may hold a different position string at a different company. A typeahead over `DISTINCT` existing values aids entry; nothing is enforced (BR-9).
 - ✅ **Backdating** allowed for **HR admin** (with reason + audit), not Super Admin only.
 - ✅ **Employment agreement (PKWT/PKWTT)** is separate from placement and tied to SWP↔employee (E2); placement `end_date` may be open-ended (PKWTT) and, for PKWT, must sit within the agreement period *(2026-06-11: the agreement reference is now **optional at create** — this period constraint applies **only when an agreement is present**; see the 2026-06-11 decision above)*.
 
 **Resolved (round 2):**
-- ✅ **Service line** → **manual classification** later, after SWP confirms (no inference for now). → [DATA-MAPPING.md](DATA-MAPPING.md) G-1.
+- ✅ **Service line removed entirely** *(2026-06-12, EPICS §8 — supersedes the prior "manual classification later")* — no ServiceLine entity/scope anywhere; the legacy `recruitment_roles.role` label copies straight into the free-text `Placement.position`. → [DATA-MAPPING.md](DATA-MAPPING.md).
 - ✅ **Sub-companies** (`role=4`) → **not used by SWP; ignore**. ClientCompany = `companies.role=2` only. → G-6. *(Sites, added 2026-06-03 as E2 F2.6, are **net-new** — not migrated from `role=4`; see E9.)*
 - ✅ **PKWT overrun** → **auto-cap** placement end to agreement end (PRD BR-1b).
 - ✅ **Buffer** → next day after prior end is sufficient.

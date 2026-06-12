@@ -22,7 +22,6 @@ func (h *Handler) ListLeaveQuotas(w http.ResponseWriter, r *http.Request) {
 		LeaveTypeID:   strPtrParam(q.Get("leave_type_id")),
 		Period:        intPtrParam(q.Get("period")),
 		CompanyID:     strPtrParam(q.Get("company_id")),
-		ServiceLine:   strPtrParam(q.Get("service_line")),
 		IncludeClosed: q.Get("include_closed") == "true",
 		Limit:         intParam(q.Get("limit")),
 	}

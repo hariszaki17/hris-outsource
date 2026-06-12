@@ -47,7 +47,6 @@ type ScheduleRepository interface {
 type CreateScheduleEntryParams struct {
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -63,7 +62,6 @@ type CreateScheduleEntryParams struct {
 type UpdateScheduleEntryParams struct {
 	ID              string
 	ShiftMasterID   *string
-	ServiceLineID   *string
 	StartTime       *string
 	EndTime         *string
 	CrossMidnight   bool
@@ -227,7 +225,6 @@ func (s *ScheduleService) CreateEntry(ctx context.Context, req CreateEntryReques
 		created, inErr = s.repo.CreateScheduleEntry(ctx, tx, CreateScheduleEntryParams{
 			EmployeeID:      req.EmployeeID,
 			PlacementID:     res.PlacementID,
-			ServiceLineID:   res.ServiceLineID,
 			ShiftMasterID:   req.ShiftMasterID,
 			StartTime:       res.StartTime,
 			EndTime:         res.EndTime,
@@ -332,7 +329,6 @@ func (s *ScheduleService) UpdateEntry(ctx context.Context, id string, req Update
 		updated, inErr = s.repo.UpdateScheduleEntry(ctx, tx, UpdateScheduleEntryParams{
 			ID:            id,
 			ShiftMasterID: shiftMaster,
-			ServiceLineID: res.ServiceLineID,
 			StartTime:     res.StartTime,
 			EndTime:       res.EndTime,
 			CrossMidnight: res.CrossMidnight,
@@ -567,8 +563,6 @@ func conflictMessage(code string) string {
 		return "Tanggal di luar periode penempatan aktif agen."
 	case "OUT_OF_SCOPE":
 		return "Anda tidak boleh menjadwalkan agen di luar perusahaan yang Anda pimpin."
-	case "SHIFT_NOT_FOR_SERVICE_LINE":
-		return "Shift dipakai untuk lini layanan lain."
 	case "SHIFT_DEACTIVATED":
 		return "Shift sudah dinonaktifkan."
 	default:

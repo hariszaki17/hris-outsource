@@ -7,7 +7,7 @@
 // Decisions (openapi docs/api/E5-attendance):
 //   - GPS_UNAVAILABLE (422) when gps_available=false — required true to clock.
 //   - NO_ACTIVE_PLACEMENT (422) when the agent has no active placement (can't resolve
-//     site/company/service_line). [code not enumerated in the cross-cutting set; chosen
+//     site/company/position). [code not enumerated in the cross-cutting set; chosen
 //     422 RULE per CONVENTIONS — the request is well-formed but unsatisfiable.]
 //   - OUT_OF_GEOFENCE (422, fields distance_m/radius_m/company_id) on clock-IN only,
 //     UNLESS force_outside_geofence=true → persist with OUTSIDE_GEOFENCE flag. Clock-OUT
@@ -42,13 +42,13 @@ const earthRadiusM = 6371000.0
 // --- ports + params ---
 
 // PlacementInfo is the active-placement projection the clock service needs to stamp
-// the denormalized company/site/position/service_line columns on a new record.
+// the denormalized company/site/position columns on a new record. Position is the
+// free-text label resolved from the placement.
 type PlacementInfo struct {
 	PlacementID string
 	CompanyID   string
 	SiteID      string
-	PositionID  string
-	ServiceLine string // attendance text enum (facility_services|building_management|parking)
+	Position    string // free-text position label
 }
 
 // ClockInParams is the decoded clock-in body (agent is always self; employee_id from
@@ -76,9 +76,8 @@ type ClockInRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
 	CheckInAt          time.Time
@@ -287,9 +286,8 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		PlacementID:        pl.PlacementID,
 		ScheduleID:         schedulePtr,
 		CompanyID:          pl.CompanyID,
-		ServiceLine:        pl.ServiceLine,
 		SiteID:             pl.SiteID,
-		PositionID:         pl.PositionID,
+		Position:           pl.Position,
 		ShiftStartAt:       shiftStartPtr,
 		ShiftEndAt:         shiftEndPtr,
 		CheckInAt:          now,

@@ -6,7 +6,7 @@
  *   rtKzk  SL read-only detail
  *
  * Design: BackRow → HeaderCard (avatar, name, NIP/NIK, status badges, edit btn, kebab) →
- * subrow (position · service line · company) → Tabs (Profil active | Penempatan E3→ | Kehadiran
+ * subrow (position · company) → Tabs (Profil active | Penempatan E3→ | Kehadiran
  * E5→ | Cuti & Lembur E6/7→) → Profil tab: LeftCol (Data Pribadi, Kontak, Statutori & Bank) +
  * RightCol (Akun Login, Ringkasan).
  *
@@ -282,21 +282,12 @@ export function EmployeeDetailScreen() {
           )}
         </div>
 
-        {/* Sub row: position · service line · company */}
+        {/* Sub row: position · company */}
         <div className="flex items-center gap-2 px-1 text-[13px]">
           {emp.current_position && (
-            <span className="font-medium text-text-2">{emp.current_position.name}</span>
+            <span className="font-medium text-text-2">{emp.current_position}</span>
           )}
-          {emp.current_position && emp.current_service_line && (
-            <span className="size-[4px] rounded-full bg-text-3" aria-hidden />
-          )}
-          {emp.current_service_line && (
-            <div className="flex items-center gap-[6px]">
-              <span className="size-[8px] rounded-full bg-info-tx shrink-0" aria-hidden />
-              <span className="text-text-2">{emp.current_service_line.name}</span>
-            </div>
-          )}
-          {emp.current_service_line && emp.current_client_company && (
+          {emp.current_position && emp.current_client_company && (
             <span className="size-[4px] rounded-full bg-text-3" aria-hidden />
           )}
           {emp.current_client_company && (
@@ -389,8 +380,7 @@ export function EmployeeDetailScreen() {
 
               {/* Ringkasan penempatan */}
               <DetailCard title={t('secRingkasan')}>
-                <KvRow label={t('fieldPosition')} value={emp.current_position?.name} />
-                <KvRow label={t('fieldServiceLine')} value={emp.current_service_line?.name} />
+                <KvRow label={t('fieldPosition')} value={emp.current_position} />
                 <KvRow label={t('fieldClientCompany')} value={emp.current_client_company?.name} />
               </DetailCard>
             </div>

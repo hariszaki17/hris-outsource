@@ -31,10 +31,9 @@ func NewHolidayRepo(pool *db.Pool) *HolidayRepo {
 
 func (r *HolidayRepo) ListHolidays(ctx context.Context, f svc.HolidayFilter) ([]dom.Holiday, error) {
 	p := sqlcgen.ListHolidaysParams{
-		Category:      strptr(f.Category),
-		ServiceLineID: strptr(f.ServiceLineID),
-		CursorID:      f.CursorID,
-		Lim:           i32(f.Limit),
+		Category: strptr(f.Category),
+		CursorID: f.CursorID,
+		Lim:      i32(f.Limit),
 	}
 	if f.Year != nil {
 		y := int32(*f.Year)
@@ -84,17 +83,12 @@ func (r *HolidayRepo) GetHolidayForDate(ctx context.Context, date time.Time) (do
 // --- writes ---
 
 func (r *HolidayRepo) InsertHoliday(ctx context.Context, tx pgx.Tx, p svc.HolidayWriteParams) (dom.Holiday, error) {
-	lines := p.ApplicableServiceLines
-	if lines == nil {
-		lines = []string{}
-	}
 	row, err := r.q.WithTx(tx).InsertHoliday(ctx, sqlcgen.InsertHolidayParams{
-		ID:                     p.ID,
-		Name:                   p.Name,
-		HolidayDate:            timeToPgDate(p.Date),
-		Category:               p.Category,
-		Recurring:              p.Recurring,
-		ApplicableServiceLines: lines,
+		ID:          p.ID,
+		Name:        p.Name,
+		HolidayDate: timeToPgDate(p.Date),
+		Category:    p.Category,
+		Recurring:   p.Recurring,
 	})
 	if err != nil {
 		return dom.Holiday{}, mapErr(err)
@@ -104,11 +98,10 @@ func (r *HolidayRepo) InsertHoliday(ctx context.Context, tx pgx.Tx, p svc.Holida
 
 func (r *HolidayRepo) UpdateHoliday(ctx context.Context, tx pgx.Tx, id string, p svc.HolidayUpdateParams) (dom.Holiday, error) {
 	params := sqlcgen.UpdateHolidayParams{
-		Name:                   p.Name,
-		Category:               p.Category,
-		Recurring:              p.Recurring,
-		ApplicableServiceLines: p.ApplicableServiceLines,
-		ID:                     id,
+		Name:      p.Name,
+		Category:  p.Category,
+		Recurring: p.Recurring,
+		ID:        id,
 	}
 	if p.Date != nil {
 		params.HolidayDate = timeToPgDate(*p.Date)

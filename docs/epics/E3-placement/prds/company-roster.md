@@ -7,13 +7,13 @@
 
 ## 1. Context & problem
 
-HR admins and shift leaders need a single, reliable view of **who is placed at a client company** — the active team, their service line, position, period, status, and the company's shift leader — plus the ability to look back at past placements and export the list. This is the day-to-day operational lens over everything F3.1–F3.4 produce.
+HR admins and shift leaders need a single, reliable view of **who is placed at a client company** — the active team, their position, site, period, status, and the company's shift leader — plus the ability to look back at past placements and export the list. This is the day-to-day operational lens over everything F3.1–F3.4 produce. *(2026-06-12: `service_line` removed; position is free-text.)*
 
 ## 2. Goals & non-goals
 
 **Goals**
 - A per-company roster of placements (active + historical) with the company's current shift leader.
-- Filters: service line, status, period, active-only vs include-history.
+- Filters: position, status, period, active-only vs include-history.
 - Export to Excel/PDF.
 - Correct visibility scoping: HR sees all companies; a shift leader sees only their own.
 
@@ -32,7 +32,7 @@ HR admins and shift leaders need a single, reliable view of **who is placed at a
 ```mermaid
 flowchart LR
     subgraph User[HR Admin / Shift Leader]
-        R1([Open company roster]) --> R2[Apply filters:<br/>service line, status, period]
+        R1([Open company roster]) --> R2[Apply filters:<br/>position, status, period]
     end
     subgraph SYS[System]
         R2 --> Z1{Authorized for<br/>this company?}
@@ -50,18 +50,18 @@ flowchart LR
 
 | Ref | Rule |
 |-----|------|
-| RO-1 | The roster lists placements for one client company: agent, service line, position, period, status, and (for the company) the current shift leader. |
+| RO-1 | The roster lists placements for one client company: agent, position, site, period, status, and (for the company) the current shift leader. |
 | RO-2 | Default view = **active + scheduled** placements; a toggle includes historical (terminal) placements. |
-| RO-3 | Filters: service line, status, and period (date range overlap). Combinable. |
+| RO-3 | Filters: position (free-text match), status, and period (date range overlap). Combinable. |
 | RO-4 | **Scope:** HR/Super Admin can open any company; a **shift leader can open only the company they lead** (others are hidden/403). |
-| RO-5 | The roster shows summary counts (total active, by service line, by status). |
+| RO-5 | The roster shows summary counts (total active, by position, by status). |
 | RO-6 | Export (Excel/PDF) reflects the **currently applied filters** and records an audit entry (who exported what, when). |
 | RO-7 | Read-only — no mutation from this view; row actions deep-link to F3.1–F3.4. The shift-leader **"Ganti"** action and the empty-leader prompt link to the **client-company "Pemimpin Shift" tab** (E2 F2.3), the single entry point for assign/replace/revoke (F3.4 SL-11). |
 | RO-8 | Sorted by status (active first) then agent name; paginated for large companies. |
 
 ## 6. Data model
 
-Read-only projection over `Placement` + `Employee` + `ServiceLine` + `Position` + `ShiftLeaderAssignment`. No new entities.
+Read-only projection over `Placement` (incl. its free-text `position`) + `Employee` + `Site` + `ShiftLeaderAssignment`. No new entities. *(2026-06-12: no `ServiceLine`/`Position` master.)*
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -69,19 +69,19 @@ Read-only projection over `Placement` + `Employee` + `ServiceLine` + `Position` 
 Feature: Company placement roster
 
   Background:
-    Given "Plaza Senayan" has 12 active placements across "Parking" and "Building Management"
+    Given "Plaza Senayan" has 12 active placements across positions "Parking Attendant" and "Building Technician"
     And "Budi" is its shift leader
 
   Scenario: HR admin views a company roster
     Given I am an HR admin
     When I open the roster for "Plaza Senayan"
-    Then I see all active and scheduled placements with agent, service line, position, period, and status
+    Then I see all active and scheduled placements with agent, position, site, period, and status
     And I see "Budi" listed as the shift leader
-    And I see summary counts by service line and status
+    And I see summary counts by position and status
 
-  Scenario: Filter by service line
-    When I filter the roster by service line "Parking"
-    Then only "Parking" placements are shown
+  Scenario: Filter by position
+    When I filter the roster by position "Parking Attendant"
+    Then only "Parking Attendant" placements are shown
     And the counts update accordingly
 
   Scenario: Include historical placements
@@ -95,9 +95,9 @@ Feature: Company placement roster
     And I cannot open the roster of any company I do not lead
 
   Scenario: Export reflects active filters
-    Given I filtered by service line "Building Management"
+    Given I filtered by position "Building Technician"
     When I export to Excel
-    Then the file contains only "Building Management" placements
+    Then the file contains only "Building Technician" placements
     And the export is recorded in the audit log
 
   Scenario: Empty company

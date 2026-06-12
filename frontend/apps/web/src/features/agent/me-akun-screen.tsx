@@ -182,11 +182,7 @@ function ProfilePanel({
   const isActive = status === 'ACTIVE';
   const statusLabel = isActive ? t('statusActive') : t('statusInactive');
 
-  const hasPlacement = !!(
-    emp?.current_position?.name ||
-    emp?.current_service_line?.name ||
-    emp?.current_client_company?.name
-  );
+  const hasPlacement = !!(emp?.current_position || emp?.current_client_company?.name);
 
   return (
     <div className="flex flex-col gap-4">
@@ -219,11 +215,7 @@ function ProfilePanel({
         <Section title={t('sectionPlacement')}>
           {hasPlacement ? (
             <Grid>
-              <ReadOnly label={t('profilePosition')} value={emp?.current_position?.name ?? '—'} />
-              <ReadOnly
-                label={t('profileServiceLine')}
-                value={emp?.current_service_line?.name ?? '—'}
-              />
+              <ReadOnly label={t('profilePosition')} value={emp?.current_position ?? '—'} />
               <ReadOnly
                 label={t('profileClientCompany')}
                 value={emp?.current_client_company?.name ?? '—'}

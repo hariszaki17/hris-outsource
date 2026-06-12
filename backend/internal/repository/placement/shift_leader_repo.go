@@ -162,7 +162,7 @@ func (r *ShiftLeaderRepo) EndAssignment(ctx context.Context, tx pgx.Tx, id strin
 func (r *ShiftLeaderRepo) RosterForCompany(ctx context.Context, f domain.PlacementFilter) ([]domain.Placement, error) {
 	rows, err := r.q.RosterForCompany(ctx, sqlcgen.RosterForCompanyParams{
 		ClientCompanyID:       deref(f.CompanyID),
-		ServiceLineID:         f.ServiceLineID,
+		Position:              f.Position,
 		Status:                f.Status,
 		StatusIn:              f.StatusIn,
 		AwaitingAgreement:     f.AwaitingAgreement,
@@ -186,7 +186,7 @@ func (r *ShiftLeaderRepo) RosterSummary(ctx context.Context, companyID string) (
 	if err != nil {
 		return domain.CompanyRosterSummary{}, err
 	}
-	byLine, err := r.q.RosterSummaryByServiceLine(ctx, companyID)
+	byPosition, err := r.q.RosterSummaryByPosition(ctx, companyID)
 	if err != nil {
 		return domain.CompanyRosterSummary{}, err
 	}
@@ -203,15 +203,10 @@ func (r *ShiftLeaderRepo) RosterSummary(ctx context.Context, companyID string) (
 			summary.TotalExpiring += int(s.Count)
 		}
 	}
-	for _, l := range byLine {
-		name := ""
-		if l.ServiceLineName != nil {
-			name = *l.ServiceLineName
-		}
-		summary.ByServiceLine = append(summary.ByServiceLine, domain.RosterServiceLineCount{
-			ServiceLineID:   l.ServiceLineID,
-			ServiceLineName: name,
-			Count:           int(l.Count),
+	for _, p := range byPosition {
+		summary.ByPosition = append(summary.ByPosition, domain.RosterPositionCount{
+			Position: p.Position,
+			Count:    int(p.Count),
 		})
 	}
 	return summary, nil
@@ -240,8 +235,8 @@ func mapPlacementFromRoster(row sqlcgen.RosterForCompanyRow) domain.Placement {
 	p := placementCore{
 		ID: row.ID, EmployeeID: row.EmployeeID, AgreementID: row.AgreementID,
 		AwaitingAgreement: row.AwaitingAgreement,
-		ClientCompanyID:   row.ClientCompanyID, SiteID: row.SiteID, ServiceLineID: row.ServiceLineID,
-		PositionID: row.PositionID, StartDate: row.StartDate, EndDate: row.EndDate,
+		ClientCompanyID:   row.ClientCompanyID, SiteID: row.SiteID,
+		Position: row.Position, StartDate: row.StartDate, EndDate: row.EndDate,
 		Notes: row.Notes, LifecycleStatus: row.LifecycleStatus, StatusChangedAt: row.StatusChangedAt,
 		EndedReason: row.EndedReason, EndedAt: row.EndedAt, TerminationReason: row.TerminationReason,
 		ResignAt: row.ResignAt, PredecessorID: row.PredecessorID, SuccessorID: row.SuccessorID,
@@ -250,8 +245,6 @@ func mapPlacementFromRoster(row sqlcgen.RosterForCompanyRow) domain.Placement {
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
-	p.ServiceLineName = row.ServiceLineName
-	p.PositionName = row.PositionName
 	p.AgreementType = row.AgreementType
 	return p
 }

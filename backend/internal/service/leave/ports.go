@@ -36,7 +36,6 @@ type RequestFilter struct {
 	CompanyID     *string
 	EmployeeID    *string
 	LeaveTypeID   *string
-	ServiceLine   *string
 	Status        *string
 	StatusIn      []string
 	StartFrom     *time.Time
@@ -54,7 +53,6 @@ type QuotaFilter struct {
 	LeaveTypeID   *string
 	Period        *int
 	CompanyID     *string
-	ServiceLine   *string
 	IncludeClosed bool
 	Limit         int
 	CursorCreated *time.Time
@@ -86,7 +84,6 @@ type GrantFilter struct {
 // CalendarFilter is the decoded GET /leave-calendar query.
 type CalendarFilter struct {
 	CompanyID   *string
-	ServiceLine *string
 	LeaveTypeID *string
 	Period      int
 	Month       *int
@@ -177,7 +174,6 @@ type CreateLeaveRequestParams struct {
 	EmployeeID       string
 	PlacementID      *string
 	CompanyID        *string
-	ServiceLineID    *string
 	LeaveTypeID      string
 	StartDate        time.Time
 	EndDate          time.Time

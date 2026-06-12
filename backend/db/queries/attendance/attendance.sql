@@ -1,19 +1,21 @@
 -- E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
--- employee_name, client_companies for company_name, client_sites for site_name,
--- and positions for position_name. Cursor lists keyset on (check_in_at DESC, id).
--- `make gen` writes internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/
--- auto-close are STORED columns (07-01 decision); no runtime compute.
+-- employee_name, client_companies for company_name, and client_sites for site_name.
+-- position is FREE-TEXT (stored directly on the row; no positions JOIN, no service_line).
+-- Cursor lists keyset on (check_in_at DESC, id). `make gen` writes
+-- internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/auto-close are STORED
+-- columns (07-01 decision); no runtime compute.
 
 -- name: ListAttendance :many
 -- Verification queue / history for a company over filters, newest first.
 -- Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
 -- (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
 --   verification_status_in / status_in: text[] = ANY membership.
---   site_id / position_id: narrow within the (leader-pinned) company scope.
+--   site_id / position: narrow within the (leader-pinned) company scope (position is
+--     a free-text exact-match on the stored label).
 --   date_from/date_to: bound on the shift-date basis (check_in_at::date).
 --   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -24,19 +26,16 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
-       s.name      AS site_name,
-       pos.name    AS position_name
+       s.name      AS site_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
 LEFT JOIN client_sites s     ON s.id = a.site_id
-LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.deleted_at IS NULL
   AND (sqlc.narg(company_id)::text IS NULL OR a.company_id = sqlc.narg(company_id)::text)
   AND (sqlc.narg(employee_id)::text IS NULL OR a.employee_id = sqlc.narg(employee_id)::text)
-  AND (sqlc.narg(service_line)::text IS NULL OR a.service_line = sqlc.narg(service_line)::text)
   AND (sqlc.narg(site_id)::text IS NULL OR a.site_id = sqlc.narg(site_id)::text)
-  AND (sqlc.narg(position_id)::text IS NULL OR a.position_id = sqlc.narg(position_id)::text)
+  AND (sqlc.narg(position)::text IS NULL OR a.position = sqlc.narg(position)::text)
   AND (sqlc.narg(verification_status_in)::text[] IS NULL OR a.verification_status = ANY(sqlc.narg(verification_status_in)::text[]))
   AND (sqlc.narg(status_in)::text[] IS NULL OR a.status = ANY(sqlc.narg(status_in)::text[]))
   AND (sqlc.narg(date_from)::date IS NULL OR a.check_in_at::date >= sqlc.narg(date_from)::date)
@@ -53,7 +52,7 @@ LIMIT sqlc.arg(page_limit);
 -- name: GetAttendance :one
 -- Single record with denormalized names.
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -64,13 +63,11 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
-       s.name      AS site_name,
-       pos.name    AS position_name
+       s.name      AS site_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
 LEFT JOIN client_sites s     ON s.id = a.site_id
-LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.id = sqlc.arg(id)
   AND a.deleted_at IS NULL;
 
@@ -78,7 +75,7 @@ WHERE a.id = sqlc.arg(id)
 -- Row-lock for verify/reject/bulk + correction-apply: reads company_id/employee_id/
 -- verification_status for scope + state guards (omits joins; service re-reads for DTO).
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -103,8 +100,8 @@ SET verification_status = 'VERIFIED',
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -130,8 +127,8 @@ SET verification_status = 'VERIFIED',
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -150,8 +147,8 @@ SET verification_status = 'REJECTED',
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -177,8 +174,8 @@ SET check_in_at        = COALESCE(sqlc.narg(check_in_at)::timestamptz, check_in_
     updated_at         = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -193,8 +190,8 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
 -- the SWP-EMP-* of the HR/admin who created the record.
 -- Returns the full row for the domain mapper.
 INSERT INTO attendance (
-    employee_id, placement_id, schedule_id, company_id, service_line,
-    site_id, position_id, attendance_code_id,
+    employee_id, placement_id, schedule_id, company_id,
+    site_id, position, attendance_code_id,
     shift_start_at, shift_end_at,
     check_in_at, check_out_at,
     lat_in, lng_in, lat_out, lng_out,
@@ -204,8 +201,8 @@ INSERT INTO attendance (
     created_by,
     created_at, updated_at
 ) VALUES (
-    sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.narg(schedule_id), sqlc.arg(company_id), sqlc.arg(service_line),
-    sqlc.arg(site_id), sqlc.arg(position_id), sqlc.narg(attendance_code_id),
+    sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.narg(schedule_id), sqlc.arg(company_id),
+    sqlc.arg(site_id), sqlc.arg(position), sqlc.narg(attendance_code_id),
     sqlc.narg(shift_start_at), sqlc.narg(shift_end_at),
     sqlc.arg(check_in_at), sqlc.narg(check_out_at),
     sqlc.narg(lat_in), sqlc.narg(lng_in), sqlc.narg(lat_out), sqlc.narg(lng_out),
@@ -214,8 +211,8 @@ INSERT INTO attendance (
     sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags)::text[],
     sqlc.narg(created_by),
     now(), now()
-) RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-            site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+) RETURNING id, employee_id, placement_id, schedule_id, company_id,
+            site_id, position, attendance_code_id, shift_start_at, shift_end_at,
             check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
             photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
             in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -231,13 +228,11 @@ INSERT INTO attendance (
 SELECT
     p.id       AS placement_id,
     p.client_company_id,
-    COALESCE(sl.name, '') AS service_line_name,
     p.site_id,
-    p.position_id,
+    p.position AS position,
     e.full_name AS employee_name,
     cc.name      AS company_name,
     cs.name      AS site_name,
-    pos.name     AS position_name,
     se.id       AS schedule_id,
     -- COALESCE to an epoch sentinel so sqlc types these NOT NULL (time.Time) and the
     -- row scan never sees a raw NULL on no-schedule days. The repo gates shift-time use
@@ -258,8 +253,6 @@ FROM placements p
 JOIN employees e  ON e.id = p.employee_id
 JOIN client_companies cc ON cc.id = p.client_company_id
 LEFT JOIN client_sites cs ON cs.id = p.site_id
-LEFT JOIN positions pos   ON pos.id = p.position_id
-LEFT JOIN service_lines sl ON sl.id = p.service_line_id
 LEFT JOIN schedule_entries se
     ON se.employee_id = p.employee_id
     AND se.work_date = (sqlc.arg(ref_date)::date)

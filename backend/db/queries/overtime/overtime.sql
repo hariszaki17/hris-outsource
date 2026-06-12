@@ -9,7 +9,7 @@
 -- narg): employee_id, company_id, status (single), status__in (text[] → status =
 -- ANY), work_date >= / <=, day_type (tier), source, flagged_no_preapproval.
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -40,7 +40,7 @@ LIMIT sqlc.arg(lim);
 -- name: GetOvertime :one
 -- Single OT record with denormalized employee + company names (for GET /overtime/{id}).
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -58,7 +58,7 @@ WHERE ot.id = sqlc.arg(id)
 -- Row-lock for the state-machine transitions (confirm/approve-l1/approve-final/
 -- reject/withdraw). Omits joins; the service re-reads via GetOvertime for the DTO.
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
-       ot.service_line_id, ot.work_date, ot.planned_start_time, ot.planned_end_time,
+       ot.work_date, ot.planned_start_time, ot.planned_end_time,
        ot.actual_start_time, ot.actual_end_time, ot.cross_midnight, ot.source,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
@@ -77,7 +77,7 @@ SET status     = sqlc.arg(status),
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
-RETURNING id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+RETURNING id, employee_id, company_id, placement_id, attendance_id,
           work_date, planned_start_time, planned_end_time, actual_start_time,
           actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
           counted_minutes, min_minutes_threshold, skipped_too_short,
@@ -89,7 +89,7 @@ RETURNING id, employee_id, company_id, placement_id, attendance_id, service_line
 -- allocated by the column DEFAULT ('SWP-OT-' || swp_next_id('OT')) when omitted,
 -- OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
 INSERT INTO overtime (
-    id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+    id, employee_id, company_id, placement_id, attendance_id,
     work_date, planned_start_time, planned_end_time, actual_start_time,
     actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
     counted_minutes, min_minutes_threshold, skipped_too_short, reference_multiplier,
@@ -100,7 +100,6 @@ INSERT INTO overtime (
     sqlc.narg(company_id),
     sqlc.arg(placement_id),
     sqlc.narg(attendance_id),
-    sqlc.narg(service_line_id),
     sqlc.arg(work_date),
     sqlc.narg(planned_start_time),
     sqlc.narg(planned_end_time),
@@ -122,7 +121,7 @@ INSERT INTO overtime (
     sqlc.narg(created_by)
 )
 ON CONFLICT (id) DO NOTHING
-RETURNING id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+RETURNING id, employee_id, company_id, placement_id, attendance_id,
           work_date, planned_start_time, planned_end_time, actual_start_time,
           actual_end_time, cross_midnight, source, status, day_type, worked_minutes,
           counted_minutes, min_minutes_threshold, skipped_too_short,

@@ -7,7 +7,7 @@
 -- Filters: company_id (via placement), work_date BETWEEN start/end,
 --   employee_id (optional), status__in (optional text[] → status = ANY).
 -- Ordered by employee_id, work_date for a stable grid layout.
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -34,7 +34,7 @@ ORDER BY se.employee_id ASC, se.work_date ASC, se.id ASC;
 -- start_time for the agent's day/week timeline.
 -- TODO(SV-3): include_company geo/address enrichment (company_geo/address) is
 --   deferred — this query returns the base ScheduleEntry projection only.
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -54,7 +54,7 @@ ORDER BY se.work_date ASC, se.start_time ASC, se.id ASC;
 
 -- name: GetScheduleEntry :one
 -- Single entry with denormalized names + company_id (from placement).
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -72,7 +72,7 @@ WHERE se.id = sqlc.arg(id)
 
 -- name: GetScheduleEntryForUpdate :one
 -- Row-lock for PATCH / soft-delete (omits joins; service re-reads for DTO).
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at
@@ -93,13 +93,12 @@ WHERE se.employee_id = sqlc.arg(employee_id)
 -- name: CreateScheduleEntry :one
 -- id allocated by the column DEFAULT ('SWP-SCH-' || swp_next_id('SCH')).
 INSERT INTO schedule_entries (
-    employee_id, placement_id, service_line_id, shift_master_id,
+    employee_id, placement_id, shift_master_id,
     start_time, end_time, cross_midnight, work_date, status,
     is_day_off, replaced_entry_id, created_by
 ) VALUES (
     sqlc.arg(employee_id),
     sqlc.arg(placement_id),
-    sqlc.narg(service_line_id),
     sqlc.narg(shift_master_id),
     sqlc.narg(start_time),
     sqlc.narg(end_time),
@@ -110,14 +109,13 @@ INSERT INTO schedule_entries (
     sqlc.narg(replaced_entry_id),
     sqlc.narg(created_by)
 )
-RETURNING id, employee_id, placement_id, service_line_id, shift_master_id,
+RETURNING id, employee_id, placement_id, shift_master_id,
           start_time, end_time, cross_midnight, work_date, status,
           is_day_off, replaced_entry_id, created_by, created_at, updated_at;
 
 -- name: UpdateScheduleEntry :one
 UPDATE schedule_entries
 SET shift_master_id   = sqlc.narg(shift_master_id),
-    service_line_id   = sqlc.narg(service_line_id),
     start_time        = sqlc.narg(start_time),
     end_time          = sqlc.narg(end_time),
     cross_midnight    = sqlc.arg(cross_midnight),
@@ -127,7 +125,7 @@ SET shift_master_id   = sqlc.narg(shift_master_id),
     updated_at        = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, service_line_id, shift_master_id,
+RETURNING id, employee_id, placement_id, shift_master_id,
           start_time, end_time, cross_midnight, work_date, status,
           is_day_off, replaced_entry_id, created_by, created_at, updated_at;
 
@@ -177,7 +175,7 @@ WHERE se.employee_id = sqlc.arg(employee_id)
 -- name: FindActivePlacementForAgentDate :one
 -- INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement
 -- whose period covers work_date (open-ended end_date treated as +inf).
-SELECT p.id, p.client_company_id, p.service_line_id, p.site_id,
+SELECT p.id, p.client_company_id, p.site_id,
        p.start_date, p.end_date, p.lifecycle_status
 FROM placements p
 WHERE p.employee_id = sqlc.arg(employee_id)

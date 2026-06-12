@@ -34,13 +34,13 @@ func NewHolidayService(repo HolidayRepository, txm TxRunner) *HolidayService {
 // SetClock overrides the time source (tests only).
 func (s *HolidayService) SetClock(c Clock) { s.now = c }
 
-// HolidayWriteRequest is the validated create/update payload (openapi HolidayWriteRequest).
+// HolidayWriteRequest is the validated create/update payload (openapi
+// HolidayWriteRequest). Holidays are GLOBAL ONLY (decision 2026-06-12).
 type HolidayWriteRequest struct {
-	Name                   string
-	Date                   *time.Time // required on create; optional on partial update
-	Category               *string    // required on create; optional on partial update
-	Recurring              *bool
-	ApplicableServiceLines []string
+	Name      string
+	Date      *time.Time // required on create; optional on partial update
+	Category  *string    // required on create; optional on partial update
+	Recurring *bool
 }
 
 // List returns the holiday page (cursor ASC by date). Each Holiday's
@@ -114,12 +114,11 @@ func (s *HolidayService) CreateWithID(ctx context.Context, id *string, req Holid
 	var out dom.Holiday
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		h, ierr := s.repo.InsertHoliday(ctx, tx, HolidayWriteParams{
-			ID:                     id,
-			Name:                   req.Name,
-			Date:                   *req.Date,
-			Category:               *req.Category,
-			Recurring:              recurring,
-			ApplicableServiceLines: req.ApplicableServiceLines,
+			ID:        id,
+			Name:      req.Name,
+			Date:      *req.Date,
+			Category:  *req.Category,
+			Recurring: recurring,
 		})
 		if ierr != nil {
 			if isUniqueViolation(ierr) {
@@ -174,11 +173,10 @@ func (s *HolidayService) Update(ctx context.Context, id string, req HolidayWrite
 	var out dom.Holiday
 	err = s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		h, uerr := s.repo.UpdateHoliday(ctx, tx, id, HolidayUpdateParams{
-			Name:                   strOrNil(req.Name),
-			Date:                   req.Date,
-			Category:               req.Category,
-			Recurring:              req.Recurring,
-			ApplicableServiceLines: req.ApplicableServiceLines,
+			Name:      strOrNil(req.Name),
+			Date:      req.Date,
+			Category:  req.Category,
+			Recurring: req.Recurring,
 		})
 		if uerr != nil {
 			if isUniqueViolation(uerr) {

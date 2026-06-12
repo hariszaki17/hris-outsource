@@ -56,8 +56,6 @@ export interface CellTarget {
   employeeId: string;
   employeeName: string;
   placementId: string;
-  serviceLineId?: string;
-  serviceLineName?: string;
   date: string;
   existingEntryId?: string;
   existingShiftName?: string;
@@ -109,8 +107,6 @@ function conflictMessage(
       return t('conflict.outsidePlacementPeriod');
     case 'OUT_OF_SCOPE':
       return t('conflict.outOfScope');
-    case 'SHIFT_NOT_FOR_SERVICE_LINE':
-      return t('conflict.shiftNotForServiceLine');
     case 'SHIFT_DEACTIVATED':
       return t('conflict.shiftDeactivated');
     case 'COVERAGE_BELOW_MIN':
@@ -175,10 +171,9 @@ export function ShiftPickerPopover({
     return () => document.removeEventListener('mousedown', handle);
   }, [target, onClose, anchorRef]);
 
-  // Shift list — filtered by service line (SM-3: untagged always included)
+  // Shift list — all active shift masters (shift catalog is service-line-independent).
   const shiftsQuery = useListShiftMasters(
     {
-      service_line_id: target?.serviceLineId,
       status: 'ACTIVE',
       q: search || undefined,
       limit: 50,
@@ -363,15 +358,6 @@ export function ShiftPickerPopover({
     }
   };
 
-  // Group shifts by service line match
-  const matchingShifts = shifts.filter(
-    (s) =>
-      !target.serviceLineId || !s.service_line_id || s.service_line_id === target.serviceLineId,
-  );
-  const otherShifts = shifts.filter(
-    (s) => target.serviceLineId && s.service_line_id && s.service_line_id !== target.serviceLineId,
-  );
-
   return (
     <div
       ref={popoverRef}
@@ -384,10 +370,7 @@ export function ShiftPickerPopover({
         <p className="text-sm font-bold text-text">
           {t('picker.title', { name: target.employeeName })}
         </p>
-        <p className="text-xs text-text-3">
-          {target.date}
-          {target.serviceLineName ? ` · ${target.serviceLineName}` : ''}
-        </p>
+        <p className="text-xs text-text-3">{target.date}</p>
       </div>
 
       {/* Search + filter */}
@@ -412,43 +395,10 @@ export function ShiftPickerPopover({
           </div>
         )}
 
-        {!shiftsQuery.isLoading && matchingShifts.length > 0 && (
-          <>
-            {target.serviceLineName && (
-              <div className="px-3.5 pb-1.5 pt-2.5">
-                <span className="text-[11px] font-bold uppercase tracking-[0.4px] text-text-3">
-                  {t('picker.groupMatching', { line: target.serviceLineName })}
-                </span>
-              </div>
-            )}
-            {matchingShifts.map((shift) => (
-              <ShiftRow
-                key={shift.id}
-                shift={shift}
-                onSelect={handleAssignShift}
-                disabled={saving}
-              />
-            ))}
-          </>
-        )}
-
-        {!shiftsQuery.isLoading && otherShifts.length > 0 && (
-          <>
-            <div className="px-3.5 pb-1.5 pt-2.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.4px] text-text-3">
-                {t('picker.groupOther')}
-              </span>
-            </div>
-            {otherShifts.map((shift) => (
-              <ShiftRow
-                key={shift.id}
-                shift={shift}
-                onSelect={handleAssignShift}
-                disabled={saving}
-              />
-            ))}
-          </>
-        )}
+        {!shiftsQuery.isLoading &&
+          shifts.map((shift) => (
+            <ShiftRow key={shift.id} shift={shift} onSelect={handleAssignShift} disabled={saving} />
+          ))}
 
         {!shiftsQuery.isLoading && shifts.length === 0 && (
           <p className="px-3.5 py-4 text-xs text-text-3">{t('picker.noShifts')}</p>

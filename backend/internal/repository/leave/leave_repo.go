@@ -89,7 +89,6 @@ func (r *LeaveRepo) CreateLeaveRequest(ctx context.Context, tx pgx.Tx, p svc.Cre
 		EmployeeID:       p.EmployeeID,
 		PlacementID:      strptr(p.PlacementID),
 		CompanyID:        strptr(p.CompanyID),
-		ServiceLineID:    strptr(p.ServiceLineID),
 		LeaveTypeID:      p.LeaveTypeID,
 		StartDate:        timeToPgDate(p.StartDate),
 		EndDate:          timeToPgDate(p.EndDate),
@@ -240,7 +239,6 @@ func (r *LeaveRepo) ListCalendarEntries(ctx context.Context, f svc.CalendarFilte
 		RangeFrom:   timeToPgDate(from),
 		StatusIn:    statusIn,
 		CompanyID:   strptr(f.CompanyID),
-		ServiceLine: strptr(f.ServiceLine),
 		LeaveTypeID: strptr(f.LeaveTypeID),
 	})
 	if err != nil {

@@ -67,8 +67,7 @@ export function LeaderCompliancePanel({ companyId }: LeaderCompliancePanelProps)
       ...extract(holidaysA),
       ...(sundayYear !== mondayYear ? extract(holidaysB) : []),
     ];
-    const slIds = new Set(rows.map((r) => r.serviceLineId).filter((x): x is string => !!x));
-    const { holidaySet } = buildHolidayMaps(allHolidays, days, slIds);
+    const { holidaySet } = buildHolidayMaps(allHolidays, days);
 
     return rows
       .map((row) => ({ row, c: computeCompliance(row.cells, days, holidaySet) }))
@@ -114,9 +113,6 @@ export function LeaderCompliancePanel({ companyId }: LeaderCompliancePanelProps)
                 <span className="truncate text-[13px] font-semibold text-text">
                   {row.employeeName}
                 </span>
-                {row.serviceLineName && (
-                  <span className="truncate text-[11px] text-text-3">{row.serviceLineName}</span>
-                )}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-1">
                 {c.noRest ? (

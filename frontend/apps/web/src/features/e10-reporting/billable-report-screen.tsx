@@ -15,7 +15,7 @@
  * Frame layout (EF8AZ):
  *   Sidebar + Main column:
  *     TitleBand  (title · subtitle)
- *     Filters    (Periode · Perusahaan · Lini · Kelompok)
+ *     Filters    (Periode · Perusahaan · Posisi · Kelompok)
  *     PendingCallout (warn Banner — unverified records excluded from billable)
  *     Stats      (4 × StatCard: Jam Billable · Jam Payable · Total Worked · Tingkat Verifikasi)
  *     Table      (group_key rows: AGEN/HARI/SHIFT · PERUSAHAAN · JAM KERJA · JAM BILLABLE ·
@@ -25,15 +25,15 @@
  * F10.3 · BR-1..BR-7 · INV-4 (billable = verified-only).
  */
 
+import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { useCompanyOptions } from '@/lib/use-company-options.ts';
-import { useServiceLineOptions } from '@/lib/use-service-line-options.ts';
 import {
   type BillableReport,
   type BillableReportRow,
-  type ExportJob,
   ExportFormat,
+  type ExportJob,
   ExportStatus,
   GetBillableAttendanceReportGroupBy,
   type GetBillableAttendanceReportParams,
@@ -49,8 +49,8 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
-  type ExportStep,
   ExportModal,
+  type ExportStep,
   FilterSelect,
   StatCard,
   StateView,
@@ -69,7 +69,7 @@ export type BillableReportSearch = {
   period_start?: string;
   period_end?: string;
   company_id?: string;
-  service_line_id?: string;
+  position?: string;
   group_by?: GetBillableAttendanceReportGroupBy;
 };
 
@@ -98,7 +98,7 @@ function hasActiveFilters(s: BillableReportSearch): boolean {
   const groupByChanged = Boolean(
     s.group_by && s.group_by !== GetBillableAttendanceReportGroupBy.employee,
   );
-  return Boolean(s.company_id || s.service_line_id) || groupByChanged;
+  return Boolean(s.company_id || s.position) || groupByChanged;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,9 +116,8 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
 
   // Filter option lists. Company picker is HR-only (SL is server-scoped to one company);
-  // service-line picker is available to everyone who can reach the screen.
+  // the position filter (free-text typeahead) is available to everyone who can reach the screen.
   const { options: companyOptions } = useCompanyOptions({ enabled: isHR });
-  const { options: serviceLineOptions } = useServiceLineOptions();
 
   const periodStart = filters.period_start ?? DEFAULT_PERIOD_START;
   const periodEnd = filters.period_end ?? DEFAULT_PERIOD_END;
@@ -131,7 +130,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
     period_start: periodStart,
     period_end: periodEnd,
     company_id: filters.company_id || undefined,
-    service_line_id: filters.service_line_id || undefined,
+    position: filters.position || undefined,
     group_by: filters.group_by || undefined,
   };
 
@@ -194,7 +193,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
             period_start: periodStart,
             period_end: periodEnd,
             company_id: filters.company_id || undefined,
-            service_line_id: filters.service_line_id || undefined,
+            position: filters.position || undefined,
             group_by: filters.group_by || undefined,
           },
         },
@@ -280,11 +279,13 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
   // ---------------------------------------------------------------------------
 
   const groupByLabel =
-    filters.group_by === GetBillableAttendanceReportGroupBy.day
-      ? t('report.groupBy.day')
-      : filters.group_by === GetBillableAttendanceReportGroupBy.shift_master
-        ? t('report.groupBy.shift_master')
-        : t('report.groupBy.employee');
+    filters.group_by === GetBillableAttendanceReportGroupBy.position
+      ? t('report.groupBy.position')
+      : filters.group_by === GetBillableAttendanceReportGroupBy.day
+        ? t('report.groupBy.day')
+        : filters.group_by === GetBillableAttendanceReportGroupBy.shift_master
+          ? t('report.groupBy.shift_master')
+          : t('report.groupBy.employee');
 
   const columns: Column<BillableReportRow>[] = [
     {
@@ -305,9 +306,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="text-sm text-text-2">{r.company_name ?? '—'}</span>
-          {r.service_line_name && (
-            <span className="text-[11px] text-text-3">{r.service_line_name}</span>
-          )}
+          {r.position && <span className="text-[11px] text-text-3">{r.position}</span>}
         </div>
       ),
     },
@@ -408,19 +407,14 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
           </FilterSelect>
         )}
 
-        {/* Service line */}
-        <FilterSelect
-          aria-label={t('report.filterServiceLine')}
-          value={filters.service_line_id ?? ''}
-          onChange={(e) => setFilter({ service_line_id: e.target.value || undefined })}
-        >
-          <option value="">{t('report.filterServiceLine')}</option>
-          {serviceLineOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </FilterSelect>
+        {/* Position — free-text typeahead (replaces the former service-line filter) */}
+        <div className="w-[200px]">
+          <PositionPicker
+            value={filters.position ?? null}
+            onChange={(v) => setFilter({ position: v ?? undefined })}
+            placeholder={t('report.filterPosition')}
+          />
+        </div>
 
         {/* Group by — EF8AZ "Kelompok: per agen" */}
         <FilterSelect

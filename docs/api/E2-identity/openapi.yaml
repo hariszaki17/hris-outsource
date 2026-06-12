@@ -7,8 +7,9 @@ info:
 
     Scope: the people the system is about (employees + linked logins), the
     employment relationship (PKWT/PKWTT agreements + compensation), the client
-    company directory, the service-line/position master, and the operational
-    master data (leave types, attendance codes, overtime rules).
+    company directory, and the operational master data (leave types, attendance
+    codes, overtime rules). Position is **free-text** (no master) with a
+    typeahead search endpoint over existing values.
 
     Binding conventions: see `docs/api/CONVENTIONS.md` (sections referenced
     inline as §N). Picker endpoints are co-located with their owning resource
@@ -61,11 +62,11 @@ tags:
       own geofence (center + radius, default 100m per EPICS §8). Every company
       has ≥1 site (primary "Main Site"). `GET /client-companies/{id}/sites`
       doubles as the Site picker for placement (E3).
-  - name: service-lines-positions
+  - name: people
     description: |
-      Service lines (Facility / Building Mgmt / Parking — seeded but
-      admin-extendable) and positions scoped under each. Both surfaces double
-      as pickers.
+      Cross-cutting people utilities — e.g. the position typeahead
+      (`GET /positions:search`) backing the free-text position field used by
+      employee placement (E3). Position is free-text, not a master entity.
   - name: master-data
     description: |
       Operational master data — leave types, attendance codes, overtime rules
@@ -115,10 +116,6 @@ paths:
           description: Multi-value status filter (CONVENTIONS §9).
           schema: { type: string, example: "ACTIVE,INACTIVE" }
         - in: query
-          name: service_line
-          description: Filter by current placement's service line ID.
-          schema: { $ref: '#/components/schemas/ServiceLineId' }
-        - in: query
           name: client_company
           description: Filter by current placement's client company ID.
           schema: { $ref: '#/components/schemas/ClientCompanyId' }
@@ -161,12 +158,7 @@ paths:
                         join_at: "2024-03-15"
                         phone: "+62-812-3344-5566"
                         status: ACTIVE
-                        current_position:
-                          id: SWP-POS-014
-                          name: Petugas Parkir
-                        current_service_line:
-                          id: SWP-SVC-003
-                          name: Parking
+                        current_position: Petugas Parkir
                         current_client_company:
                           id: SWP-CMP-101
                           name: Plaza Senayan
@@ -178,12 +170,7 @@ paths:
                         join_at: "2023-11-01"
                         phone: "+62-812-5566-7788"
                         status: ACTIVE
-                        current_position:
-                          id: SWP-POS-015
-                          name: Koordinator Lokasi
-                        current_service_line:
-                          id: SWP-SVC-003
-                          name: Parking
+                        current_position: Koordinator Lokasi
                         current_client_company:
                           id: SWP-CMP-101
                           name: Plaza Senayan
@@ -341,12 +328,7 @@ paths:
                     address: "Jl. Mawar 23, Jakarta Selatan"
                     status: ACTIVE
                     user_id: SWP-USR-1042
-                    current_position:
-                      id: SWP-POS-014
-                      name: Petugas Parkir
-                    current_service_line:
-                      id: SWP-SVC-003
-                      name: Parking
+                    current_position: Petugas Parkir
                     current_client_company:
                       id: SWP-CMP-101
                       name: Plaza Senayan
@@ -1448,9 +1430,8 @@ paths:
       summary: List client companies (also serves as ClientCompany picker)
       description: |
         Doubles as the ClientCompany picker per §18. Supports filters by
-        active service line presence, status, and whether a shift leader is
-        already assigned (`has_leader`) — the unassigned-company picker is
-        used by E3 leader-assignment.
+        status and whether a shift leader is already assigned (`has_leader`) —
+        the unassigned-company picker is used by E3 leader-assignment.
       x-rbac:
         roles: [hr_admin, super_admin, shift_leader]
         scope: company_or_global
@@ -1467,10 +1448,6 @@ paths:
           schema:
             type: string
             enum: [ACTIVE, INACTIVE]
-        - in: query
-          name: service_line
-          description: Filter to companies with active placements in this service line.
-          schema: { $ref: '#/components/schemas/ServiceLineId' }
         - in: query
           name: has_leader
           description: |
@@ -1940,355 +1917,55 @@ paths:
                       request_id: req_01J5XLB3
 
   # =====================================================================
-  # SERVICE LINES & POSITIONS (F2.4)
+  # POSITION TYPEAHEAD (free-text)
   # =====================================================================
 
-  /service-lines:
+  /positions:search:
     get:
-      operationId: listServiceLines
-      tags: [service-lines-positions]
-      summary: List service lines (also serves as ServiceLine picker)
+      operationId: searchPositions
+      tags: [people]
+      summary: Position typeahead — distinct existing position strings
       description: |
-        Returns all service lines (3 seeded — Facility Services, Building
-        Management, Parking — plus any admin-added). Doubles as the picker
-        per §18.
+        Position is **free-text** (no master entity, no FK, no ID). This
+        endpoint backs the position typeahead on the placement create/transfer
+        forms (E3): given a query `q`, it returns the **distinct** existing
+        position strings (case-insensitive substring match) already recorded
+        across placements, so admins can reuse a consistent label or type a new
+        one. There is no create/update/delete — values are persisted as the
+        free-text `position` on the placement (E3).
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
-        scope: global
-      x-design-screens: []  # AUDIT BLOCKER: F2.4 screens entirely missing
+        roles: [hr_admin, super_admin, shift_leader]
+        scope: company_or_global
       parameters:
-        - { $ref: '#/components/parameters/Limit' }
         - in: query
-          name: status
-          schema:
-            type: string
-            enum: [ACTIVE, INACTIVE]
-      responses:
-        '200':
-          description: Page of service lines.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/PageEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: '#/components/schemas/ServiceLine' }
-              examples:
-                seeded:
-                  value:
-                    data:
-                      - id: SWP-SVC-001
-                        name: Facility Services
-                        status: ACTIVE
-                        position_count: 8
-                      - id: SWP-SVC-002
-                        name: Building Management
-                        status: ACTIVE
-                        position_count: 6
-                      - id: SWP-SVC-003
-                        name: Parking
-                        status: ACTIVE
-                        position_count: 4
-                    next_cursor: null
-                    has_more: false
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      operationId: createServiceLine
-      tags: [service-lines-positions]
-      summary: Create a service line, optionally with its positions (SP-1 admin-extendable)
-      description: |
-        Per SP-1, the 3 seeded service lines are admin-extendable but cannot
-        be deleted while referenced. Names are unique.
-
-        The body MAY include an initial `positions` array. When present, the
-        service line and all its positions are created in a single atomic
-        transaction (all-or-nothing): if any position is invalid or duplicates
-        another (within the batch or an existing one), nothing is persisted.
-        Position names are unique within the line (SP-3).
-      x-rbac:
-        roles: [super_admin]
-        scope: global
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ServiceLineCreateRequest' }
-            examples:
-              new_line:
-                value:
-                  name: Security Services
-              new_line_with_positions:
-                value:
-                  name: Parking
-                  positions:
-                    - { name: Petugas Parkir, alias: Parking Attendant }
-                    - { name: Supervisor Parkir, alias: Parking Supervisor }
-      responses:
-        '201':
-          description: Created.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ServiceLine' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409':
+          name: q
           description: |
-            Duplicate service-line name (`CONFLICT`), or a provided position
-            duplicates another within the line (`POSITION_IN_USE`). The whole
-            create is rolled back.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /service-lines/{service_line_id}:
-    parameters:
-      - { $ref: '#/components/parameters/ServiceLineIdPath' }
-    get:
-      operationId: getServiceLine
-      tags: [service-lines-positions]
-      summary: Get a service line
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
-        scope: global
-      responses:
-        '200':
-          description: Service line detail.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ServiceLine' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    patch:
-      operationId: updateServiceLine
-      tags: [service-lines-positions]
-      summary: Rename a service line
-      x-rbac:
-        roles: [super_admin]
-        scope: global
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ServiceLineWriteRequest' }
-      responses:
-        '200':
-          description: Updated.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ServiceLine' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Duplicate name.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /service-lines/{service_line_id}:discontinue:
-    parameters:
-      - { $ref: '#/components/parameters/ServiceLineIdPath' }
-    post:
-      operationId: discontinueServiceLine
-      tags: [service-lines-positions]
-      summary: Discontinue (soft-delete) a service line (SP-1)
-      description: |
-        Soft-deactivation only (status → `INACTIVE`); hard-delete forbidden
-        when referenced. Returns `SERVICE_LINE_IN_USE` (409) if any active
-        placement / position / overtime-rule references it.
-      x-rbac:
-        roles: [super_admin]
-        scope: global
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      responses:
-        '200':
-          description: Discontinued.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ServiceLine' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Referenced by active placements/positions.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                in_use:
-                  value:
-                    error:
-                      code: SERVICE_LINE_IN_USE
-                      message: "Service line 'Parking' masih dipakai 42 penempatan aktif."
-                      request_id: req_01J5XLC4
-
-  /service-lines/{service_line_id}/positions:
-    parameters:
-      - { $ref: '#/components/parameters/ServiceLineIdPath' }
-    get:
-      operationId: listPositionsInServiceLine
-      tags: [service-lines-positions]
-      summary: List positions in a service line (also Position picker)
-      description: |
-        Returns positions scoped under one service line (SP-2). Doubles as
-        the Position picker used by E3 placement creation (filtered by the
-        placement's service_line).
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
-        scope: global
-      parameters:
+            Substring to match against existing position strings
+            (case-insensitive). Omit to get the most common positions.
+          schema: { type: string }
         - { $ref: '#/components/parameters/Limit' }
-        - { $ref: '#/components/parameters/Cursor' }
-        - in: query
-          name: status
-          schema:
-            type: string
-            enum: [ACTIVE, INACTIVE]
       responses:
         '200':
-          description: Page of positions.
+          description: Distinct matching position strings.
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/PageEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: '#/components/schemas/Position' }
+                type: object
+                required: [positions]
+                properties:
+                  positions:
+                    type: array
+                    items: { type: string }
               examples:
-                parking_positions:
+                parking_match:
                   value:
-                    data:
-                      - id: SWP-POS-014
-                        service_line_id: SWP-SVC-003
-                        name: Petugas Parkir
-                        alias: Parking Attendant
-                        status: ACTIVE
-                      - id: SWP-POS-015
-                        service_line_id: SWP-SVC-003
-                        name: Koordinator Lokasi
-                        alias: Parking Supervisor
-                        status: ACTIVE
-                    next_cursor: null
-                    has_more: false
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-    post:
-      operationId: createPosition
-      tags: [service-lines-positions]
-      summary: Create a position under a service line (SP-2/SP-3)
-      description: |
-        Creates a position scoped to one service line. The pair
-        `(service_line_id, name)` is unique (SP-3) — duplicate returns
-        `POSITION_IN_USE` (409 — same code is reused for line+name
-        collisions and for soft-delete-with-references).
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PositionWriteRequest' }
-            examples:
-              petugas_parkir:
-                value:
-                  name: Petugas Parkir
-                  alias: Parking Attendant
-      responses:
-        '201':
-          description: Created.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Position' }
+                    positions:
+                      - Petugas Parkir
+                      - Koordinator Lokasi
+                      - Supervisor Parkir
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Duplicate position name within this service line.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /positions/{position_id}:
-    parameters:
-      - { $ref: '#/components/parameters/PositionIdPath' }
-    patch:
-      operationId: updatePosition
-      tags: [service-lines-positions]
-      summary: Update a position (name / alias / status)
-      description: |
-        Note: **reassigning a position to a different service line is
-        discouraged/blocked** if it has active references (C-4). Create a
-        new position under the target line instead.
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/PositionWriteRequest' }
-      responses:
-        '200':
-          description: Updated.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Position' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Duplicate position name within its service line.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-    delete:
-      operationId: softDeletePosition
-      tags: [service-lines-positions]
-      summary: Soft-delete a position (SP-4)
-      description: |
-        Soft-delete only — sets `status=INACTIVE`. Returns `POSITION_IN_USE`
-        (409) if active placements still reference it; existing placements
-        retain their position reference (C-2). HR may instead just deactivate.
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      responses:
-        '204':
-          description: Soft-deleted.
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Referenced by active placements.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                position_used:
-                  value:
-                    error:
-                      code: POSITION_IN_USE
-                      message: "Posisi 'Petugas Parkir' masih dipakai 22 penempatan aktif."
-                      request_id: req_01J5XLD5
 
   # =====================================================================
   # OPERATIONAL MASTER DATA (F2.5)
@@ -2621,17 +2298,14 @@ paths:
       tags: [master-data]
       summary: List overtime rules (also serves as OvertimeRule picker)
       description: |
-        Returns the OT rules consumed by E7. Rules may be scoped to a
-        service line or global (OR-1/OR-2).
+        Returns the OT rules consumed by E7. Rules are **global only**
+        (OR-1) — there is no service-line scope.
       x-rbac:
         roles: [hr_admin, super_admin, shift_leader]
         scope: global
       x-design-screens: []  # AUDIT BLOCKER
       parameters:
         - { $ref: '#/components/parameters/Limit' }
-        - in: query
-          name: service_line
-          schema: { $ref: '#/components/schemas/ServiceLineId' }
         - in: query
           name: status
           schema:
@@ -2656,7 +2330,6 @@ paths:
                     data:
                       - id: SWP-OTR-001
                         name: Default OT
-                        service_line_id: null
                         weekday_rate: 1.5
                         restday_rate: 2.0
                         holiday_rate: 3.0
@@ -2688,7 +2361,6 @@ paths:
               parking_night:
                 value:
                   name: Parking Night OT
-                  service_line_id: SWP-SVC-003
                   weekday_rate: 1.5
                   restday_rate: 2.0
                   holiday_rate: 3.0
@@ -2831,16 +2503,6 @@ components:
       name: site_id
       required: true
       schema: { $ref: '#/components/schemas/SiteId' }
-    ServiceLineIdPath:
-      in: path
-      name: service_line_id
-      required: true
-      schema: { $ref: '#/components/schemas/ServiceLineId' }
-    PositionIdPath:
-      in: path
-      name: position_id
-      required: true
-      schema: { $ref: '#/components/schemas/PositionId' }
 
   responses:
     BadRequest:
@@ -3025,14 +2687,6 @@ components:
       type: string
       pattern: '^SWP-SITE-\d+$'
       example: SWP-SITE-501
-    ServiceLineId:
-      type: string
-      pattern: '^SWP-SVC-\d+$'
-      example: SWP-SVC-003
-    PositionId:
-      type: string
-      pattern: '^SWP-POS-\d+$'
-      example: SWP-POS-014
     LeaveTypeId:
       type: string
       pattern: '^SWP-LT-\d+$'
@@ -3169,18 +2823,12 @@ components:
             reads. The agent must rotate it on first login (see
             `must_change_password` on the login response).
         current_position:
-          type: object
+          type: string
           nullable: true
-          description: Picker summary of the agent's current placement (E3 read).
-          properties:
-            id: { $ref: '#/components/schemas/PositionId' }
-            name: { type: string }
-        current_service_line:
-          type: object
-          nullable: true
-          properties:
-            id: { $ref: '#/components/schemas/ServiceLineId' }
-            name: { type: string }
+          description: |
+            Free-text position label from the agent's current placement (E3
+            read). Position is free-text — no master, no FK, no ID.
+          example: Petugas Parkir
         current_client_company:
           type: object
           nullable: true
@@ -3698,82 +3346,6 @@ components:
         pic_name: { type: string }
         phone: { type: string }
 
-    # ---- ServiceLine / Position -----------------------------------------
-
-    ServiceLine:
-      type: object
-      required: [id, name, status]
-      properties:
-        id: { $ref: '#/components/schemas/ServiceLineId' }
-        name:
-          type: string
-          example: Parking
-          description: |
-            Unique. Seeded values: Facility Services, Building Management,
-            Parking (SP-1).
-        status:
-          type: string
-          enum: [ACTIVE, INACTIVE]
-        position_count:
-          type: integer
-          readOnly: true
-          description: Cached count of active positions in this service line.
-
-    ServiceLineWriteRequest:
-      type: object
-      required: [name]
-      properties:
-        name: { type: string, maxLength: 100 }
-
-    ServiceLineCreateRequest:
-      type: object
-      required: [name]
-      description: |
-        POST /service-lines body. Extends the rename body with an optional
-        initial `positions` array created atomically with the line (SP-3).
-      properties:
-        name: { type: string, maxLength: 100 }
-        positions:
-          type: array
-          description: |
-            Optional initial positions, created in the same transaction as the
-            line (all-or-nothing). Names must be unique within the line.
-          items: { $ref: '#/components/schemas/ServiceLinePositionInput' }
-
-    ServiceLinePositionInput:
-      type: object
-      required: [name]
-      properties:
-        name: { type: string, maxLength: 100 }
-        alias: { type: string, maxLength: 100 }
-
-    Position:
-      type: object
-      required: [id, service_line_id, name, status]
-      properties:
-        id: { $ref: '#/components/schemas/PositionId' }
-        service_line_id: { $ref: '#/components/schemas/ServiceLineId' }
-        name:
-          type: string
-          example: Petugas Parkir
-          description: Unique within its service line (SP-3).
-        alias:
-          type: string
-          description: English label / alternative name.
-          example: Parking Attendant
-        status:
-          type: string
-          enum: [ACTIVE, INACTIVE]
-
-    PositionWriteRequest:
-      type: object
-      properties:
-        name: { type: string, maxLength: 100 }
-        alias: { type: string, maxLength: 100 }
-        status:
-          type: string
-          enum: [ACTIVE, INACTIVE]
-
     # ---- Operational master data ----------------------------------------
 
     LeaveType:
@@ -3877,12 +3449,6 @@ components:
           type: string
           example: Default OT
           description: Unique (MD-2).
-        service_line_id:
-          allOf: [{ $ref: '#/components/schemas/ServiceLineId' }]
-          nullable: true
-          description: |
-            Optional scope. `null` = global default; otherwise restricted to
-            that service line (OR-2). When both apply, line-scoped wins (C-4).
         weekday_rate:
           type: number
           format: float
@@ -3921,9 +3487,6 @@ components:
       type: object
       properties:
         name: { type: string, maxLength: 100 }
-        service_line_id:
-          allOf: [{ $ref: '#/components/schemas/ServiceLineId' }]
-          nullable: true
         weekday_rate: { type: number, format: float }
         restday_rate: { type: number, format: float }
         holiday_rate: { type: number, format: float }

@@ -62,8 +62,7 @@ type CreatePlacementParams struct {
 	AgreementID     *string
 	ClientCompanyID string
 	SiteID          string
-	ServiceLineID   string
-	PositionID      string
+	Position        string // free-text position label
 	StartDate       time.Time
 	EndDate         *time.Time
 	Notes           *string
@@ -75,10 +74,10 @@ type CreatePlacementParams struct {
 
 // UpdatePlacementParams carries the limited-field PATCH columns.
 type UpdatePlacementParams struct {
-	ID         string
-	PositionID string
-	EndDate    *time.Time
-	Notes      *string
+	ID       string
+	Position string // free-text position label
+	EndDate  *time.Time
+	Notes    *string
 }
 
 // SetAgreementParams carries the backfill of an agreement onto a pending placement.
@@ -118,6 +117,7 @@ type PlacementRepository interface {
 	ListPlacements(ctx context.Context, f domain.PlacementFilter) ([]domain.Placement, error)
 	ListExpiringPlacements(ctx context.Context, f domain.ExpiringFilter) ([]domain.Placement, error)
 	PlacementStats(ctx context.Context, companyID *string) (domain.PlacementStats, error)
+	SearchPositions(ctx context.Context, pattern string) ([]string, error)
 	GetPlacementByID(ctx context.Context, id string) (domain.Placement, error)
 	GetPlacementChain(ctx context.Context, id string) ([]domain.Placement, error)
 	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (domain.Placement, error)
@@ -193,8 +193,7 @@ type PlacementSummary struct {
 	EmployeeID        string  `json:"employee_id"`
 	ClientCompanyID   string  `json:"client_company_id"`
 	ClientCompanyName *string `json:"client_company_name,omitempty"`
-	ServiceLineID     string  `json:"service_line_id"`
-	ServiceLineName   *string `json:"service_line_name,omitempty"`
+	Position          string  `json:"position"`
 	LifecycleStatus   string  `json:"lifecycle_status"`
 	StartDate         string  `json:"start_date"`
 	EndDate           *string `json:"end_date"`
@@ -232,8 +231,7 @@ func toPlacementSummary(p domain.Placement) PlacementSummary {
 		EmployeeID:        p.EmployeeID,
 		ClientCompanyID:   p.ClientCompanyID,
 		ClientCompanyName: p.ClientCompanyName,
-		ServiceLineID:     p.ServiceLineID,
-		ServiceLineName:   p.ServiceLineName,
+		Position:          p.Position,
 		LifecycleStatus:   p.LifecycleStatus,
 		StartDate:         p.StartDate.Format("2006-01-02"),
 	}
@@ -324,6 +322,22 @@ func (s *PlacementService) PlacementStats(ctx context.Context, companyID *string
 		return domain.PlacementStats{}, apperr.Internal(err)
 	}
 	return stats, nil
+}
+
+// SearchPositions backs GET /positions:search — the free-text position typeahead.
+// Returns the distinct existing position labels matching q (case-insensitive
+// substring); empty q returns every label. No master / FK / ID. The '%'..'%'
+// wrapping is built here so the SQL stays a plain ILIKE bind.
+func (s *PlacementService) SearchPositions(ctx context.Context, q string) ([]string, error) {
+	pattern := "%" + strings.TrimSpace(q) + "%"
+	rows, err := s.repo.SearchPositions(ctx, pattern)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	if rows == nil {
+		rows = []string{}
+	}
+	return rows, nil
 }
 
 // PlacementDetail bundles a placement with its chain + current leader.
@@ -613,8 +627,8 @@ func (s *PlacementService) UpdatePlacement(ctx context.Context, p UpdatePlacemen
 	}
 
 	// Default unset fields to current values (PATCH semantics).
-	if p.PositionID == "" {
-		p.PositionID = cur.PositionID
+	if p.Position == "" {
+		p.Position = cur.Position
 	}
 
 	var updated domain.Placement
@@ -636,8 +650,8 @@ func (s *PlacementService) UpdatePlacement(ctx context.Context, p UpdatePlacemen
 			Action:     audit.Action("placement.update"),
 			EntityType: "placement",
 			EntityID:   updated.ID,
-			Before:     map[string]any{"position_id": cur.PositionID},
-			After:      map[string]any{"position_id": updated.PositionID},
+			Before:     map[string]any{"position": cur.Position},
+			After:      map[string]any{"position": updated.Position},
 		})
 	}); err != nil {
 		return domain.Placement{}, asAppErr(err)
@@ -798,8 +812,7 @@ func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placeme
 type TransferParams struct {
 	ID                 string
 	NewClientCompanyID string
-	NewServiceLineID   string
-	NewPositionID      string
+	NewPosition        string // free-text destination position label
 	NewStartDate       time.Time
 	NewEndDate         *time.Time
 	NewAgreementID     *string
@@ -833,9 +846,10 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
 		return TransferResult{}, serr
 	}
-	// TR-1: must be an actual change.
-	if p.NewClientCompanyID == cur.ClientCompanyID && p.NewServiceLineID == cur.ServiceLineID {
-		return TransferResult{}, apperr.Rule("RULE_VIOLATION", map[string]string{"new_service_line_id": "Transfer harus mengubah perusahaan atau lini layanan. Gunakan :renew."})
+	// TR-1: a transfer must move the agent to a different company. A same-company
+	// position change is a :renew, not a :transfer (service_line dropped 2026-06-12).
+	if p.NewClientCompanyID == cur.ClientCompanyID {
+		return TransferResult{}, apperr.Rule("RULE_VIOLATION", map[string]string{"new_client_company_id": "Transfer harus mengubah perusahaan. Gunakan :renew untuk perubahan posisi di perusahaan yang sama."})
 	}
 	// Destination company ACTIVE.
 	destCompany, err := s.repo.GetClientCompany(ctx, p.NewClientCompanyID)
@@ -861,21 +875,14 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 	if p.NewAgreementID != nil && *p.NewAgreementID != "" {
 		agreementID = p.NewAgreementID
 	}
-	// Destination site defaults to the source site if same company, else use
-	// the source site only when company unchanged; otherwise the successor must
-	// target a site of the destination company — fall back to the source site
-	// when the company did not change (service-line-only transfer).
+	// A transfer always crosses companies (TR-1), so the successor needs a site of
+	// the destination company. The FE transfer modal does not collect a site; reuse
+	// the source site id only when it happens to belong to the destination company,
+	// otherwise keep the source site as a best-effort default (resolved properly
+	// once a destination-site query exists).
 	siteID := cur.SiteID
-	if p.NewClientCompanyID != cur.ClientCompanyID {
-		// Service-only transfers keep the company; cross-company transfers need a
-		// destination site. The FE transfer modal does not collect a site, so we
-		// reuse the source site id only when the company is unchanged. For a real
-		// cross-company move the destination company's primary site should be
-		// resolved; absent a query, validate the source site belongs to the dest.
-		site, serr := s.repo.GetSite(ctx, cur.SiteID)
-		if serr == nil && site.ClientCompanyID == p.NewClientCompanyID {
-			siteID = cur.SiteID
-		}
+	if site, serr := s.repo.GetSite(ctx, cur.SiteID); serr == nil && site.ClientCompanyID == p.NewClientCompanyID {
+		siteID = cur.SiteID
 	}
 
 	today := s.today()
@@ -908,8 +915,7 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 			AgreementID:     agreementID,
 			ClientCompanyID: p.NewClientCompanyID,
 			SiteID:          siteID,
-			ServiceLineID:   p.NewServiceLineID,
-			PositionID:      p.NewPositionID,
+			Position:        p.NewPosition,
 			StartDate:       p.NewStartDate,
 			EndDate:         p.NewEndDate,
 			Notes:           notesPtr,
@@ -984,7 +990,7 @@ type RenewParams struct {
 	NewStartDate   time.Time
 	NewEndDate     *time.Time
 	NewAgreementID *string
-	NewPositionID  *string
+	NewPosition    *string // free-text; nil/"" keeps the predecessor's position
 	Notes          *string
 	ActorUserID    *string
 }
@@ -997,7 +1003,7 @@ type RenewResult struct {
 }
 
 // RenewPlacement supersedes the predecessor (releasing the partial unique index)
-// then creates the successor — same company/service_line/position by default.
+// then creates the successor — same company + position by default.
 func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (RenewResult, error) {
 	cur, err := s.repo.GetPlacementByID(ctx, p.ID)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -1035,9 +1041,9 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 	if p.NewAgreementID != nil && *p.NewAgreementID != "" {
 		agreementID = p.NewAgreementID
 	}
-	positionID := cur.PositionID
-	if p.NewPositionID != nil && *p.NewPositionID != "" {
-		positionID = *p.NewPositionID
+	position := cur.Position
+	if p.NewPosition != nil && *p.NewPosition != "" {
+		position = *p.NewPosition
 	}
 
 	// PKWT auto-cap on new_end_date — ONLY when an agreement is present.
@@ -1078,8 +1084,7 @@ func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (R
 			AgreementID:     agreementID,
 			ClientCompanyID: cur.ClientCompanyID,
 			SiteID:          cur.SiteID,
-			ServiceLineID:   cur.ServiceLineID,
-			PositionID:      positionID,
+			Position:        position,
 			StartDate:       p.NewStartDate,
 			EndDate:         endDate,
 			Notes:           p.Notes,

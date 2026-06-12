@@ -28,7 +28,6 @@ import {
   LeaderDashboardRole,
   LeaderDashboardScheduleAlertsItemKind,
   type SuperAdminWidgets,
-  SuperAdminWidgetsOrgRollupsItemServiceLine,
   useGetMyDashboard,
 } from '@swp/api-client/e10';
 import { EmptyState, SkeletonCard, StatCard, StateView } from '@swp/ui';
@@ -134,14 +133,6 @@ function formatJakartaShort(iso: string): string {
 function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
   const { t } = useTranslation('dashboard');
 
-  const serviceLineLabel = (sl: SuperAdminWidgetsOrgRollupsItemServiceLine): string => {
-    if (sl === SuperAdminWidgetsOrgRollupsItemServiceLine.FACILITY)
-      return t('admin.orgRollups.FACILITY');
-    if (sl === SuperAdminWidgetsOrgRollupsItemServiceLine.BUILDING)
-      return t('admin.orgRollups.BUILDING');
-    return t('admin.orgRollups.PARKING');
-  };
-
   return (
     <div className="flex flex-col gap-4">
       {/* Section header */}
@@ -230,7 +221,7 @@ function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
           )}
         </div>
 
-        {/* Widget 3 — Rekap per Lini Layanan (org_rollups) */}
+        {/* Widget 3 — Rekap per Posisi (org_rollups, grouped by free-text position) */}
         <div className="flex flex-col gap-[14px] rounded-xl border border-border bg-surface p-[18px]">
           <div className="flex items-center gap-2">
             <Building2 aria-hidden className="size-4 text-text-3" />
@@ -243,7 +234,7 @@ function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
               <thead>
                 <tr className="border-b border-border-soft">
                   <th className="pb-[8px] text-left text-[11px] font-semibold uppercase tracking-wide text-text-3">
-                    {t('admin.orgRollups.colServiceLine')}
+                    {t('admin.orgRollups.colPosition')}
                   </th>
                   <th className="pb-[8px] text-right text-[11px] font-semibold uppercase tracking-wide text-text-3">
                     {t('admin.orgRollups.colHeadcount')}
@@ -255,10 +246,8 @@ function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
               </thead>
               <tbody className="divide-y divide-border-soft">
                 {admin.org_rollups.map((row) => (
-                  <tr key={row.service_line}>
-                    <td className="py-[10px] font-medium text-text">
-                      {serviceLineLabel(row.service_line)}
-                    </td>
+                  <tr key={row.position}>
+                    <td className="py-[10px] font-medium text-text">{row.position}</td>
                     <td className="py-[10px] text-right tabular-nums text-text-2">
                       {row.headcount}
                     </td>

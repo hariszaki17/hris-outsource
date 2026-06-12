@@ -319,8 +319,12 @@ export function AttendanceDetailScreen({ attendanceId }: AttendanceDetailScreenP
               <span className="text-[12px] text-text-2">
                 {record.company_name ?? record.company_id}
               </span>
-              <span className="text-text-3">·</span>
-              <span className="text-[12px] text-text-2">{record.service_line}</span>
+              {record.position && (
+                <>
+                  <span className="text-text-3">·</span>
+                  <span className="text-[12px] text-text-2">{record.position}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

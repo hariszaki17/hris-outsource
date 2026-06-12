@@ -27,7 +27,6 @@ Track overtime hours for placed agents: agents/leaders can **pre-request** OT, a
 
 ```mermaid
 erDiagram
-    SERVICE_LINE ||--o{ OVERTIME_RULE : "scopes (optional)"
     EMPLOYEE ||--o{ OVERTIME_RECORD : "works"
     PLACEMENT ||--o{ OVERTIME_RECORD : "under"
     ATTENDANCE ||--o| OVERTIME_RECORD : "auto-detected from"
@@ -36,7 +35,6 @@ erDiagram
     OVERTIME_RULE {
         bigint id PK
         string name
-        bigint service_line_id FK "null = global"
         string day_type "Workday|RestDay|Holiday"
         decimal multiplier "reference only (no pay calc v1)"
         int min_minutes
@@ -104,14 +102,13 @@ Both flagged as open items (§7).
 
 ### F7.1 — Overtime Rules (day-type tiers)
 
-Admin-defined rules with **tiered multipliers by day type** (workday / rest day / holiday), optionally scoped per service line, plus a minimum-duration threshold and a pre-approval flag. Multipliers are stored as **reference** (future payroll); v1 records hours.
+Admin-defined rules with **tiered multipliers by day type** (workday / rest day / holiday) — **global only** (one rule per day type), plus a minimum-duration threshold and a pre-approval flag. Multipliers are stored as **reference** (future payroll); v1 records hours.
 
 ```mermaid
 flowchart TD
     subgraph Admin[Super Admin / HR]
         A1([Define OT rule]) --> A2[Day type + multiplier ref + min minutes + preapproval]
-        A2 --> A3[Optional service-line scope]
-        A3 --> A4[Save]
+        A2 --> A4[Save]
     end
     subgraph SYS[System]
         A4 --> S1{Valid? multiplier>0, min>=0}
@@ -121,7 +118,7 @@ flowchart TD
     end
 ```
 
-**Entities:** `OvertimeRule`. **Depends on:** E2 (service line), holiday calendar (§6b).
+**Entities:** `OvertimeRule`. **Depends on:** holiday calendar (§6b).
 
 ---
 
@@ -181,7 +178,7 @@ flowchart TD
 
 ### F7.4 — Overtime Records & Reporting
 
-Approved OT recorded as **hours by day-type tier**, viewable per agent (mobile) and aggregated per company/service line/period for HR — feeding future payroll (E8) and client billing/reporting (E10).
+Approved OT recorded as **hours by day-type tier**, viewable per agent (mobile) and aggregated per company/position/period for HR — feeding future payroll (E8) and client billing/reporting (E10).
 
 ```mermaid
 flowchart LR
@@ -205,7 +202,7 @@ flowchart LR
 - ✅ **Capture = request + auto-detect** (from verified attendance beyond shift end).
 - ✅ **Hours only** — record OT hours; multipliers stored as reference, **no pay calc** in v1.
 - ✅ **Two-level approval** (shift leader → HR).
-- ✅ **Day-type tiers** (workday / rest day / holiday), optionally per service line.
+- ✅ **Day-type tiers** (workday / rest day / holiday), **global only** (one rule per day type). *(Service-line scoping + precedence dropped 2026-06-12 — service line removed project-wide.)*
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **Public-holiday calendar** = **HR-maintained in-app** master (recurring + one-off); shared with E6 duration counting.

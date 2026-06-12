@@ -14,7 +14,7 @@
  */
 
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
-import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
+import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
@@ -56,7 +56,7 @@ const PAGE_SIZE = 50;
 export type PlacementsSearch = {
   q?: string;
   company_id?: string;
-  service_line_id?: string;
+  position?: string;
   status?: PlacementLifecycleStatus;
   expiring_soon?: boolean;
   awaiting_agreement?: boolean;
@@ -103,10 +103,6 @@ export function PlacementsScreen() {
 
   const expiringOn = Boolean(search.expiring_soon);
 
-  // ShiftLeader can read service lines only via placements.read; they have no
-  // service_lines.read, so the master-data-backed ServiceLinePicker is not shown.
-  const canReadServiceLines = currentUser?.permissions.includes('service_lines.read') ?? false;
-
   // For SL the company filter is server-pinned to currentUser.companyId; client
   // reflects it (locked control) and pins the param so the cache key is stable.
   const slCompanyId = isShiftLeader ? (currentUser?.companyId ?? undefined) : undefined;
@@ -119,7 +115,7 @@ export function PlacementsScreen() {
     limit: PAGE_SIZE,
     q: search.q || undefined,
     company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
-    service_line_id: search.service_line_id || undefined,
+    position: search.position || undefined,
     status: search.status || undefined,
     awaiting_agreement: search.awaiting_agreement || undefined,
     cursor: search.cursor,
@@ -153,11 +149,7 @@ export function PlacementsScreen() {
   const rows = (page?.data ?? []) as Placement[];
 
   const hasFilters = Boolean(
-    search.q ||
-      search.company_id ||
-      search.service_line_id ||
-      search.status ||
-      search.awaiting_agreement,
+    search.q || search.company_id || search.position || search.status || search.awaiting_agreement,
   );
 
   // ---------------------------------------------------------------------------
@@ -198,26 +190,12 @@ export function PlacementsScreen() {
       ),
     },
     {
-      id: 'liniLayanan',
-      header: t('colLiniLayanan'),
-      width: undefined,
-      cell: (pl) =>
-        pl.service_line_name ? (
-          <div className="flex items-center gap-[7px]">
-            <span className="size-[7px] rounded-full bg-info-tx shrink-0" aria-hidden />
-            <span className="whitespace-nowrap text-[13px] text-text-2">
-              {pl.service_line_name}
-            </span>
-          </div>
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
-    },
-    {
       id: 'posisi',
       header: t('colPosisi'),
-      width: 175,
-      cell: (pl) => <span className="text-[13px] text-text-2">{pl.position_name ?? '—'}</span>,
+      width: undefined,
+      cell: (pl) => (
+        <span className="text-[13px] text-text-2">{pl.position_name ?? pl.position ?? '—'}</span>
+      ),
     },
     {
       id: 'periode',
@@ -381,17 +359,15 @@ export function PlacementsScreen() {
                 />
               </div>
             )}
-            {/* ServiceLinePicker as filter — only when the role can read the
-                service-lines master endpoint (SL lacks service_lines.read). */}
-            {canReadServiceLines && (
-              <div className="w-[240px]">
-                <ServiceLinePicker
-                  value={search.service_line_id ?? null}
-                  onChange={(v) => setSearch({ service_line_id: v ?? undefined })}
-                  placeholder={t('filterServiceLine')}
-                />
-              </div>
-            )}
+            {/* Position filter — free-text typeahead over DISTINCT existing
+                values (no master, no service-line gating). */}
+            <div className="w-[240px]">
+              <PositionPicker
+                value={search.position ?? null}
+                onChange={(v) => setSearch({ position: v ?? undefined })}
+                placeholder={t('filterPosition')}
+              />
+            </div>
           </div>
           <div className="flex items-center gap-[16px]">
             {/* Awaiting-agreement toggle — drives the awaiting_agreement query filter

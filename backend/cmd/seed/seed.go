@@ -220,16 +220,6 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	}
 
 	// -----------------------------------------------------------------------
-	// Phase 3 (03-03): Seed service lines + Parking positions.
-	// 3 canonical service lines (SWP-SVC-001/002/003) with explicit IDs so E2E
-	// tests can reference deterministic IDs. Parking gets 2 seeded positions
-	// (SWP-POS-014, SWP-POS-015) per the OpenAPI spec examples.
-	// -----------------------------------------------------------------------
-	if err := seedServiceLines(ctx, pool); err != nil {
-		return fmt.Errorf("seed service_lines: %w", err)
-	}
-
-	// -----------------------------------------------------------------------
 	// Phase 3 (03-04): Seed operational master data.
 	// Canonical leave types, attendance codes, and default overtime rule so the
 	// E2 master-data screens have content on first load.
@@ -262,9 +252,9 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 
 	// -----------------------------------------------------------------------
 	// Phase 5 (05-02): Seed placements + shift-leader assignment (E3).
-	// FK: placements → employees / agreements / client_companies / client_sites /
-	// service_lines / positions (must run AFTER seedAgreements + seedServiceLines +
-	// seedClientCompanies). Adds the persona agreements that were missing first.
+	// FK: placements → employees / agreements / client_companies / client_sites
+	// (must run AFTER seedAgreements + seedClientCompanies). Position is now
+	// free-text (no master/FK). Adds the persona agreements that were missing first.
 	// -----------------------------------------------------------------------
 	if err := seedPlacements(ctx, pool); err != nil {
 		return fmt.Errorf("seed placements: %w", err)
@@ -440,8 +430,8 @@ func seedHolidays(ctx context.Context, pool *db.Pool) error {
 	hol2 := monday.AddDate(0, 0, 21).Format("2006-01-02")  // free to delete
 
 	const hQ = `
-		INSERT INTO holidays (id, name, holiday_date, category, recurring, applicable_service_lines)
-		VALUES ($1, $2, $3::date, 'NATIONAL', false, '{}')
+		INSERT INTO holidays (id, name, holiday_date, category, recurring)
+		VALUES ($1, $2, $3::date, 'NATIONAL', false)
 		ON CONFLICT (id) DO NOTHING`
 	holidays := []struct {
 		id, name, date string
@@ -476,22 +466,21 @@ func seedHolidays(ctx context.Context, pool *db.Pool) error {
 func seedOvertime(ctx context.Context, pool *db.Pool) error {
 	monday := mondayOfCurrentWeek(time.Now())
 	d := func(off int) string { return monday.AddDate(0, 0, off).Format("2006-01-02") }
-	parking := "SWP-SVC-003"
 	rule := "SWP-OTR-001"
 	hol1 := "SWP-HOL-9001"
 
 	const otQ = `
 		INSERT INTO overtime (
-			id, employee_id, company_id, placement_id, attendance_id, service_line_id,
+			id, employee_id, company_id, placement_id, attendance_id,
 			work_date, planned_start_time, planned_end_time, actual_start_time, actual_end_time,
 			cross_midnight, source, status, day_type, worked_minutes, counted_minutes,
 			min_minutes_threshold, skipped_too_short, reference_multiplier, overtime_rule_id,
 			holiday_id, flagged_no_preapproval, reason, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6,
-			$7::date, $8, $9, $10, $11,
-			$12, $13, $14, $15, $16, $17,
-			30, $18, $19, $20,
-			$21, $22, $23, 'system-seed')
+		VALUES ($1, $2, $3, $4, $5,
+			$6::date, $7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16,
+			30, $17, $18, $19,
+			$20, $21, $22, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	type ot struct {
@@ -533,7 +522,7 @@ func seedOvertime(ctx context.Context, pool *db.Pool) error {
 	}
 	for _, r := range rows {
 		if _, err := pool.Pool.Exec(ctx, otQ,
-			r.id, r.employeeID, r.companyID, r.placementID, r.attendanceID, parking,
+			r.id, r.employeeID, r.companyID, r.placementID, r.attendanceID,
 			r.workDate, nil, nil, r.actualStart, r.actualEnd,
 			false, r.source, r.status, r.dayType, r.worked, r.counted,
 			r.skipped, r.multiplier, rule,
@@ -810,20 +799,18 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	// --- leave_requests (explicit ids; all Pending/terminal targets) ---
 	const lrQ = `
 		INSERT INTO leave_requests
-			(id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+			(id, employee_id, placement_id, company_id, leave_type_id,
 			 start_date, end_date, duration_days, reason, status, no_leader, assigned_leader_id, created_by)
-		VALUES ($1, $2, $3, $4, $5, 'SWP-LT-001',
-			 $6::date, $7::date, $8, $9, $10, $11, $12, 'system-seed')
+		VALUES ($1, $2, $3, $4, 'SWP-LT-001',
+			 $5::date, $6::date, $7, $8, $9, $10, $11, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
-	parking := "SWP-SVC-003"
 	rudi := "SWP-EMP-1108" // shift leader of CMP-0021
 	priorApproved := monday.AddDate(0, 0, -7).Format("2006-01-02")
 	priorRejected := monday.AddDate(0, 0, -5).Format("2006-01-02")
 	budiEnd := monday.AddDate(0, 0, 6).Format("2006-01-02")
 	type lr struct {
 		id, employeeID, placementID, companyID string
-		serviceLine                            *string
 		start, end                             string
 		days                                   int
 		reason, status                         string
@@ -831,17 +818,17 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		assignedLeader                         *string
 	}
 	requests := []lr{
-		{"SWP-LR-8001", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, fri, fri, 1, "Keperluan keluarga.", "PENDING_L1", false, &rudi},
-		{"SWP-LR-8002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, thu, thu, 1, "Kontrol rumah sakit.", "PENDING_HR", false, &rudi},
-		{"SWP-LR-8003", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", &parking, fri, budiEnd, 3, "Acara keluarga 3 hari.", "PENDING_HR", true, nil},
-		{"SWP-LR-8004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", &parking, thu, thu, 1, "Izin pribadi.", "PENDING_L1", false, nil},
-		{"SWP-LR-8005", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, priorApproved, priorApproved, 1, "Cuti yang sudah disetujui.", "APPROVED", false, &rudi},
-		{"SWP-LR-8006", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, priorRejected, priorRejected, 1, "Pengajuan yang ditolak.", "REJECTED", false, &rudi},
-		{"SWP-LR-8007", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", &parking, wed, wed, 1, "Cuti yang menimpa jadwal (INV-3).", "PENDING_HR", false, &rudi},
+		{"SWP-LR-8001", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", fri, fri, 1, "Keperluan keluarga.", "PENDING_L1", false, &rudi},
+		{"SWP-LR-8002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", thu, thu, 1, "Kontrol rumah sakit.", "PENDING_HR", false, &rudi},
+		{"SWP-LR-8003", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", fri, budiEnd, 3, "Acara keluarga 3 hari.", "PENDING_HR", true, nil},
+		{"SWP-LR-8004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", thu, thu, 1, "Izin pribadi.", "PENDING_L1", false, nil},
+		{"SWP-LR-8005", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", priorApproved, priorApproved, 1, "Cuti yang sudah disetujui.", "APPROVED", false, &rudi},
+		{"SWP-LR-8006", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", priorRejected, priorRejected, 1, "Pengajuan yang ditolak.", "REJECTED", false, &rudi},
+		{"SWP-LR-8007", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", wed, wed, 1, "Cuti yang menimpa jadwal (INV-3).", "PENDING_HR", false, &rudi},
 	}
 	for _, r := range requests {
 		if _, err := pool.Pool.Exec(ctx, lrQ,
-			r.id, r.employeeID, r.placementID, r.companyID, r.serviceLine,
+			r.id, r.employeeID, r.placementID, r.companyID,
 			r.start, r.end, r.days, r.reason, r.status, r.noLeader, r.assignedLeader,
 		); err != nil {
 			return fmt.Errorf("seed leave_request %q: %w", r.id, err)
@@ -871,9 +858,9 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	// → one APPROVED back-history request SWP-LR-8009.
 	const lrHistQ = `
 		INSERT INTO leave_requests
-			(id, employee_id, placement_id, company_id, service_line_id, leave_type_id,
+			(id, employee_id, placement_id, company_id, leave_type_id,
 			 start_date, end_date, duration_days, reason, status, no_leader, assigned_leader_id, created_by)
-		VALUES ($1, $2, $3, $4, $5, 'SWP-LT-001', $6::date, $7::date, $8, $9, 'APPROVED', false, $10, 'system-seed')
+		VALUES ($1, $2, $3, $4, 'SWP-LT-001', $5::date, $6::date, $7, $8, 'APPROVED', false, $9, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 	h1s := monday.AddDate(0, 0, -30).Format("2006-01-02")
 	h1e := monday.AddDate(0, 0, -28).Format("2006-01-02")
@@ -889,7 +876,7 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		{"SWP-LR-8009", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", h2s, h2e, 11, nil},
 	}
 	for _, r := range hist {
-		if _, err := pool.Pool.Exec(ctx, lrHistQ, r.id, r.emp, r.pl, r.cmp, &parking, r.start, r.end, r.days, "Cuti historis (backfill saldo).", r.leader); err != nil {
+		if _, err := pool.Pool.Exec(ctx, lrHistQ, r.id, r.emp, r.pl, r.cmp, r.start, r.end, r.days, "Cuti historis (backfill saldo).", r.leader); err != nil {
 			return fmt.Errorf("seed historical leave_request %q: %w", r.id, err)
 		}
 	}
@@ -1279,76 +1266,6 @@ func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
 	return nil
 }
 
-// seedServiceLines inserts the Phase-3 service line + position fixtures.
-// All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
-//
-// Service lines (explicit IDs — deterministic for E2E):
-//   - SWP-SVC-001  "Facility Services"
-//   - SWP-SVC-002  "Building Management"
-//   - SWP-SVC-003  "Parking"
-//
-// Positions under Parking (per OpenAPI spec examples):
-//   - SWP-POS-014  "Petugas Parkir" alias "Parking Attendant"
-//   - SWP-POS-015  "Koordinator Lokasi" alias "Parking Supervisor"
-func seedServiceLines(ctx context.Context, pool *db.Pool) error {
-	type serviceLine struct {
-		id   string
-		name string
-	}
-	lines := []serviceLine{
-		{id: "SWP-SVC-001", name: "Facility Services"},
-		{id: "SWP-SVC-002", name: "Building Management"},
-		{id: "SWP-SVC-003", name: "Parking"},
-	}
-
-	const lineQ = `
-		INSERT INTO service_lines (id, name, status)
-		VALUES ($1, $2, 'active')
-		ON CONFLICT (id) DO NOTHING`
-
-	for _, l := range lines {
-		if _, err := pool.Pool.Exec(ctx, lineQ, l.id, l.name); err != nil {
-			return fmt.Errorf("seed service_line %q: %w", l.id, err)
-		}
-		slog.Info("seed: upserted service line", "id", l.id, "name", l.name)
-	}
-
-	type position struct {
-		id            string
-		serviceLineID string
-		name          string
-		alias         string
-	}
-	positions := []position{
-		{
-			id:            "SWP-POS-014",
-			serviceLineID: "SWP-SVC-003",
-			name:          "Petugas Parkir",
-			alias:         "Parking Attendant",
-		},
-		{
-			id:            "SWP-POS-015",
-			serviceLineID: "SWP-SVC-003",
-			name:          "Koordinator Lokasi",
-			alias:         "Parking Supervisor",
-		},
-	}
-
-	const posQ = `
-		INSERT INTO positions (id, service_line_id, name, alias, status)
-		VALUES ($1, $2, $3, $4, 'active')
-		ON CONFLICT (id) DO NOTHING`
-
-	for _, p := range positions {
-		if _, err := pool.Pool.Exec(ctx, posQ, p.id, p.serviceLineID, p.name, p.alias); err != nil {
-			return fmt.Errorf("seed position %q: %w", p.id, err)
-		}
-		slog.Info("seed: upserted position", "id", p.id, "name", p.name)
-	}
-
-	return nil
-}
-
 // seedAgreements inserts Phase-4 employment-agreement + attachment fixtures.
 // All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
 //
@@ -1427,7 +1344,7 @@ func seedAgreements(ctx context.Context, pool *db.Pool) error {
 //   - SWP-AC-002  code LATE     label "Terlambat"  color #E07A2A  same flags as PRESENT
 //
 // Overtime rules:
-//   - SWP-OTR-001  "Default OT"  service_line_id=NULL  weekday_rate=1.5 restday_rate=2.0 holiday_rate=3.0
+//   - SWP-OTR-001  "Default OT"  (global)  weekday_rate=1.5 restday_rate=2.0 holiday_rate=3.0
 //     min_minutes=30 max_minutes_per_day=240 pre_approval_required=true
 func seedMasterData(ctx context.Context, pool *db.Pool) error {
 	// --- Leave types (SWP "Fitur Ijin" 18-code catalog; per-type ledger,
@@ -1557,12 +1474,12 @@ func seedMasterData(ctx context.Context, pool *db.Pool) error {
 	}
 
 	// --- Overtime rules ---
-	// SWP-OTR-001: global default overtime rule (service_line_id = NULL).
+	// SWP-OTR-001: global default overtime rule (OT rules are global-only now).
 	const otrQ = `
 		INSERT INTO overtime_rules
-			(id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+			(id, name, weekday_rate, restday_rate, holiday_rate,
 			 min_minutes, max_minutes_per_day, pre_approval_required, status)
-		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, 'active')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
 		ON CONFLICT (id) DO NOTHING`
 
 	if _, err := pool.Pool.Exec(ctx, otrQ,
@@ -1666,11 +1583,11 @@ func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
 //   - SWP-AG-7003  ACTIVE PKWT   for Rudi Wijaya (SWP-EMP-1108)
 //   - SWP-AG-7004  ACTIVE PKWT   for Dewi Lestari (SWP-EMP-3001)
 //
-// Placements (lifecycle_status=ACTIVE):
-//   - SWP-PL-5001  Rudi  @ SWP-CMP-0021 / SWP-SITE-0001 / Parking      (he leads where he is placed → INV-2/4 hold)
-//   - SWP-PL-5002  Budi  @ SWP-CMP-0022 / SWP-SITE-0002 / Parking
-//   - SWP-PL-5003  Sari  @ SWP-CMP-0021 / SWP-SITE-0001 / Building Mgmt (open-ended)
-//   - SWP-PL-5004  Dewi  @ SWP-CMP-0021 / SWP-SITE-0001 / Parking      (end_date = today+20d → DTO derives EXPIRING)
+// Placements (lifecycle_status=ACTIVE; position = free-text):
+//   - SWP-PL-5001  Rudi  @ SWP-CMP-0021 / SWP-SITE-0001 / "Petugas Parkir"     (he leads where he is placed → INV-2/4 hold)
+//   - SWP-PL-5002  Budi  @ SWP-CMP-0022 / SWP-SITE-0002 / "Petugas Parkir"
+//   - SWP-PL-5003  Sari  @ SWP-CMP-0021 / SWP-SITE-0001 / "Koordinator Lokasi" (open-ended)
+//   - SWP-PL-5004  Dewi  @ SWP-CMP-0021 / SWP-SITE-0001 / "Petugas Parkir"     (end_date = today+20d → DTO derives EXPIRING)
 //
 // Shift-leader assignment:
 //   - SWP-SLA-3001  Rudi (SWP-EMP-1108) @ SWP-CMP-0021 (company-scope, assigned_by 'system-seed')
@@ -1705,11 +1622,14 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 
 	// Placements. Insert with explicit IDs (the column DEFAULT only fires when id
 	// is omitted; an explicit id is honoured) so E2E targets are deterministic.
+	// Position is now FREE-TEXT (no master/FK) — the old position NAMES are
+	// carried over verbatim (SWP-POS-014 → "Petugas Parkir", SWP-POS-015 →
+	// "Koordinator Lokasi") so the values match prior fixtures.
 	const plQ = `
 		INSERT INTO placements
-			(id, employee_id, agreement_id, client_company_id, site_id, service_line_id,
-			 position_id, start_date, end_date, lifecycle_status, status_changed_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10, now(), 'system-seed')
+			(id, employee_id, agreement_id, client_company_id, site_id,
+			 position, start_date, end_date, lifecycle_status, status_changed_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, now(), 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	today := time.Now()
@@ -1717,21 +1637,21 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 	dewiStart := today.AddDate(0, 0, -100).Format("2006-01-02")
 
 	type placement struct {
-		id, employeeID, agreementID, companyID, siteID, serviceLineID, positionID, start string
-		end                                                                              *string
+		id, employeeID, agreementID, companyID, siteID, position, start string
+		end                                                             *string
 	}
 	endRudi := "2026-12-31"
 	endBudi := "2026-12-31"
 	placements := []placement{
-		{"SWP-PL-5001", "SWP-EMP-1108", "SWP-AG-7003", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-003", "SWP-POS-014", "2026-01-01", &endRudi},
-		{"SWP-PL-5002", "SWP-EMP-2891", "SWP-AG-7001", "SWP-CMP-0022", "SWP-SITE-0002", "SWP-SVC-003", "SWP-POS-014", "2026-02-01", &endBudi},
-		{"SWP-PL-5003", "SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-002", "SWP-POS-015", "2026-03-01", nil},
-		{"SWP-PL-5004", "SWP-EMP-3001", "SWP-AG-7004", "SWP-CMP-0021", "SWP-SITE-0001", "SWP-SVC-003", "SWP-POS-014", dewiStart, &expEnd},
+		{"SWP-PL-5001", "SWP-EMP-1108", "SWP-AG-7003", "SWP-CMP-0021", "SWP-SITE-0001", "Petugas Parkir", "2026-01-01", &endRudi},
+		{"SWP-PL-5002", "SWP-EMP-2891", "SWP-AG-7001", "SWP-CMP-0022", "SWP-SITE-0002", "Petugas Parkir", "2026-02-01", &endBudi},
+		{"SWP-PL-5003", "SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "Koordinator Lokasi", "2026-03-01", nil},
+		{"SWP-PL-5004", "SWP-EMP-3001", "SWP-AG-7004", "SWP-CMP-0021", "SWP-SITE-0001", "Petugas Parkir", dewiStart, &expEnd},
 	}
 	for _, p := range placements {
 		if _, err := pool.Pool.Exec(ctx, plQ,
-			p.id, p.employeeID, p.agreementID, p.companyID, p.siteID, p.serviceLineID,
-			p.positionID, p.start, p.end, "ACTIVE",
+			p.id, p.employeeID, p.agreementID, p.companyID, p.siteID,
+			p.position, p.start, p.end, "ACTIVE",
 		); err != nil {
 			return fmt.Errorf("seed placement %q: %w", p.id, err)
 		}
@@ -1806,8 +1726,8 @@ func mondayOfCurrentWeek(now time.Time) time.Time {
 //
 // Shift masters (explicit deterministic ids; column DEFAULT only fires when id
 // is omitted, an explicit id is honoured):
-//   - SWP-SHF-001  "Pagi"  07:00–15:00  break 12:00–13:00  service_line NULL (all lines)
-//   - SWP-SHF-002  "Malam" 23:00–07:00  (cross_midnight=true)  service_line SWP-SVC-003 (Parking)
+//   - SWP-SHF-001  "Pagi"  07:00–15:00  break 12:00–13:00
+//   - SWP-SHF-002  "Malam" 23:00–07:00  (cross_midnight=true)
 //
 // Schedule entries (so the grid renders agents at CMP-0021) — dated a few days
 // into the CURRENT week (Tuesday/Wednesday), inside each placement window:
@@ -1821,31 +1741,29 @@ func mondayOfCurrentWeek(now time.Time) time.Time {
 // NOTE for 06-03 / 06-04: Budi (SWP-EMP-2891) is placed at CMP-0022 (SWP-PL-5002)
 // — he is the leader-scope-403 target (Rudi leads CMP-0021, cannot touch Budi).
 func seedScheduling(ctx context.Context, pool *db.Pool) error {
-	// --- Shift masters ---
+	// --- Shift masters (shift master is independent of service line now) ---
 	const shfQ = `
 		INSERT INTO shift_masters
 			(id, name, start_time, end_time, break_start, break_end,
-			 service_line_id, cross_midnight, is_active, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, 'system-seed')
+			 cross_midnight, is_active, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	type shiftMaster struct {
 		id, name, start, end string
 		breakStart, breakEnd *string
-		serviceLineID        *string
 		crossMidnight        bool
 	}
 	bs := "12:00"
 	be := "13:00"
-	parking := "SWP-SVC-003"
 	masters := []shiftMaster{
-		{id: "SWP-SHF-001", name: "Pagi", start: "07:00", end: "15:00", breakStart: &bs, breakEnd: &be, serviceLineID: nil, crossMidnight: false},
-		{id: "SWP-SHF-002", name: "Malam", start: "23:00", end: "07:00", breakStart: nil, breakEnd: nil, serviceLineID: &parking, crossMidnight: true},
+		{id: "SWP-SHF-001", name: "Pagi", start: "07:00", end: "15:00", breakStart: &bs, breakEnd: &be, crossMidnight: false},
+		{id: "SWP-SHF-002", name: "Malam", start: "23:00", end: "07:00", breakStart: nil, breakEnd: nil, crossMidnight: true},
 	}
 	for _, m := range masters {
 		if _, err := pool.Pool.Exec(ctx, shfQ,
 			m.id, m.name, m.start, m.end, m.breakStart, m.breakEnd,
-			m.serviceLineID, m.crossMidnight,
+			m.crossMidnight,
 		); err != nil {
 			return fmt.Errorf("seed shift_master %q: %w", m.id, err)
 		}
@@ -1870,25 +1788,25 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 	// --- Schedule entries (snapshot Pagi 07:00–15:00 onto each cell) ---
 	const schQ = `
 		INSERT INTO schedule_entries
-			(id, employee_id, placement_id, service_line_id, shift_master_id,
+			(id, employee_id, placement_id, shift_master_id,
 			 start_time, end_time, cross_midnight, work_date, status, is_day_off, created_by)
-		VALUES ($1, $2, $3, $4, 'SWP-SHF-001', '07:00', '15:00', false, $5::date, 'SCHEDULED', false, 'system-seed')
+		VALUES ($1, $2, $3, 'SWP-SHF-001', '07:00', '15:00', false, $4::date, 'SCHEDULED', false, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	type entry struct {
-		id, employeeID, placementID, serviceLineID, date string
+		id, employeeID, placementID, date string
 	}
 	entries := []entry{
-		{"SWP-SCH-6001", "SWP-EMP-1108", "SWP-PL-5001", "SWP-SVC-003", rudiDate},
-		{"SWP-SCH-6002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-SVC-003", dewiDate},
+		{"SWP-SCH-6001", "SWP-EMP-1108", "SWP-PL-5001", rudiDate},
+		{"SWP-SCH-6002", "SWP-EMP-3001", "SWP-PL-5004", dewiDate},
 		// SWP-SCH-6003 — scheduled shift for the E5 true-ABSENT fixture (SWP-ATT-9009):
 		// the agent was scheduled but never clocked in.
-		{"SWP-SCH-6003", "SWP-EMP-1042", "SWP-PL-5003", "SWP-SVC-002", rudiDate},
+		{"SWP-SCH-6003", "SWP-EMP-1042", "SWP-PL-5003", rudiDate},
 		// SWP-SCH-6004 — the agent persona's shift for TODAY (enables the /me clock CTA).
-		{"SWP-SCH-6004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-SVC-003", agentToday},
+		{"SWP-SCH-6004", "SWP-EMP-2891", "SWP-PL-5002", agentToday},
 	}
 	for _, e := range entries {
-		if _, err := pool.Pool.Exec(ctx, schQ, e.id, e.employeeID, e.placementID, e.serviceLineID, e.date); err != nil {
+		if _, err := pool.Pool.Exec(ctx, schQ, e.id, e.employeeID, e.placementID, e.date); err != nil {
 			return fmt.Errorf("seed schedule_entry %q: %w", e.id, err)
 		}
 		slog.Info("seed: upserted schedule entry", "id", e.id, "employee_id", e.employeeID, "work_date", e.date)
@@ -1924,28 +1842,29 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 //   - SWP-ATT-9005  Budi  @ CMP-0022/PL-5002  PENDING, flags={LATE}  → cross-company OUT_OF_SCOPE target
 //   - SWP-ATT-9006  Rudi  @ CMP-0021/PL-5001  ESCALATED, flags={LATE,ESCALATED}  → VERIFY_OWN_RECORD target
 func seedAttendance(ctx context.Context, pool *db.Pool) error {
-	// site_id/position_id are denormalized from the row's placement (subqueries —
-	// keeps the positional param list stable). schedule_id is now per-row ($4) so the
-	// ABSENT fixture can carry a scheduled shift; check_in_at/lat_in/lng_in are nullable
-	// (a true ABSENT row has none).
+	// site_id/position are denormalized from the row's placement (subqueries — keeps
+	// the positional param list stable). service_line is dropped entirely (2026-06-12)
+	// and position is now FREE-TEXT (copied from the placement's free-text position).
+	// schedule_id is per-row ($4) so the ABSENT fixture can carry a scheduled shift;
+	// check_in_at/lat_in/lng_in are nullable (a true ABSENT row has none).
 	const attQ = `
 		INSERT INTO attendance
-			(id, employee_id, placement_id, schedule_id, company_id, service_line,
-			 site_id, position_id,
+			(id, employee_id, placement_id, schedule_id, company_id,
+			 site_id, position,
 			 shift_start_at, shift_end_at, check_in_at, check_out_at,
 			 lat_in, lng_in, lat_out, lng_out, wfo,
 			 is_late, late_minutes, worked_minutes, auto_closed,
 			 in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
 			 status, verification_status, flags)
 		VALUES
-			($1, $2, $3, $4, $5, $6,
+			($1, $2, $3, $4, $5,
 			 (SELECT site_id FROM placements WHERE id = $3),
-			 (SELECT position_id FROM placements WHERE id = $3),
-			 $7, $8, $9, $10,
-			 $11, $12, $13, $14, true,
-			 $15, $16, $17, $18,
-			 $19, $20, $21, $22, 100,
-			 $23, $24, $25)
+			 (SELECT position FROM placements WHERE id = $3),
+			 $6, $7, $8, $9,
+			 $10, $11, $12, $13, true,
+			 $14, $15, $16, $17,
+			 $18, $19, $20, $21, 100,
+			 $22, $23, $24)
 		ON CONFLICT (id) DO NOTHING`
 
 	// Site centroid (Plaza Senayan-ish) — in-geofence captures sit near it.
@@ -1967,22 +1886,22 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 	worked := int32(480)
 
 	type att struct {
-		id, employeeID, placementID, companyID, serviceLine string
-		scheduleID                                          *string
-		checkIn                                             *time.Time // nil = true ABSENT (no clock-in)
-		checkOut                                            *time.Time
-		latIn, lngIn                                        *float64 // nil = true ABSENT (no clock-in GPS)
-		latOut, lngOut                                      *float64
-		isLate                                              bool
-		lateMinutes                                         int32
-		workedMinutes                                       *int32
-		autoClosed                                          bool
-		inGeofence                                          *bool
-		inDistanceM                                         *int32
-		outGeofence                                         *bool
-		outDistanceM                                        *int32
-		status, verification                                string
-		flags                                               string // postgres array literal
+		id, employeeID, placementID, companyID string
+		scheduleID                             *string
+		checkIn                                *time.Time // nil = true ABSENT (no clock-in)
+		checkOut                               *time.Time
+		latIn, lngIn                           *float64 // nil = true ABSENT (no clock-in GPS)
+		latOut, lngOut                         *float64
+		isLate                                 bool
+		lateMinutes                            int32
+		workedMinutes                          *int32
+		autoClosed                             bool
+		inGeofence                             *bool
+		inDistanceM                            *int32
+		outGeofence                            *bool
+		outDistanceM                           *int32
+		status, verification                   string
+		flags                                  string // postgres array literal
 	}
 
 	out := normalOut
@@ -2002,7 +1921,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9001 — clean AUTO_APPROVED (complete, on-time, in-geofence). NOT in queue.
 		{
 			id: "SWP-ATT-9001", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
-			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			companyID: "SWP-CMP-0021",
 			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2011,7 +1930,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9002 — PENDING LATE (18m). Correction CHECK_IN target (in-window).
 		{
 			id: "SWP-ATT-9002", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
-			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			companyID: "SWP-CMP-0021",
 			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2020,7 +1939,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9003 — PENDING OUTSIDE_GEOFENCE (in_geofence=false).
 		{
 			id: "SWP-ATT-9003", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
-			companyID: "SWP-CMP-0021", serviceLine: "building_management",
+			companyID: "SWP-CMP-0021",
 			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inFalse, inDistanceM: &dFar, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2029,7 +1948,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9004 — PENDING AUTO_CLOSED (no clock-out). Correction CHECK_OUT target.
 		{
 			id: "SWP-ATT-9004", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
-			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			companyID: "SWP-CMP-0021",
 			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: nil, latOut: nil, lngOut: nil,
 			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: true,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: nil, outDistanceM: nil,
@@ -2038,7 +1957,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9005 — CMP-0022 PENDING LATE → cross-company OUT_OF_SCOPE for Rudi.
 		{
 			id: "SWP-ATT-9005", employeeID: "SWP-EMP-2891", placementID: "SWP-PL-5002",
-			companyID: "SWP-CMP-0022", serviceLine: "parking",
+			companyID: "SWP-CMP-0022",
 			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2047,7 +1966,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// 9006 — Rudi's OWN ESCALATED record → VERIFY_OWN_RECORD target.
 		{
 			id: "SWP-ATT-9006", employeeID: "SWP-EMP-1108", placementID: "SWP-PL-5001",
-			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			companyID: "SWP-CMP-0021",
 			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2058,7 +1977,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// (HR global + Rudi's leader scope). attendance_code PRESENT is is_billable.
 		{
 			id: "SWP-ATT-9007", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
-			companyID: "SWP-CMP-0021", serviceLine: "parking",
+			companyID: "SWP-CMP-0021",
 			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2066,7 +1985,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		},
 		{
 			id: "SWP-ATT-9008", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
-			companyID: "SWP-CMP-0021", serviceLine: "building_management",
+			companyID: "SWP-CMP-0021",
 			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
@@ -2078,7 +1997,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		// ABSENT → PRESENT/LATE.
 		{
 			id: "SWP-ATT-9009", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
-			companyID: "SWP-CMP-0021", serviceLine: "building_management", scheduleID: &schAbsent,
+			companyID: "SWP-CMP-0021", scheduleID: &schAbsent,
 			checkIn: nil, latIn: nil, lngIn: nil, checkOut: nil, latOut: nil, lngOut: nil,
 			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: false,
 			inGeofence: nil, inDistanceM: nil, outGeofence: nil, outDistanceM: nil,
@@ -2088,7 +2007,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 
 	for _, a := range rows {
 		if _, err := pool.Pool.Exec(ctx, attQ,
-			a.id, a.employeeID, a.placementID, a.scheduleID, a.companyID, a.serviceLine,
+			a.id, a.employeeID, a.placementID, a.scheduleID, a.companyID,
 			ss, se, nullableTime(a.checkIn), nullableTime(a.checkOut),
 			a.latIn, a.lngIn, a.latOut, a.lngOut,
 			a.isLate, a.lateMinutes, a.workedMinutes, a.autoClosed,

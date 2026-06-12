@@ -105,8 +105,8 @@ type AgentPendingRow struct {
 
 // SuperAdminWidgetsData is the raw bundle backing the admin-only widget block
 // (DB-7). The repo runs the four global aggregations; the service maps it to the
-// domain shape (service-line name → enum, audit columns → labels). now is the
-// Asia/Jakarta-resolved instant used for the offboarded-30d window.
+// domain shape (org rollups grouped by free-text position, audit columns → labels).
+// now is the Asia/Jakarta-resolved instant used for the offboarded-30d window.
 type SuperAdminWidgetsData struct {
 	ActiveUsers          int
 	OffboardedUsers30d   int
@@ -115,9 +115,9 @@ type SuperAdminWidgetsData struct {
 	RecentAudit          []AuditRow
 }
 
-// OrgRollupRow mirrors the sqlc OrgRollupsByServiceLine row (raw service-line name).
+// OrgRollupRow mirrors the sqlc OrgRollupsByPosition row (free-text position).
 type OrgRollupRow struct {
-	ServiceLineName  string
+	Position         string
 	Headcount        int
 	ActivePlacements int
 }
@@ -155,13 +155,14 @@ type DashboardRepository interface {
 // --- billable port ---
 
 // BillableQuery is the decoded /reports/attendance-billable filter set (after
-// scope coercion). CompanyID/ServiceLineID nil = unfiltered.
+// scope coercion). CompanyID/Position nil = unfiltered. Position is the free-text
+// placement position filter (exact match).
 type BillableQuery struct {
-	CompanyID     *string
-	ServiceLineID *string
-	PeriodStart   string // ISO date
-	PeriodEnd     string // ISO date
-	GroupBy       dom.BillableGroupBy
+	CompanyID   *string
+	Position    *string
+	PeriodStart string // ISO date
+	PeriodEnd   string // ISO date
+	GroupBy     dom.BillableGroupBy
 }
 
 // BillableRepository wraps the 11-01 billable aggregation queries. The aggregate

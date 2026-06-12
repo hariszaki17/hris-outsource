@@ -55,10 +55,9 @@ type shiftLeaderCreateResponse struct {
 
 // --- roster response DTOs ---
 
-type rosterServiceLineCount struct {
-	ServiceLineID   string `json:"service_line_id"`
-	ServiceLineName string `json:"service_line_name"`
-	Count           int    `json:"count"`
+type rosterPositionCount struct {
+	Position string `json:"position"`
+	Count    int    `json:"count"`
 }
 
 type rosterStatusCount struct {
@@ -67,11 +66,11 @@ type rosterStatusCount struct {
 }
 
 type companyRosterSummaryResponse struct {
-	TotalActive    int                      `json:"total_active"`
-	TotalScheduled int                      `json:"total_scheduled"`
-	TotalExpiring  int                      `json:"total_expiring"`
-	ByServiceLine  []rosterServiceLineCount `json:"by_service_line"`
-	ByStatus       []rosterStatusCount      `json:"by_status"`
+	TotalActive    int                   `json:"total_active"`
+	TotalScheduled int                   `json:"total_scheduled"`
+	TotalExpiring  int                   `json:"total_expiring"`
+	ByPosition     []rosterPositionCount `json:"by_position"`
+	ByStatus       []rosterStatusCount   `json:"by_status"`
 }
 
 type companyRosterResponse struct {
@@ -113,14 +112,13 @@ func toRosterSummaryResponse(s domain.CompanyRosterSummary) companyRosterSummary
 		TotalActive:    s.TotalActive,
 		TotalScheduled: s.TotalScheduled,
 		TotalExpiring:  s.TotalExpiring,
-		ByServiceLine:  make([]rosterServiceLineCount, 0, len(s.ByServiceLine)),
+		ByPosition:     make([]rosterPositionCount, 0, len(s.ByPosition)),
 		ByStatus:       make([]rosterStatusCount, 0, len(s.ByStatus)),
 	}
-	for _, l := range s.ByServiceLine {
-		out.ByServiceLine = append(out.ByServiceLine, rosterServiceLineCount{
-			ServiceLineID:   l.ServiceLineID,
-			ServiceLineName: l.ServiceLineName,
-			Count:           l.Count,
+	for _, l := range s.ByPosition {
+		out.ByPosition = append(out.ByPosition, rosterPositionCount{
+			Position: l.Position,
+			Count:    l.Count,
 		})
 	}
 	for _, st := range s.ByStatus {

@@ -83,8 +83,7 @@ const TRUNCATE_TABLES = [
   'refresh_tokens',
   'audit_log',
   // Phase 3: E2 org/master-data tables (FK order: most-dependent first)
-  'positions',
-  'service_lines',
+  // (positions + service_lines dropped 2026-06-12 — service line removed, position is free-text)
   'client_sites',
   'client_companies',
   'leave_types',

@@ -13,7 +13,7 @@ import (
 const createShiftMaster = `-- name: CreateShiftMaster :one
 INSERT INTO shift_masters (
     name, start_time, end_time, break_start, break_end,
-    service_line_id, cross_midnight, is_active, created_by
+    cross_midnight, is_active, created_by
 ) VALUES (
     $1,
     $2,
@@ -22,11 +22,10 @@ INSERT INTO shift_masters (
     $5,
     $6,
     $7,
-    $8,
-    $9
+    $8
 )
 RETURNING id, name, start_time, end_time, break_start, break_end,
-          service_line_id, cross_midnight, is_active,
+          cross_midnight, is_active,
           created_by, created_at, updated_at
 `
 
@@ -36,7 +35,6 @@ type CreateShiftMasterParams struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -49,7 +47,6 @@ type CreateShiftMasterRow struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -66,7 +63,6 @@ func (q *Queries) CreateShiftMaster(ctx context.Context, arg CreateShiftMasterPa
 		arg.EndTime,
 		arg.BreakStart,
 		arg.BreakEnd,
-		arg.ServiceLineID,
 		arg.CrossMidnight,
 		arg.IsActive,
 		arg.CreatedBy,
@@ -79,7 +75,6 @@ func (q *Queries) CreateShiftMaster(ctx context.Context, arg CreateShiftMasterPa
 		&i.EndTime,
 		&i.BreakStart,
 		&i.BreakEnd,
-		&i.ServiceLineID,
 		&i.CrossMidnight,
 		&i.IsActive,
 		&i.CreatedBy,
@@ -91,32 +86,28 @@ func (q *Queries) CreateShiftMaster(ctx context.Context, arg CreateShiftMasterPa
 
 const getShiftMaster = `-- name: GetShiftMaster :one
 SELECT sm.id, sm.name, sm.start_time, sm.end_time, sm.break_start, sm.break_end,
-       sm.service_line_id, sm.cross_midnight, sm.is_active,
+       sm.cross_midnight, sm.is_active,
        sm.created_by, sm.created_at, sm.updated_at,
-       sl.name AS service_line_name,
        (SELECT count(*) FROM schedule_entries se
          WHERE se.shift_master_id = sm.id AND se.deleted_at IS NULL) AS in_use_count
 FROM shift_masters sm
-LEFT JOIN service_lines sl ON sl.id = sm.service_line_id
 WHERE sm.id = $1
   AND sm.deleted_at IS NULL
 `
 
 type GetShiftMasterRow struct {
-	ID              string
-	Name            string
-	StartTime       string
-	EndTime         string
-	BreakStart      *string
-	BreakEnd        *string
-	ServiceLineID   *string
-	CrossMidnight   bool
-	IsActive        bool
-	CreatedBy       *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ServiceLineName *string
-	InUseCount      int64
+	ID            string
+	Name          string
+	StartTime     string
+	EndTime       string
+	BreakStart    *string
+	BreakEnd      *string
+	CrossMidnight bool
+	IsActive      bool
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	InUseCount    int64
 }
 
 func (q *Queries) GetShiftMaster(ctx context.Context, id string) (GetShiftMasterRow, error) {
@@ -129,13 +120,11 @@ func (q *Queries) GetShiftMaster(ctx context.Context, id string) (GetShiftMaster
 		&i.EndTime,
 		&i.BreakStart,
 		&i.BreakEnd,
-		&i.ServiceLineID,
 		&i.CrossMidnight,
 		&i.IsActive,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ServiceLineName,
 		&i.InUseCount,
 	)
 	return i, err
@@ -143,7 +132,7 @@ func (q *Queries) GetShiftMaster(ctx context.Context, id string) (GetShiftMaster
 
 const getShiftMasterForUpdate = `-- name: GetShiftMasterForUpdate :one
 SELECT sm.id, sm.name, sm.start_time, sm.end_time, sm.break_start, sm.break_end,
-       sm.service_line_id, sm.cross_midnight, sm.is_active,
+       sm.cross_midnight, sm.is_active,
        sm.created_by, sm.created_at, sm.updated_at
 FROM shift_masters sm
 WHERE sm.id = $1
@@ -158,7 +147,6 @@ type GetShiftMasterForUpdateRow struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -166,7 +154,7 @@ type GetShiftMasterForUpdateRow struct {
 	UpdatedAt     time.Time
 }
 
-// Row-lock for the update / activate-toggle path (omits joins; service re-reads for DTO).
+// Row-lock for the update / activate-toggle path (service re-reads for DTO).
 func (q *Queries) GetShiftMasterForUpdate(ctx context.Context, id string) (GetShiftMasterForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getShiftMasterForUpdate, id)
 	var i GetShiftMasterForUpdateRow
@@ -177,7 +165,6 @@ func (q *Queries) GetShiftMasterForUpdate(ctx context.Context, id string) (GetSh
 		&i.EndTime,
 		&i.BreakStart,
 		&i.BreakEnd,
-		&i.ServiceLineID,
 		&i.CrossMidnight,
 		&i.IsActive,
 		&i.CreatedBy,
@@ -190,62 +177,51 @@ func (q *Queries) GetShiftMasterForUpdate(ctx context.Context, id string) (GetSh
 const listShiftMasters = `-- name: ListShiftMasters :many
 
 SELECT sm.id, sm.name, sm.start_time, sm.end_time, sm.break_start, sm.break_end,
-       sm.service_line_id, sm.cross_midnight, sm.is_active,
+       sm.cross_midnight, sm.is_active,
        sm.created_by, sm.created_at, sm.updated_at,
-       sl.name AS service_line_name,
        (SELECT count(*) FROM schedule_entries se
          WHERE se.shift_master_id = sm.id AND se.deleted_at IS NULL) AS in_use_count
 FROM shift_masters sm
-LEFT JOIN service_lines sl ON sl.id = sm.service_line_id
 WHERE sm.deleted_at IS NULL
-  AND (
-        $1::text IS NULL
-        OR sm.service_line_id IS NULL
-        OR sm.service_line_id = $1::text
-      )
-  AND ($2::boolean IS NULL OR sm.is_active = $2::boolean)
-  AND ($3::text IS NULL OR sm.name ILIKE '%' || $3::text || '%')
-  AND ($4::text IS NULL OR sm.id < $4::text)
+  AND ($1::boolean IS NULL OR sm.is_active = $1::boolean)
+  AND ($2::text IS NULL OR sm.name ILIKE '%' || $2::text || '%')
+  AND ($3::text IS NULL OR sm.id < $3::text)
 ORDER BY sm.id DESC
-LIMIT $5
+LIMIT $4
 `
 
 type ListShiftMastersParams struct {
-	ServiceLineID *string
-	IsActive      *bool
-	Q             *string
-	CursorID      *string
-	RowLimit      int32
+	IsActive *bool
+	Q        *string
+	CursorID *string
+	RowLimit int32
 }
 
 type ListShiftMastersRow struct {
-	ID              string
-	Name            string
-	StartTime       string
-	EndTime         string
-	BreakStart      *string
-	BreakEnd        *string
-	ServiceLineID   *string
-	CrossMidnight   bool
-	IsActive        bool
-	CreatedBy       *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ServiceLineName *string
-	InUseCount      int64
+	ID            string
+	Name          string
+	StartTime     string
+	EndTime       string
+	BreakStart    *string
+	BreakEnd      *string
+	CrossMidnight bool
+	IsActive      bool
+	CreatedBy     *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	InUseCount    int64
 }
 
-// E4 shift-master queries (F4.1 / SM-* / SWP-SHF-*). Reads LEFT JOIN service_lines
-// for service_line_name and compute in_use_count via a correlated subquery over
-// live schedule_entries. Times are text columns (HH:MM, Asia/Jakarta).
+// E4 shift-master queries (F4.1 / SM-* / SWP-SHF-*). Shift masters are fully
+// INDEPENDENT (service_line removed entirely, 2026-06-12). in_use_count is a
+// correlated subquery over live schedule_entries. Times are text columns
+// (HH:MM, Asia/Jakarta).
 // Cursor page ordered by id desc. Filters:
 //
-//	service_line_id → masters tagged to that line OR untagged (NULL applies to all, SM-3),
 //	status (ACTIVE→is_active=true / INACTIVE→false) via the is_active narg,
 //	q ILIKE over name. in_use_count = live schedule_entries referencing this master.
 func (q *Queries) ListShiftMasters(ctx context.Context, arg ListShiftMastersParams) ([]ListShiftMastersRow, error) {
 	rows, err := q.db.Query(ctx, listShiftMasters,
-		arg.ServiceLineID,
 		arg.IsActive,
 		arg.Q,
 		arg.CursorID,
@@ -265,13 +241,11 @@ func (q *Queries) ListShiftMasters(ctx context.Context, arg ListShiftMastersPara
 			&i.EndTime,
 			&i.BreakStart,
 			&i.BreakEnd,
-			&i.ServiceLineID,
 			&i.CrossMidnight,
 			&i.IsActive,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ServiceLineName,
 			&i.InUseCount,
 		); err != nil {
 			return nil, err
@@ -291,7 +265,7 @@ SET is_active  = $1,
 WHERE id = $2
   AND deleted_at IS NULL
 RETURNING id, name, start_time, end_time, break_start, break_end,
-          service_line_id, cross_midnight, is_active,
+          cross_midnight, is_active,
           created_by, created_at, updated_at
 `
 
@@ -307,7 +281,6 @@ type SetShiftMasterActiveRow struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -326,7 +299,6 @@ func (q *Queries) SetShiftMasterActive(ctx context.Context, arg SetShiftMasterAc
 		&i.EndTime,
 		&i.BreakStart,
 		&i.BreakEnd,
-		&i.ServiceLineID,
 		&i.CrossMidnight,
 		&i.IsActive,
 		&i.CreatedBy,
@@ -343,14 +315,13 @@ SET name            = $1,
     end_time        = $3,
     break_start     = $4,
     break_end       = $5,
-    service_line_id = $6,
-    cross_midnight  = $7,
-    is_active       = $8,
+    cross_midnight  = $6,
+    is_active       = $7,
     updated_at      = now()
-WHERE id = $9
+WHERE id = $8
   AND deleted_at IS NULL
 RETURNING id, name, start_time, end_time, break_start, break_end,
-          service_line_id, cross_midnight, is_active,
+          cross_midnight, is_active,
           created_by, created_at, updated_at
 `
 
@@ -360,7 +331,6 @@ type UpdateShiftMasterParams struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	ID            string
@@ -373,7 +343,6 @@ type UpdateShiftMasterRow struct {
 	EndTime       string
 	BreakStart    *string
 	BreakEnd      *string
-	ServiceLineID *string
 	CrossMidnight bool
 	IsActive      bool
 	CreatedBy     *string
@@ -390,7 +359,6 @@ func (q *Queries) UpdateShiftMaster(ctx context.Context, arg UpdateShiftMasterPa
 		arg.EndTime,
 		arg.BreakStart,
 		arg.BreakEnd,
-		arg.ServiceLineID,
 		arg.CrossMidnight,
 		arg.IsActive,
 		arg.ID,
@@ -403,7 +371,6 @@ func (q *Queries) UpdateShiftMaster(ctx context.Context, arg UpdateShiftMasterPa
 		&i.EndTime,
 		&i.BreakStart,
 		&i.BreakEnd,
-		&i.ServiceLineID,
 		&i.CrossMidnight,
 		&i.IsActive,
 		&i.CreatedBy,

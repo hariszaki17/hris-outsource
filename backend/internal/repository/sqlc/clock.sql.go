@@ -57,8 +57,8 @@ func (q *Queries) AutoCloseAttendance(ctx context.Context, arg AutoCloseAttendan
 
 const clockInAttendance = `-- name: ClockInAttendance :one
 INSERT INTO attendance (
-    employee_id, placement_id, schedule_id, company_id, service_line,
-    site_id, position_id,
+    employee_id, placement_id, schedule_id, company_id,
+    site_id, position,
     shift_start_at, shift_end_at,
     check_in_at, lat_in, lng_in, photo_in_id,
     wfo, is_late, late_minutes,
@@ -67,13 +67,13 @@ INSERT INTO attendance (
 )
 VALUES (
     $1, $2, $3,
-    $4, $5,
-    $6, $7,
-    $8, $9,
-    $10, $11, $12, $13,
-    $14, $15, $16,
-    $17, $18, $19,
-    $20, $21, $22
+    $4,
+    $5, $6,
+    $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15,
+    $16, $17, $18,
+    $19, $20, $21
 )
 ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
 DO NOTHING
@@ -85,9 +85,8 @@ type ClockInAttendanceParams struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
 	CheckInAt          *time.Time
@@ -116,9 +115,8 @@ func (q *Queries) ClockInAttendance(ctx context.Context, arg ClockInAttendancePa
 		arg.PlacementID,
 		arg.ScheduleID,
 		arg.CompanyID,
-		arg.ServiceLine,
 		arg.SiteID,
-		arg.PositionID,
+		arg.Position,
 		arg.ShiftStartAt,
 		arg.ShiftEndAt,
 		arg.CheckInAt,

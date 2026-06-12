@@ -299,8 +299,7 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
     employee_name: placement.employee_name ?? placement.employee_id,
     client_company_id: placement.client_company_id,
     client_company_name: placement.client_company_name ?? placement.client_company_id,
-    service_line_name: placement.service_line_name ?? placement.service_line_id,
-    position_name: placement.position_name ?? placement.position_id,
+    position_name: placement.position_name ?? '',
     start_date: placement.start_date,
     end_date: placement.end_date,
   };
@@ -358,12 +357,7 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
               )}
             </div>
             <span className="text-[13px] text-text-2">
-              {[
-                placement.client_company_name,
-                placement.service_line_name,
-                placement.position_name,
-                placement.id,
-              ]
+              {[placement.client_company_name, placement.position_name, placement.id]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
@@ -514,7 +508,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
           >
             <div className="grid grid-cols-2 gap-x-10">
               <KvRow label={t('field.company')} value={placement.client_company_name} />
-              <KvRow label={t('field.serviceLine')} value={placement.service_line_name} />
               <KvRow label={t('field.position')} value={placement.position_name} />
               <KvRow label={t('field.period')}>
                 <span className="text-[13px] font-semibold text-text">
@@ -685,7 +678,7 @@ function PlacementChainCard({
               >
                 <div className="flex flex-col gap-[3px]">
                   <span className="text-[14px] font-semibold text-text">
-                    {[item.client_company_name, item.service_line_name].filter(Boolean).join(' · ')}
+                    {item.client_company_name ?? '—'}
                   </span>
                   <span className="text-[12px] text-text-3">
                     {item.start_date}

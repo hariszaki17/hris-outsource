@@ -21,9 +21,8 @@ func (h *Handler) ListAttendance(w http.ResponseWriter, r *http.Request) {
 	filter := svc.AttendanceFilter{
 		CompanyID:          strPtrParam(q.Get("company_id")),
 		EmployeeID:         strPtrParam(q.Get("employee_id")),
-		ServiceLine:        strPtrParam(q.Get("service_line")),
 		SiteID:             strPtrParam(q.Get("site_id")),
-		PositionID:         strPtrParam(q.Get("position_id")),
+		Position:           strPtrParam(q.Get("position")),
 		VerificationStatus: csvParam(q.Get("verification_status")),
 		Status:             csvParam(q.Get("status")),
 		DateFrom:           parseDateParam(q.Get("date_from")),
@@ -216,12 +215,12 @@ func (h *Handler) ManualAutofill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Rule("NO_ACTIVE_PLACEMENT", nil))
 		return
 	}
+	position := data.Position
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[autofillResponse]{Data: autofillResponse{
 		EmployeeName: data.EmployeeName,
 		CompanyName:  data.CompanyName,
 		SiteName:     data.SiteName,
-		PositionName: data.PositionName,
-		ServiceLine:  data.ServiceLine,
+		Position:     &position,
 		ScheduleID:   data.ScheduleID,
 		ShiftStartAt: rfc3339Ptr(data.ShiftStartAt),
 		ShiftEndAt:   rfc3339Ptr(data.ShiftEndAt),

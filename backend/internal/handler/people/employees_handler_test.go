@@ -437,7 +437,7 @@ func TestListEmployees_ShapeAndEnvelope(t *testing.T) {
 		"gender", "birth_date", "birth_place", "phone", "email_personal",
 		"address", "npwp", "bpjs_kesehatan", "bpjs_ketenagakerjaan",
 		"bank_account", "status", "has_login",
-		"current_position", "current_service_line", "current_client_company",
+		"current_position", "current_client_company",
 		"created_at", "updated_at", "created_by",
 	}
 	for _, k := range requiredKeys {

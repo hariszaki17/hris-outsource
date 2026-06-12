@@ -17,35 +17,32 @@ import (
 // shiftMasterWriteRequest is the POST body (create). The *Set pattern for PATCH
 // lives in shiftMasterPatchRequest below.
 type shiftMasterWriteRequest struct {
-	Name          string  `json:"name"`
-	StartTime     string  `json:"start_time"`
-	EndTime       string  `json:"end_time"`
-	BreakStart    *string `json:"break_start"`
-	BreakEnd      *string `json:"break_end"`
-	ServiceLineID *string `json:"service_line_id"`
-	IsActive      *bool   `json:"is_active"`
+	Name       string  `json:"name"`
+	StartTime  string  `json:"start_time"`
+	EndTime    string  `json:"end_time"`
+	BreakStart *string `json:"break_start"`
+	BreakEnd   *string `json:"break_end"`
+	IsActive   *bool   `json:"is_active"`
 }
 
 // --- response DTO ---
 
 // shiftMasterResponse is the openapi ShiftMaster object.
 type shiftMasterResponse struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	StartTime       string  `json:"start_time"`
-	EndTime         string  `json:"end_time"`
-	BreakStart      *string `json:"break_start"`
-	BreakEnd        *string `json:"break_end"`
-	BreakMinutes    *int    `json:"break_minutes"`
-	ServiceLineID   *string `json:"service_line_id"`
-	ServiceLineName *string `json:"service_line_name"`
-	CrossMidnight   bool    `json:"cross_midnight"`
-	IsActive        bool    `json:"is_active"`
-	Status          string  `json:"status"`
-	InUseCount      int64   `json:"in_use_count"`
-	CreatedBy       *string `json:"created_by"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	StartTime     string  `json:"start_time"`
+	EndTime       string  `json:"end_time"`
+	BreakStart    *string `json:"break_start"`
+	BreakEnd      *string `json:"break_end"`
+	BreakMinutes  *int    `json:"break_minutes"`
+	CrossMidnight bool    `json:"cross_midnight"`
+	IsActive      bool    `json:"is_active"`
+	Status        string  `json:"status"`
+	InUseCount    int64   `json:"in_use_count"`
+	CreatedBy     *string `json:"created_by"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 type shiftMasterListResponse struct {
@@ -62,22 +59,20 @@ func toShiftMasterResponse(m domain.ShiftMaster) shiftMasterResponse {
 		status = "ACTIVE"
 	}
 	resp := shiftMasterResponse{
-		ID:              m.ID,
-		Name:            m.Name,
-		StartTime:       m.StartTime,
-		EndTime:         m.EndTime,
-		BreakStart:      m.BreakStart,
-		BreakEnd:        m.BreakEnd,
-		BreakMinutes:    breakMinutes(m.BreakStart, m.BreakEnd),
-		ServiceLineID:   m.ServiceLineID,
-		ServiceLineName: m.ServiceLineName,
-		CrossMidnight:   m.CrossMidnight,
-		IsActive:        m.IsActive,
-		Status:          status,
-		InUseCount:      m.InUseCount,
-		CreatedBy:       m.CreatedBy,
-		CreatedAt:       m.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:       m.UpdatedAt.UTC().Format(time.RFC3339),
+		ID:            m.ID,
+		Name:          m.Name,
+		StartTime:     m.StartTime,
+		EndTime:       m.EndTime,
+		BreakStart:    m.BreakStart,
+		BreakEnd:      m.BreakEnd,
+		BreakMinutes:  breakMinutes(m.BreakStart, m.BreakEnd),
+		CrossMidnight: m.CrossMidnight,
+		IsActive:      m.IsActive,
+		Status:        status,
+		InUseCount:    m.InUseCount,
+		CreatedBy:     m.CreatedBy,
+		CreatedAt:     m.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:     m.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 	return resp
 }

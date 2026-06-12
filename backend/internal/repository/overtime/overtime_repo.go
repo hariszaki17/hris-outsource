@@ -103,7 +103,6 @@ func (r *OvertimeRepo) InsertOvertime(ctx context.Context, tx pgx.Tx, p svc.Over
 		EmployeeID:       p.EmployeeID,
 		CompanyID:        p.CompanyID,
 		PlacementID:      p.PlacementID,
-		ServiceLineID:    p.ServiceLineID,
 		WorkDate:         timeToPgDate(p.WorkDate),
 		PlannedStartTime: p.PlannedStartTime,
 		PlannedEndTime:   p.PlannedEndTime,
@@ -152,42 +151,19 @@ func (r *OvertimeRepo) ListOvertimeApprovals(ctx context.Context, overtimeID str
 
 // --- rule lookup (reused E2/Phase-3 overtime_rules) ---
 
-// FindOvertimeRule resolves the applicable overtime rule for OT_BELOW_MIN +
-// reference-multiplier lookup. A line-scoped active rule wins over the global
-// default (OR-2); the global default (service_line_id NULL) is the fallback.
-// domain.ErrNotFound when no rule is configured.
-func (r *OvertimeRepo) FindOvertimeRule(ctx context.Context, serviceLineID *string) (svc.OvertimeRule, error) {
+// FindOvertimeRule resolves the single GLOBAL overtime rule for OT_BELOW_MIN +
+// reference-multiplier lookup. Overtime rules are GLOBAL ONLY (decision 2026-06-12 —
+// the service_line scope axis + line-vs-global precedence were dropped): the first
+// active rule is the effective rule. domain.ErrNotFound when none is configured.
+func (r *OvertimeRepo) FindOvertimeRule(ctx context.Context) (svc.OvertimeRule, error) {
 	active := "active"
-	// 1. Try a line-scoped active rule first (when a line is given).
-	if serviceLineID != nil && *serviceLineID != "" {
-		rows, err := r.q.ListOvertimeRules(ctx, sqlcgen.ListOvertimeRulesParams{
-			Status:        &active,
-			ServiceLineID: serviceLineID,
-			RowLimit:      1,
-		})
-		if err != nil {
-			return svc.OvertimeRule{}, err
-		}
-		if len(rows) > 0 {
-			return ruleFromList(rows[0]), nil
-		}
-	}
-	// 2. Fall back to the global default (service_line_id IS NULL). The list query
-	//    has no "global only" filter, so scan the active rules and pick a NULL-line
-	//    one.
 	rows, err := r.q.ListOvertimeRules(ctx, sqlcgen.ListOvertimeRulesParams{
 		Status:   &active,
-		RowLimit: 200,
+		RowLimit: 1,
 	})
 	if err != nil {
 		return svc.OvertimeRule{}, err
 	}
-	for _, row := range rows {
-		if row.ServiceLineID == nil {
-			return ruleFromList(row), nil
-		}
-	}
-	// 3. As a last resort, return any active rule (keeps OT_BELOW_MIN enforceable).
 	if len(rows) > 0 {
 		return ruleFromList(rows[0]), nil
 	}
@@ -196,11 +172,10 @@ func (r *OvertimeRepo) FindOvertimeRule(ctx context.Context, serviceLineID *stri
 
 func ruleFromList(r sqlcgen.ListOvertimeRulesRow) svc.OvertimeRule {
 	return svc.OvertimeRule{
-		ID:            r.ID,
-		ServiceLineID: r.ServiceLineID,
-		WeekdayRate:   float64(r.WeekdayRate),
-		RestdayRate:   float64(r.RestdayRate),
-		HolidayRate:   float64(r.HolidayRate),
-		MinMinutes:    int(r.MinMinutes),
+		ID:          r.ID,
+		WeekdayRate: float64(r.WeekdayRate),
+		RestdayRate: float64(r.RestdayRate),
+		HolidayRate: float64(r.HolidayRate),
+		MinMinutes:  int(r.MinMinutes),
 	}
 }

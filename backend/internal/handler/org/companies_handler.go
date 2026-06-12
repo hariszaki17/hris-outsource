@@ -41,10 +41,9 @@ func (h *Handler) ListClientCompanies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	filter := domain.CompanyFilter{
-		Q:           queryStringPtr(q.Get("q")),
-		Status:      queryStringPtr(q.Get("status")),
-		ServiceLine: queryStringPtr(q.Get("service_line")),
-		Limit:       parseLimit(q.Get("limit")),
+		Q:      queryStringPtr(q.Get("q")),
+		Status: queryStringPtr(q.Get("status")),
+		Limit:  parseLimit(q.Get("limit")),
 	}
 
 	if v := q.Get("has_leader"); v != "" {

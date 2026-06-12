@@ -40,7 +40,7 @@ func isoDate(s string) pgtype.Date {
 
 func hours(min int64) float64 { return float64(min) / 60.0 }
 
-// strPtr returns a non-nil pointer only for a non-empty company/service-line name.
+// strPtr returns a non-nil pointer only for a non-empty company/position value.
 func strPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -58,9 +58,9 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 
 	out := make([]dom.BillableReportRow, 0, 16)
 	switch q.GroupBy {
-	case dom.GroupByDay:
-		rows, err := r.q.BillableAggregateByDay(ctx, sqlcgen.BillableAggregateByDayParams{
-			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+	case dom.GroupByPosition:
+		rows, err := r.q.BillableAggregateByPosition(ctx, sqlcgen.BillableAggregateByPositionParams{
+			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, Position: q.Position,
 		})
 		if err != nil {
 			return nil, err
@@ -71,8 +71,27 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 				GroupLabel:          row.GroupLabel,
 				CompanyID:           strPtr(row.CompanyID),
 				CompanyName:         strPtr(row.CompanyName),
-				ServiceLineID:       strPtr(row.ServiceLineID),
-				ServiceLineName:     strPtr(row.ServiceLineName),
+				Position:            strPtr(row.Position),
+				WorkedHours:         hours(row.WorkedMinutes),
+				BillableHours:       hours(row.BillableMinutes),
+				PayableHours:        hours(row.WorkedMinutes),
+				VerifiedRecordCount: int(row.VerifiedRecordCount),
+			})
+		}
+	case dom.GroupByDay:
+		rows, err := r.q.BillableAggregateByDay(ctx, sqlcgen.BillableAggregateByDayParams{
+			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, Position: q.Position,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out = append(out, dom.BillableReportRow{
+				GroupKey:            row.GroupKey,
+				GroupLabel:          row.GroupLabel,
+				CompanyID:           strPtr(row.CompanyID),
+				CompanyName:         strPtr(row.CompanyName),
+				Position:            strPtr(row.Position),
 				WorkedHours:         hours(row.WorkedMinutes),
 				BillableHours:       hours(row.BillableMinutes),
 				PayableHours:        hours(row.WorkedMinutes),
@@ -81,7 +100,7 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 		}
 	case dom.GroupByShiftMaster:
 		rows, err := r.q.BillableAggregateByShiftMaster(ctx, sqlcgen.BillableAggregateByShiftMasterParams{
-			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, Position: q.Position,
 		})
 		if err != nil {
 			return nil, err
@@ -92,8 +111,7 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 				GroupLabel:          row.GroupLabel,
 				CompanyID:           strPtr(row.CompanyID),
 				CompanyName:         strPtr(row.CompanyName),
-				ServiceLineID:       strPtr(row.ServiceLineID),
-				ServiceLineName:     strPtr(row.ServiceLineName),
+				Position:            strPtr(row.Position),
 				WorkedHours:         hours(row.WorkedMinutes),
 				BillableHours:       hours(row.BillableMinutes),
 				PayableHours:        hours(row.WorkedMinutes),
@@ -102,7 +120,7 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 		}
 	default: // employee
 		rows, err := r.q.BillableAggregateByEmployee(ctx, sqlcgen.BillableAggregateByEmployeeParams{
-			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+			PeriodStart: ps, PeriodEnd: pe, CompanyID: q.CompanyID, Position: q.Position,
 		})
 		if err != nil {
 			return nil, err
@@ -113,8 +131,7 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 				GroupLabel:          row.GroupLabel,
 				CompanyID:           strPtr(row.CompanyID),
 				CompanyName:         strPtr(row.CompanyName),
-				ServiceLineID:       strPtr(row.ServiceLineID),
-				ServiceLineName:     strPtr(row.ServiceLineName),
+				Position:            strPtr(row.Position),
 				WorkedHours:         hours(row.WorkedMinutes),
 				BillableHours:       hours(row.BillableMinutes),
 				PayableHours:        hours(row.WorkedMinutes),
@@ -130,7 +147,7 @@ func (r *BillableRepo) Aggregate(ctx context.Context, q svc.BillableQuery) ([]do
 func (r *BillableRepo) Summary(ctx context.Context, q svc.BillableQuery) (dom.BillableSummary, error) {
 	row, err := r.q.BillableSummary(ctx, sqlcgen.BillableSummaryParams{
 		PeriodStart: isoDate(q.PeriodStart), PeriodEnd: isoDate(q.PeriodEnd),
-		CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+		CompanyID: q.CompanyID, Position: q.Position,
 	})
 	if err != nil {
 		return dom.BillableSummary{}, err
@@ -147,7 +164,7 @@ func (r *BillableRepo) Summary(ctx context.Context, q svc.BillableQuery) (dom.Bi
 func (r *BillableRepo) PendingSummary(ctx context.Context, q svc.BillableQuery) (dom.BillablePendingSummary, error) {
 	row, err := r.q.BillablePendingSummary(ctx, sqlcgen.BillablePendingSummaryParams{
 		PeriodStart: isoDate(q.PeriodStart), PeriodEnd: isoDate(q.PeriodEnd),
-		CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+		CompanyID: q.CompanyID, Position: q.Position,
 	})
 	if err != nil {
 		return dom.BillablePendingSummary{}, err
@@ -162,14 +179,14 @@ func (r *BillableRepo) PendingSummary(ctx context.Context, q svc.BillableQuery) 
 func (r *BillableRepo) CountInScope(ctx context.Context, q svc.BillableQuery) (int, error) {
 	s, err := r.q.BillableSummary(ctx, sqlcgen.BillableSummaryParams{
 		PeriodStart: isoDate(q.PeriodStart), PeriodEnd: isoDate(q.PeriodEnd),
-		CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+		CompanyID: q.CompanyID, Position: q.Position,
 	})
 	if err != nil {
 		return 0, err
 	}
 	p, err := r.q.BillablePendingSummary(ctx, sqlcgen.BillablePendingSummaryParams{
 		PeriodStart: isoDate(q.PeriodStart), PeriodEnd: isoDate(q.PeriodEnd),
-		CompanyID: q.CompanyID, ServiceLineID: q.ServiceLineID,
+		CompanyID: q.CompanyID, Position: q.Position,
 	})
 	if err != nil {
 		return 0, err

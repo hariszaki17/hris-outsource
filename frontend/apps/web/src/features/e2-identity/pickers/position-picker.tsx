@@ -1,20 +1,25 @@
 /**
- * PositionPicker — FK picker for selecting a Position within a ServiceLine.
+ * PositionPicker — free-text typeahead for the placement "position" field.
  *
- * Design source: .pen comp/PickerPosition `Nz6iR`
- * Lists positions via `useListPositionsInServiceLine(serviceLineId)`.
- * Disabled until `serviceLineId` is provided (design shows "Posisi tersedia di
- * [service line]" context pill — enforced by disabling the trigger).
+ * Position is FREE-TEXT (no master, no FK, no SWP-POS id) per the locked
+ * decision (2026-06-12): the value is the position *string* itself. The picker
+ * is a typeahead Combobox over DISTINCT existing values, backed by
+ * `useSearchPositions` (GET /positions:search). The user may pick an existing
+ * value or type a new one — whatever string they commit becomes the value.
  *
- * Maps: id → value, name → label, alias → sublabel (English label).
+ * No service-line gating, no reset-on-service-line: the field stands alone.
  *
- * Wraps the generic `Combobox` from @swp/ui.
- * i18n namespace: `pickers`.
+ * The debounced query (`q`) drives the search hook; the Combobox's `onSearch`
+ * plumbing supplies the raw query. The current value is always merged into the
+ * options so the Combobox trigger can render it even when it isn't in the
+ * latest search page.
+ *
+ * Wraps the generic `Combobox` from @swp/ui. i18n namespace: `pickers`.
  */
 
-import { useListPositionsInServiceLine } from '@swp/api-client/e2';
+import { useSearchPositions } from '@swp/api-client/e2';
 import { Combobox } from '@swp/ui';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -22,9 +27,9 @@ import { useTranslation } from 'react-i18next';
 // ---------------------------------------------------------------------------
 
 export interface PositionPickerProps {
+  /** Free-text position string (not an id). */
   value: string | null;
   onChange: (value: string | null) => void;
-  serviceLineId: string | null;
   disabled?: boolean;
   error?: boolean;
   placeholder?: string;
@@ -37,7 +42,6 @@ export interface PositionPickerProps {
 export function PositionPicker({
   value,
   onChange,
-  serviceLineId,
   disabled,
   error,
   placeholder,
@@ -57,52 +61,28 @@ export function PositionPicker({
     };
   }, [query]);
 
-  // Reset the selected value whenever the service line changes (intentionally keyed on
-  // serviceLineId only — `onChange` is a stable callback we don't want to re-trigger on).
-  // Reset only on a *real* change, not on first mount (and not on StrictMode's
-  // double-invoked effect, which a simple first-run flag wouldn't survive): we track the
-  // previous serviceLineId and reset only when it actually differs, so we never clobber
-  // the form's initial value or trigger eager validation before the user interacts.
-  const prevServiceLineId = useRef(serviceLineId);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset effect keyed on serviceLineId
-  useEffect(() => {
-    if (prevServiceLineId.current !== serviceLineId) {
-      prevServiceLineId.current = serviceLineId;
-      onChange(null);
-    }
-  }, [serviceLineId]);
-
-  const result = useListPositionsInServiceLine(
-    serviceLineId ?? '',
-    { limit: 50 },
+  const result = useSearchPositions(
+    { q: debouncedQuery || undefined, limit: 50 },
     {
       query: {
-        enabled: !!serviceLineId,
         staleTime: 60_000,
       },
     },
   );
 
-  // Response wrapped: result.data?.data → { data: Position[], next_cursor, has_more }
-  const positions =
-    (result.data?.data as { data?: { id: string; name: string; alias?: string }[] } | undefined)
-      ?.data ?? [];
+  // Response: result.data?.data → { positions: string[] }
+  const positions = (result.data?.data as { positions?: string[] } | undefined)?.positions ?? [];
 
-  const filtered = debouncedQuery
-    ? positions.filter(
-        (p) =>
-          p.name.toLowerCase().includes(debouncedQuery.toLowerCase()) ||
-          (p.alias?.toLowerCase().includes(debouncedQuery.toLowerCase()) ?? false),
-      )
-    : positions;
-
-  const options = filtered.map((pos) => ({
-    value: pos.id,
-    label: pos.name,
-    sublabel: pos.alias,
-  }));
-
-  const isDisabled = disabled || !serviceLineId;
+  // The value is a free-text string. Merge it into the options so the Combobox
+  // trigger can render the current selection even when it isn't in the latest
+  // search page (and so the user's typed-but-not-listed value stays visible).
+  const options = useMemo(() => {
+    const opts = positions.map((p) => ({ value: p, label: p }));
+    if (value && !opts.some((o) => o.value === value)) {
+      return [{ value, label: value }, ...opts];
+    }
+    return opts;
+  }, [positions, value]);
 
   return (
     <Combobox
@@ -111,11 +91,8 @@ export function PositionPicker({
       options={options}
       onSearch={setQuery}
       isLoading={result.isLoading}
-      placeholder={
-        placeholder ??
-        (!serviceLineId ? t('position.disabledPlaceholder') : t('position.placeholder'))
-      }
-      disabled={isDisabled}
+      placeholder={placeholder ?? t('position.searchPlaceholder')}
+      disabled={disabled}
       error={error}
       emptyText={t('position.empty')}
     />

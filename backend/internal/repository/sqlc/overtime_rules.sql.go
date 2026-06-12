@@ -11,7 +11,7 @@ import (
 )
 
 const createOvertimeRule = `-- name: CreateOvertimeRule :one
-INSERT INTO overtime_rules (id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+INSERT INTO overtime_rules (id, name, weekday_rate, restday_rate, holiday_rate,
                             min_minutes, max_minutes_per_day, pre_approval_required)
 VALUES (
     'SWP-OTR-' || swp_next_id('OTR'),
@@ -21,16 +21,14 @@ VALUES (
     $4,
     $5,
     $6,
-    $7,
-    $8
+    $7
 )
-RETURNING id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+RETURNING id, name, weekday_rate, restday_rate, holiday_rate,
           min_minutes, max_minutes_per_day, pre_approval_required, status, created_at, updated_at
 `
 
 type CreateOvertimeRuleParams struct {
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -42,7 +40,6 @@ type CreateOvertimeRuleParams struct {
 type CreateOvertimeRuleRow struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -54,11 +51,11 @@ type CreateOvertimeRuleRow struct {
 	UpdatedAt           time.Time
 }
 
-// Allocates the SWP-OTR id inline from the per-prefix sequence.
+// Allocates the SWP-OTR id inline from the per-prefix sequence. Overtime rules are
+// GLOBAL ONLY (decision 2026-06-12 — service_line_id dropped).
 func (q *Queries) CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error) {
 	row := q.db.QueryRow(ctx, createOvertimeRule,
 		arg.Name,
-		arg.ServiceLineID,
 		arg.WeekdayRate,
 		arg.RestdayRate,
 		arg.HolidayRate,
@@ -70,7 +67,6 @@ func (q *Queries) CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRule
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ServiceLineID,
 		&i.WeekdayRate,
 		&i.RestdayRate,
 		&i.HolidayRate,
@@ -85,7 +81,7 @@ func (q *Queries) CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRule
 }
 
 const getOvertimeRuleByID = `-- name: GetOvertimeRuleByID :one
-SELECT id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+SELECT id, name, weekday_rate, restday_rate, holiday_rate,
        min_minutes, max_minutes_per_day, pre_approval_required, status, created_at, updated_at
 FROM overtime_rules
 WHERE id = $1
@@ -95,7 +91,6 @@ WHERE id = $1
 type GetOvertimeRuleByIDRow struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -113,7 +108,6 @@ func (q *Queries) GetOvertimeRuleByID(ctx context.Context, id string) (GetOverti
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ServiceLineID,
 		&i.WeekdayRate,
 		&i.RestdayRate,
 		&i.HolidayRate,
@@ -128,23 +122,21 @@ func (q *Queries) GetOvertimeRuleByID(ctx context.Context, id string) (GetOverti
 }
 
 const listOvertimeRules = `-- name: ListOvertimeRules :many
-SELECT id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+SELECT id, name, weekday_rate, restday_rate, holiday_rate,
        min_minutes, max_minutes_per_day, pre_approval_required, status, created_at, updated_at
 FROM overtime_rules
 WHERE deleted_at IS NULL
   AND ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR service_line_id = $2::text)
   AND (
-        $3::timestamptz IS NULL
-        OR (created_at, id) < ($3::timestamptz, $4::text)
+        $2::timestamptz IS NULL
+        OR (created_at, id) < ($2::timestamptz, $3::text)
       )
 ORDER BY created_at DESC, id DESC
-LIMIT $5
+LIMIT $4
 `
 
 type ListOvertimeRulesParams struct {
 	Status          *string
-	ServiceLineID   *string
 	CursorCreatedAt *time.Time
 	CursorID        *string
 	RowLimit        int32
@@ -153,7 +145,6 @@ type ListOvertimeRulesParams struct {
 type ListOvertimeRulesRow struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -166,11 +157,11 @@ type ListOvertimeRulesRow struct {
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-// Filters: status, service_line (scopes to a specific line or global).
+// Overtime rules are GLOBAL ONLY (decision 2026-06-12 — the service_line scope axis
+// + line-vs-global precedence were dropped). Filter: status.
 func (q *Queries) ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error) {
 	rows, err := q.db.Query(ctx, listOvertimeRules,
 		arg.Status,
-		arg.ServiceLineID,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,
@@ -185,7 +176,6 @@ func (q *Queries) ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesPa
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.ServiceLineID,
 			&i.WeekdayRate,
 			&i.RestdayRate,
 			&i.HolidayRate,
@@ -212,7 +202,7 @@ SET status     = $1,
     updated_at = now()
 WHERE id = $2
   AND deleted_at IS NULL
-RETURNING id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+RETURNING id, name, weekday_rate, restday_rate, holiday_rate,
           min_minutes, max_minutes_per_day, pre_approval_required, status, created_at, updated_at
 `
 
@@ -224,7 +214,6 @@ type SetOvertimeRuleStatusParams struct {
 type SetOvertimeRuleStatusRow struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -243,7 +232,6 @@ func (q *Queries) SetOvertimeRuleStatus(ctx context.Context, arg SetOvertimeRule
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ServiceLineID,
 		&i.WeekdayRate,
 		&i.RestdayRate,
 		&i.HolidayRate,
@@ -273,23 +261,21 @@ func (q *Queries) SoftDeleteOvertimeRule(ctx context.Context, id string) error {
 const updateOvertimeRule = `-- name: UpdateOvertimeRule :one
 UPDATE overtime_rules
 SET name                  = $1,
-    service_line_id       = $2,
-    weekday_rate          = $3,
-    restday_rate          = $4,
-    holiday_rate          = $5,
-    min_minutes           = $6,
-    max_minutes_per_day   = $7,
-    pre_approval_required = $8,
+    weekday_rate          = $2,
+    restday_rate          = $3,
+    holiday_rate          = $4,
+    min_minutes           = $5,
+    max_minutes_per_day   = $6,
+    pre_approval_required = $7,
     updated_at            = now()
-WHERE id = $9
+WHERE id = $8
   AND deleted_at IS NULL
-RETURNING id, name, service_line_id, weekday_rate, restday_rate, holiday_rate,
+RETURNING id, name, weekday_rate, restday_rate, holiday_rate,
           min_minutes, max_minutes_per_day, pre_approval_required, status, created_at, updated_at
 `
 
 type UpdateOvertimeRuleParams struct {
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -302,7 +288,6 @@ type UpdateOvertimeRuleParams struct {
 type UpdateOvertimeRuleRow struct {
 	ID                  string
 	Name                string
-	ServiceLineID       *string
 	WeekdayRate         float32
 	RestdayRate         float32
 	HolidayRate         float32
@@ -317,7 +302,6 @@ type UpdateOvertimeRuleRow struct {
 func (q *Queries) UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRuleParams) (UpdateOvertimeRuleRow, error) {
 	row := q.db.QueryRow(ctx, updateOvertimeRule,
 		arg.Name,
-		arg.ServiceLineID,
 		arg.WeekdayRate,
 		arg.RestdayRate,
 		arg.HolidayRate,
@@ -330,7 +314,6 @@ func (q *Queries) UpdateOvertimeRule(ctx context.Context, arg UpdateOvertimeRule
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.ServiceLineID,
 		&i.WeekdayRate,
 		&i.RestdayRate,
 		&i.HolidayRate,

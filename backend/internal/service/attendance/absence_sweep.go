@@ -20,16 +20,15 @@ import (
 
 // AbsenceCandidate is one scheduled shift that ended past the grace with no
 // attendance row — the unit the sweep turns into an ABSENT record. The shift window
-// is computed (schedule_entries stores HH:MM, not a timestamptz); company/site/
-// position/service_line are resolved from the placement for the denormalized columns.
+// is computed (schedule_entries stores HH:MM, not a timestamptz); company/site/position
+// are resolved from the placement for the denormalized columns (position is free-text).
 type AbsenceCandidate struct {
 	ScheduleID   string
 	EmployeeID   string
 	PlacementID  string
 	CompanyID    string
 	SiteID       string
-	PositionID   string
-	ServiceLine  string
+	Position     string
 	ShiftStartAt time.Time
 	ShiftEndAt   time.Time
 }
@@ -41,8 +40,7 @@ type CreateAbsentParams struct {
 	ScheduleID   string
 	CompanyID    string
 	SiteID       string
-	PositionID   string
-	ServiceLine  string
+	Position     string
 	ShiftStartAt time.Time
 	ShiftEndAt   time.Time
 }
@@ -104,8 +102,7 @@ func (s *AbsenceSweepService) Sweep(ctx context.Context) (int, error) {
 				ScheduleID:   c.ScheduleID,
 				CompanyID:    c.CompanyID,
 				SiteID:       c.SiteID,
-				PositionID:   c.PositionID,
-				ServiceLine:  c.ServiceLine,
+				Position:     c.Position,
 				ShiftStartAt: c.ShiftStartAt,
 				ShiftEndAt:   c.ShiftEndAt,
 			})

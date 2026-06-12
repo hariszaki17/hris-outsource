@@ -97,8 +97,8 @@ func TestAutoCloseAttendance_Integration(t *testing.T) {
 		t.Fatalf("disable FK: %v", err)
 	}
 	_, err = pool.Exec(ctx, `
-		INSERT INTO attendance (id, employee_id, placement_id, company_id, service_line, site_id, position_id, check_in_at, lat_in, lng_in)
-		VALUES ($1, $2, 'SWP-PL-IT1', 'SWP-CMP-IT1', 'parking', 'SWP-SITE-IT1', 'SWP-POS-IT1', $3, -6.2, 106.8)`,
+		INSERT INTO attendance (id, employee_id, placement_id, company_id, site_id, position, check_in_at, lat_in, lng_in)
+		VALUES ($1, $2, 'SWP-PL-IT1', 'SWP-CMP-IT1', 'SWP-SITE-IT1', 'Petugas Parkir', $3, -6.2, 106.8)`,
 		attID, empID, checkIn)
 	if err != nil {
 		t.Fatalf("insert open row: %v", err)

@@ -7,7 +7,6 @@ package attendance
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -61,9 +60,8 @@ func (r *AttendanceRepo) ListAttendance(ctx context.Context, f svc.AttendanceFil
 	rows, err := r.q.ListAttendance(ctx, sqlcgen.ListAttendanceParams{
 		CompanyID:            f.CompanyID,
 		EmployeeID:           f.EmployeeID,
-		ServiceLine:          f.ServiceLine,
 		SiteID:               f.SiteID,
-		PositionID:           f.PositionID,
+		Position:             f.Position,
 		VerificationStatusIn: f.VerificationStatus,
 		StatusIn:             f.Status,
 		DateFrom:             timePtrToPgDate(f.DateFrom),
@@ -179,9 +177,8 @@ func (r *AttendanceRepo) CreateManualAttendance(ctx context.Context, tx pgx.Tx, 
 		PlacementID:        p.PlacementID,
 		ScheduleID:         p.ScheduleID,
 		CompanyID:          p.CompanyID,
-		ServiceLine:        p.ServiceLine,
 		SiteID:             p.SiteID,
-		PositionID:         p.PositionID,
+		Position:           p.Position,
 		AttendanceCodeID:   p.AttendanceCodeID,
 		ShiftStartAt:       p.ShiftStartAt,
 		ShiftEndAt:         p.ShiftEndAt,
@@ -225,7 +222,6 @@ func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID s
 		}
 		return svc.ManualAutofillData{}, false, err
 	}
-	serviceLine := strings.ToLower(strings.ReplaceAll(row.ServiceLineName, " ", "_"))
 	var shiftStart, shiftEnd *time.Time
 	if row.ScheduleID != nil {
 		ss := row.ShiftStartAt
@@ -236,13 +232,11 @@ func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID s
 	return svc.ManualAutofillData{
 		PlacementID:            row.PlacementID,
 		CompanyID:              row.ClientCompanyID,
-		ServiceLine:            serviceLine,
 		SiteID:                 row.SiteID,
-		PositionID:             row.PositionID,
+		Position:               row.Position,
 		EmployeeName:           row.EmployeeName,
 		CompanyName:            row.CompanyName,
 		SiteName:               row.SiteName,
-		PositionName:           row.PositionName,
 		ScheduleID:             row.ScheduleID,
 		ShiftStartAt:           shiftStart,
 		ShiftEndAt:             shiftEnd,
@@ -268,16 +262,11 @@ func (r *AttendanceRepo) GetActivePlacement(ctx context.Context, employeeID stri
 		}
 		return svc.PlacementInfo{}, false, err
 	}
-	serviceLine := ""
-	if row.ServiceLineName != nil {
-		serviceLine = strings.ToLower(strings.ReplaceAll(*row.ServiceLineName, " ", "_"))
-	}
 	return svc.PlacementInfo{
 		PlacementID: row.ID,
 		CompanyID:   row.ClientCompanyID,
 		SiteID:      row.SiteID,
-		PositionID:  row.PositionID,
-		ServiceLine: serviceLine,
+		Position:    row.Position,
 	}, true, nil
 }
 

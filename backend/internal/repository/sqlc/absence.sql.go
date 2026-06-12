@@ -12,17 +12,17 @@ import (
 
 const createAbsentAttendance = `-- name: CreateAbsentAttendance :one
 INSERT INTO attendance (
-    employee_id, placement_id, schedule_id, company_id, service_line,
-    site_id, position_id,
+    employee_id, placement_id, schedule_id, company_id,
+    site_id, position,
     shift_start_at, shift_end_at,
     check_in_at, lat_in, lng_in,
     status, verification_status
 )
 VALUES (
     $1, $2, $3,
-    $4, $5,
-    $6, $7,
-    $8, $9,
+    $4,
+    $5, $6,
+    $7, $8,
     NULL, NULL, NULL,
     'ABSENT', 'PENDING'
 )
@@ -36,9 +36,8 @@ type CreateAbsentAttendanceParams struct {
 	PlacementID  string
 	ScheduleID   *string
 	CompanyID    string
-	ServiceLine  string
 	SiteID       string
-	PositionID   string
+	Position     string
 	ShiftStartAt *time.Time
 	ShiftEndAt   *time.Time
 }
@@ -57,9 +56,8 @@ func (q *Queries) CreateAbsentAttendance(ctx context.Context, arg CreateAbsentAt
 		arg.PlacementID,
 		arg.ScheduleID,
 		arg.CompanyID,
-		arg.ServiceLine,
 		arg.SiteID,
-		arg.PositionID,
+		arg.Position,
 		arg.ShiftStartAt,
 		arg.ShiftEndAt,
 	)
@@ -76,15 +74,13 @@ SELECT
     se.placement_id                         AS placement_id,
     p.client_company_id                     AS company_id,
     p.site_id                               AS site_id,
-    p.position_id                           AS position_id,
-    lower(replace(sl.name, ' ', '_'))::text AS service_line,
+    p.position                              AS position,
     ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
     (((se.work_date + se.end_time::time)
         + (CASE WHEN se.cross_midnight THEN interval '1 day' ELSE interval '0' END))
         AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_end_at
 FROM schedule_entries se
-JOIN placements p     ON p.id = se.placement_id
-JOIN service_lines sl ON sl.id = p.service_line_id
+JOIN placements p      ON p.id = se.placement_id
 WHERE se.deleted_at IS NULL
   AND se.is_day_off = false
   AND se.status NOT IN ('CANCELLED_BY_LEAVE')
@@ -113,8 +109,7 @@ type FindUnreportedAbsencesRow struct {
 	PlacementID  string
 	CompanyID    string
 	SiteID       string
-	PositionID   string
-	ServiceLine  string
+	Position     string
 	ShiftStartAt time.Time
 	ShiftEndAt   time.Time
 }
@@ -124,16 +119,15 @@ type FindUnreportedAbsencesRow struct {
 // grace with NO clock-in as ABSENT. schedule_entries carries NO stored shift
 // timestamptz — the window is computed from work_date + start_time/end_time (HH:MM,
 // Asia/Jakarta wall-clock) via `... AT TIME ZONE 'Asia/Jakarta'` (CLAUDE.md TZ layer:
-// 07:00 WIB → 00:00 UTC). cross_midnight adds a day to the end. service_line is the
-// attendance text enum (facility_services|building_management|parking) derived from the
-// placement's service_lines row as lower(replace(name,' ','_')) — there is no slug
-// column, the three seeded names map 1:1 ("Facility Services"→facility_services, etc).
-// `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+// 07:00 WIB → 00:00 UTC). cross_midnight adds a day to the end. position is FREE-TEXT,
+// resolved from the placement's positions.name and stored directly on the ABSENT row;
+// there is no service_line column. `make gen` writes internal/repository/sqlc (NEVER
+// hand-edit).
 // Candidate scheduled shifts that ended before :cutoff (now - grace) and have no
-// attendance row yet. Joins placements for the denormalized company/site/position/
-// service_line the ABSENT row must carry. Deterministic order (work_date, id) so
-// batching is stable across ticks. is_day_off and CANCELLED_BY_LEAVE entries are
-// never absences; only live (deleted_at IS NULL) entries with both times present.
+// attendance row yet. Joins placements for the denormalized company/site/position the
+// ABSENT row must carry (position is the free-text positions.name). Deterministic order
+// (work_date, id) so batching is stable across ticks. is_day_off and CANCELLED_BY_LEAVE
+// entries are never absences; only live (deleted_at IS NULL) entries with both times present.
 func (q *Queries) FindUnreportedAbsences(ctx context.Context, arg FindUnreportedAbsencesParams) ([]FindUnreportedAbsencesRow, error) {
 	rows, err := q.db.Query(ctx, findUnreportedAbsences, arg.Cutoff, arg.PageLimit)
 	if err != nil {
@@ -149,8 +143,7 @@ func (q *Queries) FindUnreportedAbsences(ctx context.Context, arg FindUnreported
 			&i.PlacementID,
 			&i.CompanyID,
 			&i.SiteID,
-			&i.PositionID,
-			&i.ServiceLine,
+			&i.Position,
 			&i.ShiftStartAt,
 			&i.ShiftEndAt,
 		); err != nil {

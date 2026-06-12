@@ -7,12 +7,12 @@
 
 ## 1. Context & problem
 
-In the legacy system, "placement" was a free-text string on `employee_contracts` — unstructured, unqueryable, and impossible to validate. SWP needs to formally **place an agent at a client company, in a service line, for a contract period**, capturing the terms that govern that engagement. This record becomes the anchor for scheduling, attendance, leave, and overtime. Getting creation right (with the right rules and history) is the foundation of the whole product.
+In the legacy system, "placement" was a free-text string on `employee_contracts` — unstructured, unqueryable, and impossible to validate. SWP needs to formally **place an agent at a client company (site), in a position, for a contract period**, capturing the terms that govern that engagement. This record becomes the anchor for scheduling, attendance, leave, and overtime. Getting creation right (with the right rules and history) is the foundation of the whole product. *(2026-06-12: `service_line` is removed entirely and **position is free-text**, no master — see BR-9.)*
 
 ## 2. Goals & non-goals
 
 **Goals**
-- HR admin can create a placement in one flow: agent → company → service line → period → terms.
+- HR admin can create a placement in one flow: agent → company → site → position → period → terms.
 - Enforce the placement invariants (one active placement per agent; valid period; active company).
 - Support both **immediate** activation and **scheduled** (future-dated) placements.
 - Every placement is auditable and triggers the right notifications.
@@ -32,17 +32,17 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 
 ## 4. User stories
 
-- **US-1** — *As an HR admin, I want to place an agent at a client company in a service line for a contract period, so that the agent is officially assigned and can be scheduled.*
+- **US-1** — *As an HR admin, I want to place an agent at a client company (site) in a position for a contract period, so that the agent is officially assigned and can be scheduled.*
 - **US-2** — *As an HR admin, I want to schedule a placement to start on a future date, so that I can prepare assignments ahead of the agent's start.*
 - **US-3** — *As an HR admin, I want the system to stop me from placing an agent who already has an active placement, so that I don't accidentally double-book a person.*
-- **US-4** — *As an agent, I want to see my active placement (company, service line, period), so that I know where and when I'm assigned.*
+- **US-4** — *As an agent, I want to see my active placement (company, site, position, period), so that I know where and when I'm assigned.*
 - **US-5** — *As a shift leader, I want newly placed agents to appear in my company roster, so that I can schedule them.*
 
 ## 5. Functional requirements & business rules
 
 | Ref | Rule |
 |-----|------|
-| BR-1 | A placement requires: agent, client company, **site** (E2 F2.6 — the specific location), service line, **position** (from master), start date. The **employment agreement is optional at create and may be backfilled** *(EPICS §8 2026-06-11 — supersedes the prior version of BR-1 that made the agreement mandatory)* — an agent may be placed and start work before the PKWT/PKWTT is finalized; a placement created without one is **flagged `awaiting agreement`** (see BR-10) until the agreement is attached. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`, and for any pending-agreement placement). |
+| BR-1 | A placement requires: agent, client company, **site** (E2 F2.6 — the specific location), **position** (free-text string — see BR-9), start date. *(2026-06-12: `service_line` is removed entirely and is no longer a required field.)* The **employment agreement is optional at create and may be backfilled** *(EPICS §8 2026-06-11 — supersedes the prior version of BR-1 that made the agreement mandatory)* — an agent may be placed and start work before the PKWT/PKWTT is finalized; a placement created without one is **flagged `awaiting agreement`** (see BR-10) until the agreement is attached. `end_date` is **optional** — open-ended placements are allowed (typical for `PKWTT`, and for any pending-agreement placement). |
 | BR-1b | **Only when an employment agreement is present**, the placement period must fall **within the agent's employment-agreement validity**. For `PKWT`, if the placement `end_date` would exceed the agreement `end_date`, the system **auto-caps** it to the agreement `end_date` and notifies the creator; `PKWTT` imposes no upper bound. When **no** agreement is set (awaiting-agreement placement), this check is **skipped** and `end_date` may be open-ended; it re-runs when the agreement is backfilled (BR-10). |
 | BR-2 | **INV-1 + 1-day buffer** — the agent must have no `Active`/`Scheduled` placement overlapping the new period, AND the new `start_date` must be **at least 1 day after** any prior placement's `end_date` (no overlap, no same-day handover). Enforced at persist time (DB constraint), not just UI. |
 | BR-3 | The client company must be `Active`. Placing into an inactive/archived company is blocked. |
@@ -52,7 +52,7 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | BR-6 | Backdating `start_date` is allowed for **HR admin and Super Admin**, requires a **reason**, and is recorded in the audit log. |
 | BR-7 | On successful creation, write an audit-log entry and notify the agent and the company's shift leader (if one is assigned). |
 | BR-8 | Creation is not blocked if the company has no shift leader yet, but the UI surfaces a warning prompting F3.4. |
-| BR-9 | `position` is selected per placement from the E2 position master; the same agent may hold a **different position** at a different company. |
+| BR-9 | `position` is a **free-text string entered per placement** *(2026-06-12, EPICS §8 — supersedes "from the E2 position master"; there is **no Position master, no FK, no `service_line`, no uniqueness, no `SWP-POS` id**)*. A **typeahead endpoint** suggests `DISTINCT` existing placement position values for entry consistency, but any new string is accepted — nothing is enforced. The same agent may hold a **different position** at a different company. |
 | BR-10 | **Pending-agreement tracking & backfill** *(EPICS §8 2026-06-11).* A placement created without an `employment_agreement_id` carries a derived flag **`awaiting_agreement` (= the agreement reference is null)** — an **orthogonal compliance flag, NOT a lifecycle status** (the F3.2 state machine is unaffected; an awaiting placement can be Active/Scheduled/Expiring). Placement list + company-roster views expose an **`awaiting_agreement` filter** to surface the pending backlog. The agreement is attached later via a **backfill action** (`POST /placements/{id}/agreement`), which re-runs the BR-1b period check / PKWT auto-cap, then clears `awaiting_agreement`; backfilling an agreement that does **not** belong to the placement's agent is rejected, and backfilling a placement that already has an agreement is a no-op/rejected (nothing pending). On **renew/transfer** of a pending placement the successor **stays pending** (null propagates, no auto-cap) until its own agreement is backfilled (see C-11). A finalized PKWT/PKWTT remains legally required for the employment overall (alih-daya) — this rule only removes it as a blocking precondition at placement create. |
 
 ## 6. Data model (created fields)
@@ -64,8 +64,7 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | `awaiting_agreement` | bool (derived) | system | `true` ⟺ `employment_agreement_id` is null (BR-10). Compliance flag, not a lifecycle status; drives the list/roster filter. |
 | `client_company_id` | FK → ClientCompany | yes | company status = active (BR-3) |
 | `site_id` | FK → Site (E2 F2.6) | yes | belongs to `client_company_id` & status = active (BR-3b); defaults to the company's primary Main Site |
-| `service_line_id` | FK → ServiceLine | yes | one of Facility / Building Mgmt / Parking |
-| `position_id` | FK → Position (E2 master) | yes | per-placement; may differ across companies (BR-9) |
+| `position` | text (free-text) | yes | non-empty string entered per placement; **no master/FK/uniqueness** (BR-9); typeahead over `DISTINCT` existing values |
 | `start_date` | date | yes | valid date; backdating needs reason (BR-6) |
 | `end_date` | date | no | open-ended allowed; if present `> start_date` (BR-4) and within agreement (BR-1b) |
 | `predecessor_id` | FK → Placement | system | null on plain create; set by renewal/transfer (F3.2/F3.3) |
@@ -74,7 +73,7 @@ In the legacy system, "placement" was a free-text string on `employee_contracts`
 | `status` | enum | system | set by BR-5 |
 | `created_by` | FK → User | system | actor id |
 
-> `pkwt_reference` and the PKWT/PKWTT type now live on **EmploymentAgreement** (E2), not on the placement — see [DATA-MAPPING.md](../DATA-MAPPING.md). **Compensation (base salary) and the annual-leave entitlement (`annual_leave_entitlement_days`) are also EmploymentAgreement terms (E2), not placement fields** *(2026-06-07, EPICS §8)* — they were removed from the placement to avoid duplicating E2; E6 leave-quota sources the entitlement from E2.
+> `pkwt_reference` and the PKWT/PKWTT type now live on **EmploymentAgreement** (E2), not on the placement — see [DATA-MAPPING.md](../DATA-MAPPING.md). **Compensation (base salary) and the annual-leave entitlement (`annual_leave_entitlement_days`) are also EmploymentAgreement terms (E2), not placement fields** *(2026-06-07, EPICS §8)* — they were removed from the placement to avoid duplicating E2; E6 leave-quota sources the entitlement from E2. **`service_line_id` and `position_id` are removed** *(2026-06-12, EPICS §8)* — `service_line` is dropped entirely and `position` is now a free-text string column (BR-9), not an FK to a master.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -85,10 +84,9 @@ Feature: Agent placement creation
     Given I am signed in as an HR admin
     And an active agent "Budi" who has no active or scheduled placement
     And an active client company "Plaza Senayan"
-    And the service line "Parking" exists
 
   Scenario: Create an immediately-active placement
-    When I create a placement for "Budi" at "Plaza Senayan" in "Parking"
+    When I create a placement for "Budi" at "Plaza Senayan" with position "Parking Attendant"
     And I set start date to today and a valid PKWT period
     Then the placement is created with status "Active"
     And an audit-log entry records the creation
@@ -156,7 +154,7 @@ Feature: Agent placement creation
 
   Scenario: Create a placement without an employment agreement (awaiting agreement)
     Given "Budi" has no finalized employment agreement yet
-    When I create a placement for "Budi" at "Plaza Senayan" in "Parking" without an employment agreement
+    When I create a placement for "Budi" at "Plaza Senayan" with position "Parking Attendant" without an employment agreement
     Then the placement is created successfully
     And it is flagged "awaiting agreement"
     And no period-within-agreement validation is applied
@@ -196,16 +194,18 @@ Feature: Agent placement creation
 
 ## 9. Dependencies
 
-- **E2** — Employee, ClientCompany, ServiceLine master data must exist.
+- **E2** — Employee, ClientCompany, Site master data must exist. *(No ServiceLine/Position master — position is free-text, BR-9.)*
 - **E1** — audit log + RBAC (only HR admin / super admin may create).
 - **E10** — notifications (agent / shift leader).
 - **F3.4** — shift-leader assignment (referenced for notification + warning).
 
 ## 10. Decisions & open questions
 
-**Resolved (2026-05-29):** C-2 → 1-day buffer, no same-day handover (BR-2). Position → master-data controlled, set per placement (BR-9). Open-ended placements valid, esp. PKWTT (BR-1). Backdating → HR admin + reason (BR-6).
+**Resolved (2026-05-29):** C-2 → 1-day buffer, no same-day handover (BR-2). Position → set per placement (BR-9). Open-ended placements valid, esp. PKWTT (BR-1). Backdating → HR admin + reason (BR-6).
 
-**Resolved (2026-05-29, round 2):** Service line → **manual classification later** (after SWP confirms) → [DATA-MAPPING.md](../DATA-MAPPING.md) G-1. Buffer → **next day after prior end** is sufficient. PKWT overrun → **auto-cap** to agreement end (BR-1b). Designation window → defaults to the employment-agreement dates, adjustable per placement.
+**Resolved (2026-05-29, round 2):** Buffer → **next day after prior end** is sufficient. PKWT overrun → **auto-cap** to agreement end (BR-1b). Designation window → defaults to the employment-agreement dates, adjustable per placement.
+
+**Resolved (2026-06-12):** **`service_line` removed entirely** and **`position` is free-text** (no master, no FK, no uniqueness, no `SWP-POS` id) — supersedes the 2026-05-29 "master-data controlled" position and the "manual service-line classification" decision. A typeahead over `DISTINCT` existing values aids entry only. See BR-9, [EPICS.md §8](../../../EPICS.md), [DATA-MAPPING.md](../DATA-MAPPING.md) G-1.
 
 **Resolved (2026-06-07):** `annual_leave_entitlement` and `base_salary_ref` **removed from the placement** — compensation and annual-leave entitlement are employment-agreement (E2) terms, not placement terms. See EPICS §8 + [employment-agreement.md](../../E2-identity/prds/employment-agreement.md). BR-9 (position per placement) is unaffected.
 

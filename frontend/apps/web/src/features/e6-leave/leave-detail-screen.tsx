@@ -289,9 +289,9 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
           </div>
           <div className="flex flex-col">
             <span className="font-semibold text-text">{lr.employee_name ?? lr.employee_id}</span>
-            <span className="text-xs text-text-3">
-              {lr.employee_company_name} · {lr.employee_service_line}
-            </span>
+            {lr.employee_company_name && (
+              <span className="text-xs text-text-3">{lr.employee_company_name}</span>
+            )}
           </div>
           <StatusBadge dot tone={leaveStatusTone(lr.status)}>
             {t(`status.${lr.status}`)}

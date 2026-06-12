@@ -14,7 +14,6 @@ import {
   ArrowLeft,
   Building2,
   CalendarClock,
-  Clock,
   Info,
   MapPin,
   Search,
@@ -34,7 +33,6 @@ interface AutofillData {
   company_name: string;
   site_name: string | null;
   position_name: string | null;
-  service_line: string;
   schedule_id: string | null;
   shift_start_at: string | null;
   shift_end_at: string | null;
@@ -396,11 +394,6 @@ export function ManualAttendanceCreateScreen() {
                     icon={Users}
                     label={t('position_name', { ns: 'common' })}
                     value={autofillQuery.data.position_name ?? '-'}
-                  />
-                  <InfoRow
-                    icon={Clock}
-                    label="Lini Layanan"
-                    value={t(`serviceLine.${autofillQuery.data.service_line}` as never)}
                   />
 
                   {/* Schedule */}

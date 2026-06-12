@@ -756,12 +756,6 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/HolidayCategory'
-        - name: service_line_id
-          in: query
-          description: Filter to holidays applicable to this service line (or global).
-          schema:
-            type: string
-            example: SWP-SVC-PARKING
         - $ref: '#/components/parameters/cursor'
         - $ref: '#/components/parameters/limit'
       responses:
@@ -781,7 +775,6 @@ paths:
                         date: '2026-08-17'
                         category: NATIONAL
                         recurring: true
-                        applicable_service_lines: []
                         in_use_by_overtime: true
                         created_at: '2025-12-15T03:21:00Z'
                         updated_at: '2025-12-15T03:21:00Z'
@@ -790,7 +783,6 @@ paths:
                         date: '2026-04-13'
                         category: NATIONAL
                         recurring: false
-                        applicable_service_lines: []
                         in_use_by_overtime: false
                         created_at: '2025-12-15T03:30:00Z'
                         updated_at: '2025-12-15T03:30:00Z'
@@ -815,7 +807,7 @@ paths:
         `recurring: false`.
 
         Duplicate-date guard: creating a holiday on a date that already has one with
-        the same `category` + service-line scope → `HOLIDAY_DATE_CLASH` (409).
+        the same `category` → `HOLIDAY_DATE_CLASH` (409).
       parameters:
         - $ref: '#/components/parameters/idempotencyKey'
       requestBody:
@@ -832,7 +824,6 @@ paths:
                   date: '2026-08-17'
                   category: NATIONAL
                   recurring: true
-                  applicable_service_lines: []
               movable_yearly:
                 summary: Add Idul Fitri 2026 (movable, yearly)
                 value:
@@ -840,15 +831,13 @@ paths:
                   date: '2026-04-13'
                   category: NATIONAL
                   recurring: false
-                  applicable_service_lines: []
               custom_regional:
-                summary: Add a custom regional holiday for Parking only
+                summary: Add a custom regional holiday
                 value:
                   name: HUT Daerah Khusus
                   date: '2026-09-12'
                   category: REGIONAL
                   recurring: true
-                  applicable_service_lines: [SWP-SVC-PARKING]
       responses:
         '201':
           description: Holiday created.
@@ -865,7 +854,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: '`HOLIDAY_DATE_CLASH` — duplicate holiday on same date+scope.'
+          description: '`HOLIDAY_DATE_CLASH` — duplicate holiday on same date + category.'
           $ref: '#/components/responses/Conflict'
       x-rbac:
         roles: [hr_admin, super_admin]
@@ -923,7 +912,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: '`HOLIDAY_DATE_CLASH` if the new date+scope conflicts.'
+          description: '`HOLIDAY_DATE_CLASH` if the new date + category conflicts.'
           $ref: '#/components/responses/Conflict'
       x-rbac:
         roles: [hr_admin, super_admin]
@@ -976,12 +965,6 @@ paths:
         widgets that highlight the "next holiday" hint.
 
         Returns `null` data if no holiday is scheduled in the next 2 years.
-      parameters:
-        - name: service_line_id
-          in: query
-          description: Restrict to holidays applicable to this service line.
-          schema:
-            type: string
       responses:
         '200':
           description: Next holiday or null.
@@ -1491,7 +1474,6 @@ components:
         - date
         - category
         - recurring
-        - applicable_service_lines
         - in_use_by_overtime
         - created_at
         - updated_at
@@ -1519,14 +1501,6 @@ components:
             True = repeats annually on the same MM-DD (no need to re-enter yearly).
             False = movable holiday entered per year (e.g. Idul Fitri).
           example: true
-        applicable_service_lines:
-          type: array
-          description: |
-            Empty list = applies globally (all service lines). Non-empty = restricted
-            to the listed service lines (useful for REGIONAL/CUSTOM).
-          items:
-            type: string
-            example: SWP-SVC-PARKING
         in_use_by_overtime:
           type: boolean
           readOnly: true
@@ -1560,13 +1534,6 @@ components:
           type: boolean
           default: false
           example: true
-        applicable_service_lines:
-          type: array
-          description: |
-            Empty/omitted = global. Non-empty = restricted to listed service-line IDs.
-          items:
-            type: string
-          default: []
 
     HolidayPage:
       type: object

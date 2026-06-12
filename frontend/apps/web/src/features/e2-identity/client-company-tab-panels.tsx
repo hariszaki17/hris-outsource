@@ -144,17 +144,6 @@ function RosterTable({ clientCompanyId, includeHistory }: RosterTableProps) {
       ),
     },
     {
-      id: 'liniLayanan',
-      header: t('rosterColLiniLayanan'),
-      width: 165,
-      cell: (pl) =>
-        pl.service_line_name ? (
-          <span className="text-[13px] text-text-2">{pl.service_line_name}</span>
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
-    },
-    {
       id: 'posisi',
       header: t('rosterColPosisi'),
       width: 190,

@@ -41,7 +41,7 @@ Agent, Shift Leader, HR/Super Admin, System (compute, scope).
 | DB-4 | **HR dashboard:** cross-company KPIs — attendance rate, billable hours trend, OT totals, leave usage, active placements/headcount. |
 | DB-5 | Dashboard widgets **deep-link** to the underlying feature (approve, verify, schedule). |
 | DB-6 | Data reflects auto-published/near-live state (E4/E5). |
-| DB-7 | **Super Admin superset:** the `super_admin` dashboard returns the `HrDashboard` payload **plus** an `admin` block — (a) **user & access** (active users, accounts pending provisioning, offboarded/disabled ≤30d — E2/F2.7); (b) **recent audit feed** (last sensitive actions — E1 audit); (c) **org rollups by service line** (headcount + active placements across Facility/Building/Parking — E3); (d) **pending grants** (bank-account approval escalations + role-change requests). `admin` is present **only** for `super_admin`; the `hr_admin` payload is unchanged. Each widget deep-links (DB-5). |
+| DB-7 | **Super Admin superset:** the `super_admin` dashboard returns the `HrDashboard` payload **plus** an `admin` block — (a) **user & access** (active users, accounts pending provisioning, offboarded/disabled ≤30d — E2/F2.7); (b) **recent audit feed** (last sensitive actions — E1 audit); (c) **org rollups by position** (headcount + active placements grouped by free-text position — E3); (d) **pending grants** (bank-account approval escalations + role-change requests). `admin` is present **only** for `super_admin`; the `hr_admin` payload is unchanged. Each widget deep-links (DB-5). |
 | DB-8 | **Leader dual-surface:** the `LeaderDashboard` payload backs **both** the web team dashboard and the mobile Beranda. No separate endpoint — `GET /dashboards/me` returns it for `shift_leader` on either client. |
 
 ## 6. Data model
@@ -81,7 +81,7 @@ Feature: Role-based dashboards
     Given I am a super admin
     When I open my dashboard
     Then I see the HR cross-company KPIs
-    And I also see the admin widgets: users & access, recent audit, org rollups by service line, and pending grants
+    And I also see the admin widgets: users & access, recent audit, org rollups by position, and pending grants
 
   Scenario: HR Admin does not see admin widgets (DB-7)
     Given I am an HR admin
@@ -115,6 +115,6 @@ E3–E8 (data), F10.1 (notifications widget), E1 (scope).
 ## 10. Decisions & open questions
 
 - ✅ Role-tailored, scoped dashboards with deep links.
-- ✅ **Super Admin = HR cockpit superset** (DB-7, resolved 2026-06-11, [EPICS §8](../../../EPICS.md)) — admin-only widget block on `HrDashboard.admin`, super-admin only. Widget set: users & access · recent audit feed · org rollups by service line · pending grants.
+- ✅ **Super Admin = HR cockpit superset** (DB-7, resolved 2026-06-11, [EPICS §8](../../../EPICS.md)) — admin-only widget block on `HrDashboard.admin`, super-admin only. Widget set: users & access · recent audit feed · org rollups by position · pending grants. *(Rollup axis changed from service line → free-text position 2026-06-12.)*
 - ✅ **Shift-leader dashboard is dual-surface** (DB-8, resolved 2026-06-11) — one `LeaderDashboard` payload powers web + mobile Beranda; no new endpoint. Mobile frame `.pen` `UMzuO`.
 - **Open:** exact KPI set + freshness/caching targets for the HR dashboard.

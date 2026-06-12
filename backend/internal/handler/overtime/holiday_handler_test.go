@@ -50,7 +50,7 @@ func TestListHolidays_Envelope(t *testing.T) {
 	}
 	// keyset is ASC by date: Aug 17 precedes Dec 25.
 	first := data[0].(map[string]any)
-	for _, k := range []string{"id", "name", "date", "category", "recurring", "applicable_service_lines", "in_use_by_overtime"} {
+	for _, k := range []string{"id", "name", "date", "category", "recurring", "in_use_by_overtime"} {
 		if _, ok := first[k]; !ok {
 			t.Errorf("holiday row missing key: %s", k)
 		}

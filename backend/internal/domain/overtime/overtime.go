@@ -99,14 +99,13 @@ type OvertimeApproval struct {
 // ReferenceMultiplier is STORED reference only, NOT applied (INV-2): there is no
 // monetary method on this type.
 type Overtime struct {
-	ID            string
-	EmployeeID    string
-	EmployeeName  *string
-	CompanyID     *string
-	CompanyName   *string
-	PlacementID   string
-	AttendanceID  *string
-	ServiceLineID *string
+	ID           string
+	EmployeeID   string
+	EmployeeName *string
+	CompanyID    *string
+	CompanyName  *string
+	PlacementID  string
+	AttendanceID *string
 
 	WorkDate         time.Time
 	PlannedStartTime *string
@@ -144,16 +143,16 @@ type Overtime struct {
 func (o Overtime) CountedFromWorked() int { return (o.WorkedMinutes / 30) * 30 }
 
 // Holiday is the domain entity for one public-holiday calendar row (openapi
-// Holiday). InUseByOvertime is the server-computed flag (true if any APPROVED OT
+// Holiday). Holidays are GLOBAL ONLY (decision 2026-06-12 — applicable_service_lines
+// dropped). InUseByOvertime is the server-computed flag (true if any APPROVED OT
 // references this holiday — the HOLIDAY_IN_USE guard surface).
 type Holiday struct {
-	ID                     string
-	Name                   string
-	Date                   time.Time
-	Category               HolidayCategory
-	Recurring              bool
-	ApplicableServiceLines []string
-	InUseByOvertime        bool
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID              string
+	Name            string
+	Date            time.Time
+	Category        HolidayCategory
+	Recurring       bool
+	InUseByOvertime bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }

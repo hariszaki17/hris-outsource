@@ -22,7 +22,7 @@ import { getChangeRequestsMock } from './gen/e2/change-requests/change-requests.
 import { getClientCompaniesMock } from './gen/e2/client-companies/client-companies.msw.ts';
 import { getEmployeesMock } from './gen/e2/employees/employees.msw.ts';
 import { getMasterDataMock } from './gen/e2/master-data/master-data.msw.ts';
-import { getServiceLinesPositionsMock } from './gen/e2/service-lines-positions/service-lines-positions.msw.ts';
+import { getPeopleMock } from './gen/e2/people/people.msw.ts';
 import { getClientCompaniesMock as getE3RosterMock } from './gen/e3/client-companies/client-companies.msw.ts';
 import { getPlacementsMock } from './gen/e3/placements/placements.msw.ts';
 import { getShiftLeaderAssignmentsMock } from './gen/e3/shift-leader-assignments/shift-leader-assignments.msw.ts';
@@ -58,7 +58,7 @@ export const handlers: RequestHandler[] = [
   ...getChangeRequestsMock(),
   ...getAgreementsMock(),
   ...getClientCompaniesMock(),
-  ...getServiceLinesPositionsMock(),
+  ...getPeopleMock(),
   ...getMasterDataMock(),
   // E3 Placement / Penempatan
   ...getPlacementsMock(),

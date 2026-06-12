@@ -26,12 +26,14 @@
 - `internal/repository/leave/quota_repo.go` (+ `mapping.go`): 8 concrete repo methods over the new queries; `mapQuotaFromModel` populates the new fields. **Not yet added to `svc.QuotaRepository`** (avoids breaking in-flight mocks; the meter interface lands in Phase 3).
 - Gate met: `make gen-sqlc` + `go build ./...` clean; 72 leave tests pass; vet clean. *(LeaveType cap fields read in Phase 3 via a join query — not needed on a domain LeaveType yet.)*
 
-## Phase 3 — Cap-basis metering + eligibility gates (Opus)
+## Phase 3 — Cap-basis metering + eligibility gates ✅ DONE (Opus)
 
-- New `internal/service/leave/quota_meter.go`: `windowKey(capBasis, date) → period_key`; `Reserve/Commit/Release(empID, typeID, days, date)` dispatching by `cap_basis` (quota-bearing → window row; `PER_EVENT` → cap check, no row; `UNCAPPED` → doc only; `PER_YEAR_COUNT` → occurrence count; `LIFETIME_ONCE`/`SERVICE_UNPAID` → EMP window once).
-- Eligibility gates (INV-7): gender match, `notice_days`, `min_service_years` (tenure from E2), lifetime-once (no prior approved). Typed errors → 422 RULE_VIOLATION mapping.
-- Annual auto-grant: write one `ANNUAL_POOL` quota from `employment_agreements.annual_leave_entitlement_days`, pro-rated (replaces `grant_service` annual lot).
-- Gate: comprehensive unit tests per cap_basis (mirror [F6.1 PRD §7 Gherkin]).
+- `db/queries/leave/leave_meter.sql`: `GetLeaveTypeCap`, `GetEmployeeGateInfo` (gender+join_at), `GetAnnualEntitlementForEmployee` (active agreement).
+- `internal/domain/leave/leave.go`: `LeaveTypeCap`, `EmployeeGateInfo`.
+- `internal/service/leave/quota_meter.go`: `QuotaMeter` + `QuotaMeterStore`/`QuotaMeterReader` interfaces + `GateError`. `Reserve/Commit/Release/Reverse` dispatch by `cap_basis` (quota-bearing → resolve-or-auto-open + remaining check; `PER_EVENT` → per-occurrence cap, no row; `UNCAPPED` → no day cap; COUNT → charge 1; lifetime/service → EMP window + once gate). Gates: gender / notice_days / min_service_years / lifetime-once. Pure helpers `windowFor`/`chargeFor`/`dayCapped`/`evaluateGates`/`entitlementFor`.
+- `internal/repository/leave/quota_repo.go`: 3 reader methods + `var _ QuotaMeterStore/Reader = (*QuotaRepo)(nil)`.
+- `internal/service/leave/quota_meter_test.go`: 9 unit tests.
+- Gate met: `go build ./...` clean; **81 leave tests pass**; vet clean. **Meter not yet wired into `LeaveService`** (Phase 4). *(Annual pro-ration LQ-8 deferred to the auto-grant job; on-demand auto-open uses full entitlement.)*
 
 ## Phase 4 — Rewire LeaveService (Opus, core swap)
 

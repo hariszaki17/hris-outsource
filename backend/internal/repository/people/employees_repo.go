@@ -316,12 +316,8 @@ func mapEmployeeFromList(row sqlcgen.ListEmployeesRow) domain.Employee {
 		CreatedBy: row.CreatedBy,
 	}
 	// current_* come from the employee's non-terminal placement (null when unplaced).
-	if row.CurrentPositionID != nil {
-		emp.CurrentPosition = &domain.PositionRef{ID: *row.CurrentPositionID, Name: derefStr(row.CurrentPositionName)}
-	}
-	if row.CurrentServiceLineID != nil {
-		emp.CurrentServiceLine = &domain.ServiceLineRef{ID: *row.CurrentServiceLineID, Name: derefStr(row.CurrentServiceLineName)}
-	}
+	// current_position is the free-text placement label (no master / FK / ID).
+	emp.CurrentPosition = row.CurrentPosition
 	if row.CurrentClientCompanyID != nil {
 		emp.CurrentClientCompany = &domain.ClientCompanyRef{ID: *row.CurrentClientCompanyID, Name: derefStr(row.CurrentClientCompanyName)}
 	}
@@ -363,12 +359,8 @@ func mapEmployeeFromGetByID(row sqlcgen.GetEmployeeByIDRow) domain.Employee {
 		CreatedBy:      row.CreatedBy,
 	}
 	// current_* come from the employee's non-terminal placement (null when unplaced).
-	if row.CurrentPositionID != nil {
-		emp.CurrentPosition = &domain.PositionRef{ID: *row.CurrentPositionID, Name: derefStr(row.CurrentPositionName)}
-	}
-	if row.CurrentServiceLineID != nil {
-		emp.CurrentServiceLine = &domain.ServiceLineRef{ID: *row.CurrentServiceLineID, Name: derefStr(row.CurrentServiceLineName)}
-	}
+	// current_position is the free-text placement label (no master / FK / ID).
+	emp.CurrentPosition = row.CurrentPosition
 	if row.CurrentClientCompanyID != nil {
 		emp.CurrentClientCompany = &domain.ClientCompanyRef{ID: *row.CurrentClientCompanyID, Name: derefStr(row.CurrentClientCompanyName)}
 	}

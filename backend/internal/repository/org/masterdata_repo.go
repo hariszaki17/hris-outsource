@@ -284,7 +284,6 @@ func (r *MasterDataRepository) SoftDeleteAttendanceCode(ctx context.Context, tx 
 func (r *MasterDataRepository) ListOvertimeRules(ctx context.Context, f domain.OvertimeRuleFilter) ([]domain.OvertimeRule, error) {
 	rows, err := r.q.ListOvertimeRules(ctx, sqlcgen.ListOvertimeRulesParams{
 		Status:          f.Status,
-		ServiceLineID:   f.ServiceLine,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,
 		RowLimit:        int32(f.Limit),
@@ -294,7 +293,7 @@ func (r *MasterDataRepository) ListOvertimeRules(ctx context.Context, f domain.O
 	}
 	out := make([]domain.OvertimeRule, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toOvertimeRuleDomain(row.ID, row.Name, row.ServiceLineID,
+		out = append(out, toOvertimeRuleDomain(row.ID, row.Name,
 			row.WeekdayRate, row.RestdayRate, row.HolidayRate,
 			int(row.MinMinutes), int(row.MaxMinutesPerDay),
 			row.PreApprovalRequired, row.Status, row.CreatedAt, row.UpdatedAt))
@@ -308,7 +307,7 @@ func (r *MasterDataRepository) GetOvertimeRuleByID(ctx context.Context, id strin
 	if err != nil {
 		return domain.OvertimeRule{}, mapErr(err)
 	}
-	return toOvertimeRuleDomain(row.ID, row.Name, row.ServiceLineID,
+	return toOvertimeRuleDomain(row.ID, row.Name,
 		row.WeekdayRate, row.RestdayRate, row.HolidayRate,
 		int(row.MinMinutes), int(row.MaxMinutesPerDay),
 		row.PreApprovalRequired, row.Status, row.CreatedAt, row.UpdatedAt), nil
@@ -318,7 +317,6 @@ func (r *MasterDataRepository) GetOvertimeRuleByID(ctx context.Context, id strin
 func (r *MasterDataRepository) CreateOvertimeRule(ctx context.Context, tx pgx.Tx, p svc.CreateOvertimeRuleParams) (domain.OvertimeRule, error) {
 	row, err := r.q.WithTx(tx).CreateOvertimeRule(ctx, sqlcgen.CreateOvertimeRuleParams{
 		Name:                p.Name,
-		ServiceLineID:       p.ServiceLineID,
 		WeekdayRate:         float32(p.WeekdayRate),
 		RestdayRate:         float32(p.RestdayRate),
 		HolidayRate:         float32(p.HolidayRate),
@@ -329,7 +327,7 @@ func (r *MasterDataRepository) CreateOvertimeRule(ctx context.Context, tx pgx.Tx
 	if err != nil {
 		return domain.OvertimeRule{}, mapErr(err)
 	}
-	return toOvertimeRuleDomain(row.ID, row.Name, row.ServiceLineID,
+	return toOvertimeRuleDomain(row.ID, row.Name,
 		row.WeekdayRate, row.RestdayRate, row.HolidayRate,
 		int(row.MinMinutes), int(row.MaxMinutesPerDay),
 		row.PreApprovalRequired, row.Status, row.CreatedAt, row.UpdatedAt), nil
@@ -340,7 +338,6 @@ func (r *MasterDataRepository) UpdateOvertimeRule(ctx context.Context, tx pgx.Tx
 	row, err := r.q.WithTx(tx).UpdateOvertimeRule(ctx, sqlcgen.UpdateOvertimeRuleParams{
 		ID:                  p.ID,
 		Name:                p.Name,
-		ServiceLineID:       p.ServiceLineID,
 		WeekdayRate:         float32(p.WeekdayRate),
 		RestdayRate:         float32(p.RestdayRate),
 		HolidayRate:         float32(p.HolidayRate),
@@ -351,7 +348,7 @@ func (r *MasterDataRepository) UpdateOvertimeRule(ctx context.Context, tx pgx.Tx
 	if err != nil {
 		return domain.OvertimeRule{}, mapErr(err)
 	}
-	return toOvertimeRuleDomain(row.ID, row.Name, row.ServiceLineID,
+	return toOvertimeRuleDomain(row.ID, row.Name,
 		row.WeekdayRate, row.RestdayRate, row.HolidayRate,
 		int(row.MinMinutes), int(row.MaxMinutesPerDay),
 		row.PreApprovalRequired, row.Status, row.CreatedAt, row.UpdatedAt), nil
@@ -366,7 +363,6 @@ func (r *MasterDataRepository) SoftDeleteOvertimeRule(ctx context.Context, tx pg
 
 func toOvertimeRuleDomain(
 	id, name string,
-	serviceLineID *string,
 	weekdayRate, restdayRate, holidayRate float32,
 	minMinutes, maxMinutesPerDay int,
 	preApprovalRequired bool,
@@ -376,7 +372,6 @@ func toOvertimeRuleDomain(
 	return domain.OvertimeRule{
 		ID:                  id,
 		Name:                name,
-		ServiceLineID:       serviceLineID,
 		WeekdayRate:         float64(weekdayRate),
 		RestdayRate:         float64(restdayRate),
 		HolidayRate:         float64(holidayRate),

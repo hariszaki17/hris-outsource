@@ -269,7 +269,7 @@ func (r *fakeAttendanceRepo) ListAttendance(_ context.Context, f svc.AttendanceF
 		if f.SiteID != nil && a.SiteID != *f.SiteID {
 			continue
 		}
-		if f.PositionID != nil && a.PositionID != *f.PositionID {
+		if f.Position != nil && a.Position != *f.Position {
 			continue
 		}
 		if len(f.VerificationStatus) > 0 && !contains(f.VerificationStatus, string(a.VerificationStatus)) {
@@ -413,8 +413,7 @@ func (r *fakeAttendanceRepo) GetActivePlacement(_ context.Context, employeeID st
 		PlacementID: "SWP-PL-9999",
 		CompanyID:   cmpLed,
 		SiteID:      "SWP-SITE-001",
-		PositionID:  "SWP-POS-001",
-		ServiceLine: att.ServiceLineFacilityServices,
+		Position:    "Petugas Kebersihan",
 	}, true, nil
 }
 
@@ -441,9 +440,8 @@ func (r *fakeAttendanceRepo) CreateManualAttendance(_ context.Context, _ pgx.Tx,
 		PlacementID:        p.PlacementID,
 		ScheduleID:         p.ScheduleID,
 		CompanyID:          p.CompanyID,
-		ServiceLine:        p.ServiceLine,
 		SiteID:             p.SiteID,
-		PositionID:         p.PositionID,
+		Position:           p.Position,
 		AttendanceCodeID:   p.AttendanceCodeID,
 		ShiftStartAt:       p.ShiftStartAt,
 		ShiftEndAt:         p.ShiftEndAt,
@@ -470,17 +468,14 @@ func (r *fakeAttendanceRepo) GetManualAutofillData(_ context.Context, employeeID
 		return svc.ManualAutofillData{}, false, nil
 	}
 	siteName := "Site of " + cmpLed
-	posName := "Position of " + employeeID
 	data := svc.ManualAutofillData{
 		PlacementID:  "SWP-PL-9999",
 		CompanyID:    cmpLed,
-		ServiceLine:  att.ServiceLineFacilityServices,
 		SiteID:       "SWP-SITE-001",
-		PositionID:   "SWP-POS-001",
+		Position:     "Petugas Kebersihan",
 		EmployeeName: "Agent " + employeeID,
 		CompanyName:  "Company " + cmpLed,
 		SiteName:     &siteName,
-		PositionName: &posName,
 	}
 	if s, ok := r.schedules[employeeID]; ok {
 		ss := s.shiftStart
@@ -754,9 +749,8 @@ func (h *harness) seedAttendance(id, company, employee string, vstatus att.Verif
 		EmployeeID:         employee,
 		PlacementID:        "SWP-PL-5001",
 		CompanyID:          company,
-		ServiceLine:        att.ServiceLineFacilityServices,
 		SiteID:             "SWP-SITE-001",
-		PositionID:         "SWP-POS-001",
+		Position:           "Petugas Kebersihan",
 		CheckInAt:          &ci,
 		WFO:                true,
 		Status:             att.StatusLate,
@@ -767,7 +761,6 @@ func (h *harness) seedAttendance(id, company, employee string, vstatus att.Verif
 		EmployeeName:       strp("Agent " + employee),
 		CompanyName:        strp("Company " + company),
 		SiteName:           strp("Site of " + company),
-		PositionName:       strp("Position of " + employee),
 	}
 	h.attendance.records[id] = a
 	return a

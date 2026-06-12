@@ -4,17 +4,14 @@
 -- CONVENTIONS §11 (calendar reads ascend by date).
 
 -- name: ListHolidays :many
--- Calendar / list load. Keyset cursor (holiday_date,id) ASC. Filters (all optional
--- via narg): category, service_line_id (matches when applicable_service_lines is
--- empty=global OR contains the line), year (EXTRACT(year FROM holiday_date)).
+-- Calendar / list load. Keyset cursor (holiday_date,id) ASC. Holidays are GLOBAL
+-- ONLY (decision 2026-06-12) — no service-line filter. Filters (all optional via
+-- narg): category, year (EXTRACT(year FROM holiday_date)).
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.deleted_at IS NULL
   AND (sqlc.narg(category)::text IS NULL OR h.category = sqlc.narg(category)::text)
-  AND (sqlc.narg(service_line_id)::text IS NULL
-       OR h.applicable_service_lines = '{}'
-       OR sqlc.narg(service_line_id)::text = ANY(h.applicable_service_lines))
   AND (sqlc.narg(year)::int IS NULL
        OR EXTRACT(year FROM h.holiday_date)::int = sqlc.narg(year)::int)
   -- keyset: rows strictly after the cursor (holiday_date,id) when provided.
@@ -26,7 +23,7 @@ LIMIT sqlc.arg(lim);
 -- name: GetHoliday :one
 -- Single holiday (for GET after create/update).
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.id = sqlc.arg(id)
   AND h.deleted_at IS NULL;
@@ -36,7 +33,7 @@ WHERE h.id = sqlc.arg(id)
 -- (date, category)? The service pre-checks here, then backstops on the 23505 from
 -- holidays_date_category_uq.
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.holiday_date = sqlc.arg(holiday_date)
   AND h.category     = sqlc.arg(category)
@@ -46,7 +43,7 @@ WHERE h.holiday_date = sqlc.arg(holiday_date)
 -- day_type classification: is this work_date a holiday? Highest-priority category
 -- (NATIONAL) wins when several share a date.
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.holiday_date = sqlc.arg(holiday_date)
   AND h.deleted_at IS NULL
@@ -58,33 +55,31 @@ LIMIT 1;
 -- ('SWP-HOL-' || swp_next_id('HOL')) when omitted, OR supplied explicitly
 -- (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
 INSERT INTO holidays (
-    id, name, holiday_date, category, recurring, applicable_service_lines
+    id, name, holiday_date, category, recurring
 ) VALUES (
     COALESCE(sqlc.narg(id)::text, 'SWP-HOL-' || swp_next_id('HOL')),
     sqlc.arg(name),
     sqlc.arg(holiday_date),
     sqlc.arg(category),
-    sqlc.arg(recurring),
-    sqlc.arg(applicable_service_lines)
+    sqlc.arg(recurring)
 )
 ON CONFLICT (id) DO NOTHING
 RETURNING id, name, holiday_date, category, recurring,
-          applicable_service_lines, created_at, updated_at;
+          created_at, updated_at;
 
 -- name: UpdateHoliday :one
 -- Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
--- the current value (applicable_service_lines is whole-array replace when supplied).
+-- the current value. Holidays are GLOBAL ONLY (decision 2026-06-12).
 UPDATE holidays
-SET name                     = COALESCE(sqlc.narg(name)::text, name),
-    holiday_date             = COALESCE(sqlc.narg(holiday_date)::date, holiday_date),
-    category                 = COALESCE(sqlc.narg(category)::text, category),
-    recurring                = COALESCE(sqlc.narg(recurring)::boolean, recurring),
-    applicable_service_lines = COALESCE(sqlc.narg(applicable_service_lines)::text[], applicable_service_lines),
-    updated_at               = now()
+SET name         = COALESCE(sqlc.narg(name)::text, name),
+    holiday_date = COALESCE(sqlc.narg(holiday_date)::date, holiday_date),
+    category     = COALESCE(sqlc.narg(category)::text, category),
+    recurring    = COALESCE(sqlc.narg(recurring)::boolean, recurring),
+    updated_at   = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, name, holiday_date, category, recurring,
-          applicable_service_lines, created_at, updated_at;
+          created_at, updated_at;
 
 -- name: SoftDeleteHoliday :one
 -- DELETE /holidays/{id} (soft). The service first runs CountOvertimeUsingHoliday to

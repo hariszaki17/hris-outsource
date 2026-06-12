@@ -48,11 +48,10 @@ type bulkRejectRequest struct {
 }
 
 type holidayWriteRequest struct {
-	Name                   string   `json:"name"`
-	Date                   string   `json:"date"`
-	Category               string   `json:"category"`
-	Recurring              *bool    `json:"recurring"`
-	ApplicableServiceLines []string `json:"applicable_service_lines"`
+	Name      string `json:"name"`
+	Date      string `json:"date"`
+	Category  string `json:"category"`
+	Recurring *bool  `json:"recurring"`
 }
 
 // --- generic envelopes ---
@@ -123,15 +122,14 @@ type overtimeResponse struct {
 // --- response: Holiday ---
 
 type holidayResponse struct {
-	ID                     string   `json:"id"`
-	Name                   string   `json:"name"`
-	Date                   string   `json:"date"`
-	Category               string   `json:"category"`
-	Recurring              bool     `json:"recurring"`
-	ApplicableServiceLines []string `json:"applicable_service_lines"`
-	InUseByOvertime        bool     `json:"in_use_by_overtime"`
-	CreatedAt              string   `json:"created_at"`
-	UpdatedAt              string   `json:"updated_at"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Date            string `json:"date"`
+	Category        string `json:"category"`
+	Recurring       bool   `json:"recurring"`
+	InUseByOvertime bool   `json:"in_use_by_overtime"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // --- response: BulkResult ---
@@ -223,20 +221,15 @@ func toCalculationResponse(c svc.Calculation) calculationResponse {
 }
 
 func toHolidayResponse(h dom.Holiday) holidayResponse {
-	lines := h.ApplicableServiceLines
-	if lines == nil {
-		lines = []string{}
-	}
 	return holidayResponse{
-		ID:                     h.ID,
-		Name:                   h.Name,
-		Date:                   dateStr(h.Date),
-		Category:               string(h.Category),
-		Recurring:              h.Recurring,
-		ApplicableServiceLines: lines,
-		InUseByOvertime:        h.InUseByOvertime,
-		CreatedAt:              rfc3339(h.CreatedAt),
-		UpdatedAt:              rfc3339(h.UpdatedAt),
+		ID:              h.ID,
+		Name:            h.Name,
+		Date:            dateStr(h.Date),
+		Category:        string(h.Category),
+		Recurring:       h.Recurring,
+		InUseByOvertime: h.InUseByOvertime,
+		CreatedAt:       rfc3339(h.CreatedAt),
+		UpdatedAt:       rfc3339(h.UpdatedAt),
 	}
 }
 

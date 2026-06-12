@@ -13,7 +13,7 @@ import (
 
 const listCalendarEntries = `-- name: ListCalendarEntries :many
 
-SELECT lr.id AS leave_request_id, lr.employee_id, lr.company_id, lr.service_line_id,
+SELECT lr.id AS leave_request_id, lr.employee_id, lr.company_id,
        lr.leave_type_id, lr.start_date, lr.end_date, lr.status,
        lr.delegate_id,
        e.full_name AS employee_name,
@@ -32,8 +32,7 @@ WHERE lr.deleted_at IS NULL
   AND lr.end_date   >= $2::date
   AND lr.status = ANY($3::text[])
   AND ($4::text    IS NULL OR lr.company_id      = $4::text)
-  AND ($5::text  IS NULL OR lr.service_line_id = $5::text)
-  AND ($6::text IS NULL OR lr.leave_type_id   = $6::text)
+  AND ($5::text IS NULL OR lr.leave_type_id   = $5::text)
 ORDER BY lr.start_date ASC, lr.id ASC
 `
 
@@ -42,7 +41,6 @@ type ListCalendarEntriesParams struct {
 	RangeFrom   pgtype.Date
 	StatusIn    []string
 	CompanyID   *string
-	ServiceLine *string
 	LeaveTypeID *string
 }
 
@@ -50,7 +48,6 @@ type ListCalendarEntriesRow struct {
 	LeaveRequestID string
 	EmployeeID     string
 	CompanyID      *string
-	ServiceLineID  *string
 	LeaveTypeID    string
 	StartDate      pgtype.Date
 	EndDate        pgtype.Date
@@ -64,8 +61,8 @@ type ListCalendarEntriesRow struct {
 }
 
 // E6 leave-calendar query (GET /leave-calendar). Returns leave entries overlapping
-// a [from,to] date range, scoped by company / service-line / leave-type. The status
-// filter is a text[] the service builds: APPROVED only when show_pending=false, else
+// a [from,to] date range, scoped by company / leave-type. The status filter is a
+// text[] the service builds: APPROVED only when show_pending=false, else
 // APPROVED + PENDING_L1 + PENDING_HR. Denormalized names via LEFT JOINs.
 func (q *Queries) ListCalendarEntries(ctx context.Context, arg ListCalendarEntriesParams) ([]ListCalendarEntriesRow, error) {
 	rows, err := q.db.Query(ctx, listCalendarEntries,
@@ -73,7 +70,6 @@ func (q *Queries) ListCalendarEntries(ctx context.Context, arg ListCalendarEntri
 		arg.RangeFrom,
 		arg.StatusIn,
 		arg.CompanyID,
-		arg.ServiceLine,
 		arg.LeaveTypeID,
 	)
 	if err != nil {
@@ -87,7 +83,6 @@ func (q *Queries) ListCalendarEntries(ctx context.Context, arg ListCalendarEntri
 			&i.LeaveRequestID,
 			&i.EmployeeID,
 			&i.CompanyID,
-			&i.ServiceLineID,
 			&i.LeaveTypeID,
 			&i.StartDate,
 			&i.EndDate,

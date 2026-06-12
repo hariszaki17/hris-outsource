@@ -244,9 +244,6 @@ func (r *fakeMasterDataRepo) ListOvertimeRules(_ context.Context, f domain.Overt
 		if f.Status != nil && otr.Status != *f.Status {
 			continue
 		}
-		if f.ServiceLine != nil && (otr.ServiceLineID == nil || *otr.ServiceLineID != *f.ServiceLine) {
-			continue
-		}
 		if f.CursorCreatedAt != nil && f.CursorID != nil {
 			if otr.CreatedAt.Before(*f.CursorCreatedAt) {
 				continue
@@ -287,7 +284,6 @@ func (r *fakeMasterDataRepo) CreateOvertimeRule(_ context.Context, _ pgx.Tx, p o
 	otr := domain.OvertimeRule{
 		ID:                  id,
 		Name:                p.Name,
-		ServiceLineID:       p.ServiceLineID,
 		WeekdayRate:         p.WeekdayRate,
 		RestdayRate:         p.RestdayRate,
 		HolidayRate:         p.HolidayRate,
@@ -308,7 +304,6 @@ func (r *fakeMasterDataRepo) UpdateOvertimeRule(_ context.Context, _ pgx.Tx, p o
 		return domain.OvertimeRule{}, domain.ErrNotFound
 	}
 	otr.Name = p.Name
-	otr.ServiceLineID = p.ServiceLineID
 	otr.WeekdayRate = p.WeekdayRate
 	otr.RestdayRate = p.RestdayRate
 	otr.HolidayRate = p.HolidayRate
@@ -730,7 +725,7 @@ func TestListOvertimeRules_Shape(t *testing.T) {
 	}
 	first := data[0].(map[string]any)
 	requiredKeys := []string{
-		"id", "name", "service_line_id",
+		"id", "name",
 		"weekday_rate", "restday_rate", "holiday_rate",
 		"min_minutes", "max_minutes_per_day", "pre_approval_required",
 		"status", "created_at", "updated_at",
@@ -759,13 +754,9 @@ func TestListOvertimeRules_Shape(t *testing.T) {
 	if first["holiday_rate"] != 3.0 {
 		t.Errorf("holiday_rate = %v, want 3.0", first["holiday_rate"])
 	}
-	// service_line_id must be present as null (not omitted).
-	if _, exists := first["service_line_id"]; !exists {
-		t.Error("service_line_id key must be present (even as null)")
-	}
-	// In our seed it is nil → JSON null.
-	if first["service_line_id"] != nil {
-		t.Errorf("service_line_id = %v, want null for global rule", first["service_line_id"])
+	// Overtime rules are GLOBAL ONLY — service_line_id must NOT appear.
+	if _, exists := first["service_line_id"]; exists {
+		t.Error("service_line_id key must be absent (overtime is global only)")
 	}
 	// pre_approval_required must be bool.
 	if _, ok := first["pre_approval_required"].(bool); !ok {
@@ -798,9 +789,9 @@ func TestCreateOvertimeRule_201(t *testing.T) {
 	if body["status"] != "ACTIVE" {
 		t.Errorf("status = %v, want ACTIVE", body["status"])
 	}
-	// Verify service_line_id is explicitly present as null.
-	if _, exists := body["service_line_id"]; !exists {
-		t.Error("service_line_id key must be present (even as null)")
+	// Overtime rules are GLOBAL ONLY — service_line_id must NOT appear.
+	if _, exists := body["service_line_id"]; exists {
+		t.Error("service_line_id key must be absent (overtime is global only)")
 	}
 }
 

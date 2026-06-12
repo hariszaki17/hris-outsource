@@ -143,7 +143,9 @@ function DetailSheet({
                 {item.employee_name ?? item.employee_id}
               </Text>
               <Text variant="caption" className="text-text-3">
-                {item.employee_id} · {item.service_line} · {item.site_name ?? item.company_name}
+                {[item.employee_id, item.position, item.site_name ?? item.company_name]
+                  .filter(Boolean)
+                  .join(' · ')}
               </Text>
             </View>
           </View>

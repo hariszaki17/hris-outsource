@@ -154,25 +154,23 @@ FROM client_companies
 WHERE deleted_at IS NULL
   AND ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR name ILIKE '%' || $2::text || '%')
-  AND ($3::text IS NULL OR TRUE)
-  AND ($4::boolean IS NULL OR
+  AND ($3::boolean IS NULL OR
        EXISTS (
          SELECT 1 FROM shift_leader_assignments sla
          WHERE sla.client_company_id = client_companies.id
            AND sla.unassigned_at IS NULL
-       ) = $4::boolean)
+       ) = $3::boolean)
   AND (
-        $5::timestamptz IS NULL
-        OR (client_companies.created_at, client_companies.id) < ($5::timestamptz, $6::text)
+        $4::timestamptz IS NULL
+        OR (client_companies.created_at, client_companies.id) < ($4::timestamptz, $5::text)
       )
 ORDER BY client_companies.created_at DESC, client_companies.id DESC
-LIMIT $7
+LIMIT $6
 `
 
 type ListClientCompaniesParams struct {
 	Status          *string
 	Q               *string
-	ServiceLine     *string
 	HasLeader       *bool
 	CursorCreatedAt *time.Time
 	CursorID        *string
@@ -195,12 +193,11 @@ type ListClientCompaniesRow struct {
 }
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
-// Filters: q (ILIKE name), status, service_line, has_leader.
+// Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 func (q *Queries) ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error) {
 	rows, err := q.db.Query(ctx, listClientCompanies,
 		arg.Status,
 		arg.Q,
-		arg.ServiceLine,
 		arg.HasLeader,
 		arg.CursorCreatedAt,
 		arg.CursorID,

@@ -25,8 +25,8 @@ SET check_in_at        = COALESCE($1::timestamptz, check_in_at),
     updated_at         = now()
 WHERE id = $8
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -52,9 +52,8 @@ type ApplyCorrectionToAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -112,9 +111,8 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -153,8 +151,8 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 
 const createManualAttendance = `-- name: CreateManualAttendance :one
 INSERT INTO attendance (
-    employee_id, placement_id, schedule_id, company_id, service_line,
-    site_id, position_id, attendance_code_id,
+    employee_id, placement_id, schedule_id, company_id,
+    site_id, position, attendance_code_id,
     shift_start_at, shift_end_at,
     check_in_at, check_out_at,
     lat_in, lng_in, lat_out, lng_out,
@@ -164,18 +162,18 @@ INSERT INTO attendance (
     created_by,
     created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8,
-    $9, $10,
-    $11, $12,
-    $13, $14, $15, $16,
-    $17, $18, $19, $20,
-    $21, $22, $23, $24, $25,
-    $26, $27, $28::text[],
-    $29,
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9,
+    $10, $11,
+    $12, $13, $14, $15,
+    $16, $17, $18, $19,
+    $20, $21, $22, $23, $24,
+    $25, $26, $27::text[],
+    $28,
     now(), now()
-) RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-            site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+) RETURNING id, employee_id, placement_id, schedule_id, company_id,
+            site_id, position, attendance_code_id, shift_start_at, shift_end_at,
             check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
             photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
             in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -190,9 +188,8 @@ type CreateManualAttendanceParams struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -223,9 +220,8 @@ type CreateManualAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -272,9 +268,8 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		arg.PlacementID,
 		arg.ScheduleID,
 		arg.CompanyID,
-		arg.ServiceLine,
 		arg.SiteID,
-		arg.PositionID,
+		arg.Position,
 		arg.AttendanceCodeID,
 		arg.ShiftStartAt,
 		arg.ShiftEndAt,
@@ -305,9 +300,8 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -347,7 +341,7 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 
 const getAttendance = `-- name: GetAttendance :one
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -358,13 +352,11 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
-       s.name      AS site_name,
-       pos.name    AS position_name
+       s.name      AS site_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
 LEFT JOIN client_sites s     ON s.id = a.site_id
-LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.id = $1
   AND a.deleted_at IS NULL
 `
@@ -375,9 +367,8 @@ type GetAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -413,7 +404,6 @@ type GetAttendanceRow struct {
 	EmployeeName       *string
 	CompanyName        *string
 	SiteName           *string
-	PositionName       *string
 }
 
 // Single record with denormalized names.
@@ -426,9 +416,8 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -464,14 +453,13 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.EmployeeName,
 		&i.CompanyName,
 		&i.SiteName,
-		&i.PositionName,
 	)
 	return i, err
 }
 
 const getAttendanceForUpdate = `-- name: GetAttendanceForUpdate :one
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -492,9 +480,8 @@ type GetAttendanceForUpdateRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -540,9 +527,8 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -583,13 +569,11 @@ const getManualAutofillData = `-- name: GetManualAutofillData :one
 SELECT
     p.id       AS placement_id,
     p.client_company_id,
-    COALESCE(sl.name, '') AS service_line_name,
     p.site_id,
-    p.position_id,
+    p.position AS position,
     e.full_name AS employee_name,
     cc.name      AS company_name,
     cs.name      AS site_name,
-    pos.name     AS position_name,
     se.id       AS schedule_id,
     -- COALESCE to an epoch sentinel so sqlc types these NOT NULL (time.Time) and the
     -- row scan never sees a raw NULL on no-schedule days. The repo gates shift-time use
@@ -610,8 +594,6 @@ FROM placements p
 JOIN employees e  ON e.id = p.employee_id
 JOIN client_companies cc ON cc.id = p.client_company_id
 LEFT JOIN client_sites cs ON cs.id = p.site_id
-LEFT JOIN positions pos   ON pos.id = p.position_id
-LEFT JOIN service_lines sl ON sl.id = p.service_line_id
 LEFT JOIN schedule_entries se
     ON se.employee_id = p.employee_id
     AND se.work_date = ($1::date)
@@ -648,13 +630,11 @@ type GetManualAutofillDataParams struct {
 type GetManualAutofillDataRow struct {
 	PlacementID                string
 	ClientCompanyID            string
-	ServiceLineName            string
 	SiteID                     string
-	PositionID                 string
+	Position                   string
 	EmployeeName               string
 	CompanyName                string
 	SiteName                   *string
-	PositionName               *string
 	ScheduleID                 *string
 	ShiftStartAt               time.Time
 	ShiftEndAt                 time.Time
@@ -672,13 +652,11 @@ func (q *Queries) GetManualAutofillData(ctx context.Context, arg GetManualAutofi
 	err := row.Scan(
 		&i.PlacementID,
 		&i.ClientCompanyID,
-		&i.ServiceLineName,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.EmployeeName,
 		&i.CompanyName,
 		&i.SiteName,
-		&i.PositionName,
 		&i.ScheduleID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -692,7 +670,7 @@ func (q *Queries) GetManualAutofillData(ctx context.Context, arg GetManualAutofi
 const listAttendance = `-- name: ListAttendance :many
 
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
-       a.service_line, a.site_id, a.position_id, a.attendance_code_id,
+       a.site_id, a.position, a.attendance_code_id,
        a.shift_start_at, a.shift_end_at,
        a.check_in_at, a.check_out_at, a.lat_in, a.lng_in, a.lat_out, a.lng_out,
        a.photo_in_id, a.photo_out_id, a.wfo, a.is_late, a.late_minutes,
@@ -703,39 +681,35 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
-       s.name      AS site_name,
-       pos.name    AS position_name
+       s.name      AS site_name
 FROM attendance a
 LEFT JOIN employees e        ON e.id = a.employee_id
 LEFT JOIN client_companies c ON c.id = a.company_id
 LEFT JOIN client_sites s     ON s.id = a.site_id
-LEFT JOIN positions pos      ON pos.id = a.position_id
 WHERE a.deleted_at IS NULL
   AND ($1::text IS NULL OR a.company_id = $1::text)
   AND ($2::text IS NULL OR a.employee_id = $2::text)
-  AND ($3::text IS NULL OR a.service_line = $3::text)
-  AND ($4::text IS NULL OR a.site_id = $4::text)
-  AND ($5::text IS NULL OR a.position_id = $5::text)
-  AND ($6::text[] IS NULL OR a.verification_status = ANY($6::text[]))
-  AND ($7::text[] IS NULL OR a.status = ANY($7::text[]))
-  AND ($8::date IS NULL OR a.check_in_at::date >= $8::date)
-  AND ($9::date IS NULL OR a.check_in_at::date <= $9::date)
-  AND ($10::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
+  AND ($3::text IS NULL OR a.site_id = $3::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
+  AND ($5::text[] IS NULL OR a.verification_status = ANY($5::text[]))
+  AND ($6::text[] IS NULL OR a.status = ANY($6::text[]))
+  AND ($7::date IS NULL OR a.check_in_at::date >= $7::date)
+  AND ($8::date IS NULL OR a.check_in_at::date <= $8::date)
+  AND ($9::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
   AND (
-        $11::timestamptz IS NULL
-        OR a.check_in_at < $11::timestamptz
-        OR (a.check_in_at = $11::timestamptz AND a.id < $12::text)
+        $10::timestamptz IS NULL
+        OR a.check_in_at < $10::timestamptz
+        OR (a.check_in_at = $10::timestamptz AND a.id < $11::text)
       )
 ORDER BY a.check_in_at DESC, a.id DESC
-LIMIT $13
+LIMIT $12
 `
 
 type ListAttendanceParams struct {
 	CompanyID            *string
 	EmployeeID           *string
-	ServiceLine          *string
 	SiteID               *string
-	PositionID           *string
+	Position             *string
 	VerificationStatusIn []string
 	StatusIn             []string
 	DateFrom             pgtype.Date
@@ -752,9 +726,8 @@ type ListAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -790,29 +763,29 @@ type ListAttendanceRow struct {
 	EmployeeName       *string
 	CompanyName        *string
 	SiteName           *string
-	PositionName       *string
 }
 
 // E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
-// employee_name, client_companies for company_name, client_sites for site_name,
-// and positions for position_name. Cursor lists keyset on (check_in_at DESC, id).
-// `make gen` writes internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/
-// auto-close are STORED columns (07-01 decision); no runtime compute.
+// employee_name, client_companies for company_name, and client_sites for site_name.
+// position is FREE-TEXT (stored directly on the row; no positions JOIN, no service_line).
+// Cursor lists keyset on (check_in_at DESC, id). `make gen` writes
+// internal/repository/sqlc (NEVER hand-edit). Geofence/lateness/auto-close are STORED
+// columns (07-01 decision); no runtime compute.
 // Verification queue / history for a company over filters, newest first.
 // Keyset cursor: pass cursor_check_in_at + cursor_id from the previous page tail
 // (both NULL on the first page). Filters are nullable nargs (IS NULL OR ...).
 //
 //	verification_status_in / status_in: text[] = ANY membership.
-//	site_id / position_id: narrow within the (leader-pinned) company scope.
+//	site_id / position: narrow within the (leader-pinned) company scope (position is
+//	  a free-text exact-match on the stored label).
 //	date_from/date_to: bound on the shift-date basis (check_in_at::date).
 //	exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error) {
 	rows, err := q.db.Query(ctx, listAttendance,
 		arg.CompanyID,
 		arg.EmployeeID,
-		arg.ServiceLine,
 		arg.SiteID,
-		arg.PositionID,
+		arg.Position,
 		arg.VerificationStatusIn,
 		arg.StatusIn,
 		arg.DateFrom,
@@ -835,9 +808,8 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.PlacementID,
 			&i.ScheduleID,
 			&i.CompanyID,
-			&i.ServiceLine,
 			&i.SiteID,
-			&i.PositionID,
+			&i.Position,
 			&i.AttendanceCodeID,
 			&i.ShiftStartAt,
 			&i.ShiftEndAt,
@@ -873,7 +845,6 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.EmployeeName,
 			&i.CompanyName,
 			&i.SiteName,
-			&i.PositionName,
 		); err != nil {
 			return nil, err
 		}
@@ -895,8 +866,8 @@ SET verification_status = 'REJECTED',
 WHERE id = $3
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -917,9 +888,8 @@ type RejectAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -964,9 +934,8 @@ func (q *Queries) RejectAttendance(ctx context.Context, arg RejectAttendancePara
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -1012,8 +981,8 @@ SET verification_status = 'VERIFIED',
 WHERE id = $2
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -1033,9 +1002,8 @@ type VerifyAttendanceRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -1081,9 +1049,8 @@ func (q *Queries) VerifyAttendance(ctx context.Context, arg VerifyAttendancePara
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,
@@ -1134,8 +1101,8 @@ SET verification_status = 'VERIFIED',
 WHERE id = $7
   AND deleted_at IS NULL
   AND verification_status IN ('PENDING','ESCALATED')
-RETURNING id, employee_id, placement_id, schedule_id, company_id, service_line,
-          site_id, position_id, attendance_code_id, shift_start_at, shift_end_at,
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
           check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
           photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
@@ -1160,9 +1127,8 @@ type VerifyAttendanceWithTimesRow struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -1218,9 +1184,8 @@ func (q *Queries) VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAtten
 		&i.PlacementID,
 		&i.ScheduleID,
 		&i.CompanyID,
-		&i.ServiceLine,
 		&i.SiteID,
-		&i.PositionID,
+		&i.Position,
 		&i.AttendanceCodeID,
 		&i.ShiftStartAt,
 		&i.ShiftEndAt,

@@ -79,10 +79,9 @@ test.beforeAll(async () => {
 const COMPANY_NAME = 'PT Journey Onboarding E2E';
 const COMPANY_ADDRESS = 'Jl. Journey No. 1, Jakarta';
 
-// Global master data seeded for every run (Parking line + Petugas Parkir position) —
-// reused exactly as the e3 agent-placement suite does.
-const SERVICE_LINE_ID = 'SWP-SVC-003';
-const POSITION_ID = 'SWP-POS-014';
+// Position is FREE-TEXT (no master / FK / service line, locked 2026-06-12) — the
+// placement just carries the position string, reused as the e3 agent-placement suite does.
+const POSITION = 'Petugas Parkir';
 
 const SL = {
   fullName: 'Joko Pemimpin E2E',
@@ -166,8 +165,7 @@ async function createPlacement(
     agreement_id: agreementId,
     client_company_id: J.companyId,
     site_id: J.siteId,
-    service_line_id: SERVICE_LINE_ID,
-    position_id: POSITION_ID,
+    position: POSITION,
     start_date: isoDaysFromNow(-5),
     end_date: null,
     backdate_reason: 'Penempatan awal onboarding (uji E2E).',

@@ -17,10 +17,9 @@ import (
 func (h *Handler) ListHolidays(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := svc.HolidayFilter{
-		Category:      strPtrParam(q.Get("category")),
-		ServiceLineID: strPtrParam(q.Get("service_line_id")),
-		Year:          intPtrParam(q.Get("year")),
-		Limit:         intParam(q.Get("limit")),
+		Category: strPtrParam(q.Get("category")),
+		Year:     intPtrParam(q.Get("year")),
+		Limit:    intParam(q.Get("limit")),
 	}
 	if cursor := q.Get("cursor"); cursor != "" {
 		d, id, err := svc.DecodeHolidayCursor(cursor)
@@ -115,9 +114,8 @@ func (h *Handler) DeleteHoliday(w http.ResponseWriter, r *http.Request) {
 // service request (date parsed YYYY-MM-DD; category passed through).
 func toHolidayServiceRequest(req holidayWriteRequest) (svc.HolidayWriteRequest, error) {
 	out := svc.HolidayWriteRequest{
-		Name:                   req.Name,
-		Recurring:              req.Recurring,
-		ApplicableServiceLines: req.ApplicableServiceLines,
+		Name:      req.Name,
+		Recurring: req.Recurring,
 	}
 	if req.Date != "" {
 		d := parseDateParam(req.Date)

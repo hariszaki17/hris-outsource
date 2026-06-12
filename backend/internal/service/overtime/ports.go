@@ -52,13 +52,13 @@ type OvertimeFilter struct {
 }
 
 // HolidayFilter is the decoded GET /holidays query (cursor-paged, ascending by date).
+// Holidays are GLOBAL ONLY (decision 2026-06-12) — no service-line filter.
 type HolidayFilter struct {
-	Category      *string
-	ServiceLineID *string
-	Year          *int
-	Limit         int
-	CursorDate    *time.Time
-	CursorID      *string
+	Category   *string
+	Year       *int
+	Limit      int
+	CursorDate *time.Time
+	CursorID   *string
 }
 
 // --- overtime repository port ---
@@ -77,13 +77,12 @@ type OvertimeRepository interface {
 }
 
 // OvertimeInsertParams carries one overtime INSERT for the F7.2 request path. The
-// service denormalizes placement/company/service_line from the resolved active
-// placement; id is allocated by the column DEFAULT (nil).
+// service denormalizes placement/company from the resolved active placement; id is
+// allocated by the column DEFAULT (nil).
 type OvertimeInsertParams struct {
 	EmployeeID       string
 	CompanyID        *string
 	PlacementID      string
-	ServiceLineID    *string
 	WorkDate         time.Time
 	PlannedStartTime *string
 	PlannedEndTime   *string
@@ -120,44 +119,42 @@ type HolidayRepository interface {
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID string) (int64, error)
 }
 
-// HolidayWriteParams carries one holiday create.
+// HolidayWriteParams carries one holiday create (holidays are GLOBAL ONLY).
 type HolidayWriteParams struct {
-	ID                     *string // nil → DEFAULT sequence id; explicit for seed/E2E
-	Name                   string
-	Date                   time.Time
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
+	ID        *string // nil → DEFAULT sequence id; explicit for seed/E2E
+	Name      string
+	Date      time.Time
+	Category  string
+	Recurring bool
 }
 
 // HolidayUpdateParams carries a partial holiday update (nil = keep current).
 type HolidayUpdateParams struct {
-	Name                   *string
-	Date                   *time.Time
-	Category               *string
-	Recurring              *bool
-	ApplicableServiceLines []string // non-nil replaces the whole array
+	Name      *string
+	Date      *time.Time
+	Category  *string
+	Recurring *bool
 }
 
 // --- overtime-rule read port (the EXISTING E2/Phase-3 overtime_rules) ---
 
 // OvertimeRule is the subset of the E2 overtime_rules master E7 consumes at
 // calculation time: min_minutes (OT_BELOW_MIN) + the per-tier reference multiplier
-// (INV-2: stored, never applied).
+// (INV-2: stored, never applied). The rule is GLOBAL ONLY (decision 2026-06-12 —
+// the service_line scope axis + line-vs-global precedence were dropped).
 type OvertimeRule struct {
-	ID            string
-	ServiceLineID *string
-	WeekdayRate   float64
-	RestdayRate   float64
-	HolidayRate   float64
-	MinMinutes    int
+	ID          string
+	WeekdayRate float64
+	RestdayRate float64
+	HolidayRate float64
+	MinMinutes  int
 }
 
-// RuleRepository is the read-through to the E2 overtime_rules master. The
-// line-scoped rule wins over the global rule (OR-2); the global default is the
-// fallback. domain.ErrNotFound when no rule exists.
+// RuleRepository is the read-through to the overtime_rules master. There is a single
+// GLOBAL rule (decision 2026-06-12 — no per-line rules, no line-vs-global
+// precedence). domain.ErrNotFound when no rule exists.
 type RuleRepository interface {
-	FindOvertimeRule(ctx context.Context, serviceLineID *string) (OvertimeRule, error)
+	FindOvertimeRule(ctx context.Context) (OvertimeRule, error)
 }
 
 // --- schedule read port (day_type WORKDAY/RESTDAY classification) ---

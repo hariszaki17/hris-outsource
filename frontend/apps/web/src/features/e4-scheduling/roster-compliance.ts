@@ -63,8 +63,6 @@ export type AgentRow = {
   employeeId: string;
   employeeName: string;
   placementId: string;
-  serviceLineId?: string;
-  serviceLineName?: string;
   cells: Record<string, ScheduleEntry | undefined>; // date string → entry
 };
 
@@ -77,14 +75,11 @@ export function buildAgentRows(entries: ScheduleEntry[]): AgentRow[] {
         employeeId: e.employee_id,
         employeeName: String(e.employee_name ?? e.employee_id),
         placementId: e.placement_id,
-        serviceLineId: e.service_line_id ?? undefined,
-        serviceLineName: String(e.company_name ?? ''),
         cells: {},
       });
     }
     const row = map.get(key)!;
     row.cells[e.work_date] = e;
-    if (e.service_line_id) row.serviceLineId = e.service_line_id;
   }
   return Array.from(map.values());
 }
@@ -93,8 +88,6 @@ type RosterPlacement = {
   id: string;
   employee_id: string;
   employee_name?: string;
-  service_line_id?: string;
-  service_line_name?: string;
 };
 
 /**
@@ -114,8 +107,6 @@ export function buildAgentRowsFromRoster(
       employeeId: p.employee_id,
       employeeName: String(p.employee_name ?? p.employee_id),
       placementId: p.id,
-      serviceLineId: p.service_line_id ?? undefined,
-      serviceLineName: p.service_line_name ?? undefined,
       cells: {},
     });
   }
@@ -127,35 +118,27 @@ export function buildAgentRowsFromRoster(
         employeeId: e.employee_id,
         employeeName: String(e.employee_name ?? e.employee_id),
         placementId: e.placement_id,
-        serviceLineId: e.service_line_id ?? undefined,
-        serviceLineName: undefined,
         cells: {},
       };
       map.set(key, row);
     }
     row.cells[e.work_date] = e;
-    if (e.service_line_id) row.serviceLineId = e.service_line_id;
   }
   return Array.from(map.values());
 }
 
 // ---------------------------------------------------------------------------
-// Holiday scoping (EPICS §8 D1) — global holidays + those matching a company's
-// service lines, projected onto the visible week.
+// Holiday mapping (EPICS §8 D1) — holidays are global; project them onto the
+// visible week. A holiday applies whenever its date falls in the window.
 // ---------------------------------------------------------------------------
 
 export function buildHolidayMaps(
   holidays: Holiday[],
   days: string[],
-  serviceLineIds: Set<string>,
 ): { holidaySet: Set<string>; holidayNameByDate: Map<string, string> } {
   const nameByDate = new Map<string, string>();
   for (const h of holidays) {
     if (!days.includes(h.date)) continue;
-    const applies =
-      h.applicable_service_lines.length === 0 ||
-      h.applicable_service_lines.some((id) => serviceLineIds.has(id));
-    if (!applies) continue;
     if (!nameByDate.has(h.date)) nameByDate.set(h.date, h.name);
   }
   return { holidaySet: new Set(nameByDate.keys()), holidayNameByDate: nameByDate };

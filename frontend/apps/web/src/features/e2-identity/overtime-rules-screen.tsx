@@ -5,7 +5,6 @@ import {
   type OvertimeRule,
   OvertimeRuleStatus,
   useListOvertimeRules,
-  useListServiceLines,
 } from '@swp/api-client/e2';
 import { type Column, DataTable, EmptyState, FilterSelect, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
@@ -17,7 +16,7 @@ import { useTranslation } from 'react-i18next';
  * E2 · Aturan Lembur — read-only list.
  * Built from .pen frame `SnXpE` (list). Seeded rules rarely change, so this screen
  * is view-only: no create/edit/deactivate entry-points (decided 2026-06-09).
- * OR-2: service_line_id scoping (null = global), OR-3: rates.
+ * Overtime rules are GLOBAL ONLY (service-line scope dropped 2026-06-12). OR-3: rates.
  * Routes: /master-data/overtime-rules — consumers must register in the router.
  * Refs: F7.1 (E7 OT calc consumes this master).
  */
@@ -40,18 +39,6 @@ export function OvertimeRulesScreen() {
 
   const query = useListOvertimeRules(params);
 
-  // Resolve service_line_id → name for the table (OR-2 renders a scope label, not a raw FK).
-  const serviceLinesQuery = useListServiceLines(
-    { limit: 50 },
-    { query: { staleTime: 5 * 60_000 } },
-  );
-  const serviceLineName = (id: string): string => {
-    const list =
-      (serviceLinesQuery.data?.data as { data?: { id: string; name: string }[] } | undefined)
-        ?.data ?? [];
-    return list.find((sl) => sl.id === id)?.name ?? id;
-  };
-
   const hasFilters = Boolean(statusFilter);
 
   const columns: Column<OvertimeRule>[] = [
@@ -66,25 +53,8 @@ export function OvertimeRulesScreen() {
           </div>
           <div className="flex flex-col gap-[2px]">
             <span className="text-[14px] font-medium text-text">{row.name}</span>
-            {row.service_line_id && (
-              <span className="text-[11px] text-text-2">
-                {serviceLineName(row.service_line_id)}
-              </span>
-            )}
           </div>
         </div>
-      ),
-    },
-    {
-      id: 'service_line',
-      header: t('masterData.overtimeRules.colServiceLine'),
-      width: 160,
-      cell: (row) => (
-        <span className="text-[13px] text-text">
-          {row.service_line_id
-            ? serviceLineName(row.service_line_id)
-            : t('masterData.overtimeRules.global')}
-        </span>
       ),
     },
     {

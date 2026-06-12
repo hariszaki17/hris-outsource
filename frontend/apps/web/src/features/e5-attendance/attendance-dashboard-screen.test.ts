@@ -28,11 +28,11 @@ describe('AttendanceDashboardSearch type', () => {
       cursor: 'abc',
       company_id: 'SWP-CMP-014',
       site_id: 'SWP-SITE-031',
-      position_id: 'SWP-POS-009',
+      position: 'Petugas Parkir',
     };
     expect(search.company_id).toBe('SWP-CMP-014');
     expect(search.site_id).toBe('SWP-SITE-031');
-    expect(search.position_id).toBe('SWP-POS-009');
+    expect(search.position).toBe('Petugas Parkir');
   });
 
   it('all filter fields are optional', () => {
@@ -40,7 +40,7 @@ describe('AttendanceDashboardSearch type', () => {
     const search: AttendanceDashboardSearch = {};
     expect(search.company_id).toBeUndefined();
     expect(search.site_id).toBeUndefined();
-    expect(search.position_id).toBeUndefined();
+    expect(search.position).toBeUndefined();
   });
 });
 

@@ -12,7 +12,7 @@ This is the core outsource revenue artifact: **how many verified, billable hours
 ## 2. Goals & non-goals
 
 **Goals**
-- Aggregate **verified** attendance on **billable** codes into hours by agent / client company / service line / period.
+- Aggregate **verified** attendance on **billable** codes into hours by agent / client company / position / period.
 - Filterable; exportable (via F10.4); internal-only.
 
 **Non-goals**
@@ -34,7 +34,7 @@ HR / Super Admin (all), Shift Leader (own company), System (aggregate, scope).
 | Ref | Rule |
 |-----|------|
 | BR-1 | Counts only **verified** attendance (E5) recorded against **billable** attendance codes (E2 `is_billable`) (INV-4). |
-| BR-2 | Aggregations: hours by **agent**, **client company**, **service line**, and **period** (day/week/month). |
+| BR-2 | Aggregations: hours by **agent**, **client company**, **position** (free-text), and **period** (day/week/month). |
 | BR-3 | Distinguishes **billable** vs **payable** vs total worked hours where relevant. |
 | BR-4 | **Scope:** HR/Super Admin see all; a shift leader sees **their company** only. |
 | BR-5 | **Hours only** — no rates/amounts applied here (assumed; see §10). |
@@ -43,7 +43,7 @@ HR / Super Admin (all), Shift Leader (own company), System (aggregate, scope).
 
 ## 6. Data model
 
-Read projection over `Attendance` + `AttendanceCode` + `Placement` + `ClientCompany` + `ServiceLine`. No new entities.
+Read projection over `Attendance` + `AttendanceCode` + `Placement` + `ClientCompany`. The `position` axis is the free-text position denormalized onto `Attendance` (E5). No new entities.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -52,8 +52,8 @@ Feature: Attendance & billable-hours report
 
   Scenario: Billable hours per client for a month
     Given I am HR
-    When I run the report for "Plaza Senayan", June, grouped by service line
-    Then I get verified billable hours per agent and service-line totals
+    When I run the report for "Plaza Senayan", June, grouped by position
+    Then I get verified billable hours per agent and position totals
 
   Scenario: Only verified billable codes count
     Given some June records are unverified or on non-billable codes
@@ -83,10 +83,10 @@ Feature: Attendance & billable-hours report
 
 ## 9. Dependencies
 
-E5 (verified attendance), E2 (billable codes), E3 (placement/company/service line), F10.4 (export), E1 (scope/audit).
+E5 (verified attendance), E2 (billable codes), E3 (placement/company), F10.4 (export), E1 (scope/audit).
 
 ## 10. Decisions & open questions
 
-- ✅ Verified + billable only; hours by agent/company/service-line/period; internal; export-capable.
+- ✅ Verified + billable only; hours by agent/company/position/period (position is free-text); internal; export-capable. *(Group-by axis changed from service line → position 2026-06-12.)*
 - **Open (§ INV-4 / C-1):** confirm unverified records never count.
 - **Open:** does this report ever apply **rates** (hours × rate → amount), or strictly hours with billing computed outside? (assumed: hours only.)

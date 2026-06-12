@@ -115,13 +115,6 @@ func IsWithinCheckoutWindow(a Attendance, now time.Time) bool {
 	return !now.After(end.Add(CheckoutWindowGrace))
 }
 
-// ServiceLine enumerates the placement service lines carried on the record.
-const (
-	ServiceLineFacilityServices   = "facility_services"
-	ServiceLineBuildingManagement = "building_management"
-	ServiceLineParking            = "parking"
-)
-
 // GeofenceCheck is the openapi GeofenceCheck — the stored geofence result for one
 // clock event (assembled from the *_geofence / *_distance_m / geofence_radius_m
 // columns; nil when the underlying inside flag is absent).
@@ -140,9 +133,8 @@ type Attendance struct {
 	PlacementID      string
 	ScheduleID       *string // nil = unscheduled
 	CompanyID        string
-	ServiceLine      string
 	SiteID           string // denormalized from placement → site (E2 F2.6 / INV-5)
-	PositionID       string // denormalized from placement → position (E2)
+	Position         string // free-text, denormalized from placement → position (E2)
 	AttendanceCodeID *string
 
 	ShiftStartAt *time.Time
@@ -187,5 +179,4 @@ type Attendance struct {
 	EmployeeName *string
 	CompanyName  *string
 	SiteName     *string
-	PositionName *string
 }

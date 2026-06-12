@@ -39,7 +39,6 @@ func (r *Repository) ListClientCompanies(ctx context.Context, f domain.CompanyFi
 	rows, err := r.q.ListClientCompanies(ctx, sqlcgen.ListClientCompaniesParams{
 		Status:          f.Status,
 		Q:               f.Q,
-		ServiceLine:     f.ServiceLine,
 		HasLeader:       f.HasLeader,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,

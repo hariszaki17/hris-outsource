@@ -10,7 +10,6 @@ package reporting
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
@@ -151,8 +150,9 @@ func (s *DashboardService) hrDashboard(ctx context.Context, p auth.Principal, no
 const recentAuditCap = 8
 
 // superAdminWidgets assembles the admin-only widget block (DB-7). It maps the raw
-// repo bundle to the domain shape: free-text service-line name → FACILITY|BUILDING|
-// PARKING enum, and audit columns → actor_label/target_label.
+// repo bundle to the domain shape: org rollups carry the free-text placement
+// position (decision 2026-06-12: service_line removed), audit columns →
+// actor_label/target_label.
 func (s *DashboardService) superAdminWidgets(ctx context.Context, now time.Time) (*dom.SuperAdminWidgets, error) {
 	data, err := s.repo.SuperAdminWidgets(ctx, now.UTC(), recentAuditCap)
 	if err != nil {
@@ -161,14 +161,8 @@ func (s *DashboardService) superAdminWidgets(ctx context.Context, now time.Time)
 
 	rollups := make([]dom.OrgRollup, 0, len(data.OrgRollups))
 	for _, r := range data.OrgRollups {
-		sl, ok := serviceLineEnum(r.ServiceLineName)
-		if !ok {
-			// Unknown service line (not one of the three SWP lines) — skip rather
-			// than emit a value outside the openapi enum.
-			continue
-		}
 		rollups = append(rollups, dom.OrgRollup{
-			ServiceLine:      sl,
+			Position:         r.Position,
 			Headcount:        r.Headcount,
 			ActivePlacements: r.ActivePlacements,
 		})
@@ -204,22 +198,6 @@ func (s *DashboardService) superAdminWidgets(ctx context.Context, now time.Time)
 			RoleRequests: 0,
 		},
 	}, nil
-}
-
-// serviceLineEnum maps a free-text service_lines.name to the openapi
-// FACILITY|BUILDING|PARKING enum (the schema stores names, not enum codes — seeded
-// as "Facility Services" / "Building Management" / "Parking").
-func serviceLineEnum(name string) (dom.ServiceLine, bool) {
-	switch {
-	case strings.Contains(strings.ToUpper(name), "FACILITY"):
-		return dom.ServiceLineFacility, true
-	case strings.Contains(strings.ToUpper(name), "BUILDING"):
-		return dom.ServiceLineBuilding, true
-	case strings.Contains(strings.ToUpper(name), "PARKING"):
-		return dom.ServiceLineParking, true
-	default:
-		return "", false
-	}
 }
 
 // auditActorLabel composes recent_audit.actor_label from the audit columns. The

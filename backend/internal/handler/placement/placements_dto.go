@@ -18,8 +18,7 @@ type placementWriteRequest struct {
 	AgreementID     *string `json:"agreement_id,omitempty"` // optional: nil/"" → pending agreement
 	ClientCompanyID string  `json:"client_company_id"`
 	SiteID          string  `json:"site_id"`
-	ServiceLineID   string  `json:"service_line_id"`
-	PositionID      string  `json:"position_id"`
+	Position        string  `json:"position"` // free-text position label
 	StartDate       string  `json:"start_date"`
 	EndDate         *string `json:"end_date"`
 	BackdateReason  *string `json:"backdate_reason"`
@@ -27,14 +26,13 @@ type placementWriteRequest struct {
 }
 
 type placementPatchRequest struct {
-	PositionID *string `json:"position_id"`
-	EndDate    *string `json:"end_date"`
-	Notes      *string `json:"notes"`
+	Position *string `json:"position"` // free-text position label
+	EndDate  *string `json:"end_date"`
+	Notes    *string `json:"notes"`
 	// Read-only fields — rejected if present.
 	EmployeeID      *string `json:"employee_id"`
 	AgreementID     *string `json:"agreement_id"`
 	ClientCompanyID *string `json:"client_company_id"`
-	ServiceLineID   *string `json:"service_line_id"`
 	StartDate       *string `json:"start_date"`
 	LifecycleStatus *string `json:"lifecycle_status"`
 	PredecessorID   *string `json:"predecessor_id"`
@@ -48,8 +46,7 @@ type setAgreementRequest struct {
 
 type transferRequest struct {
 	NewClientCompanyID string  `json:"new_client_company_id"`
-	NewServiceLineID   string  `json:"new_service_line_id"`
-	NewPositionID      string  `json:"new_position_id"`
+	NewPosition        string  `json:"new_position"` // free-text destination position label
 	NewStartDate       string  `json:"new_start_date"`
 	NewEndDate         *string `json:"new_end_date"`
 	NewAgreementID     *string `json:"new_agreement_id"`
@@ -61,7 +58,7 @@ type renewRequest struct {
 	NewStartDate   string  `json:"new_start_date"`
 	NewEndDate     *string `json:"new_end_date"`
 	NewAgreementID *string `json:"new_agreement_id"`
-	NewPositionID  *string `json:"new_position_id"`
+	NewPosition    *string `json:"new_position"` // free-text; nil/"" keeps predecessor's position
 	Notes          *string `json:"notes"`
 }
 
@@ -98,10 +95,8 @@ type placementResponse struct {
 	ClientCompanyName *string  `json:"client_company_name"`
 	SiteID            string   `json:"site_id"`
 	SiteName          *string  `json:"site_name"`
-	ServiceLineID     string   `json:"service_line_id"`
-	ServiceLineName   *string  `json:"service_line_name"`
-	PositionID        string   `json:"position_id"`
-	PositionName      *string  `json:"position_name"`
+	Position          string   `json:"position"`      // free-text position label
+	PositionName      string   `json:"position_name"` // denormalized alias — same value as Position
 	StartDate         string   `json:"start_date"`
 	EndDate           *string  `json:"end_date"`
 	Notes             *string  `json:"notes"`
@@ -126,8 +121,7 @@ type placementSummaryResponse struct {
 	EmployeeID        string  `json:"employee_id"`
 	ClientCompanyID   string  `json:"client_company_id"`
 	ClientCompanyName *string `json:"client_company_name"`
-	ServiceLineID     string  `json:"service_line_id"`
-	ServiceLineName   *string `json:"service_line_name"`
+	Position          string  `json:"position"` // free-text position label
 	LifecycleStatus   string  `json:"lifecycle_status"`
 	StartDate         string  `json:"start_date"`
 	EndDate           *string `json:"end_date"`
@@ -208,10 +202,8 @@ func toPlacementResponse(p domain.Placement, today time.Time) placementResponse 
 		ClientCompanyName: p.ClientCompanyName,
 		SiteID:            p.SiteID,
 		SiteName:          p.SiteName,
-		ServiceLineID:     p.ServiceLineID,
-		ServiceLineName:   p.ServiceLineName,
-		PositionID:        p.PositionID,
-		PositionName:      p.PositionName,
+		Position:          p.Position,
+		PositionName:      p.Position, // alias — same free-text value
 		StartDate:         p.StartDate.Format("2006-01-02"),
 		Notes:             p.Notes,
 		LifecycleStatus:   status,
@@ -251,8 +243,7 @@ func toPlacementSummaryResponse(p domain.Placement, today time.Time) placementSu
 		EmployeeID:        p.EmployeeID,
 		ClientCompanyID:   p.ClientCompanyID,
 		ClientCompanyName: p.ClientCompanyName,
-		ServiceLineID:     p.ServiceLineID,
-		ServiceLineName:   p.ServiceLineName,
+		Position:          p.Position,
 		LifecycleStatus:   full.LifecycleStatus,
 		StartDate:         full.StartDate,
 		EndDate:           full.EndDate,

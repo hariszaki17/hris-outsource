@@ -51,8 +51,6 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-AG` | Employment Agreement (PKWT/PKWTT) | E2 |
 | `SWP-CMP` | Client Company | E2 |
 | `SWP-SITE` | Client Site (placement location + geofence) | E2 |
-| `SWP-SVC` | Service Line | E2 |
-| `SWP-POS` | Position | E2 |
 | `SWP-LT` | Leave Type | E2 |
 | `SWP-AC` | Attendance Code | E2 |
 | `SWP-OTR` | Overtime Rule | E2 |
@@ -89,7 +87,7 @@ Use the full prefixed ID in URLs:
 - **URL paths:** kebab-case, plural nouns (`/leave-requests`, `/client-companies`, `/audit-log`).
 - **JSON fields:** snake_case (`employee_id`, `start_date`, `geofence_radius_m`).
 - **Enum values:** UPPER_SNAKE_CASE for fixed sets (`status: "PENDING_L1"`), lowercase-kebab for free-form display tags.
-- **Query parameters:** snake_case (`?service_line=facility_services&status=active`).
+- **Query parameters:** snake_case (`?status=active&company_id=SWP-CMP-12`).
 - **Action endpoints:** trailing `:verb` after the resource ID:
   - `POST /api/v1/leave-requests/SWP-LR-1042:approve-l1`
   - `POST /api/v1/attendance/SWP-ATT-10711:verify`
@@ -401,9 +399,8 @@ Server enforces RBAC at controller/handler level; clients hide unauthorized acti
 Per yesterday's decision (your call): **picker endpoints belong to their entity's epic, not a shared `/lookups/` namespace.** Examples:
 
 - Employee picker → `GET /api/v1/employees?status=ACTIVE&q=...` (E2 endpoint, returns picker-shaped list)
-- Client company picker → `GET /api/v1/client-companies?service_line=...` (E2)
-- Service line picker → `GET /api/v1/service-lines` (E2)
-- Position picker → `GET /api/v1/service-lines/SWP-SVC-001/positions` (E2)
+- Client company picker → `GET /api/v1/client-companies?status=ACTIVE&q=...` (E2)
+- Position typeahead → `GET /api/v1/positions:search?q=...` (E2 — free-text suggestions over DISTINCT existing position values; no master, no FK)
 - Shift leader picker → `GET /api/v1/employees?role=shift_leader&assigned=false` (E2)
 
 This keeps RBAC and resource ownership clean.
@@ -430,7 +427,7 @@ Each `docs/api/E#-name/openapi.yaml` MUST:
 - Declare `openapi: 3.1.0`
 - Declare `info` with title, version (`1.0.0`), description
 - Reference shared schemas where possible (in v1 each spec is self-contained; v2 may extract shared components)
-- Use `tags` to group endpoints by feature (matching the PRD feature names — e.g., E2 tags: `employees`, `agreements`, `client-companies`, `service-lines-positions`, `master-data`)
+- Use `tags` to group endpoints by feature (matching the PRD feature names — e.g., E2 tags: `employees`, `agreements`, `client-companies`, `master-data`)
 - Include `x-rbac` extension on every operation
 - Include `x-design-screens` extension on every operation listing the .pen frame IDs that consume the endpoint (for traceability)
 - Include realistic example payloads (NOT lorem ipsum) — use the personas from the design (Sari Hadi · HR Admin, Rudi Wijaya · Shift Leader at Plaza Senayan)

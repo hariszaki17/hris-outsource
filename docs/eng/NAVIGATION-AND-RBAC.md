@@ -80,7 +80,7 @@ Rendered only when a section has **>1 permitted tab** for the user. Detail/creat
 their section.
 
 - **Karyawan** → Employees · Change requests
-- **Klien & Perjanjian** → Client companies · Agreements · Service lines
+- **Klien & Perjanjian** → Client companies · Agreements
 - **Jadwal Shift** → Schedule · Shift masters *(→ Settings, see §3.4)*
 - **Kehadiran** → Attendance · Corrections
 - **Cuti** → Approvals · Leave quotas *(→ Settings)* · Calendar
@@ -90,7 +90,7 @@ their section.
 ### 3.3 Settings (Pengaturan)
 
 Hub cards + nested routes: **Users & Roles** · **Audit Log** · **General** · **Master Data**
-(service lines, leave types, attendance codes, overtime rules). A future **Roles & Permissions**
+(leave types, attendance codes, overtime rules). A future **Roles & Permissions**
 card (`settings.roles.manage`) is where a super admin defines custom roles — see §5.
 
 ### 3.4 Planned migration (not in this pass)
@@ -129,7 +129,7 @@ Interim role bundles:
   `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`,
   `change_requests.read/.approve` (**not** `.approve.bank`). No clients,
   contracts, payroll, reports, master data, or settings.
-- **lead** *(2026-06-12)* — service-line operational approver ("parking lead", "facility lead", …):
+- **lead** *(2026-06-12)* — company-scoped operational approver over a set of assigned client companies:
   `dashboard.view`, `employees.read`, `placements.read/.write` (placement lifecycle:
   create/transfer/end/renew — **not** shift-leader-assignment, **not** placement master edits),
   `schedule.read/.write`, `attendance.read/.verify`, `leave.read/.approve` (final/L2),
@@ -185,8 +185,7 @@ for a `shift_leader` when the resource company equals its single `CompanyID`; `s
 stay global (no company guard). Lead is the L2/final approver for leave + overtime **scoped to the
 agent's company** via this same guard, and arranges placements only within its assigned set; HR keeps
 global oversight + override. **Fail-safe:** on resolver error or an empty assigned set the scope is
-stripped — deny, never escalate. `service_line` remains a **data label, not an RBAC axis** — scope is
-keyed on company membership only.
+stripped — deny, never escalate. Scope is keyed on company membership only.
 
 ### 4.3 Day-one vs deferred
 

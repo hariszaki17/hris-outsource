@@ -42,10 +42,9 @@ func (r *ScheduleRepo) FindActivePlacementForAgentDate(ctx context.Context, empl
 		return svc.PlacementCover{}, mapErr(err)
 	}
 	cover := svc.PlacementCover{
-		PlacementID:   row.ID,
-		CompanyID:     row.ClientCompanyID,
-		ServiceLineID: row.ServiceLineID,
-		StartDate:     pgDateToTime(row.StartDate),
+		PlacementID: row.ID,
+		CompanyID:   row.ClientCompanyID,
+		StartDate:   pgDateToTime(row.StartDate),
 	}
 	if row.EndDate.Valid {
 		e := row.EndDate.Time
@@ -176,7 +175,6 @@ func (r *ScheduleRepo) CreateScheduleEntry(ctx context.Context, tx pgx.Tx, p svc
 	row, err := r.q.WithTx(tx).CreateScheduleEntry(ctx, sqlcgen.CreateScheduleEntryParams{
 		EmployeeID:      p.EmployeeID,
 		PlacementID:     p.PlacementID,
-		ServiceLineID:   p.ServiceLineID,
 		ShiftMasterID:   p.ShiftMasterID,
 		StartTime:       p.StartTime,
 		EndTime:         p.EndTime,
@@ -196,7 +194,6 @@ func (r *ScheduleRepo) CreateScheduleEntry(ctx context.Context, tx pgx.Tx, p svc
 func (r *ScheduleRepo) UpdateScheduleEntry(ctx context.Context, tx pgx.Tx, p svc.UpdateScheduleEntryParams) (domain.ScheduleEntry, error) {
 	row, err := r.q.WithTx(tx).UpdateScheduleEntry(ctx, sqlcgen.UpdateScheduleEntryParams{
 		ShiftMasterID:   p.ShiftMasterID,
-		ServiceLineID:   p.ServiceLineID,
 		StartTime:       p.StartTime,
 		EndTime:         p.EndTime,
 		CrossMidnight:   p.CrossMidnight,

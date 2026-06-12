@@ -16,7 +16,7 @@
  * the replace flow). Search filters client-side over the roster page.
  *
  * Maps: employee_id → value, employee_name → label,
- *       position_name · service_line_name → sublabel.
+ *       position_name → sublabel.
  *
  * Wraps the generic `Combobox` from @swp/ui. i18n namespace: `pickers`.
  */
@@ -74,7 +74,7 @@ export function CompanyLeaderCandidatePicker({
       opts.push({
         value: p.employee_id,
         label,
-        sublabel: [p.position_name, p.service_line_name].filter(Boolean).join(' · ') || undefined,
+        sublabel: p.position_name || undefined,
       });
     }
     return opts;

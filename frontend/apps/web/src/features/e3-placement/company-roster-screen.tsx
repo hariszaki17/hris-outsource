@@ -5,8 +5,8 @@
  *   nLN4d  — E3 · Roster — Plaza Senayan   (HR/Admin: has Export + Buat Penempatan + Reassign)
  *   o5Txgg — E3 SL · Roster (read-only)    (Shift Leader: actions hidden / disabled)
  *
- * Layout: CompanyHeader (name + status badge + address + service-line pills + leader +
- * stat counters) → Filters (search, service line, status, period toggle "Sertakan riwayat")
+ * Layout: CompanyHeader (name + status badge + address + leader +
+ * stat counters) → Filters (search, status, period toggle "Sertakan riwayat")
  * → RosterTable (DataTable with cursor pagination).
  *
  * Role gate: isShiftLeader hides Export, "Buat Penempatan", and "Ganti" (reassign) actions
@@ -18,7 +18,6 @@
  * ENGINEERING.md D1 — typed URL search params + cursor pagination.
  */
 
-import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
@@ -57,7 +56,6 @@ const PAGE_SIZE = 25;
 /** Typed filter/cursor search params for the roster route. */
 export type CompanyRosterSearch = {
   q?: string;
-  service_line_id?: string;
   status?: PlacementLifecycleStatus;
   include_history?: boolean;
   awaiting_agreement?: boolean;
@@ -120,7 +118,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
   const params: GetCompanyRosterParams = {
     limit: PAGE_SIZE,
     q: search.q || undefined,
-    service_line_id: search.service_line_id || undefined,
     status: search.status || undefined,
     include_history: search.include_history || undefined,
     awaiting_agreement: search.awaiting_agreement || undefined,
@@ -134,9 +131,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
   const summary = rosterData?.summary;
   const shiftLeader = rosterData?.current_shift_leader;
 
-  const hasFilters = Boolean(
-    search.q || search.service_line_id || search.status || search.awaiting_agreement,
-  );
+  const hasFilters = Boolean(search.q || search.status || search.awaiting_agreement);
 
   // ---------------------------------------------------------------------------
   // Navigation helpers
@@ -215,20 +210,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
           </div>
         );
       },
-    },
-    {
-      id: 'liniLayanan',
-      header: t('rosterColLiniLayanan'),
-      width: 165,
-      cell: (pl) =>
-        pl.service_line_name ? (
-          <div className="flex items-center gap-[8px]">
-            <span className="size-[7px] rounded-full bg-info-tx shrink-0" aria-hidden />
-            <span className="text-[13px] text-text-2">{pl.service_line_name}</span>
-          </div>
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
     },
     {
       id: 'posisi',
@@ -322,20 +303,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
                 {t('companyStatusActive')}
               </StatusBadge>
             </div>
-            {/* Service line pills row */}
-            {rosterData?.summary?.by_service_line && (
-              <div className="flex flex-wrap gap-[8px] pt-[2px]">
-                {rosterData.summary.by_service_line.map((sl) => (
-                  <span
-                    key={sl.service_line_id}
-                    className="flex items-center gap-[6px] rounded-full border border-border bg-surface-2 px-[10px] py-[4px] text-[11px] font-semibold text-text-2"
-                  >
-                    <span className="size-[6px] rounded-full bg-info-tx shrink-0" aria-hidden />
-                    {sl.service_line_name ?? sl.service_line_id}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
 
           {/* Action buttons — hidden for shift leader (o5Txgg: enabled:false pattern) */}
@@ -440,14 +407,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
               containerClassName="w-[220px]"
               onChange={(e) => setSearch({ q: e.target.value || undefined })}
             />
-            {/* Service line filter */}
-            <div className="w-[180px]">
-              <ServiceLinePicker
-                value={search.service_line_id ?? null}
-                onChange={(v) => setSearch({ service_line_id: v ?? undefined })}
-                placeholder={t('filterServiceLine')}
-              />
-            </div>
             {/* Status filter */}
             <FilterSelect
               aria-label={t('filterStatus')}

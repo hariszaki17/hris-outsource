@@ -3,8 +3,9 @@
  *
  * .pen frame implemented:
  *   vd4na  "E7 · Aturan OT & Kalender Libur (HR)"
- *     Left  — "Tier Tipe-Hari" table: each OT rule (E2 master) expanded into its 3 day-type
- *             tiers (Hari Kerja / Hari Libur / Hari Besar) with ×mult (ref), MIN, pra-approval.
+ *     Left  — "Tier Tipe-Hari" table: each OT rule (E2 master; GLOBAL only — service-line
+ *             scope dropped 2026-06-12) expanded into its 3 day-type tiers (Hari Kerja /
+ *             Hari Libur / Hari Besar) with ×mult (ref), MIN, pra-approval.
  *     Right — "Kalender Hari Libur" with full CRUD (E7 /holidays).
  *
  * Route: /overtime/aturan (role: hr_admin | super_admin)
@@ -147,7 +148,7 @@ export function OvertimeRulesScreen() {
               {/* Column header */}
               <div className="flex bg-surface-2 px-[18px] py-[10px] text-[10px] font-semibold tracking-[0.4px] text-text-3">
                 <span className="w-[170px]">{t('rules.colDayType')}</span>
-                <span className="w-[130px]">{t('rules.colLine')}</span>
+                <span className="w-[200px]">{t('rules.colRule')}</span>
                 <span className="w-[90px]">{t('rules.colMult')}</span>
                 <span className="w-[80px]">{t('rules.colMin')}</span>
                 <span className="w-[110px]">{t('rules.colPreApproval')}</span>
@@ -161,8 +162,8 @@ export function OvertimeRulesScreen() {
                   <span className="w-[170px] text-[13px] font-semibold text-text">
                     {t(TIER_LABEL_KEY[row.tier])}
                   </span>
-                  <span className="w-[130px] text-[13px] text-text-3">
-                    {row.rule.service_line_id ? row.rule.name : t('rules.scopeGlobal')}
+                  <span className="w-[200px] truncate text-[13px] text-text-3">
+                    {row.rule.name}
                   </span>
                   <span className="w-[90px] font-mono text-[13px] font-semibold text-text">
                     {formatMult(row.rate)}

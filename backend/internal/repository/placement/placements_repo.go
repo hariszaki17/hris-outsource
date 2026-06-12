@@ -38,7 +38,7 @@ func NewPlacementRepo(pool *db.Pool) *PlacementRepo {
 func (r *PlacementRepo) ListPlacements(ctx context.Context, f domain.PlacementFilter) ([]domain.Placement, error) {
 	rows, err := r.q.ListPlacements(ctx, sqlcgen.ListPlacementsParams{
 		CompanyID:             f.CompanyID,
-		ServiceLineID:         f.ServiceLineID,
+		Position:              f.Position,
 		EmployeeID:            f.EmployeeID,
 		AgreementID:           f.AgreementID,
 		Status:                f.Status,
@@ -93,6 +93,12 @@ func (r *PlacementRepo) PlacementStats(ctx context.Context, companyID *string) (
 		ExpiringCount:      row.ExpiringCount,
 		PendingCount:       row.PendingCount,
 	}, nil
+}
+
+// SearchPositions returns DISTINCT free-text position labels matching pattern
+// (the handler passes a '%q%' ILIKE pattern). Backs GET /positions:search.
+func (r *PlacementRepo) SearchPositions(ctx context.Context, pattern string) ([]string, error) {
+	return r.q.SearchPositions(ctx, pattern)
 }
 
 // GetPlacementByID fetches a single placement by SWP-PL id.
@@ -205,8 +211,7 @@ func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.Cr
 		AgreementID:     p.AgreementID,
 		ClientCompanyID: p.ClientCompanyID,
 		SiteID:          p.SiteID,
-		ServiceLineID:   p.ServiceLineID,
-		PositionID:      p.PositionID,
+		Position:        p.Position,
 		StartDate:       pgtype.Date{Time: p.StartDate, Valid: true},
 		EndDate:         ptrTimeToPgDate(p.EndDate),
 		Notes:           p.Notes,
@@ -223,10 +228,10 @@ func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.Cr
 
 func (r *PlacementRepo) UpdatePlacementFields(ctx context.Context, tx pgx.Tx, p svc.UpdatePlacementParams) (domain.Placement, error) {
 	row, err := r.q.WithTx(tx).UpdatePlacementFields(ctx, sqlcgen.UpdatePlacementFieldsParams{
-		PositionID: p.PositionID,
-		EndDate:    ptrTimeToPgDate(p.EndDate),
-		Notes:      p.Notes,
-		ID:         p.ID,
+		Position: p.Position,
+		EndDate:  ptrTimeToPgDate(p.EndDate),
+		Notes:    p.Notes,
+		ID:       p.ID,
 	})
 	if err != nil {
 		return domain.Placement{}, mapErr(err)

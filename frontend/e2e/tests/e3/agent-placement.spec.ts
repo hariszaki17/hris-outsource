@@ -18,6 +18,8 @@
  *   - FK fields are @swp/ui Combobox pickers (button[aria-haspopup=listbox] → search input → option button),
  *     EXCEPT agreement_id: it is now AgreementField — a read-only auto-resolver (no combobox) that picks the
  *     agent's single active agreement once the employee is chosen (EA-2). Do NOT pickCombobox it.
+ *   - position is FREE-TEXT (no master / FK / service line, locked 2026-06-12): a typeahead Combobox over
+ *     DISTINCT existing values (PositionPicker, field id "position"). Drive it like any other Combobox.
  *   - Native date/number ids: start_date, end_date, notes, backdate_reason. Forms are noValidate.
  *   - The filter row has TWO role=switch toggles (Menunggu perjanjian + Akan berakhir) — target by aria-label.
  *
@@ -92,8 +94,9 @@ test('AP-create-active · UI create a backdated (active) placement for an unplac
   // no combobox) — EA-2: one active agreement per agent. No pick needed.
   await pickCombobox(page, comboFieldById(page, 'client_company_id'), /Mall Kelapa Gading/i, 'Mall');
   await pickCombobox(page, comboFieldById(page, 'site_id'), /Mall Kelapa Gading/i);
-  await pickCombobox(page, comboFieldById(page, 'service_line_id'), /Parking/i, 'Park');
-  await pickCombobox(page, comboFieldById(page, 'position_id'), /Petugas Parkir|Koordinator/i);
+  // Position is now FREE-TEXT (no master / FK / service line): a typeahead Combobox over
+  // DISTINCT existing values. Search the seeded "Petugas Parkir" string and pick it.
+  await pickCombobox(page, comboFieldById(page, 'position'), /Petugas Parkir/i, 'Petugas');
   await page.locator('#start_date').fill(isoDaysFromNow(-15));
   await page.locator('#backdate_reason').fill('Penempatan dibuat surut atas permintaan klien.');
   await page.getByRole('button', { name: /Simpan Penempatan/i }).click();
@@ -136,8 +139,7 @@ test('AP-create-active-api · create a backdated placement for an unplaced agent
     agreement_id: agId,
     client_company_id: 'SWP-CMP-0022',
     site_id: 'SWP-SITE-0002',
-    service_line_id: 'SWP-SVC-003',
-    position_id: 'SWP-POS-014',
+    position: 'Petugas Parkir',
     start_date: isoDaysFromNow(-30),
     end_date: null,
     backdate_reason: 'Penempatan dibuat surut atas permintaan klien.',
@@ -176,8 +178,7 @@ test('AP-create-future · future-dated start → PENDING_START (BR-5)', async ({
     agreement_id: agId,
     client_company_id: 'SWP-CMP-0022',
     site_id: 'SWP-SITE-0002',
-    service_line_id: 'SWP-SVC-003',
-    position_id: 'SWP-POS-014',
+    position: 'Petugas Parkir',
     start_date: isoDaysFromNow(30),
     end_date: null,
   });
@@ -206,8 +207,7 @@ test('AP-inv1-block · 2nd placement for already-placed Rudi → 409 INV_1_VIOLA
     agreement_id: 'SWP-AG-7003',
     client_company_id: 'SWP-CMP-0022',
     site_id: 'SWP-SITE-0002',
-    service_line_id: 'SWP-SVC-003',
-    position_id: 'SWP-POS-014',
+    position: 'Petugas Parkir',
     start_date: isoDaysFromNow(-5),
     end_date: null,
     backdate_reason: 'Uji konflik INV-1.',
@@ -231,8 +231,8 @@ test('AP-inv1-block · 2nd placement for already-placed Rudi → 409 INV_1_VIOLA
   // agreement_id auto-resolves from the chosen agent (AgreementField, read-only).
   await pickCombobox(page, comboFieldById(page, 'client_company_id'), /Mall Kelapa Gading/i, 'Mall');
   await pickCombobox(page, comboFieldById(page, 'site_id'), /Mall Kelapa Gading/i);
-  await pickCombobox(page, comboFieldById(page, 'service_line_id'), /Parking/i, 'Park');
-  await pickCombobox(page, comboFieldById(page, 'position_id'), /Petugas Parkir|Koordinator/i);
+  // Free-text position typeahead (no service line / no master).
+  await pickCombobox(page, comboFieldById(page, 'position'), /Petugas Parkir/i, 'Petugas');
   await page.locator('#start_date').fill(isoDaysFromNow(-5));
   await page.locator('#backdate_reason').fill('Uji konflik INV-1 dari UI.');
   await page.getByRole('button', { name: /Simpan Penempatan/i }).click();
@@ -319,8 +319,7 @@ test('AP-company-inactive · create into an inactive company → 409 COMPANY_INA
     agreement_id: agId,
     client_company_id: 'SWP-CMP-0022',
     site_id: 'SWP-SITE-0002',
-    service_line_id: 'SWP-SVC-003',
-    position_id: 'SWP-POS-014',
+    position: 'Petugas Parkir',
     start_date: isoDaysFromNow(-5),
     end_date: null,
     backdate_reason: 'Uji COMPANY_INACTIVE.',
@@ -369,8 +368,7 @@ test('AP-rbac-agent · agent POST /placements → 403 (write is super_admin/hr_a
     agreement_id: 'SWP-AG-7001',
     client_company_id: 'SWP-CMP-0022',
     site_id: 'SWP-SITE-0002',
-    service_line_id: 'SWP-SVC-003',
-    position_id: 'SWP-POS-014',
+    position: 'Petugas Parkir',
     start_date: isoDaysFromNow(-1),
     end_date: null,
     backdate_reason: 'Uji RBAC.',

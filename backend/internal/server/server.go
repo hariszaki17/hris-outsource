@@ -35,14 +35,12 @@ type Deps struct {
 
 	Auth        *identityhttp.Handler
 	Foundations *foundationshttp.Handler
-	// ORG slice (03-02): client companies + sites.
-	// Siblings 03-03 (service lines + positions) and 03-04 (master data) should
-	// add their own Deps fields here (OrgServiceLines, OrgMasterData) — or reuse
-	// OrgCompanies if they share the same handler package (they don't in this plan;
-	// they use separate packages). See 03-02-SUMMARY.md for the coordination contract.
-	OrgCompanies    *orghttp.Handler
-	OrgServiceLines *orghttp.ServiceLineHandler // 03-03: service lines + positions
-	OrgMasterData   *orghttp.MasterDataHandler  // 03-04: leave types, attendance codes, overtime rules
+	// ORG slice (03-02): client companies + sites. The 03-03 service-line +
+	// position master was removed (2026-06-12) — position is now free-text,
+	// surfaced via GET /positions:search on the Placement handler. 03-04
+	// (master data) keeps its own OrgMasterData field below.
+	OrgCompanies  *orghttp.Handler
+	OrgMasterData *orghttp.MasterDataHandler // 03-04: leave types, attendance codes, overtime rules
 	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
@@ -168,35 +166,16 @@ func New(d Deps) http.Handler {
 			// ORG slice end (03-02). 03-03 sibling: append r.Group{} here.
 
 			// ---------------------------------------------------------------
-			// ORG slice (03-03): service lines + positions (E2 F2.4).
-			// COORDINATION POINT: 03-04 appends its OWN Group block after this
-			// closing brace. Do NOT modify 03-02 or 03-03 groups.
+			// POSITION TYPEAHEAD (E2 F2.4 — replaces the deleted service-line +
+			// position master). Position is FREE-TEXT (no master, no FK, no ID):
+			// GET /positions:search returns DISTINCT existing position strings to
+			// back the placement create/transfer form typeahead. Every role that
+			// fills a placement form may read it (super, hr, leader, lead, agent).
 			// ---------------------------------------------------------------
-
-			// Service-line + position reads: all authenticated roles.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
-				r.Get("/service-lines", d.OrgServiceLines.ListServiceLines)
-				r.Get("/service-lines/{service_line_id}", d.OrgServiceLines.GetServiceLine)
-				r.Get("/service-lines/{service_line_id}/positions", d.OrgServiceLines.ListPositionsInServiceLine)
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
+				r.Get("/positions:search", d.Placement.SearchPositions)
 			})
-
-			// Service-line writes: super_admin only.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin))
-				r.With(d.Idempotency.Handler).Post("/service-lines", d.OrgServiceLines.CreateServiceLine)
-				r.Patch("/service-lines/{service_line_id}", d.OrgServiceLines.UpdateServiceLine)
-				r.With(d.Idempotency.Handler).Post("/service-lines/{service_line_id}:discontinue", d.OrgServiceLines.DiscontinueServiceLine)
-			})
-
-			// Position writes: super_admin + hr_admin.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-				r.With(d.Idempotency.Handler).Post("/service-lines/{service_line_id}/positions", d.OrgServiceLines.CreatePosition)
-				r.Patch("/positions/{position_id}", d.OrgServiceLines.UpdatePosition)
-				r.Delete("/positions/{position_id}", d.OrgServiceLines.SoftDeletePosition)
-			})
-			// ORG slice end (03-03). 03-04 sibling: append r.Group{} here.
 
 			// ---------------------------------------------------------------
 			// ORG slice (03-04): operational master data — leave types,

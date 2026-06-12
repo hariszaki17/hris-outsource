@@ -9,8 +9,8 @@
  *     Row: employee_id | agreement_id (filtered to chosen employee)
  *     AgentNote (ok-bg when no active placement; bad-bg on INV-1)
  *   Card: Penempatan
- *     Row: client_company_id | service_line_id
- *     Row: position_id (half-width, depends on service_line_id)
+ *     Row: client_company_id | site_id
+ *     Row: position (half-width, free-text typeahead)
  *   Card: Periode & Ketentuan
  *     Row: start_date | end_date
  *     CapNote (info-bg)
@@ -51,7 +51,6 @@ import { z } from 'zod';
 import { ClientCompanyPicker } from '../e2-identity/pickers/client-company-picker.tsx';
 import { EmployeePicker } from '../e2-identity/pickers/employee-picker.tsx';
 import { PositionPicker } from '../e2-identity/pickers/position-picker.tsx';
-import { ServiceLinePicker } from '../e2-identity/pickers/service-line-picker.tsx';
 import { SitePicker } from '../e2-identity/pickers/site-picker.tsx';
 import { AgreementField } from './agreement-field.tsx';
 
@@ -67,8 +66,7 @@ const placementSchema = z
     agreement_id: z.string().optional(),
     client_company_id: z.string().min(1, 'Perusahaan klien wajib dipilih'),
     site_id: z.string().min(1, 'Site wajib dipilih'),
-    service_line_id: z.string().min(1, 'Lini layanan wajib dipilih'),
-    position_id: z.string().min(1, 'Posisi wajib dipilih'),
+    position: z.string().min(1, 'Posisi wajib diisi'),
     start_date: z.string().min(1, 'Tanggal mulai wajib diisi'),
     end_date: z.string().nullable().optional(),
     backdate_reason: z.string().max(1000).nullable().optional(),
@@ -188,8 +186,7 @@ export function CreatePlacementScreen() {
       agreement_id: '',
       client_company_id: '',
       site_id: '',
-      service_line_id: '',
-      position_id: '',
+      position: '',
       start_date: '',
       end_date: null,
       backdate_reason: null,
@@ -208,8 +205,7 @@ export function CreatePlacementScreen() {
 
   const watchedEmployeeId = watch('employee_id');
   const watchedAgreementId = watch('agreement_id');
-  const watchedServiceLineId = watch('service_line_id');
-  const watchedPositionId = watch('position_id');
+  const watchedPosition = watch('position');
   const watchedStartDate = watch('start_date');
 
   const showBackdateReason = isBackdate(watchedStartDate);
@@ -231,8 +227,7 @@ export function CreatePlacementScreen() {
           agreement_id: values.agreement_id || null,
           client_company_id: values.client_company_id,
           site_id: values.site_id,
-          service_line_id: values.service_line_id,
-          position_id: values.position_id,
+          position: values.position,
           start_date: values.start_date,
           end_date: values.end_date ?? null,
           backdate_reason: values.backdate_reason ?? null,
@@ -464,45 +459,20 @@ export function CreatePlacementScreen() {
                 </div>
               </FieldRow>
 
-              {/* Row: service_line */}
-              <FieldRow>
-                <div className="flex-1 min-w-0" style={{ maxWidth: '50%' }}>
-                  <FormField
-                    label={t('fieldServiceLine')}
-                    htmlFor="service_line_id"
-                    required
-                    error={errors.service_line_id?.message}
-                  >
-                    <ServiceLinePicker
-                      value={watchedServiceLineId || null}
-                      onChange={(val) => {
-                        setValue('service_line_id', val ?? '', { shouldValidate: true });
-                        // Reset position when service line changes.
-                        setValue('position_id', '', { shouldValidate: false });
-                      }}
-                      error={!!errors.service_line_id}
-                      placeholder={t('fieldServiceLinePlaceholder')}
-                    />
-                  </FormField>
-                </div>
-              </FieldRow>
-
-              {/* Row: position (half-width per design — g3OzZz TcBbR Bhezi width:549) */}
+              {/* Row: position (half-width per design — g3OzZz TcBbR Bhezi width:549).
+                  Free-text typeahead — no service-line gating. */}
               <FieldRow>
                 <div className="flex-1 min-w-0" style={{ maxWidth: '50%' }}>
                   <FormField
                     label={t('fieldPosition')}
-                    htmlFor="position_id"
+                    htmlFor="position"
                     required
-                    error={errors.position_id?.message}
+                    error={errors.position?.message}
                   >
                     <PositionPicker
-                      value={watchedPositionId || null}
-                      onChange={(val) =>
-                        setValue('position_id', val ?? '', { shouldValidate: true })
-                      }
-                      serviceLineId={watchedServiceLineId || null}
-                      error={!!errors.position_id}
+                      value={watchedPosition || null}
+                      onChange={(val) => setValue('position', val ?? '', { shouldValidate: true })}
+                      error={!!errors.position}
                       placeholder={t('fieldPositionPlaceholder')}
                     />
                   </FormField>

@@ -55,13 +55,6 @@ const (
 	TimelineStatusOverrideApproved TimelineStatus = "OVERRIDE_APPROVED"
 )
 
-// ServiceLine enumerates the placement service lines carried on the request.
-const (
-	ServiceLineFacilityServices   = "facility_services"
-	ServiceLineBuildingManagement = "building_management"
-	ServiceLineParking            = "parking"
-)
-
 // LeaveRouting is the openapi LeaveRequest.routing object (LA-2 no-leader routing).
 type LeaveRouting struct {
 	NoLeader         bool    `json:"no_leader"`
@@ -114,12 +107,11 @@ type ScheduleImpactEntry struct {
 // Timeline / ScheduleImpact are assembled by 08-02 from the leave_approvals +
 // schedule-cancel side-effects.
 type LeaveRequest struct {
-	ID            string
-	EmployeeID    string
-	PlacementID   *string
-	CompanyID     *string
-	ServiceLineID *string
-	LeaveTypeID   string
+	ID          string
+	EmployeeID  string
+	PlacementID *string
+	CompanyID   *string
+	LeaveTypeID string
 
 	StartDate    time.Time
 	EndDate      time.Time
@@ -338,6 +330,30 @@ func (q LeaveQuota) Remaining() int { return q.Total - q.Used - q.Pending }
 // (allocation only ever draws available, INV-6).
 func (q LeaveQuota) RemainingPerType() int { return q.EntitledDays - q.UsedDays - q.PendingDays }
 
+// LeaveTypeCap is a leave type's metering mechanics (leave_types cap_* columns,
+// migr. 00050) — read by the QuotaMeter to pick the window + apply gates.
+type LeaveTypeCap struct {
+	ID               string
+	Code             string
+	Name             string
+	CapBasis         LeaveTypeCapBasis
+	CapValue         *int // nil = uncapped / variable
+	CapUnit          string // DAYS | COUNT
+	Paid             bool
+	Gender           string // ANY | FEMALE | MALE
+	RequiresDocument bool
+	NoticeDays       int
+	MinServiceYears  int
+	LeadDays         int
+	TrailDays        int
+}
+
+// EmployeeGateInfo is the employee data the request-time gates need.
+type EmployeeGateInfo struct {
+	Gender *string   // MALE | FEMALE | nil
+	JoinAt time.Time // tenure source for min_service_years
+}
+
 // QuotaWindowSpec opens (or upserts) a per-type quota window. Legacy Period/
 // PeriodStart/PeriodEnd are supplied transitionally (NOT NULL until Phase 8).
 type QuotaWindowSpec struct {
@@ -412,7 +428,6 @@ type LeaveCalendarEntry struct {
 	EmployeeName   *string
 	CompanyID      *string
 	CompanyName    *string
-	ServiceLine    *string
 	LeaveTypeID    string
 	LeaveTypeCode  *string
 	LeaveTypeName  *string
@@ -421,14 +436,6 @@ type LeaveCalendarEntry struct {
 	Status         LeaveStatus
 	DelegateID     *string
 	DelegateName   *string
-}
-
-// LeaveCalendarClash flags two overlapping leaves at the same company (openapi
-// LeaveCalendarEntry clash surface — the FE renders an overlap warning).
-type LeaveCalendarClash struct {
-	CompanyID  string   `json:"company_id"`
-	Date       string   `json:"date"`
-	RequestIDs []string `json:"request_ids"`
 }
 
 // LeaveQuotaAdjustParams carries the :adjust inputs (08-02 service → repo).

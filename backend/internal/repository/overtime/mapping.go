@@ -76,7 +76,6 @@ func mapOvertimeFromList(r sqlcgen.ListOvertimeRow) dom.Overtime {
 		CompanyName:          r.CompanyName,
 		PlacementID:          r.PlacementID,
 		AttendanceID:         r.AttendanceID,
-		ServiceLineID:        r.ServiceLineID,
 		WorkDate:             pgDateToTime(r.WorkDate),
 		PlannedStartTime:     r.PlannedStartTime,
 		PlannedEndTime:       r.PlannedEndTime,
@@ -110,7 +109,6 @@ func mapOvertimeFromGet(r sqlcgen.GetOvertimeRow) dom.Overtime {
 		CompanyName:          r.CompanyName,
 		PlacementID:          r.PlacementID,
 		AttendanceID:         r.AttendanceID,
-		ServiceLineID:        r.ServiceLineID,
 		WorkDate:             pgDateToTime(r.WorkDate),
 		PlannedStartTime:     r.PlannedStartTime,
 		PlannedEndTime:       r.PlannedEndTime,
@@ -142,7 +140,6 @@ func mapOvertimeFromForUpdate(r sqlcgen.GetOvertimeForUpdateRow) dom.Overtime {
 		CompanyID:            r.CompanyID,
 		PlacementID:          r.PlacementID,
 		AttendanceID:         r.AttendanceID,
-		ServiceLineID:        r.ServiceLineID,
 		WorkDate:             pgDateToTime(r.WorkDate),
 		PlannedStartTime:     r.PlannedStartTime,
 		PlannedEndTime:       r.PlannedEndTime,
@@ -174,7 +171,6 @@ func mapOvertimeFromInsert(r sqlcgen.InsertOvertimeRow) dom.Overtime {
 		CompanyID:            r.CompanyID,
 		PlacementID:          r.PlacementID,
 		AttendanceID:         r.AttendanceID,
-		ServiceLineID:        r.ServiceLineID,
 		WorkDate:             pgDateToTime(r.WorkDate),
 		PlannedStartTime:     r.PlannedStartTime,
 		PlannedEndTime:       r.PlannedEndTime,
@@ -206,7 +202,6 @@ func mapOvertimeFromUpdate(r sqlcgen.UpdateOvertimeStatusRow) dom.Overtime {
 		CompanyID:            r.CompanyID,
 		PlacementID:          r.PlacementID,
 		AttendanceID:         r.AttendanceID,
-		ServiceLineID:        r.ServiceLineID,
 		WorkDate:             pgDateToTime(r.WorkDate),
 		PlannedStartTime:     r.PlannedStartTime,
 		PlannedEndTime:       r.PlannedEndTime,
@@ -242,89 +237,76 @@ func mapApproval(r sqlcgen.OvertimeApproval) dom.OvertimeApproval {
 	}
 }
 
-// --- holiday mappers ---
+// --- holiday mappers (holidays are GLOBAL ONLY; no applicable_service_lines) ---
 
 func mapHolidayFromList(r sqlcgen.ListHolidaysRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func mapHolidayFromGet(r sqlcgen.GetHolidayRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func mapHolidayFromByDateCategory(r sqlcgen.GetHolidayByDateCategoryRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func mapHolidayFromForDate(r sqlcgen.GetHolidayForDateRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func mapHolidayFromInsert(r sqlcgen.InsertHolidayRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
 }
 
 func mapHolidayFromUpdate(r sqlcgen.UpdateHolidayRow) dom.Holiday {
 	return dom.Holiday{
-		ID:                     r.ID,
-		Name:                   r.Name,
-		Date:                   pgDateToTime(r.HolidayDate),
-		Category:               dom.HolidayCategory(r.Category),
-		Recurring:              r.Recurring,
-		ApplicableServiceLines: emptyIfNil(r.ApplicableServiceLines),
-		CreatedAt:              r.CreatedAt,
-		UpdatedAt:              r.UpdatedAt,
+		ID:        r.ID,
+		Name:      r.Name,
+		Date:      pgDateToTime(r.HolidayDate),
+		Category:  dom.HolidayCategory(r.Category),
+		Recurring: r.Recurring,
+		CreatedAt: r.CreatedAt,
+		UpdatedAt: r.UpdatedAt,
 	}
-}
-
-func emptyIfNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }

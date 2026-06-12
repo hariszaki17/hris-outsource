@@ -6,7 +6,7 @@
  *   Mn9ux  E4 · Tambah Shift (modal)
  *
  * Layout: Sidebar + Main (TitleBand → FilterRow → ShiftTable)
- * Modal: Tambah/Edit — Nama, Lini Layanan (opsional), Jam Mulai, Jam Selesai,
+ * Modal: Tambah/Edit — Nama, Jam Mulai, Jam Selesai,
  *        Istirahat Mulai/Selesai, cross-midnight note, status toggle.
  * Confirms: Deactivate (tone danger) · Reactivate (tone info).
  *
@@ -18,15 +18,8 @@
  * ENGINEERING.md A2 — client RBAC is defense-in-depth.
  */
 
-import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  type ListServiceLines200,
-  type ServiceLine,
-  ServiceLineStatus,
-  useListServiceLines,
-} from '@swp/api-client/e2';
 import {
   type ListShiftMasters200,
   type ListShiftMastersParams,
@@ -103,7 +96,6 @@ const shiftMasterSchema = z.object({
     .regex(TIME_PATTERN, { message: 'shiftMasters.validation.timeFormat' })
     .optional()
     .or(z.literal('')),
-  service_line_id: z.string().nullable().optional(),
   is_active: z.boolean(),
 });
 
@@ -157,7 +149,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
       end_time: '',
       break_start: '',
       break_end: '',
-      service_line_id: null,
       is_active: true,
     },
   });
@@ -178,7 +169,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
           end_time: editing.end_time,
           break_start: editing.break_start ?? '',
           break_end: editing.break_end ?? '',
-          service_line_id: editing.service_line_id ?? null,
           is_active: editing.is_active,
         });
       } else {
@@ -188,7 +178,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
           end_time: '',
           break_start: '',
           break_end: '',
-          service_line_id: null,
           is_active: true,
         });
       }
@@ -202,7 +191,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
       end_time: values.end_time,
       break_start: values.break_start !== '' ? values.break_start : undefined,
       break_end: values.break_end !== '' ? values.break_end : undefined,
-      service_line_id: values.service_line_id ?? undefined,
       is_active: values.is_active,
     };
 
@@ -223,8 +211,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
       }
     }
   }
-
-  const serviceLineId = watch('service_line_id');
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} size="lg">
@@ -253,15 +239,6 @@ function ShiftMasterModal({ open, onOpenChange, editing, onDone }: ShiftMasterMo
               {...register('name')}
               aria-invalid={!!formState.errors.name}
               aria-describedby={formState.errors.name ? 'sm-name-error' : undefined}
-            />
-          </FormField>
-
-          {/* Lini Layanan (opsional) */}
-          <FormField htmlFor="sm-service-line" label={t('modal.fieldServiceLine')}>
-            <ServiceLinePicker
-              value={serviceLineId ?? null}
-              onChange={(v) => setValue('service_line_id', v)}
-              placeholder={t('modal.fieldServiceLinePlaceholder')}
             />
           </FormField>
 
@@ -428,7 +405,6 @@ function RowActionsMenu({ shift, onEdit, onDeactivate, onReactivate }: RowAction
 /** Typed filter/cursor search params for `/shift-masters`. */
 export type ShiftMastersSearch = {
   q?: string;
-  service_line_id?: string;
   status?: ShiftMasterStatus;
   cursor?: string;
 };
@@ -442,7 +418,6 @@ export function ShiftMastersScreen() {
   // ---------------------------------------------------------------------------
 
   const [searchQ, setSearchQ] = useState('');
-  const [serviceLineFilter, setServiceLineFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<ShiftMasterStatus | undefined>(undefined);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
@@ -463,7 +438,6 @@ export function ShiftMastersScreen() {
   const params: ListShiftMastersParams = {
     limit: PAGE_SIZE,
     q: searchQ || undefined,
-    service_line_id: serviceLineFilter,
     status: statusFilter,
     cursor,
   };
@@ -472,23 +446,13 @@ export function ShiftMastersScreen() {
   const deactivateMut = useDeactivateShiftMaster();
   const reactivateMut = useReactivateShiftMaster();
 
-  // Service lines for the filter dropdown (active only). Global shifts (no line)
-  // are matched server-side regardless of the selected line.
-  const serviceLinesQuery = useListServiceLines(
-    { limit: 50 },
-    { query: { staleTime: 5 * 60_000 } },
-  );
-  const serviceLineOptions = (
-    ((serviceLinesQuery.data?.data as ListServiceLines200 | undefined)?.data ?? []) as ServiceLine[]
-  ).filter((sl) => sl.status === ServiceLineStatus.ACTIVE);
-
   const page = query.data?.data as ListShiftMasters200 | undefined;
   const rows: ShiftMaster[] = page?.data ?? [];
   const nextCursor = page?.next_cursor ?? undefined;
   const hasMore = page?.has_more ?? Boolean(nextCursor);
   const hasPrev = prevCursors.length > 0;
 
-  const hasFilters = Boolean(searchQ || serviceLineFilter || statusFilter);
+  const hasFilters = Boolean(searchQ || statusFilter);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -528,12 +492,6 @@ export function ShiftMastersScreen() {
     setPrevCursors([]);
   }
 
-  function handleServiceLineFilter(v: string) {
-    setServiceLineFilter(v || undefined);
-    setCursor(undefined);
-    setPrevCursors([]);
-  }
-
   function handleStatusFilter(v: string) {
     setStatusFilter((v as ShiftMasterStatus) || undefined);
     setCursor(undefined);
@@ -569,9 +527,8 @@ export function ShiftMastersScreen() {
   }
 
   // ---------------------------------------------------------------------------
-  // Columns (mirrors .pen ShiftTable columns: h0…h5)
-  // h0 = Nama Shift (w:310), h1 = Waktu (w:200), h2 = Istirahat (w:190),
-  // h3 = Lini Layanan (w:210), h4 = Status (w:150), h5 = actions (w:56)
+  // Columns (mirrors .pen ShiftTable columns)
+  // Nama Shift (w:310), Waktu (w:200), Istirahat (w:190), Status (w:150), actions (w:56)
   // ---------------------------------------------------------------------------
 
   const columns: Column<ShiftMaster>[] = [
@@ -615,19 +572,6 @@ export function ShiftMastersScreen() {
           </span>
         ) : (
           <span className="text-text-3">—</span>
-        ),
-    },
-    {
-      id: 'service_line',
-      header: t('col.serviceLine'),
-      width: 210,
-      cell: (row) =>
-        row.service_line_name ? (
-          <span className="inline-flex rounded-full bg-info-bg px-2 py-0.5 text-[11px] font-medium text-info-tx">
-            {row.service_line_name}
-          </span>
-        ) : (
-          <span className="text-[12px] text-text-3">{t('allLines')}</span>
         ),
     },
     {
@@ -711,7 +655,7 @@ export function ShiftMastersScreen() {
         </Button>
       </div>
 
-      {/* Filter row — mirrors .pen xG94u Filters: Search + Lini Layanan + Status */}
+      {/* Filter row — mirrors .pen xG94u Filters: Search + Status */}
       <div className="flex items-center gap-[10px]">
         <SearchField
           placeholder={t('searchPlaceholder')}
@@ -719,22 +663,6 @@ export function ShiftMastersScreen() {
           containerClassName="w-[280px]"
           onChange={(e) => handleSearch(e.target.value)}
         />
-
-        {/* Service line filter — active lines from the master list (global shifts
-            with no line are matched server-side regardless of selection). */}
-        <FilterSelect
-          aria-label={t('filterServiceLine')}
-          value={serviceLineFilter ?? ''}
-          onChange={(e) => handleServiceLineFilter(e.target.value)}
-          containerClassName="w-[200px]"
-        >
-          <option value="">{t('filterAllServiceLines')}</option>
-          {serviceLineOptions.map((sl) => (
-            <option key={sl.id} value={sl.id}>
-              {sl.name}
-            </option>
-          ))}
-        </FilterSelect>
 
         <FilterSelect
           aria-label={t('filterStatus')}

@@ -58,8 +58,6 @@ export const PERMISSIONS = [
   'clients.write',
   'agreements.read',
   'agreements.write',
-  'service_lines.read',
-  'service_lines.write',
   // E3 — Placement
   'placements.read',
   'placements.write',

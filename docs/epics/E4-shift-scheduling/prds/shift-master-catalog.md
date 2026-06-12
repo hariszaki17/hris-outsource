@@ -7,12 +7,12 @@
 
 ## 1. Context & problem
 
-Scheduling needs a controlled set of **shift templates** — named working-hour windows with break times — that leaders pick from instead of typing hours each time. SWP runs 24/7 sites, so the catalog must handle **cross-midnight** shifts. It's a single global catalog, optionally tagged by service line for filtering.
+Scheduling needs a controlled set of **shift templates** — named working-hour windows with break times — that leaders pick from instead of typing hours each time. SWP runs 24/7 sites, so the catalog must handle **cross-midnight** shifts. It's a single global catalog used across all companies.
 
 ## 2. Goals & non-goals
 
 **Goals**
-- Maintain global shift templates (title, start/end, break window, optional service-line tag).
+- Maintain global shift templates (title, start/end, break window).
 - Correctly represent cross-midnight shifts.
 - Safe lifecycle (deactivate, not delete) since schedules reference templates.
 
@@ -36,14 +36,13 @@ Super Admin / HR Admin (author), System (validate, audit). Read consumers: F4.2/
 |-----|------|
 | SM-1 | A template requires: `title`, `start_at`, `end_at`. Break (`start_break`, `end_break`) is optional but, if set, must fall **within** the working window. |
 | SM-2 | If `end_at <= start_at`, the shift **spans midnight**; `spans_midnight` is set automatically and duration computed across the day boundary. |
-| SM-3 | `service_line_id` is an **optional tag**; untagged templates are available to all lines. |
 | SM-4 | `title` is unique within the catalog. |
 | SM-5 | Templates are **deactivated, not hard-deleted**, when referenced by any schedule. |
 | SM-6 | All actions audited (E1). |
 
 ## 6. Data model
 
-`ShiftMaster`: `id, title (unique), start_at (time), end_at (time), start_break (time, null), end_break (time, null), spans_midnight (bool), service_line_id (FK, null), status, created_by`.
+`ShiftMaster`: `id, title (unique), start_at (time), end_at (time), start_break (time, null), end_break (time, null), spans_midnight (bool), status, created_by`.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -63,10 +62,6 @@ Feature: Work-shift master catalog
   Scenario: Reject a break outside the shift window
     When I create "Morning" 07:00–15:00 with break 16:00–17:00
     Then it is blocked because the break is outside the working window
-
-  Scenario: Tag a template to a service line
-    When I create "Parking Night" 23:00–07:00 tagged to "Parking"
-    Then it appears first when scheduling Parking placements
 
   Scenario: Cannot delete a referenced template
     Given schedules reference "Morning"
@@ -90,10 +85,10 @@ Feature: Work-shift master catalog
 
 ## 9. Dependencies
 
-E2 (ServiceLine), E1 (RBAC/audit), F4.2/F4.3 (consumers), E5 (attendance policy per shift), E9 (migration).
+E1 (RBAC/audit), F4.2/F4.3 (consumers), E5 (attendance policy per shift), E9 (migration).
 
 ## 10. Decisions & open questions
 
-- ✅ Global catalog, optional service-line tag, cross-midnight supported.
+- ✅ Global catalog (independent of service line), cross-midnight supported. *(Service-line tag dropped 2026-06-12 — service line removed project-wide.)*
 - **Open:** single break window enough, or multiple breaks needed for long shifts?
 - **Open:** allow a 24h shift (start == end)?

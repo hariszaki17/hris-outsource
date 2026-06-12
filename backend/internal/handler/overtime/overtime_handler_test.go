@@ -505,10 +505,9 @@ func TestWithdraw_FromApproved_409(t *testing.T) {
 
 func TestEnforceMinMinutes_BelowMin422WithFields(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedRule("", 30) // global default min_minutes = 30
-	line := "SWP-SVC-001"
+	h.seedRule("", 30) // single GLOBAL rule, min_minutes = 30
 
-	err := h.otSvc.EnforceMinMinutes(context.Background(), 20, &line)
+	err := h.otSvc.EnforceMinMinutes(context.Background(), 20)
 	if err == nil {
 		t.Fatalf("expected OT_BELOW_MIN error for counted 20 < min 30, got nil")
 	}
@@ -534,8 +533,7 @@ func TestEnforceMinMinutes_BelowMin422WithFields(t *testing.T) {
 func TestEnforceMinMinutes_AtOrAboveMin_OK(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedRule("", 30)
-	line := "SWP-SVC-001"
-	if err := h.otSvc.EnforceMinMinutes(context.Background(), 30, &line); err != nil {
+	if err := h.otSvc.EnforceMinMinutes(context.Background(), 30); err != nil {
 		t.Errorf("counted 30 >= min 30 should pass, got %v", err)
 	}
 }
@@ -551,7 +549,7 @@ func TestClassifyDayType_HolidayOverridesSchedule(t *testing.T) {
 	h.schedule.live[liveKey(empAgent, workDate)] = schedulingsvc.LiveEntry{ID: "SWP-SCH-6001", Status: "PUBLISHED", IsDayOff: false}
 	h.seedHoliday("SWP-HOL-9001", "Hari Kemerdekaan", workDate, dom.HolidayCategoryNational, 0)
 
-	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate, nil)
+	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate)
 	if tier != dom.OvertimeTierHoliday {
 		t.Errorf("tier = %s, want HOLIDAY (precedence over WORKDAY)", tier)
 	}
@@ -563,7 +561,7 @@ func TestClassifyDayType_HolidayOverridesSchedule(t *testing.T) {
 func TestClassifyDayType_NoScheduleNoHoliday_Restday(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	workDate := ymd(2026, time.August, 18)
-	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate, nil)
+	tier, holidayID := h.otSvc.ClassifyDayType(context.Background(), empAgent, workDate)
 	if tier != dom.OvertimeTierRestday {
 		t.Errorf("tier = %s, want RESTDAY (no live shift, no holiday)", tier)
 	}

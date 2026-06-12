@@ -7,7 +7,7 @@
 
 ## 1. Context & problem
 
-Legacy data is messy — free-text placements, orphan identities, missing service-line classification, decrypt failures. Per decision, these are **resolved before go-live** via a **review queue** HR works, backed by per-run **reconciliation reports** (source vs loaded vs queued). This is the gate that guarantees clean data at launch.
+Legacy data is messy — free-text placements, orphan identities, ambiguous renewal chains, decrypt failures. Per decision, these are **resolved before go-live** via a **review queue** HR works, backed by per-run **reconciliation reports** (source vs loaded vs queued). This is the gate that guarantees clean data at launch.
 
 ## 2. Goals & non-goals
 
@@ -34,7 +34,7 @@ HR / Super Admin (resolve), Migration engineer (monitor), System (queue, report,
 
 | Ref | Rule |
 |-----|------|
-| RC-1 | Review items carry an `issue_type` (unmatched_placement, orphan_identity, decrypt_fail, unclassified_service_line, ambiguous_chain, …), `entity_type`, and a `payload` with context. |
+| RC-1 | Review items carry an `issue_type` (unmatched_placement, orphan_identity, decrypt_fail, ambiguous_chain, …), `entity_type`, and a `payload` with context. |
 | RC-2 | Resolving an item records the resolution (chosen mapping/classification/correction), `resolved_by`, and timestamp; the resolution **feeds the next transform/load run**. |
 | RC-3 | Items are classified **blocking** vs **non-blocking**; **blocking items must be Resolved before cutover** (go-live gate). |
 | RC-4 | Each run emits a **reconciliation report** per entity: `source_count`, `loaded_count`, `review_count` (must balance). |
@@ -79,7 +79,6 @@ Feature: Reconciliation & review queue
 | # | Case | Expected |
 |---|------|----------|
 | C-1 | Decrypt-fail items | Blocking for comp/payroll integrity; must resolve (re-key/re-source). |
-| C-2 | Unclassified service line | Non-blocking if placements can launch with pending classification (per E3 decision) — confirm. |
 | C-3 | Conflicting resolutions across runs | Latest resolution wins; audited. |
 | C-4 | New items appear on re-run | Surfaced; counts updated. |
 
@@ -90,4 +89,4 @@ F9.1/F9.2 (item sources), F9.4 (applies resolutions), F9.5 (consumes the gate), 
 ## 10. Decisions & open questions
 
 - ✅ Review queue resolved before go-live; reports balance; blocking gate.
-- **Open:** which issue types are **blocking** vs non-blocking (e.g., is unclassified service line blocking?).
+- **Open:** which issue types are **blocking** vs non-blocking (e.g., is `ambiguous_chain` blocking?). *(`unclassified_service_line` removed 2026-06-12 — service line dropped project-wide.)*

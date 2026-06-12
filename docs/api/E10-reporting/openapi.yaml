@@ -19,7 +19,7 @@ info:
         (per CONVENTIONS §16.2) — this spec only exposes the read & mark-read
         side of the durable in-app center.
       - The billable-hours report reads verified attendance (E5) joined to
-        placements (E3), client companies + service lines + attendance codes
+        placements (E3), client companies + attendance codes
         (E2). Billable = verified-only (EPICS.md §8 E10).
       - Exports consume any report's query and produce an Excel file (v1).
 
@@ -628,10 +628,10 @@ paths:
         **Data sources:**
         - E5 `Attendance` filtered by `is_verified=true` (BR-1, INV-4).
         - E2 `AttendanceCode` for the `is_billable` predicate.
-        - E3 `Placement` for `company_id`, `service_line_id`, and to split
-          hours across companies when an agent transferred mid-period
+        - E3 `Placement` for `company_id`, `position` (free-text), and to
+          split hours across companies when an agent transferred mid-period
           (BR-7, C-3).
-        - E2 `ClientCompany`, `ServiceLine`, `Employee` for display labels.
+        - E2 `ClientCompany`, `Employee` for display labels.
 
         **Cross-midnight (BR-7, C-4):** hours are counted once to the
         shift's start date (avoids double-counting).
@@ -668,13 +668,13 @@ paths:
           schema:
             type: string
             example: SWP-CMP-0021
-        - name: service_line_id
+        - name: position
           in: query
-          description: Optional service-line filter (E2).
+          description: Optional position filter (free-text; matches the placement's position exactly).
           required: false
           schema:
             type: string
-            example: SWP-SVC-001
+            example: "Cleaning Service"
         - name: period_start
           in: query
           description: Inclusive start date (ISO `full-date`). Required.
@@ -700,7 +700,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [employee, day, shift_master]
+            enum: [employee, position, day, shift_master]
             default: employee
       responses:
         '200':
@@ -717,8 +717,7 @@ paths:
                     filters:
                       company_id: SWP-CMP-0021
                       company_name: "Plaza Senayan"
-                      service_line_id: null
-                      service_line_name: null
+                      position: null
                       period_start: "2026-06-01"
                       period_end: "2026-06-30"
                       group_by: employee
@@ -737,8 +736,7 @@ paths:
                         group_label: "Budi Santoso"
                         company_id: SWP-CMP-0021
                         company_name: "Plaza Senayan"
-                        service_line_id: SWP-SVC-001
-                        service_line_name: "Facility Services"
+                        position: "Cleaning Service"
                         worked_hours: 176.0
                         billable_hours: 168.0
                         payable_hours: 172.0
@@ -751,8 +749,7 @@ paths:
                     filters:
                       company_id: SWP-CMP-0099
                       company_name: "Site Baru"
-                      service_line_id: null
-                      service_line_name: null
+                      position: null
                       period_start: "2026-06-01"
                       period_end: "2026-06-30"
                       group_by: employee
@@ -844,7 +841,7 @@ paths:
                   type: string
                   nullable: true
                   example: SWP-CMP-0021
-                service_line_id:
+                position:
                   type: string
                   nullable: true
                   example: null
@@ -1816,14 +1813,15 @@ components:
                 format: date-time
         org_rollups:
           type: array
-          description: Headcount + active placements per service line (E3).
+          description: Headcount + active placements per position (free-text, E3).
           items:
             type: object
-            required: [service_line, headcount, active_placements]
+            required: [position, headcount, active_placements]
             properties:
-              service_line:
+              position:
                 type: string
-                enum: [FACILITY, BUILDING, PARKING]
+                description: Placement position (free-text; no master).
+                example: "Cleaning Service"
               headcount:
                 type: integer
                 example: 312
@@ -2245,13 +2243,10 @@ components:
               type: string
               nullable: true
               example: "Plaza Senayan"
-            service_line_id:
+            position:
               type: string
               nullable: true
-              example: null
-            service_line_name:
-              type: string
-              nullable: true
+              description: Position filter echo (free-text; null when unfiltered).
               example: null
             period_start:
               type: string
@@ -2263,7 +2258,7 @@ components:
               example: "2026-06-30"
             group_by:
               type: string
-              enum: [employee, day, shift_master]
+              enum: [employee, position, day, shift_master]
               example: employee
         summary:
           type: object
@@ -2352,7 +2347,7 @@ components:
           example: SWP-EMP-3104
         group_label:
           type: string
-          description: Display label for the row (name / date / shift name).
+          description: Display label for the row (name / position / date / shift name).
           example: "Budi Santoso"
         company_id:
           type: string
@@ -2367,14 +2362,14 @@ components:
           type: string
           nullable: true
           example: "Plaza Senayan"
-        service_line_id:
+        position:
           type: string
           nullable: true
-          example: SWP-SVC-001
-        service_line_name:
-          type: string
-          nullable: true
-          example: "Facility Services"
+          description: |
+            Placement position (free-text). The row's grouping value when
+            `group_by=position`; otherwise the agent's position for context
+            (null when ambiguous across split rows).
+          example: "Cleaning Service"
         worked_hours:
           type: number
           format: float
@@ -2474,7 +2469,7 @@ components:
           type: object
           description: |
             Free-form filter map. Server validates per `report_type`.
-            Common keys: `company_id`, `service_line_id`, `period_start`,
+            Common keys: `company_id`, `position`, `period_start`,
             `period_end`, `group_by`. See per-report endpoints for the
             exact filter contract.
           additionalProperties: true

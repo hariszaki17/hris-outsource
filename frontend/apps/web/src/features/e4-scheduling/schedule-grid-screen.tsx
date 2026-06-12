@@ -210,7 +210,8 @@ export function ScheduleGridScreen() {
     { query: { enabled: sundayYear !== mondayYear, staleTime: 5 * 60 * 1000 } },
   );
 
-  // date(iso) → holiday name, scoped to the company's service lines (global holidays always apply).
+  // date(iso) → holiday name. Holidays are global (EPICS §8 D1) — every holiday
+  // in the visible week applies.
   const { holidaySet, holidayNameByDate } = React.useMemo(() => {
     const extract = (q: typeof holidaysA): Holiday[] => {
       const body = q.data?.data as { data?: Holiday[] } | Holiday[] | undefined;
@@ -218,9 +219,8 @@ export function ScheduleGridScreen() {
       return body?.data ?? [];
     };
     const all = [...extract(holidaysA), ...(sundayYear !== mondayYear ? extract(holidaysB) : [])];
-    const slIds = new Set(agentRows.map((r) => r.serviceLineId).filter((x): x is string => !!x));
-    return buildHolidayMaps(all, days, slIds);
-  }, [holidaysA, holidaysB, agentRows, days, mondayYear, sundayYear]);
+    return buildHolidayMaps(all, days);
+  }, [holidaysA, holidaysB, days, mondayYear, sundayYear]);
 
   // ---- Per-agent roster compliance (EPICS §8 D3) ----
   const complianceByRow = React.useMemo(() => {
@@ -283,8 +283,6 @@ export function ScheduleGridScreen() {
       employeeId: row.employeeId,
       employeeName: row.employeeName,
       placementId: row.placementId,
-      serviceLineId: row.serviceLineId,
-      serviceLineName: row.serviceLineName,
       date: dateIso,
       existingEntryId: entry?.id,
       existingShiftName: entry?.shift_master_name ?? undefined,
@@ -601,9 +599,6 @@ export function ScheduleGridScreen() {
                         <p className="text-[13px] font-semibold text-text leading-tight">
                           {row.employeeName}
                         </p>
-                        {row.serviceLineName && (
-                          <p className="mt-0.5 text-[11px] text-text-3">{row.serviceLineName}</p>
-                        )}
                         {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             {c.noRest ? (

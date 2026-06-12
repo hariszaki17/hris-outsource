@@ -7,7 +7,7 @@
 // Clock for tests, apperr codes with explicit HTTP status overrides).
 //
 // The conflict engine (this file) is the single pure evaluator shared by
-// create / update / :check / :bulk-apply. It runs the SIX contract checks IN
+// create / update / :check / :bulk-apply. It runs the FIVE contract checks IN
 // ORDER and short-circuits on the first failure, returning the exact code +
 // HTTP status + ConflictDetails the openapi specifies.
 package scheduling
@@ -35,13 +35,12 @@ type TxRunner interface {
 type Clock func() time.Time
 
 // PlacementCover is the slim projection of the active placement covering a date
-// (INV-2 anchor + scope company + service line for SHIFT_NOT_FOR_SERVICE_LINE).
+// (INV-2 anchor + scope company).
 type PlacementCover struct {
-	PlacementID   string
-	CompanyID     string
-	ServiceLineID string // placement service line (non-null in the schema)
-	StartDate     time.Time
-	EndDate       *time.Time
+	PlacementID string
+	CompanyID   string
+	StartDate   time.Time
+	EndDate     *time.Time
 }
 
 // LiveEntry is the existing live schedule entry for an agent on a date
@@ -67,8 +66,8 @@ type ConflictRepo interface {
 	// FindActivePlacementForAgentDate resolves the ACTIVE/EXPIRING placement
 	// whose window covers date (INV-2). domain.ErrNotFound when none.
 	FindActivePlacementForAgentDate(ctx context.Context, employeeID string, date time.Time) (PlacementCover, error)
-	// GetShiftMaster returns the master (for is_active + service_line + time
-	// snapshot). domain.ErrNotFound when missing/soft-deleted.
+	// GetShiftMaster returns the master (for is_active + time snapshot).
+	// domain.ErrNotFound when missing/soft-deleted.
 	GetShiftMaster(ctx context.Context, id string) (domain.ShiftMaster, error)
 	// FindApprovedLeaveForAgentDate returns the approved-leave row covering date
 	// (SHIFT_OVER_LEAVE). domain.ErrNotFound when none.
@@ -100,7 +99,6 @@ type ConflictResult struct {
 	// Resolved context for a successful write:
 	PlacementID   string
 	CompanyID     string
-	ServiceLineID *string // entry service line = placement's (snapshot)
 	StartTime     *string
 	EndTime       *string
 	CrossMidnight bool
@@ -111,7 +109,7 @@ type ConflictResult struct {
 	ExistingShift   *string // name, for the DOUBLE_SHIFT detail
 }
 
-// OK reports whether the cell passed all six checks.
+// OK reports whether the cell passed all five checks.
 func (r ConflictResult) OK() bool { return r.Code == "" }
 
 // AsError renders a failed ConflictResult into the matching *apperr.Error
@@ -128,15 +126,14 @@ func (r ConflictResult) AsError() error {
 	}
 }
 
-// Evaluate runs the SIX conflict checks IN ORDER, short-circuiting on the first
+// Evaluate runs the FIVE conflict checks IN ORDER, short-circuiting on the first
 // failure. Order (openapi POST /schedule description):
 //
 //  1. OUT_OF_SCOPE              403  leader company != agent placement company (INV-3)
 //  2. OUTSIDE_PLACEMENT_PERIOD  422  date outside active placement window      (INV-2)
 //  3. SHIFT_DEACTIVATED         422  picked master is_active=false             (SM-5)
-//  4. SHIFT_NOT_FOR_SERVICE_LINE 422 master.service_line set & != placement's  (SA-4)
-//  5. SHIFT_OVER_LEAVE          409  approved leave covers date                (EPICS §8)
-//  6. DOUBLE_SHIFT              409  live entry exists & !force_replace         (INV-1)
+//  4. SHIFT_OVER_LEAVE          409  approved leave covers date                (EPICS §8)
+//  5. DOUBLE_SHIFT              409  live entry exists & !force_replace         (INV-1)
 //
 // Resolution: the active placement is resolved FIRST (scope needs its company);
 // if no active placement exists at all, OUTSIDE_PLACEMENT_PERIOD is emitted.
@@ -171,13 +168,12 @@ func Evaluate(ctx context.Context, repo ConflictRepo, in ConflictInput) (Conflic
 	}
 
 	res := ConflictResult{
-		PlacementID:   cover.PlacementID,
-		CompanyID:     cover.CompanyID,
-		ServiceLineID: &cover.ServiceLineID,
+		PlacementID: cover.PlacementID,
+		CompanyID:   cover.CompanyID,
 	}
 
 	if !in.IsDayOff {
-		// Need the master for deactivation + service-line + time snapshot.
+		// Need the master for deactivation + time snapshot.
 		if in.ShiftMasterID == nil {
 			return ConflictResult{
 				Code:   "INVALID_REQUEST",
@@ -205,19 +201,6 @@ func Evaluate(ctx context.Context, repo ConflictRepo, in ConflictInput) (Conflic
 			}, nil
 		}
 
-		// 4. SHIFT_NOT_FOR_SERVICE_LINE (422) — tagged master vs placement line.
-		if master.ServiceLineID != nil && *master.ServiceLineID != cover.ServiceLineID {
-			return ConflictResult{
-				Code:   "SHIFT_NOT_FOR_SERVICE_LINE",
-				Status: 422,
-				Fields: map[string]string{"shift_master_id": "Shift dipakai untuk lini layanan lain."},
-				Details: map[string]any{
-					"placement_service_line_id": cover.ServiceLineID,
-					"shift_service_line_id":     *master.ServiceLineID,
-				},
-			}, nil
-		}
-
 		// Snapshot the master window onto the result (day-off → nil/false).
 		st := master.StartTime
 		et := master.EndTime
@@ -226,7 +209,7 @@ func Evaluate(ctx context.Context, repo ConflictRepo, in ConflictInput) (Conflic
 		res.CrossMidnight = master.CrossMidnight
 	}
 
-	// 5. SHIFT_OVER_LEAVE (409) — approved leave covers the date.
+	// 4. SHIFT_OVER_LEAVE (409) — approved leave covers the date.
 	leave, lerr := repo.FindApprovedLeaveForAgentDate(ctx, in.EmployeeID, in.Date)
 	if lerr == nil {
 		details := map[string]any{}
@@ -246,7 +229,7 @@ func Evaluate(ctx context.Context, repo ConflictRepo, in ConflictInput) (Conflic
 		return ConflictResult{}, apperr.Internal(lerr)
 	}
 
-	// 6. DOUBLE_SHIFT (409) — live entry exists.
+	// 5. DOUBLE_SHIFT (409) — live entry exists.
 	live, eerr := repo.FindLiveEntryForAgentDate(ctx, in.EmployeeID, in.Date)
 	if eerr == nil {
 		if in.ForceReplace {
@@ -270,7 +253,7 @@ func Evaluate(ctx context.Context, repo ConflictRepo, in ConflictInput) (Conflic
 		return ConflictResult{}, apperr.Internal(eerr)
 	}
 
-	// All six passed.
+	// All five passed.
 	return res, nil
 }
 

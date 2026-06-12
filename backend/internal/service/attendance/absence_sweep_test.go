@@ -106,8 +106,7 @@ func candidate(scheduleID string, endAt time.Time) AbsenceCandidate {
 		PlacementID:  "SWP-PL-0001",
 		CompanyID:    "SWP-CMP-0021",
 		SiteID:       "SWP-SITE-0001",
-		PositionID:   "SWP-POS-014",
-		ServiceLine:  "building_management",
+		Position:     "Teknisi Gedung",
 		ShiftStartAt: endAt.Add(-8 * time.Hour),
 		ShiftEndAt:   endAt,
 	}
@@ -139,11 +138,8 @@ func TestSweep(t *testing.T) {
 		if got.ScheduleID != "SWP-SCH-1" {
 			t.Errorf("schedule_id = %q, want SWP-SCH-1", got.ScheduleID)
 		}
-		if got.CompanyID != "SWP-CMP-0021" || got.SiteID != "SWP-SITE-0001" || got.PositionID != "SWP-POS-014" {
+		if got.CompanyID != "SWP-CMP-0021" || got.SiteID != "SWP-SITE-0001" || got.Position != "Teknisi Gedung" {
 			t.Errorf("denorm fields not set: %+v", got)
-		}
-		if got.ServiceLine != "building_management" {
-			t.Errorf("service_line = %q, want building_management", got.ServiceLine)
 		}
 		if got.ShiftStartAt.IsZero() || got.ShiftEndAt.IsZero() {
 			t.Errorf("shift window not set: %+v", got)

@@ -31,21 +31,20 @@ func (q *Queries) CountOvertimeUsingHoliday(ctx context.Context, holidayID *stri
 
 const getHoliday = `-- name: GetHoliday :one
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.id = $1
   AND h.deleted_at IS NULL
 `
 
 type GetHolidayRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Single holiday (for GET after create/update).
@@ -58,7 +57,6 @@ func (q *Queries) GetHoliday(ctx context.Context, id string) (GetHolidayRow, err
 		&i.HolidayDate,
 		&i.Category,
 		&i.Recurring,
-		&i.ApplicableServiceLines,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,7 +65,7 @@ func (q *Queries) GetHoliday(ctx context.Context, id string) (GetHolidayRow, err
 
 const getHolidayByDateCategory = `-- name: GetHolidayByDateCategory :one
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.holiday_date = $1
   AND h.category     = $2
@@ -80,14 +78,13 @@ type GetHolidayByDateCategoryParams struct {
 }
 
 type GetHolidayByDateCategoryRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // HOLIDAY_DATE_CLASH pre-check: does a non-deleted holiday already exist on this
@@ -102,7 +99,6 @@ func (q *Queries) GetHolidayByDateCategory(ctx context.Context, arg GetHolidayBy
 		&i.HolidayDate,
 		&i.Category,
 		&i.Recurring,
-		&i.ApplicableServiceLines,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -111,7 +107,7 @@ func (q *Queries) GetHolidayByDateCategory(ctx context.Context, arg GetHolidayBy
 
 const getHolidayForDate = `-- name: GetHolidayForDate :one
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.holiday_date = $1
   AND h.deleted_at IS NULL
@@ -120,14 +116,13 @@ LIMIT 1
 `
 
 type GetHolidayForDateRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // day_type classification: is this work_date a holiday? Highest-priority category
@@ -141,7 +136,6 @@ func (q *Queries) GetHolidayForDate(ctx context.Context, holidayDate pgtype.Date
 		&i.HolidayDate,
 		&i.Category,
 		&i.Recurring,
-		&i.ApplicableServiceLines,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -150,38 +144,35 @@ func (q *Queries) GetHolidayForDate(ctx context.Context, holidayDate pgtype.Date
 
 const insertHoliday = `-- name: InsertHoliday :one
 INSERT INTO holidays (
-    id, name, holiday_date, category, recurring, applicable_service_lines
+    id, name, holiday_date, category, recurring
 ) VALUES (
     COALESCE($1::text, 'SWP-HOL-' || swp_next_id('HOL')),
     $2,
     $3,
     $4,
-    $5,
-    $6
+    $5
 )
 ON CONFLICT (id) DO NOTHING
 RETURNING id, name, holiday_date, category, recurring,
-          applicable_service_lines, created_at, updated_at
+          created_at, updated_at
 `
 
 type InsertHolidayParams struct {
-	ID                     *string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
+	ID          *string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
 }
 
 type InsertHolidayRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Create (POST /holidays). id allocated by the column DEFAULT
@@ -194,7 +185,6 @@ func (q *Queries) InsertHoliday(ctx context.Context, arg InsertHolidayParams) (I
 		arg.HolidayDate,
 		arg.Category,
 		arg.Recurring,
-		arg.ApplicableServiceLines,
 	)
 	var i InsertHolidayRow
 	err := row.Scan(
@@ -203,7 +193,6 @@ func (q *Queries) InsertHoliday(ctx context.Context, arg InsertHolidayParams) (I
 		&i.HolidayDate,
 		&i.Category,
 		&i.Recurring,
-		&i.ApplicableServiceLines,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -213,53 +202,47 @@ func (q *Queries) InsertHoliday(ctx context.Context, arg InsertHolidayParams) (I
 const listHolidays = `-- name: ListHolidays :many
 
 SELECT h.id, h.name, h.holiday_date, h.category, h.recurring,
-       h.applicable_service_lines, h.created_at, h.updated_at
+       h.created_at, h.updated_at
 FROM holidays h
 WHERE h.deleted_at IS NULL
   AND ($1::text IS NULL OR h.category = $1::text)
-  AND ($2::text IS NULL
-       OR h.applicable_service_lines = '{}'
-       OR $2::text = ANY(h.applicable_service_lines))
-  AND ($3::int IS NULL
-       OR EXTRACT(year FROM h.holiday_date)::int = $3::int)
+  AND ($2::int IS NULL
+       OR EXTRACT(year FROM h.holiday_date)::int = $2::int)
   -- keyset: rows strictly after the cursor (holiday_date,id) when provided.
-  AND ($4::date IS NULL OR
-       (h.holiday_date, h.id) > ($4::date, $5::text))
+  AND ($3::date IS NULL OR
+       (h.holiday_date, h.id) > ($3::date, $4::text))
 ORDER BY h.holiday_date ASC, h.id ASC
-LIMIT $6
+LIMIT $5
 `
 
 type ListHolidaysParams struct {
-	Category      *string
-	ServiceLineID *string
-	Year          *int32
-	CursorDate    pgtype.Date
-	CursorID      *string
-	Lim           int32
+	Category   *string
+	Year       *int32
+	CursorDate pgtype.Date
+	CursorID   *string
+	Lim        int32
 }
 
 type ListHolidaysRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // E7 public-holiday calendar queries (F7.1 / SWP-HOL-*). The HR-managed master
 // that feeds OT day_type classification. holiday_date comes back as pgtype.Date
 // (09-02 repo converts <-> time.Time). Keyset cursor on (holiday_date ASC, id) per
 // CONVENTIONS §11 (calendar reads ascend by date).
-// Calendar / list load. Keyset cursor (holiday_date,id) ASC. Filters (all optional
-// via narg): category, service_line_id (matches when applicable_service_lines is
-// empty=global OR contains the line), year (EXTRACT(year FROM holiday_date)).
+// Calendar / list load. Keyset cursor (holiday_date,id) ASC. Holidays are GLOBAL
+// ONLY (decision 2026-06-12) — no service-line filter. Filters (all optional via
+// narg): category, year (EXTRACT(year FROM holiday_date)).
 func (q *Queries) ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]ListHolidaysRow, error) {
 	rows, err := q.db.Query(ctx, listHolidays,
 		arg.Category,
-		arg.ServiceLineID,
 		arg.Year,
 		arg.CursorDate,
 		arg.CursorID,
@@ -278,7 +261,6 @@ func (q *Queries) ListHolidays(ctx context.Context, arg ListHolidaysParams) ([]L
 			&i.HolidayDate,
 			&i.Category,
 			&i.Recurring,
-			&i.ApplicableServiceLines,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -311,47 +293,43 @@ func (q *Queries) SoftDeleteHoliday(ctx context.Context, id string) (string, err
 
 const updateHoliday = `-- name: UpdateHoliday :one
 UPDATE holidays
-SET name                     = COALESCE($1::text, name),
-    holiday_date             = COALESCE($2::date, holiday_date),
-    category                 = COALESCE($3::text, category),
-    recurring                = COALESCE($4::boolean, recurring),
-    applicable_service_lines = COALESCE($5::text[], applicable_service_lines),
-    updated_at               = now()
-WHERE id = $6
+SET name         = COALESCE($1::text, name),
+    holiday_date = COALESCE($2::date, holiday_date),
+    category     = COALESCE($3::text, category),
+    recurring    = COALESCE($4::boolean, recurring),
+    updated_at   = now()
+WHERE id = $5
   AND deleted_at IS NULL
 RETURNING id, name, holiday_date, category, recurring,
-          applicable_service_lines, created_at, updated_at
+          created_at, updated_at
 `
 
 type UpdateHolidayParams struct {
-	Name                   *string
-	HolidayDate            pgtype.Date
-	Category               *string
-	Recurring              *bool
-	ApplicableServiceLines []string
-	ID                     string
+	Name        *string
+	HolidayDate pgtype.Date
+	Category    *string
+	Recurring   *bool
+	ID          string
 }
 
 type UpdateHolidayRow struct {
-	ID                     string
-	Name                   string
-	HolidayDate            pgtype.Date
-	Category               string
-	Recurring              bool
-	ApplicableServiceLines []string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID          string
+	Name        string
+	HolidayDate pgtype.Date
+	Category    string
+	Recurring   bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Partial update (PATCH /holidays/{id}): COALESCE each field so omitted nargs keep
-// the current value (applicable_service_lines is whole-array replace when supplied).
+// the current value. Holidays are GLOBAL ONLY (decision 2026-06-12).
 func (q *Queries) UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (UpdateHolidayRow, error) {
 	row := q.db.QueryRow(ctx, updateHoliday,
 		arg.Name,
 		arg.HolidayDate,
 		arg.Category,
 		arg.Recurring,
-		arg.ApplicableServiceLines,
 		arg.ID,
 	)
 	var i UpdateHolidayRow
@@ -361,7 +339,6 @@ func (q *Queries) UpdateHoliday(ctx context.Context, arg UpdateHolidayParams) (U
 		&i.HolidayDate,
 		&i.Category,
 		&i.Recurring,
-		&i.ApplicableServiceLines,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

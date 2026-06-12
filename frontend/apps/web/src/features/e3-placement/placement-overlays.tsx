@@ -25,7 +25,6 @@
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
 import { CompanyLeaderCandidatePicker } from '@/features/e2-identity/pickers/company-leader-picker.tsx';
 import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
-import { ServiceLinePicker } from '@/features/e2-identity/pickers/service-line-picker.tsx';
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { ApiError } from '@swp/api-client';
 import {
@@ -86,7 +85,6 @@ export interface PlacementInfo {
   employee_name: string;
   client_company_id: string;
   client_company_name: string;
-  service_line_name: string;
   position_name: string;
   start_date: string;
   end_date?: string | null;
@@ -104,8 +102,7 @@ export interface TransferModalProps {
 
 interface TransferFormValues {
   new_client_company_id: string;
-  new_service_line_id: string;
-  new_position_id: string;
+  new_position: string;
   new_start_date: string;
   new_end_date: string;
   transfer_reason: string;
@@ -116,8 +113,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
   const { toast } = useToast();
   const [bannerMsg, setBannerMsg] = useState<string | null>(null);
   const [bannerTone, setBannerTone] = useState<'warn' | 'bad' | 'info'>('bad');
-  // Track selected service line to filter position picker
-  const [selectedServiceLineId, setSelectedServiceLineId] = useState<string | null>(null);
 
   const mutation = useTransferPlacement();
 
@@ -131,8 +126,7 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
   } = useForm<TransferFormValues>({
     defaultValues: {
       new_client_company_id: '',
-      new_service_line_id: '',
-      new_position_id: '',
+      new_position: '',
       new_start_date: '',
       new_end_date: '',
       transfer_reason: '',
@@ -149,7 +143,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
   function handleClose() {
     reset();
     setBannerMsg(null);
-    setSelectedServiceLineId(null);
     onClose();
   }
 
@@ -157,8 +150,7 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
     setBannerMsg(null);
     const data: TransferRequest = {
       new_client_company_id: values.new_client_company_id,
-      new_service_line_id: values.new_service_line_id,
-      new_position_id: values.new_position_id,
+      new_position: values.new_position,
       new_start_date: values.new_start_date,
       new_end_date: values.new_end_date || null,
       transfer_reason: values.transfer_reason,
@@ -203,9 +195,7 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
               <span className="text-[12px] font-semibold text-text">
                 {placement.client_company_name}
               </span>
-              <span className="text-[11px] text-text-3">
-                {placement.service_line_name} · {placement.position_name}
-              </span>
+              <span className="text-[11px] text-text-3">{placement.position_name}</span>
             </div>
           </div>
 
@@ -236,43 +226,20 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
               />
             </FormField>
             <FormField
-              label={t('transfer.newServiceLine')}
-              htmlFor="tf-sl"
-              required
-              error={errors.new_service_line_id?.message}
-            >
-              <Controller
-                control={control}
-                name="new_service_line_id"
-                rules={{ required: t('validation.required') }}
-                render={({ field }) => (
-                  <ServiceLinePicker
-                    value={field.value || null}
-                    onChange={(v) => {
-                      field.onChange(v ?? '');
-                      setSelectedServiceLineId(v ?? null);
-                    }}
-                    error={!!errors.new_service_line_id}
-                  />
-                )}
-              />
-            </FormField>
-            <FormField
               label={t('transfer.newPosition')}
               htmlFor="tf-pos"
               required
-              error={errors.new_position_id?.message}
+              error={errors.new_position?.message}
             >
               <Controller
                 control={control}
-                name="new_position_id"
+                name="new_position"
                 rules={{ required: t('validation.required') }}
                 render={({ field }) => (
                   <PositionPicker
                     value={field.value || null}
                     onChange={(v) => field.onChange(v ?? '')}
-                    serviceLineId={selectedServiceLineId}
-                    error={!!errors.new_position_id}
+                    error={!!errors.new_position}
                   />
                 )}
               />

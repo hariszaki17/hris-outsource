@@ -355,48 +355,6 @@ export async function getSiteGeofence(
 }
 
 /**
- * getServiceLineStatus — return the status for a service line by id, or null if not found.
- */
-export async function getServiceLineStatus(id: string): Promise<string | null> {
-  return withClient(async (client) => {
-    const res = await client.query<{ status: string }>(
-      'SELECT status FROM service_lines WHERE id = $1',
-      [id],
-    );
-    return res.rows[0]?.status ?? null;
-  });
-}
-
-/**
- * getPositionStatus — return the status for a position by id, or null if not found.
- * Note: soft-deleted positions have deleted_at set; status column may not exist —
- * check deleted_at IS NULL as the "active" indicator.
- */
-export async function getPositionStatus(id: string): Promise<string | null> {
-  return withClient(async (client) => {
-    const res = await client.query<{ deleted_at: Date | null }>(
-      'SELECT deleted_at FROM positions WHERE id = $1',
-      [id],
-    );
-    if (res.rows.length === 0) return null;
-    return res.rows[0].deleted_at === null ? 'active' : 'inactive';
-  });
-}
-
-/**
- * countActivePositionsForLine — count positions for a service line where deleted_at IS NULL.
- */
-export async function countActivePositionsForLine(lineId: string): Promise<number> {
-  return withClient(async (client) => {
-    const res = await client.query<{ cnt: string }>(
-      'SELECT COUNT(*) AS cnt FROM positions WHERE service_line_id = $1 AND deleted_at IS NULL',
-      [lineId],
-    );
-    return parseInt(res.rows[0]?.cnt ?? '0', 10);
-  });
-}
-
-/**
  * getLeaveTypeStatus — return the status for a leave type by id, or null if not found.
  * Soft-deleted rows have deleted_at set; check for that.
  */

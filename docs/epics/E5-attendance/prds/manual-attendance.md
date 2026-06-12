@@ -76,8 +76,7 @@ HR and shift leaders need a **manual entry path** to create an attendance record
 | `employee_name` | string | Employee display name |
 | `company_name` | string | Placement company name |
 | `site_name` | string\|null | Placement site name |
-| `position_name` | string\|null | Placement position name |
-| `service_line` | string | Service line enum |
+| `position` | string\|null | Placement position (free-text) |
 | `schedule_id` | string\|null | Today's schedule ID (null if none) |
 | `shift_start_at` | string\|null | Schedule shift start (null if none) |
 | `shift_end_at` | string\|null | Schedule shift end (null if none) |
@@ -235,7 +234,7 @@ Given the employee has one placement with lifecycle_status "EXPIRING" and end_da
    Or the employee has one placement with end_date NULL (open-ended PKWTT)
   And the chosen date falls on/after start_date (and on/before end_date when set)
 When HR calls GET /attendance:manual-autofill for that employee and date
-Then the response resolves that placement (company/site/position/service_line populated)
+Then the response resolves that placement (company/site/position populated)
   And does NOT return NO_ACTIVE_PLACEMENT
 ```
 
@@ -285,7 +284,7 @@ Then the summary shows the blocking error state with a "Coba lagi" (retry) actio
 
 | Dependency | Why |
 |------------|-----|
-| E3 (Placement) | Resolve employee's active placement for company/site/position/service line. |
+| E3 (Placement) | Resolve employee's active placement for company/site/position. |
 | E4 (Schedule) | Resolve today's schedule for lateness/early evaluation. |
 | E5 F5.2 (Evaluation + absence-sweep) | Lateness/status computation; the absence-sweep cron is the source of the pre-existing `ABSENT`/`PENDING` rows the autofill detects (MR-14). |
 | E5 F5.3 (Verification) / F5.4 (Corrections) | Target of the "verify/correct existing record" steer when autofill finds a record (MR-14). |

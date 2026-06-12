@@ -111,7 +111,6 @@ type leaveRequestResponse struct {
 	EmployeeName        *string `json:"employee_name,omitempty"`
 	EmployeeCompanyID   *string `json:"employee_company_id,omitempty"`
 	EmployeeCompanyName *string `json:"employee_company_name,omitempty"`
-	EmployeeServiceLine *string `json:"employee_service_line,omitempty"`
 	LeaveTypeID         string  `json:"leave_type_id"`
 	LeaveTypeName       *string `json:"leave_type_name,omitempty"`
 	StartDate           string  `json:"start_date"`
@@ -292,7 +291,6 @@ type calendarEntryResponse struct {
 	EmployeeName   *string `json:"employee_name,omitempty"`
 	CompanyID      *string `json:"company_id,omitempty"`
 	CompanyName    *string `json:"company_name,omitempty"`
-	ServiceLine    *string `json:"service_line,omitempty"`
 	LeaveTypeID    string  `json:"leave_type_id"`
 	LeaveTypeCode  *string `json:"leave_type_code,omitempty"`
 	StartDate      string  `json:"start_date"`
@@ -302,21 +300,11 @@ type calendarEntryResponse struct {
 	DelegateName   *string `json:"delegate_name"`
 }
 
-type calendarClashResponse struct {
-	Date            string   `json:"date"`
-	CompanyID       string   `json:"company_id"`
-	CompanyName     *string  `json:"company_name,omitempty"`
-	ServiceLine     string   `json:"service_line"`
-	AgentCount      int      `json:"agent_count"`
-	LeaveRequestIDs []string `json:"leave_request_ids"`
-}
-
 type calendarResponse struct {
 	Period      int                     `json:"period"`
 	Month       *int                    `json:"month"`
 	ShowPending bool                    `json:"show_pending"`
 	Entries     []calendarEntryResponse `json:"entries"`
-	Clashes     []calendarClashResponse `json:"clashes"`
 }
 
 // --- generic envelopes ---
@@ -432,7 +420,6 @@ func toLeaveRequestResponse(r dom.LeaveRequest) leaveRequestResponse {
 		EmployeeName:        r.EmployeeName,
 		EmployeeCompanyID:   r.CompanyID,
 		EmployeeCompanyName: r.CompanyName,
-		EmployeeServiceLine: r.ServiceLineID,
 		LeaveTypeID:         r.LeaveTypeID,
 		LeaveTypeName:       r.LeaveTypeName,
 		StartDate:           dateStr(r.StartDate),
@@ -559,7 +546,6 @@ func toCalendarResponse(r svc.CalendarResult) calendarResponse {
 		Month:       r.Month,
 		ShowPending: r.ShowPending,
 		Entries:     make([]calendarEntryResponse, 0, len(r.Entries)),
-		Clashes:     make([]calendarClashResponse, 0, len(r.Clashes)),
 	}
 	for _, e := range r.Entries {
 		out.Entries = append(out.Entries, calendarEntryResponse{
@@ -568,7 +554,6 @@ func toCalendarResponse(r svc.CalendarResult) calendarResponse {
 			EmployeeName:   e.EmployeeName,
 			CompanyID:      e.CompanyID,
 			CompanyName:    e.CompanyName,
-			ServiceLine:    e.ServiceLine,
 			LeaveTypeID:    e.LeaveTypeID,
 			LeaveTypeCode:  e.LeaveTypeCode,
 			StartDate:      dateStr(e.StartDate),
@@ -576,16 +561,6 @@ func toCalendarResponse(r svc.CalendarResult) calendarResponse {
 			Status:         string(e.Status),
 			DelegateID:     e.DelegateID,
 			DelegateName:   e.DelegateName,
-		})
-	}
-	for _, c := range r.Clashes {
-		out.Clashes = append(out.Clashes, calendarClashResponse{
-			Date:            c.Date,
-			CompanyID:       c.CompanyID,
-			CompanyName:     c.CompanyName,
-			ServiceLine:     c.ServiceLine,
-			AgentCount:      c.AgentCount,
-			LeaveRequestIDs: c.LeaveRequestIDs,
 		})
 	}
 	return out

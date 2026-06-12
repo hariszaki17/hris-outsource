@@ -98,7 +98,7 @@ func (q *Queries) CountLeaveDurationDays(ctx context.Context, arg CountLeaveDura
 
 const createScheduleEntry = `-- name: CreateScheduleEntry :one
 INSERT INTO schedule_entries (
-    employee_id, placement_id, service_line_id, shift_master_id,
+    employee_id, placement_id, shift_master_id,
     start_time, end_time, cross_midnight, work_date, status,
     is_day_off, replaced_entry_id, created_by
 ) VALUES (
@@ -112,10 +112,9 @@ INSERT INTO schedule_entries (
     $8,
     $9,
     $10,
-    $11,
-    $12
+    $11
 )
-RETURNING id, employee_id, placement_id, service_line_id, shift_master_id,
+RETURNING id, employee_id, placement_id, shift_master_id,
           start_time, end_time, cross_midnight, work_date, status,
           is_day_off, replaced_entry_id, created_by, created_at, updated_at
 `
@@ -123,7 +122,6 @@ RETURNING id, employee_id, placement_id, service_line_id, shift_master_id,
 type CreateScheduleEntryParams struct {
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -139,7 +137,6 @@ type CreateScheduleEntryRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -158,7 +155,6 @@ func (q *Queries) CreateScheduleEntry(ctx context.Context, arg CreateScheduleEnt
 	row := q.db.QueryRow(ctx, createScheduleEntry,
 		arg.EmployeeID,
 		arg.PlacementID,
-		arg.ServiceLineID,
 		arg.ShiftMasterID,
 		arg.StartTime,
 		arg.EndTime,
@@ -174,7 +170,6 @@ func (q *Queries) CreateScheduleEntry(ctx context.Context, arg CreateScheduleEnt
 		&i.ID,
 		&i.EmployeeID,
 		&i.PlacementID,
-		&i.ServiceLineID,
 		&i.ShiftMasterID,
 		&i.StartTime,
 		&i.EndTime,
@@ -191,7 +186,7 @@ func (q *Queries) CreateScheduleEntry(ctx context.Context, arg CreateScheduleEnt
 }
 
 const findActivePlacementForAgentDate = `-- name: FindActivePlacementForAgentDate :one
-SELECT p.id, p.client_company_id, p.service_line_id, p.site_id,
+SELECT p.id, p.client_company_id, p.site_id,
        p.start_date, p.end_date, p.lifecycle_status
 FROM placements p
 WHERE p.employee_id = $1
@@ -210,7 +205,6 @@ type FindActivePlacementForAgentDateParams struct {
 type FindActivePlacementForAgentDateRow struct {
 	ID              string
 	ClientCompanyID string
-	ServiceLineID   string
 	SiteID          string
 	StartDate       pgtype.Date
 	EndDate         pgtype.Date
@@ -225,7 +219,6 @@ func (q *Queries) FindActivePlacementForAgentDate(ctx context.Context, arg FindA
 	err := row.Scan(
 		&i.ID,
 		&i.ClientCompanyID,
-		&i.ServiceLineID,
 		&i.SiteID,
 		&i.StartDate,
 		&i.EndDate,
@@ -269,7 +262,7 @@ func (q *Queries) FindLiveEntryForAgentDate(ctx context.Context, arg FindLiveEnt
 }
 
 const getScheduleEntry = `-- name: GetScheduleEntry :one
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -290,7 +283,6 @@ type GetScheduleEntryRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -316,7 +308,6 @@ func (q *Queries) GetScheduleEntry(ctx context.Context, id string) (GetScheduleE
 		&i.ID,
 		&i.EmployeeID,
 		&i.PlacementID,
-		&i.ServiceLineID,
 		&i.ShiftMasterID,
 		&i.StartTime,
 		&i.EndTime,
@@ -337,7 +328,7 @@ func (q *Queries) GetScheduleEntry(ctx context.Context, id string) (GetScheduleE
 }
 
 const getScheduleEntryForUpdate = `-- name: GetScheduleEntryForUpdate :one
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at
@@ -351,7 +342,6 @@ type GetScheduleEntryForUpdateRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -373,7 +363,6 @@ func (q *Queries) GetScheduleEntryForUpdate(ctx context.Context, id string) (Get
 		&i.ID,
 		&i.EmployeeID,
 		&i.PlacementID,
-		&i.ServiceLineID,
 		&i.ShiftMasterID,
 		&i.StartTime,
 		&i.EndTime,
@@ -391,7 +380,7 @@ func (q *Queries) GetScheduleEntryForUpdate(ctx context.Context, id string) (Get
 
 const listSchedule = `-- name: ListSchedule :many
 
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -424,7 +413,6 @@ type ListScheduleRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -470,7 +458,6 @@ func (q *Queries) ListSchedule(ctx context.Context, arg ListScheduleParams) ([]L
 			&i.ID,
 			&i.EmployeeID,
 			&i.PlacementID,
-			&i.ServiceLineID,
 			&i.ShiftMasterID,
 			&i.StartTime,
 			&i.EndTime,
@@ -498,7 +485,7 @@ func (q *Queries) ListSchedule(ctx context.Context, arg ListScheduleParams) ([]L
 }
 
 const listScheduleByAgent = `-- name: ListScheduleByAgent :many
-SELECT se.id, se.employee_id, se.placement_id, se.service_line_id,
+SELECT se.id, se.employee_id, se.placement_id,
        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
        se.created_by, se.created_at, se.updated_at,
@@ -527,7 +514,6 @@ type ListScheduleByAgentRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -565,7 +551,6 @@ func (q *Queries) ListScheduleByAgent(ctx context.Context, arg ListScheduleByAge
 			&i.ID,
 			&i.EmployeeID,
 			&i.PlacementID,
-			&i.ServiceLineID,
 			&i.ShiftMasterID,
 			&i.StartTime,
 			&i.EndTime,
@@ -610,24 +595,22 @@ func (q *Queries) SoftDeleteScheduleEntry(ctx context.Context, id string) (int64
 const updateScheduleEntry = `-- name: UpdateScheduleEntry :one
 UPDATE schedule_entries
 SET shift_master_id   = $1,
-    service_line_id   = $2,
-    start_time        = $3,
-    end_time          = $4,
-    cross_midnight    = $5,
-    status            = $6,
-    is_day_off        = $7,
-    replaced_entry_id = $8,
+    start_time        = $2,
+    end_time          = $3,
+    cross_midnight    = $4,
+    status            = $5,
+    is_day_off        = $6,
+    replaced_entry_id = $7,
     updated_at        = now()
-WHERE id = $9
+WHERE id = $8
   AND deleted_at IS NULL
-RETURNING id, employee_id, placement_id, service_line_id, shift_master_id,
+RETURNING id, employee_id, placement_id, shift_master_id,
           start_time, end_time, cross_midnight, work_date, status,
           is_day_off, replaced_entry_id, created_by, created_at, updated_at
 `
 
 type UpdateScheduleEntryParams struct {
 	ShiftMasterID   *string
-	ServiceLineID   *string
 	StartTime       *string
 	EndTime         *string
 	CrossMidnight   bool
@@ -641,7 +624,6 @@ type UpdateScheduleEntryRow struct {
 	ID              string
 	EmployeeID      string
 	PlacementID     string
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	StartTime       *string
 	EndTime         *string
@@ -658,7 +640,6 @@ type UpdateScheduleEntryRow struct {
 func (q *Queries) UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error) {
 	row := q.db.QueryRow(ctx, updateScheduleEntry,
 		arg.ShiftMasterID,
-		arg.ServiceLineID,
 		arg.StartTime,
 		arg.EndTime,
 		arg.CrossMidnight,
@@ -672,7 +653,6 @@ func (q *Queries) UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEnt
 		&i.ID,
 		&i.EmployeeID,
 		&i.PlacementID,
-		&i.ServiceLineID,
 		&i.ShiftMasterID,
 		&i.StartTime,
 		&i.EndTime,

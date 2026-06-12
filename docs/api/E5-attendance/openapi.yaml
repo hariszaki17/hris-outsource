@@ -24,14 +24,14 @@ info:
 
     **Cross-epic references:**
       - E2 — `ClientCompany.geofence_radius_m`, `ClientCompany.location` (lat/lng), `AttendanceCode`.
-      - E3 — `Placement` resolves the agent's site for geofence + service line; `ShiftLeaderAssignment` resolves scope.
+      - E3 — `Placement` resolves the agent's site for geofence; `ShiftLeaderAssignment` resolves scope.
       - E4 — `Schedule` resolves the scheduled `shift_start_at` / `shift_end_at` for lateness, auto-close, early-clock-out detection.
       - E6 — Approved leave suppresses `ABSENT` (see `Attendance.status=ON_LEAVE`).
       - E7 — `verified` records feed worked-time → OT detection.
       - E8 / E10 — Billable/payable rollups consume `VERIFIED` records only.
 
     **E5 high-volume notes:** `GET /attendance` is the primary read surface and is expected to be
-    paged by cursor with combined filters (employee/company/service_line/date/status/flag/source).
+    paged by cursor with combined filters (employee/company/position/date/status/flag/source).
     All listing endpoints follow CONVENTIONS §8 cursor pagination and reject offset-style queries.
   contact:
     name: hris-outsource product+architecture
@@ -145,7 +145,6 @@ paths:
                       placement_id: SWP-PL-882
                       schedule_id: SWP-SCH-22041
                       company_id: SWP-CMP-014
-                      service_line: facility_services
                       attendance_code_id: SWP-AC-001
                       shift_start_at: '2026-06-03T07:00:00Z'
                       shift_end_at: '2026-06-03T15:00:00Z'
@@ -180,7 +179,6 @@ paths:
                       placement_id: SWP-PL-882
                       schedule_id: SWP-SCH-22042
                       company_id: SWP-CMP-014
-                      service_line: facility_services
                       shift_start_at: '2026-06-03T07:00:00Z'
                       shift_end_at: '2026-06-03T15:00:00Z'
                       check_in_at: '2026-06-03T07:18:00Z'
@@ -205,7 +203,6 @@ paths:
                       placement_id: SWP-PL-882
                       schedule_id: null
                       company_id: SWP-CMP-014
-                      service_line: facility_services
                       check_in_at: '2026-06-03T09:14:01Z'
                       lat_in: -6.2256
                       lng_in: 106.7997
@@ -495,11 +492,10 @@ paths:
           name: site_id
           schema: { type: string, pattern: '^SWP-SITE-[A-Za-z0-9]+$' }
           description: "Filter by the agent's placement **site** (E2 F2.6, denormalized onto the record). For `shift_leader` the company scope is server-pinned; `site_id` only narrows within the led company."
-        - { in: query, name: service_line, schema: { type: string, enum: [facility_services, building_management, parking] } }
         - in: query
-          name: position_id
-          schema: { type: string, pattern: '^SWP-POS-[A-Za-z0-9]+$' }
-          description: "Filter by the agent's placement **position** (E2, denormalized onto the record)."
+          name: position
+          schema: { type: string }
+          description: "Filter by the agent's placement **position** (free-text, denormalized onto the record). Exact-match on the stored position string."
         - in: query
           name: date_from
           schema: { type: string, format: date }
@@ -559,9 +555,7 @@ paths:
                         company_name: Plaza Senayan
                         site_id: SWP-SITE-031
                         site_name: Plaza Senayan — Lobby Utama
-                        service_line: facility_services
-                        position_id: SWP-POS-009
-                        position_name: Petugas Kebersihan
+                        position: Petugas Kebersihan
                         shift_start_at: '2026-06-03T07:00:00Z'
                         shift_end_at: '2026-06-03T15:00:00Z'
                         check_in_at: '2026-06-03T07:18:00Z'
@@ -954,8 +948,7 @@ paths:
                       employee_name: Budi Santoso
                       company_name: Plaza Senayan
                       site_name: Plaza Senayan — Lobby Utama
-                      position_name: Petugas Kebersihan
-                      service_line: facility_services
+                      position: Petugas Kebersihan
                       schedule_id: SWP-SCH-22041
                       shift_start_at: '2026-06-04T07:00:00Z'
                       shift_end_at: '2026-06-04T15:00:00Z'
@@ -966,8 +959,7 @@ paths:
                       employee_name: Budi Santoso
                       company_name: Plaza Senayan
                       site_name: Plaza Senayan — Lobby Utama
-                      position_name: Petugas Kebersihan
-                      service_line: facility_services
+                      position: Petugas Kebersihan
                       schedule_id: null
                       shift_start_at: null
                       shift_end_at: null
@@ -1481,8 +1473,7 @@ components:
         - placement_id
         - company_id
         - site_id
-        - service_line
-        - position_id
+        - position
         - status
         - verification_status
         - flags
@@ -1524,17 +1515,9 @@ components:
           type: string
           description: "Server-denormalized for list rendering (avoids client JOIN)."
           example: Plaza Senayan — Lobby Utama
-        service_line:
+        position:
           type: string
-          enum: [facility_services, building_management, parking]
-          description: "Derived from placement → service line (no separate JOIN endpoint)."
-        position_id:
-          type: string
-          pattern: '^SWP-POS-[A-Za-z0-9]+$'
-          description: "Denormalized from `placement` → position (E2). Drives the `position_id` filter; never separately editable."
-        position_name:
-          type: string
-          description: "Server-denormalized for list rendering (avoids client JOIN)."
+          description: "Free-text position, denormalized from `placement` → position. Drives the `position` filter; never separately editable."
           example: Petugas Kebersihan
         attendance_code_id:
           type: [string, "null"]
@@ -1751,7 +1734,6 @@ components:
       required:
         - employee_name
         - company_name
-        - service_line
       properties:
         employee_name:
           type: string
@@ -1762,12 +1744,10 @@ components:
         site_name:
           type: [string, "null"]
           example: Plaza Senayan — Lobby Utama
-        position_name:
+        position:
           type: [string, "null"]
+          description: Free-text position from the employee's active placement.
           example: Petugas Kebersihan
-        service_line:
-          type: string
-          enum: [facility_services, building_management, parking]
         schedule_id:
           type: [string, "null"]
           pattern: '^SWP-SCH-[A-Za-z0-9]+$'

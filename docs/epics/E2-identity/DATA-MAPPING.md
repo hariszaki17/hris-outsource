@@ -7,7 +7,7 @@
 
 ## 1. Shape of the change
 
-Legacy splits identity across **`users`** (login, with a tinyint `role` + `company_id` tenant) and **`employees`** (HR profile), bridged by `employees.user_id`. hris-outsource keeps the split but **drops multi-tenancy** (single org = SWP), **remaps the role enum**, and lifts compensation out of the encrypted `employee_contracts` blob into a structured **EmploymentAgreement**. Job roles (`recruitment_roles`) become the **Position** master; **service line and overtime rules have no source** and are seeded/defined fresh.
+Legacy splits identity across **`users`** (login, with a tinyint `role` + `company_id` tenant) and **`employees`** (HR profile), bridged by `employees.user_id`. hris-outsource keeps the split but **drops multi-tenancy** (single org = SWP), **remaps the role enum**, and lifts compensation out of the encrypted `employee_contracts` blob into a structured **EmploymentAgreement**. Job roles (`recruitment_roles.role`) become a **free-text position string** captured per placement (no Position master, no `service_line` — both removed 2026-06-12); **overtime rules have no source** and are defined fresh (global only).
 
 ## 2. Source tables
 
@@ -18,11 +18,11 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | `employee_contracts` | EmploymentAgreement | `contract_status_id, pkwt_reference, contract_start_at, contract_end_at, resign_at, gaji_pokok*, bpjs_*, pph21*` (`*`=encrypted) |
 | `companies` (role=2) | ClientCompany | `id, name, address, npwp, penanggung_jawab, phone_number, is_enabled` (geo `lat/long_address` **not** migrated — see G-8) · `leader_scope` defaults `company` |
 | *(none — net-new)* | Site (F2.6) | Loader **auto-creates one primary "Main Site" per ClientCompany**, geofence **empty**; geo is configured post-cutover (G-8). |
-| `recruitment_roles` | Position | `id, role, alias, client, recruitment_role_type_id` |
-| `recruitment_role_types` | (lookup) | `id, name` — drives PKWT/PKWTT + position category derivation |
+| `recruitment_roles` | → **free-text `position` string** on Placement (E3) | `id, role` (the role label) — no Position master |
+| `recruitment_role_types` | (lookup) | `id, name` — drives PKWT/PKWTT derivation |
 | `leave_types` | LeaveType | `id, name, description, is_tahunan, is_document_required` (legacy has only annual/doc flags — new cap mechanics are **seeded**, not migrated; see leave_types mapping below) |
 | `attendance_codes` | AttendanceCode | `id, name, description, company_id, hari_masuk, hari_penggajian, dapat_ditagih, perlu_verifikasi, color` |
-| — (none) | ServiceLine, OvertimeRule | **net-new** — seed / define fresh |
+| — (none) | OvertimeRule | **net-new** — define fresh (global only) |
 
 ## 3. Field mapping
 
@@ -54,16 +54,13 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | `pph21` (enc) | `tax_profile` | decrypt |
 | `resign_at` | agreement close | sets status terminated/resigned |
 | `annual_leave` | → Placement entitlement (E3) / leave quota (E6) | not on agreement |
-| `role_id` | → **Position** on Placement (E3) | not on agreement |
+| `role_id` | → **free-text `position` string** on Placement (E3) | resolve `recruitment_roles.role` label → `Placement.position` text; not on agreement, no master |
 
-### `recruitment_roles` → Position
+### `recruitment_roles` → free-text `position` string (E3)
 | Legacy | → | Notes |
 |---|---|---|
-| `role` | `name` | — |
-| `alias` | `alias` | — |
-| `client` | (classification hint) | drop or keep as note |
-| `recruitment_role_type_id` | category (optional) | from `recruitment_role_types.name` |
-| — | `service_line_id` | **manual classification** (no source; same approach as placement G-1) |
+| `role` | `Placement.position` (text) | copy the role label directly onto the placement as free text — **no Position master, no `service_line`, no uniqueness** (2026-06-12). Feeds the position typeahead's `DISTINCT` set. |
+| `alias`, `client`, `recruitment_role_type_id` | **DROP** | no master to carry alias/category/classification onto |
 
 ### `leave_types` → LeaveType
 `name→name`, `description→description`, `is_document_required→requires_document`. Legacy `is_tahunan=1` → `cap_basis=ANNUAL_POOL`. The richer cap mechanics (`code`, `cap_basis`, `cap_value`, `cap_unit`, `paid`, `gender`, `notice_days`, `min_service_years`, `lead/trail_days`, `category`) have **no legacy source** — the active catalog is **seeded** from SWP's 18-code `Fitur Ijin` policy (E2 operational-master-data §5a), and `leaves.type` (E6) is remapped onto the seeded codes (E6 DATA-MAPPING G-1). Migrate legacy rows that aren't in the seeded set as `cap_basis=UNCAPPED` (or deactivate) and reconcile post-cutover.
@@ -77,16 +74,15 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 |---|-----|----------|
 | G-1 | **Legacy role tinyint → new role enum** unknown | Inspect distinct `users.role` values in prod; build an explicit value map to {super_admin, hr_admin, shift_leader, agent}. Shift-leader role is mostly derived from E3 F3.4, not the legacy enum. |
 | G-2 | **Password hashes** | Confirm Laravel bcrypt cost/scheme; if portable, carry the hash; otherwise force a password reset / re-invite on first login. |
-| G-3 | **Service line absent** (Position + Placement) | Manual classification later (per E3 G-1 decision). Positions load with `service_line_id` pending. |
 | G-4 | **PKWT/PKWTT derivation** | Read distinct `recruitment_role_types.name` values; map to type + status. Fallback: null `contract_end_at` ⇒ PKWTT. |
 | G-5 | **Identity reconciliation** | Post-migration **every Employee MUST have a linked User** (1:1 non-null — F2.1 EP-4, D1/D4). Legacy `employees.user_id` that are **null** (no login) are **backfilled a User keyed on phone** (email if present), with a **temp password / forced reset** on first login (G-2). Phone is the **required** login identifier (email optional). `users` with no employee are reviewed separately (E9 review queue). Keep both legacy ids in the crosswalk. **No null `user_id` post-migration.** |
 | G-6 | **Per-company master** | `attendance_codes` (and any per-company leave config) are keyed by `company_id`; collapse to one SWP-wide set, dedupe by name. |
-| G-7 | **No OvertimeRule / ServiceLine source** | Seed `ServiceLine` = {Facility Services, Building Management, Parking}; define `OvertimeRule` fresh (confirm fields in E7). Not migrated. |
+| G-7 | **No OvertimeRule source** | Define `OvertimeRule` fresh — **global only**, no `service_line` (confirm fields in E7). Not migrated. *(2026-06-12: the former ServiceLine seed is dropped — `service_line` removed entirely; `recruitment_roles.role` now copies to a free-text `Placement.position`, no master to classify.)* |
 | G-8 | **Sites are net-new** (F2.6, 2026-06-03) | Legacy is flat (one address per `role=2` company; `role=4` ignored). The loader **auto-creates one primary "Main Site" per ClientCompany** with **empty geofence** to satisfy the required `Placement.site_id`; legacy geo is **not** carried over. HR configures geofences + splits multi-site companies post-cutover. `Placement.site_id` → the company's Main Site. |
 
 ## 5. Migration rules
 
 1. Identity loads first (User + Employee + crosswalks), then EmploymentAgreement, then master data, before E3 placements.
-2. Idempotent via crosswalks (`legacy_user_id`, `legacy_employee_id`, `legacy_contract_id`, `legacy_company_id`, `legacy_role_id`).
+2. Idempotent via crosswalks (`legacy_user_id`, `legacy_employee_id`, `legacy_contract_id`, `legacy_company_id`). *(`legacy_role_id` crosswalk dropped — `recruitment_roles.role` copies straight to free-text `Placement.position`, no Position master to key.)*
 3. Decrypt-then-re-encrypt for all comp fields; failures go to a review queue, never silently null.
 4. Detailed extract/load orchestration lives in E9; this doc owns the E2 field-level mapping + decisions.

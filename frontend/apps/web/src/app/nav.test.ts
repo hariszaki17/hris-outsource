@@ -77,7 +77,6 @@ describe('section sub-nav (sub-features live under their parent module)', () => 
     expect(NAV_ITEMS.map((i) => i.to)).toContain('/client-companies');
     expect(activeSection('/client-companies')).toBe('/client-companies');
     expect(activeSection('/agreements')).toBe('/employees');
-    expect(activeSection('/service-lines')).toBe('/client-companies');
   });
 
   it('master data resolves to Settings (its new home)', () => {

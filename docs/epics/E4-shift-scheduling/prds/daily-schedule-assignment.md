@@ -7,7 +7,7 @@
 
 ## 1. Context & problem
 
-The shift leader's daily job: decide who works which shift on which day at their site. hris-outsource does this **day-by-day, manually** — the leader picks a shift (from the master, filtered by the placement's service line) for each placed agent on each date. Saving is **immediately live** to the agent (auto-publish), so the schedule the agent sees on mobile is always current. This schedule is what E5 attendance is judged against.
+The shift leader's daily job: decide who works which shift on which day at their site. hris-outsource does this **day-by-day, manually** — the leader picks a shift from the master (all active templates) for each placed agent on each date. Saving is **immediately live** to the agent (auto-publish), so the schedule the agent sees on mobile is always current. This schedule is what E5 attendance is judged against.
 
 ## 2. Goals & non-goals
 
@@ -39,7 +39,6 @@ Shift Leader (own company), HR/Super Admin (any company), System (validate, publ
 | SA-1 | An agent can be scheduled on a date only if they have an **active placement** on that date (E3 INV); the schedule links that `placement_id`. |
 | SA-2 | **One shift per agent per date** (INV-1). Assigning a second replaces the first (with a warning). |
 | SA-3 | A **shift leader may schedule only agents at their own company** (F3.4 scope). HR/Super Admin may schedule any. |
-| SA-4 | The shift picker is **filtered by the placement's service line** (tagged templates first; untagged available too). |
 | SA-5 | Cannot schedule **before placement start** or **after placement end**; ending a placement cancels its future schedule entries. |
 | SA-6 | Saving a cell **auto-publishes** (no draft) and **notifies the agent** on mobile (INV-4). |
 | SA-7 | A day can be explicitly marked **OFF** (status `Off`) — distinct from "no entry". |
@@ -58,7 +57,7 @@ Feature: Daily schedule assignment
 
   Background:
     Given I am the shift leader of "Plaza Senayan"
-    And "Budi" has an active placement at "Plaza Senayan" in "Parking"
+    And "Budi" has an active placement at "Plaza Senayan"
 
   Scenario: Assign a shift and auto-publish
     When I assign "Budi" the "Parking Night" shift on 2026-06-10
@@ -76,10 +75,9 @@ Feature: Daily schedule assignment
     When I assign him "Night" on 2026-06-10
     Then I am warned and the entry is replaced with "Night"
 
-  Scenario: Shift picker is filtered by service line
-    Given Budi's placement is in "Parking"
-    When I open the shift picker for him
-    Then Parking-tagged shifts appear first, untagged shifts also available
+  Scenario: Shift picker shows all active shifts
+    When I open the shift picker for "Budi"
+    Then all active shift templates from the master are available
 
   Scenario: Cannot schedule beyond placement end
     Given Budi's placement ends 2026-06-30
@@ -111,7 +109,7 @@ Feature: Daily schedule assignment
 
 ## 9. Dependencies
 
-F4.1 (shift master), E3 (active placement + leader scope), E2 (service line), E1 (audit), E10 (notifications), E5 (consumes schedule), E6 (leave conflicts).
+F4.1 (shift master), E3 (active placement + leader scope), E1 (audit), E10 (notifications), E5 (consumes schedule), E6 (leave conflicts).
 
 ## 10. Decisions & open questions
 

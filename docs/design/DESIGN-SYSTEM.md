@@ -320,7 +320,7 @@ Entities: **ShiftMaster** (`title`, `start_at`, `end_at`, `start_break?`, `end_b
 `placement_id`, `work_date`, `status` ∈ `Scheduled|Off|Changed`); unique `(employee_id, work_date)`.
 Rules: one shift/agent/day (INV-1); only agents with an **active placement** that date (INV-2); a
 shift leader schedules **own company only** (INV-3); **save = auto-publish + notify** (INV-4 — no
-draft/approval gate). Shift picker is filtered by the placement's service line. **Scheduling over
+draft/approval gate). Shift picker shows all active shift masters. **Scheduling over
 approved leave is blocked** (the Cuti cell is locked). **Cross-midnight** shift attributes to its
 start date (shown with a `+1` moon badge). Shift-master status: Aktif→ok · Nonaktif→neutral.
 

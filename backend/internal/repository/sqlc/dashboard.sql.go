@@ -335,40 +335,38 @@ func (q *Queries) LeaderTodayStatus(ctx context.Context, arg LeaderTodayStatusPa
 	return i, err
 }
 
-const orgRollupsByServiceLine = `-- name: OrgRollupsByServiceLine :many
+const orgRollupsByPosition = `-- name: OrgRollupsByPosition :many
 SELECT
-    sl.name                                  AS service_line_name,
+    p.position                                AS position,
     count(DISTINCT p.employee_id)::bigint     AS headcount,
     count(*)::bigint                          AS active_placements
 FROM placements p
-JOIN service_lines sl ON sl.id = p.service_line_id
 WHERE p.deleted_at IS NULL
   AND p.lifecycle_status IN ('ACTIVE','EXTENDED','EXPIRING','PENDING_START')
-GROUP BY sl.id, sl.name
-ORDER BY sl.name
+GROUP BY p.position
+ORDER BY p.position
 `
 
-type OrgRollupsByServiceLineRow struct {
-	ServiceLineName  string
+type OrgRollupsByPositionRow struct {
+	Position         string
 	Headcount        int64
 	ActivePlacements int64
 }
 
-// org_rollups: per-service-line headcount (distinct placed employees) + active
+// org_rollups: per-position headcount (distinct placed employees) + active
 // placement count, over non-terminal placements (mirrors CountActivePlacements).
-// service_lines.name is free text ("Facility Services" / "Building Management" /
-// "Parking"); the service maps it to the FACILITY|BUILDING|PARKING enum. We return
-// the raw name so the mapping stays in Go (no enum in the schema).
-func (q *Queries) OrgRollupsByServiceLine(ctx context.Context) ([]OrgRollupsByServiceLineRow, error) {
-	rows, err := q.db.Query(ctx, orgRollupsByServiceLine)
+// Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
+// removed, position is a plain text column on placements — no master/enum).
+func (q *Queries) OrgRollupsByPosition(ctx context.Context) ([]OrgRollupsByPositionRow, error) {
+	rows, err := q.db.Query(ctx, orgRollupsByPosition)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []OrgRollupsByServiceLineRow{}
+	items := []OrgRollupsByPositionRow{}
 	for rows.Next() {
-		var i OrgRollupsByServiceLineRow
-		if err := rows.Scan(&i.ServiceLineName, &i.Headcount, &i.ActivePlacements); err != nil {
+		var i OrgRollupsByPositionRow
+		if err := rows.Scan(&i.Position, &i.Headcount, &i.ActivePlacements); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

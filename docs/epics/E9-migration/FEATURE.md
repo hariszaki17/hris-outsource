@@ -16,7 +16,7 @@ Move **everything** from the legacy SWP production database into the new model, 
 | Actor | Involvement |
 |---|---|
 | **Migration engineer / ops** | Runs extraction/transform/load; owns the runbook + rollback. |
-| **HR / Super Admin** | Resolves the reconciliation review queue (unmatched placements, identity, service-line classification). |
+| **HR / Super Admin** | Resolves the reconciliation review queue (unmatched placements, identity, ambiguous chains). |
 | **System (migration tooling)** | Extract, decrypt, transform, crosswalk, load, validate, report. |
 
 ## 3. Scope
@@ -51,7 +51,7 @@ erDiagram
     REVIEW_ITEM {
         bigint id PK
         string entity_type
-        string issue_type "unmatched_placement|orphan_identity|decrypt_fail|unclassified_service_line|ambiguous_chain"
+        string issue_type "unmatched_placement|orphan_identity|decrypt_fail|ambiguous_chain"
         json payload
         string status "Open|Resolved"
         bigint resolved_by FK
@@ -118,7 +118,7 @@ flowchart TD
 
 ### F9.2 — Transform & Crosswalks
 
-Apply each epic's mapping to staged data: remap identity, split `employee_contracts` into EmploymentAgreement + Placement, dedupe shifts, derive links (schedule→placement, attendance→schedule), classify (service line, day_type) — writing a **CROSSWALK** for every legacy_id → new_id.
+Apply each epic's mapping to staged data: remap identity, split `employee_contracts` into EmploymentAgreement + Placement, dedupe shifts, derive links (schedule→placement, attendance→schedule), classify (day_type) — writing a **CROSSWALK** for every legacy_id → new_id. Position copies straight across as free-text (no classification step).
 
 ```mermaid
 flowchart LR
@@ -137,7 +137,7 @@ flowchart LR
 
 ### F9.3 — Reconciliation & Review Queue
 
-Anything ambiguous — free-text `placement` → ClientCompany, orphan identities, unclassified service lines, ambiguous renewal chains, decrypt failures — becomes a **review item** that HR resolves **before go-live**. Each run emits a reconciliation report (counts in/out/queued).
+Anything ambiguous — free-text `placement` → ClientCompany, orphan identities, ambiguous renewal chains, decrypt failures — becomes a **review item** that HR resolves **before go-live**. Each run emits a reconciliation report (counts in/out/queued).
 
 ```mermaid
 flowchart TD
@@ -211,11 +211,11 @@ flowchart TD
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **History window** = migrate **everything** incl. full attendance (plan a larger migration + validation window).
-- ✅ **Blocking review items** = `decrypt_fail`, `orphan_identity`, `unmatched_placement`; non-blocking = `unclassified_service_line`, `ambiguous_chain`.
+- ✅ **Blocking review items** = `decrypt_fail`, `orphan_identity`, `unmatched_placement`; non-blocking = `ambiguous_chain`. *(`unclassified_service_line` removed 2026-06-12 — service line dropped project-wide; position is free-text, copied verbatim, never queued.)*
 - ✅ **Placement-string matching** = exact + alias list + fuzzy-with-manual-confirm.
 - ✅ **Post-cutover** = keep `lumen_swp` read-only ~6–12 months.
 
 **Still open (sized during dry-runs / ops):**
 1. Maintenance-window length + rehearsal schedule.
 2. Exact validation-gate thresholds + required sign-offs.
-3. Timing of HR's manual service-line / role-enum classification relative to cutover.
+3. Timing of HR's manual role-enum classification relative to cutover.

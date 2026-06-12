@@ -83,18 +83,11 @@ type AuditEntry struct {
 	At          time.Time
 }
 
-// ServiceLine is the SuperAdminWidgets.org_rollups service_line enum.
-type ServiceLine string
-
-const (
-	ServiceLineFacility ServiceLine = "FACILITY"
-	ServiceLineBuilding ServiceLine = "BUILDING"
-	ServiceLineParking  ServiceLine = "PARKING"
-)
-
-// OrgRollup is one SuperAdminWidgets.org_rollups row (per service line, E3).
+// OrgRollup is one SuperAdminWidgets.org_rollups row. Rollups GROUP BY the
+// placement's free-text position (decision 2026-06-12: service_line removed; the
+// rollup dimension is the free-text position, no master/enum).
 type OrgRollup struct {
-	ServiceLine      ServiceLine
+	Position         string // free-text placement position
 	Headcount        int
 	ActivePlacements int
 }

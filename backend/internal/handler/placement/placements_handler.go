@@ -44,16 +44,31 @@ func jakartaToday() time.Time {
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// --- position typeahead ---
+
+// SearchPositions handles GET /positions:search — the free-text position
+// typeahead. Returns the distinct existing position labels matching q
+// (case-insensitive substring); empty q returns the most common labels.
+func (h *Handler) SearchPositions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	positions, err := h.placements.SearchPositions(r.Context(), q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": positions})
+}
+
 // --- list / get ---
 
 // ListPlacements handles GET /placements.
 func (h *Handler) ListPlacements(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := domain.PlacementFilter{
-		CompanyID:     strPtrParam(q.Get("company_id")),
-		ServiceLineID: strPtrParam(q.Get("service_line_id")),
-		EmployeeID:    strPtrParam(q.Get("employee_id")),
-		AgreementID:   strPtrParam(q.Get("agreement_id")),
+		CompanyID:   strPtrParam(q.Get("company_id")),
+		Position:    strPtrParam(q.Get("position")),
+		EmployeeID:  strPtrParam(q.Get("employee_id")),
+		AgreementID: strPtrParam(q.Get("agreement_id")),
 		// Param names are `status` / `status__in`; both filter lifecycle_status.
 		Status:            strPtrParam(q.Get("status")),
 		StatusIn:          csvParam(q.Get("status__in")),
@@ -196,8 +211,7 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 		AgreementID:     req.AgreementID, // nil/"" → pending agreement (normalized in the service)
 		ClientCompanyID: req.ClientCompanyID,
 		SiteID:          req.SiteID,
-		ServiceLineID:   req.ServiceLineID,
-		PositionID:      req.PositionID,
+		Position:        req.Position,
 		StartDate:       startDate,
 		EndDate:         endDate,
 		Notes:           req.Notes,
@@ -252,9 +266,6 @@ func (h *Handler) UpdatePlacement(w http.ResponseWriter, r *http.Request) {
 	if req.ClientCompanyID != nil {
 		roFields["client_company_id"] = true
 	}
-	if req.ServiceLineID != nil {
-		roFields["service_line_id"] = true
-	}
 	if req.StartDate != nil {
 		roFields["start_date"] = true
 	}
@@ -280,8 +291,8 @@ func (h *Handler) UpdatePlacement(w http.ResponseWriter, r *http.Request) {
 		ID:    id,
 		Notes: req.Notes,
 	}
-	if req.PositionID != nil {
-		params.PositionID = *req.PositionID
+	if req.Position != nil {
+		params.Position = *req.Position
 	}
 	if req.EndDate != nil && *req.EndDate != "" {
 		ed, derr := parseDate(*req.EndDate)
@@ -324,8 +335,7 @@ func (h *Handler) TransferPlacement(w http.ResponseWriter, r *http.Request) {
 	res, err := h.placements.TransferPlacement(r.Context(), svc.TransferParams{
 		ID:                 id,
 		NewClientCompanyID: req.NewClientCompanyID,
-		NewServiceLineID:   req.NewServiceLineID,
-		NewPositionID:      req.NewPositionID,
+		NewPosition:        req.NewPosition,
 		NewStartDate:       startDate,
 		NewEndDate:         endDate,
 		NewAgreementID:     req.NewAgreementID,
@@ -376,7 +386,7 @@ func (h *Handler) RenewPlacement(w http.ResponseWriter, r *http.Request) {
 		NewStartDate:   startDate,
 		NewEndDate:     endDate,
 		NewAgreementID: req.NewAgreementID,
-		NewPositionID:  req.NewPositionID,
+		NewPosition:    req.NewPosition,
 		Notes:          req.Notes,
 		ActorUserID:    actorPtr(r),
 	}

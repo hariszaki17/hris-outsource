@@ -13,10 +13,10 @@ import "time"
 
 // ShiftMaster is the domain entity for a reusable shift template (F4.1 / SM-*).
 //
-// ServiceLineID nil = untagged (applies to all service lines, SM-3). CrossMidnight
-// is server-derived (end_time <= start_time). InUseCount = live schedule_entries
-// referencing this master. IsActive drives the ACTIVE/INACTIVE status at the DTO
-// boundary. *Name fields are denormalized at read time via LEFT JOINs.
+// Shift masters are fully INDEPENDENT — they carry no service-line scope
+// (service_line removed entirely, 2026-06-12). CrossMidnight is server-derived
+// (end_time <= start_time). InUseCount = live schedule_entries referencing this
+// master. IsActive drives the ACTIVE/INACTIVE status at the DTO boundary.
 type ShiftMaster struct {
 	ID         string
 	Name       string
@@ -24,9 +24,6 @@ type ShiftMaster struct {
 	EndTime    string // HH:MM
 	BreakStart *string
 	BreakEnd   *string
-
-	ServiceLineID   *string
-	ServiceLineName *string // denormalized via JOIN
 
 	CrossMidnight bool
 	IsActive      bool
@@ -50,7 +47,6 @@ type ScheduleEntry struct {
 	PlacementID string
 	CompanyID   string // from placement.client_company_id
 
-	ServiceLineID   *string
 	ShiftMasterID   *string
 	ShiftMasterName *string // denormalized via JOIN
 	EmployeeName    *string // denormalized via JOIN
@@ -77,11 +73,10 @@ type ScheduleEntry struct {
 // Status is the API ACTIVE/INACTIVE token; the repository maps it to the
 // is_active bool narg.
 type ShiftMasterFilter struct {
-	ServiceLineID *string
-	Status        *string // ACTIVE | INACTIVE
-	Q             *string
-	Limit         int32
-	Cursor        *string
+	Status *string // ACTIVE | INACTIVE
+	Q      *string
+	Limit  int32
+	Cursor *string
 }
 
 // ScheduleFilter holds the decoded query parameters for GET /schedule.

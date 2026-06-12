@@ -2,21 +2,19 @@
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 -- Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
 -- current_* come from the employee's single non-terminal placement (INV-1 → at most one);
--- LEFT JOINs so unplaced employees still list (current_* null).
+-- LEFT JOINs so unplaced employees still list (current_* null). current_position is
+-- the free-text placement label (no master / FK / ID; service_line dropped 2026-06-12).
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       pos.id   AS current_position_id,
-       pos.name AS current_position_name,
-       sl.id    AS current_service_line_id,
-       sl.name  AS current_service_line_name,
-       cc.id    AS current_client_company_id,
-       cc.name  AS current_client_company_name
+       COALESCE(cp.position, '') AS current_position,
+       cc.id       AS current_client_company_id,
+       cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position_id, p.service_line_id, p.client_company_id
+    SELECT p.position, p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -24,8 +22,6 @@ LEFT JOIN LATERAL (
     ORDER BY p.status_changed_at DESC
     LIMIT 1
 ) cp ON true
-LEFT JOIN positions        pos ON pos.id = cp.position_id
-LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
 LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
 WHERE e.deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR e.status = sqlc.narg(status)::text)
@@ -70,21 +66,19 @@ LIMIT sqlc.arg(row_limit);
 -- name: GetEmployeeByID :one
 -- current_* come from the employee's single non-terminal placement (INV-1 → at most
 -- one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
--- employee still resolves (current_* null).
+-- employee still resolves (current_* null). current_position is the free-text
+-- placement label (no master / FK / ID; service_line dropped 2026-06-12).
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       pos.id   AS current_position_id,
-       pos.name AS current_position_name,
-       sl.id    AS current_service_line_id,
-       sl.name  AS current_service_line_name,
-       cc.id    AS current_client_company_id,
-       cc.name  AS current_client_company_name
+       COALESCE(cp.position, '') AS current_position,
+       cc.id       AS current_client_company_id,
+       cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position_id, p.service_line_id, p.client_company_id
+    SELECT p.position, p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -92,8 +86,6 @@ LEFT JOIN LATERAL (
     ORDER BY p.status_changed_at DESC
     LIMIT 1
 ) cp ON true
-LEFT JOIN positions        pos ON pos.id = cp.position_id
-LEFT JOIN service_lines    sl  ON sl.id  = cp.service_line_id
 LEFT JOIN client_companies cc  ON cc.id  = cp.client_company_id
 WHERE e.id = sqlc.arg(id)
   AND e.deleted_at IS NULL;

@@ -7,7 +7,7 @@
  *
  * Design: TitleBand → 4× StatCards → TableCard (Tabs, FilterRow, DataTable, Pagination).
  * HR: cross-company. SL: own-company scope, locked company filter + ScopeBanner.
- * Columns: Karyawan (name+ID) | Perusahaan | Lini Layanan | Masuk | Status | Verifikasi | Aksi.
+ * Columns: Karyawan (name+ID) | Perusahaan | Masuk | Status | Verifikasi | Aksi.
  *
  * ENGINEERING.md D1 — typed URL search params + cursor pagination.
  */
@@ -54,7 +54,7 @@ export type AttendanceDashboardSearch = {
   cursor?: string;
   company_id?: string;
   site_id?: string;
-  position_id?: string;
+  position?: string;
   date_from?: string;
   date_to?: string;
 };
@@ -157,7 +157,7 @@ export function AttendanceDashboardScreen() {
     // SL: always pass their company id (server would enforce it anyway; this keeps the cache key stable).
     company_id: isShiftLeader ? slCompanyId : search.company_id || undefined,
     site_id: search.site_id || undefined,
-    position_id: search.position_id || undefined,
+    position: search.position || undefined,
     // Date range filters
     date_from: search.date_from || undefined,
     date_to: search.date_to || undefined,
@@ -201,21 +201,11 @@ export function AttendanceDashboardScreen() {
     return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
   }, [rows]);
 
-  const positionOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const r of rows) {
-      if (r.position_id && !seen.has(r.position_id)) {
-        seen.set(r.position_id, r.position_name ?? r.position_id);
-      }
-    }
-    return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
-  }, [rows]);
-
   const hasFilters = Boolean(
     search.q ||
       search.company_id ||
       search.site_id ||
-      search.position_id ||
+      search.position ||
       search.date_from ||
       search.date_to,
   );
@@ -293,12 +283,6 @@ export function AttendanceDashboardScreen() {
       cell: (row) => (
         <span className="text-[13px] text-text">{row.company_name ?? row.company_id}</span>
       ),
-    },
-    {
-      id: 'service_line',
-      header: t('colServiceLine'),
-      width: 160,
-      cell: (row) => <span className="text-[13px] text-text">{row.service_line}</span>,
     },
     {
       id: 'date',
@@ -514,19 +498,15 @@ export function AttendanceDashboardScreen() {
             ))}
           </FilterSelect>
 
-          {/* Position filter */}
-          <FilterSelect
+          {/* Position filter — free-text exact-match (position is now a free-text string) */}
+          <Input
             aria-label={t('filterPosition')}
-            value={search.position_id ?? ''}
-            onChange={(e) => setSearch({ position_id: e.target.value || undefined })}
-          >
-            <option value="">{t('filterPositionAll')}</option>
-            {positionOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </FilterSelect>
+            type="search"
+            placeholder={t('filterPosition')}
+            value={search.position ?? ''}
+            onChange={(e) => setSearch({ position: e.target.value || undefined })}
+            className="w-[180px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+          />
 
           {/* Date range filters */}
           <Input
@@ -557,7 +537,7 @@ export function AttendanceDashboardScreen() {
                   q: undefined,
                   company_id: undefined,
                   site_id: undefined,
-                  position_id: undefined,
+                  position: undefined,
                   date_from: undefined,
                   date_to: undefined,
                 })

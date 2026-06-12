@@ -49,8 +49,8 @@ LIMIT 1;
 -- yields NO row (pgx.ErrNoRows), which the repo maps to created=false so the service
 -- emits ALREADY_CLOCKED_IN. flags is text[].
 INSERT INTO attendance (
-    employee_id, placement_id, schedule_id, company_id, service_line,
-    site_id, position_id,
+    employee_id, placement_id, schedule_id, company_id,
+    site_id, position,
     shift_start_at, shift_end_at,
     check_in_at, lat_in, lng_in, photo_in_id,
     wfo, is_late, late_minutes,
@@ -59,8 +59,8 @@ INSERT INTO attendance (
 )
 VALUES (
     sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.arg(schedule_id),
-    sqlc.arg(company_id), sqlc.arg(service_line),
-    sqlc.arg(site_id), sqlc.arg(position_id),
+    sqlc.arg(company_id),
+    sqlc.arg(site_id), sqlc.arg(position),
     sqlc.arg(shift_start_at), sqlc.arg(shift_end_at),
     sqlc.arg(check_in_at), sqlc.arg(lat_in), sqlc.arg(lng_in), sqlc.arg(photo_in_id),
     sqlc.arg(wfo), sqlc.arg(is_late), sqlc.arg(late_minutes),

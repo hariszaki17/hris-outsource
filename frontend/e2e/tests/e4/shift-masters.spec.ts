@@ -20,8 +20,8 @@
  *   Edit/Nonaktifkan/Aktifkan kembali; modal inputs #sm-name #sm-start-time #sm-end-time
  *   #sm-break-start #sm-break-end; save Button "Simpan"; ConfirmDialog confirm labels.
  *
- * Seed (06-02): SWP-SHF-001 "Pagi" 07:00–15:00 (all lines); SWP-SHF-002 "Malam" 23:00–07:00
- *   (SWP-SVC-003, cross_midnight=true). Route /shifts.
+ * Seed (06-02): SWP-SHF-001 "Pagi" 07:00–15:00; SWP-SHF-002 "Malam" 23:00–07:00
+ *   (cross_midnight=true). Shift master is service-line-independent (locked 2026-06-12). Route /shifts.
  */
 
 import { apiAs, errorCode } from '../../lib/e4-helpers.js';

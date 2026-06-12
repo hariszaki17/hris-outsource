@@ -163,11 +163,6 @@ func run() error {
 	orgCompaniesSvc := orgsvc.NewService(orgCompaniesRepo, txm)
 	orgCompaniesHandler := orghttp.NewHandler(orgCompaniesSvc)
 
-	// Org slice (03-03): service lines + positions (E2 F2.4).
-	orgServiceLinesRepo := orgrepo.NewServiceLineRepo(pool)
-	orgServiceLinesSvc := orgsvc.NewServiceLineService(orgServiceLinesRepo, txm)
-	orgServiceLinesHandler := orghttp.NewServiceLineHandler(orgServiceLinesSvc)
-
 	// Org slice (03-04): operational master data — leave types, attendance codes, overtime rules.
 	orgMasterDataRepo := orgrepo.NewMasterDataRepo(pool)
 	orgMasterDataSvc := orgsvc.NewMasterDataService(orgMasterDataRepo, txm)
@@ -318,7 +313,6 @@ func run() error {
 		Auth:                 idHandler,
 		Foundations:          fndHandler,
 		OrgCompanies:         orgCompaniesHandler,
-		OrgServiceLines:      orgServiceLinesHandler,
 		OrgMasterData:        orgMasterDataHandler,
 		People:               peopleHandler,
 		PeopleAgreements:     agreementsHandler,

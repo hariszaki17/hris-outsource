@@ -6,19 +6,19 @@
  * the REAL stack.
  *
  * Coverage:
- *   TR-transfer-atomic  Transfer Budi (SWP-PL-5002 @0022) to SWP-CMP-0021 / different service line
- *                       (TransferModal: tf-company/tf-sl/tf-pos/tf-start + tf-reason) → predecessor TRANSFERRED,
+ *   TR-transfer-atomic  Transfer Budi (SWP-PL-5002 @0022) to SWP-CMP-0021 / new position
+ *                       (TransferModal: tf-company/tf-pos/tf-start + tf-reason) → predecessor TRANSFERRED,
  *                       successor ACTIVE @0021; 0021 roster now shows Budi (and 0022 no longer does)
- *   TR-same-company     Transfer same-company-same-service-line (no-op) → 422 RULE_VIOLATION (API)
+ *   TR-same-company     Transfer same-company-same-position (no-op) → 422 RULE_VIOLATION (API)
  *   TR-vacancy-warn     Transfer to a company without a leader surfaces the destination no-leader warning
  *   TR-auto-vacate      Transferring a leader out of their company auto-vacates their leadership (SL-6)
  *
- * DOM (placement-overlays.tsx TransferModal): tf-company/tf-sl/tf-pos are Combobox pickers;
+ * DOM (placement-overlays.tsx TransferModal): tf-company is a Combobox picker; tf-pos is the
+ *   free-text PositionPicker (typeahead Combobox, no master / FK / service line, locked 2026-06-12);
  *   tf-start/tf-end are native date inputs; tf-reason is a textarea. Form noValidate.
  *
- * Seed: SWP-PL-5002 Budi@0022 "Mall Kelapa Gading" / Parking (SWP-SVC-003);
+ * Seed: SWP-PL-5002 Budi@0022 "Mall Kelapa Gading" / "Petugas Parkir" (free-text position);
  *   SWP-CMP-0021 "Plaza Senayan" (led by Rudi/SWP-SLA-3001); SWP-CMP-0022 has NO leader.
- *   Service lines: SWP-SVC-001 Facility, SWP-SVC-002 Building Management, SWP-SVC-003 Parking.
  *
  * Traceable to: PLC-02, F3.3, TR-*, INV-1 backstop, RULE_VIOLATION.
  */
@@ -60,12 +60,11 @@ test('TR-transfer-atomic · transfer Budi to SWP-CMP-0021 → predecessor TRANSF
   await page.getByRole('button', { name: /Transfer/i }).first().click();
   await expect(page.locator('#tf-start')).toBeVisible({ timeout: 10_000 });
 
-  // New company = Plaza Senayan (SWP-CMP-0021). The seeded positions all belong to the
-  // Parking line (SWP-SVC-003), so keep Parking — the COMPANY change alone makes this a
-  // valid (non-no-op) transfer. Position = Petugas Parkir / Koordinator Lokasi.
+  // New company = Plaza Senayan (SWP-CMP-0021). The COMPANY change alone makes this a valid
+  // (non-no-op) transfer. Position is now FREE-TEXT (typeahead Combobox over existing values);
+  // pick the seeded "Koordinator Lokasi".
   await pickCombobox(page, comboFieldById(page, 'tf-company'), /Plaza Senayan/i, 'Plaza');
-  await pickCombobox(page, comboFieldById(page, 'tf-sl'), /Parking/i, 'Park');
-  await pickCombobox(page, comboFieldById(page, 'tf-pos'), /Koordinator|Petugas/i);
+  await pickCombobox(page, comboFieldById(page, 'tf-pos'), /Koordinator Lokasi/i, 'Koordinator');
   await page.locator('#tf-start').fill(isoDaysFromNow(-2));
   await page.locator('#tf-reason').fill('Rotasi penempatan antar lokasi klien.');
 
@@ -87,22 +86,21 @@ test('TR-transfer-atomic · transfer Budi to SWP-CMP-0021 → predecessor TRANSF
 });
 
 // ---------------------------------------------------------------------------
-// TR-same-company — no-op transfer (same company + same service line) → 422 RULE_VIOLATION
+// TR-same-company — no-op transfer (same company + same position) → 422 RULE_VIOLATION
 // ---------------------------------------------------------------------------
 
-test('TR-same-company · transfer to the same company + same service line → 422 RULE_VIOLATION', async ({
+test('TR-same-company · transfer to the same company + same position → 422 RULE_VIOLATION', async ({
   page,
 }) => {
   await loginAs(page, PERSONAS.hrAdmin);
   await page.goto('/placements');
   await expect(page.getByText(/Penempatan/i).first()).toBeVisible({ timeout: 30_000 });
 
-  // SWP-PL-5002 is Budi @ 0022 / Parking (SWP-SVC-003). Transferring to the SAME company +
-  // SAME service line is a no-op the BE rejects (must use :renew instead).
+  // SWP-PL-5002 is Budi @ 0022 / "Petugas Parkir". Transferring to the SAME company +
+  // SAME position is a no-op the BE rejects (must use :renew instead).
   const res = await apiAs(page, 'POST', '/placements/SWP-PL-5002:transfer', {
     new_client_company_id: 'SWP-CMP-0022',
-    new_service_line_id: 'SWP-SVC-003',
-    new_position_id: 'SWP-POS-014',
+    new_position: 'Petugas Parkir',
     new_start_date: isoDaysFromNow(-1),
     new_end_date: null,
     transfer_reason: 'Uji RULE_VIOLATION no-op transfer.',
@@ -126,8 +124,7 @@ test('TR-vacancy-warn · transfer to a leaderless company → destination no-lea
   // result carries a NO_SHIFT_LEADER_AT_DESTINATION warning.
   const res = await apiAs(page, 'POST', '/placements/SWP-PL-5003:transfer', {
     new_client_company_id: 'SWP-CMP-0022',
-    new_service_line_id: 'SWP-SVC-002',
-    new_position_id: 'SWP-POS-015',
+    new_position: 'Koordinator Lokasi',
     new_start_date: isoDaysFromNow(-1),
     new_end_date: null,
     transfer_reason: 'Transfer ke perusahaan tanpa shift leader.',
@@ -158,8 +155,7 @@ test('TR-auto-vacate · transferring leader Rudi out of SWP-CMP-0021 auto-vacate
   // Transfer Rudi (SWP-PL-5001 @ 0021) to SWP-CMP-0022. SL-6: his leadership of 0021 auto-vacates.
   const res = await apiAs(page, 'POST', '/placements/SWP-PL-5001:transfer', {
     new_client_company_id: 'SWP-CMP-0022',
-    new_service_line_id: 'SWP-SVC-003',
-    new_position_id: 'SWP-POS-014',
+    new_position: 'Petugas Parkir',
     new_start_date: isoDaysFromNow(-1),
     new_end_date: null,
     transfer_reason: 'Transfer pemimpin shift; jabatan lama otomatis kosong.',

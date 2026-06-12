@@ -135,7 +135,6 @@ func toAttendanceCodeResponse(ac domain.AttendanceCode) attendanceCodeResponse {
 // Rates and min_minutes are optional (service applies defaults).
 type createOvertimeRuleRequest struct {
 	Name                *string  `json:"name"`
-	ServiceLineID       *string  `json:"service_line_id"`
 	WeekdayRate         *float64 `json:"weekday_rate"`
 	RestdayRate         *float64 `json:"restday_rate"`
 	HolidayRate         *float64 `json:"holiday_rate"`
@@ -147,7 +146,6 @@ type createOvertimeRuleRequest struct {
 // updateOvertimeRuleRequest is the PATCH /overtime-rules/{id} body.
 type updateOvertimeRuleRequest struct {
 	Name                *string  `json:"name"`
-	ServiceLineID       *string  `json:"service_line_id"`
 	WeekdayRate         *float64 `json:"weekday_rate"`
 	RestdayRate         *float64 `json:"restday_rate"`
 	HolidayRate         *float64 `json:"holiday_rate"`
@@ -156,14 +154,13 @@ type updateOvertimeRuleRequest struct {
 	PreApprovalRequired *bool    `json:"pre_approval_required"`
 }
 
-// overtimeRuleResponse matches the OvertimeRule schema (openapi line 3391+).
+// overtimeRuleResponse matches the OvertimeRule schema.
 // Rates are float64 so JSON round-trips cleanly (avoids float32 noise).
-// service_line_id is nullable (omitempty would hide it — use explicit *string).
+// Overtime rules are GLOBAL ONLY (service_line scope dropped 2026-06-12).
 // Status is uppercased at this boundary.
 type overtimeRuleResponse struct {
 	ID                  string  `json:"id"`
 	Name                string  `json:"name"`
-	ServiceLineID       *string `json:"service_line_id"` // nullable
 	WeekdayRate         float64 `json:"weekday_rate"`
 	RestdayRate         float64 `json:"restday_rate"`
 	HolidayRate         float64 `json:"holiday_rate"`
@@ -179,7 +176,6 @@ func toOvertimeRuleResponse(or domain.OvertimeRule) overtimeRuleResponse {
 	return overtimeRuleResponse{
 		ID:                  or.ID,
 		Name:                or.Name,
-		ServiceLineID:       or.ServiceLineID,
 		WeekdayRate:         or.WeekdayRate,
 		RestdayRate:         or.RestdayRate,
 		HolidayRate:         or.HolidayRate,

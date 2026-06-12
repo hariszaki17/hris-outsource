@@ -1,7 +1,6 @@
 // Package leave — CalendarService: GET /leave-calendar. Returns leave entries
-// overlapping the requested range (a month, or all 12 months of the period) plus
-// per-day service-line-aware coverage clashes (≥2 same-line agents off at the same
-// company). show_pending toggles PENDING_L1/PENDING_HR visibility (APPROVED always).
+// overlapping the requested range (a month, or all 12 months of the period).
+// show_pending toggles PENDING_L1/PENDING_HR visibility (APPROVED always).
 // Leader scope is forced to their led company.
 package leave
 
@@ -34,20 +33,9 @@ type CalendarResult struct {
 	Month       *int
 	ShowPending bool
 	Entries     []dom.LeaveCalendarEntry
-	Clashes     []CalendarClash
 }
 
-// CalendarClash is one service-line-aware coverage clash day.
-type CalendarClash struct {
-	Date            string
-	CompanyID       string
-	CompanyName     *string
-	ServiceLine     string
-	AgentCount      int
-	LeaveRequestIDs []string
-}
-
-// Get returns the calendar grid for the requested range + clash flags.
+// Get returns the calendar grid for the requested range.
 func (s *CalendarService) Get(ctx context.Context, f CalendarFilter) (CalendarResult, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
@@ -79,7 +67,6 @@ func (s *CalendarService) Get(ctx context.Context, f CalendarFilter) (CalendarRe
 		Month:       f.Month,
 		ShowPending: f.ShowPending,
 		Entries:     entries,
-		Clashes:     computeClashes(entries),
 	}, nil
 }
 
@@ -92,57 +79,4 @@ func rangeFor(period int, month *int) (time.Time, time.Time) {
 	}
 	return time.Date(period, 1, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(period, 12, 31, 0, 0, 0, 0, time.UTC)
-}
-
-// computeClashes flags (date, company, service_line) triples where ≥2 same-line
-// agents are off at the same client company on the same day.
-func computeClashes(entries []dom.LeaveCalendarEntry) []CalendarClash {
-	type key struct{ date, company, line string }
-	type agg struct {
-		companyName *string
-		requestIDs  []string
-		employees   map[string]bool
-	}
-	buckets := map[key]*agg{}
-
-	for _, e := range entries {
-		company := ""
-		if e.CompanyID != nil {
-			company = *e.CompanyID
-		}
-		line := ""
-		if e.ServiceLine != nil {
-			line = *e.ServiceLine
-		}
-		if company == "" || line == "" {
-			continue
-		}
-		for d := e.StartDate; !d.After(e.EndDate); d = d.AddDate(0, 0, 1) {
-			k := key{date: d.Format("2006-01-02"), company: company, line: line}
-			b := buckets[k]
-			if b == nil {
-				b = &agg{companyName: e.CompanyName, employees: map[string]bool{}}
-				buckets[k] = b
-			}
-			if !b.employees[e.EmployeeID] {
-				b.employees[e.EmployeeID] = true
-				b.requestIDs = append(b.requestIDs, e.LeaveRequestID)
-			}
-		}
-	}
-
-	var out []CalendarClash
-	for k, b := range buckets {
-		if len(b.employees) >= 2 {
-			out = append(out, CalendarClash{
-				Date:            k.date,
-				CompanyID:       k.company,
-				CompanyName:     b.companyName,
-				ServiceLine:     k.line,
-				AgentCount:      len(b.employees),
-				LeaveRequestIDs: b.requestIDs,
-			})
-		}
-	}
-	return out
 }

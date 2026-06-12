@@ -45,8 +45,7 @@ func (r *AbsenceSweepRepo) FindUnreportedAbsences(ctx context.Context, cutoff ti
 			PlacementID:  row.PlacementID,
 			CompanyID:    row.CompanyID,
 			SiteID:       row.SiteID,
-			PositionID:   row.PositionID,
-			ServiceLine:  row.ServiceLine,
+			Position:     row.Position,
 			ShiftStartAt: row.ShiftStartAt,
 			ShiftEndAt:   row.ShiftEndAt,
 		})
@@ -63,9 +62,8 @@ func (r *AbsenceSweepRepo) CreateAbsentAttendance(ctx context.Context, tx pgx.Tx
 		PlacementID:  p.PlacementID,
 		ScheduleID:   &scheduleID,
 		CompanyID:    p.CompanyID,
-		ServiceLine:  p.ServiceLine,
 		SiteID:       p.SiteID,
-		PositionID:   p.PositionID,
+		Position:     p.Position,
 		ShiftStartAt: &shiftStart,
 		ShiftEndAt:   &shiftEnd,
 	})

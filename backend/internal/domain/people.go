@@ -27,8 +27,8 @@ type EmergencyContact struct {
 // Employee is the domain entity for an SWP employee (F2.1 / EP-*).
 //
 // HasLogin is derived (UserID != nil), never stored.
-// CurrentPosition, CurrentServiceLine, CurrentClientCompany are Phase-5 stubs
-// (always nil until the placements table is wired in Phase 5).
+// CurrentPosition (free-text label) and CurrentClientCompany come from the
+// agent's current placement (E3 read); nil/empty until a placement exists.
 type Employee struct {
 	ID                  string
 	UserID              *string // nullable — linked E1 user when provisioned (EP-3)
@@ -58,28 +58,16 @@ type Employee struct {
 	PhotoObjectKey *string
 	Status         string // "active" | "inactive" (DB lowercase)
 	HasLogin       bool   // derived: UserID != nil
-	// Phase-5 stubs — always nil until placements table is wired.
-	CurrentPosition      *PositionRef
-	CurrentServiceLine   *ServiceLineRef
+	// current_* come from the agent's current placement (E3 read); empty/nil unplaced.
+	// CurrentPosition is a free-text label (no master / FK / ID).
+	CurrentPosition      string
 	CurrentClientCompany *ClientCompanyRef
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	CreatedBy            *string
 }
 
-// PositionRef is the compact position reference embedded in Employee (Phase-5 stub).
-type PositionRef struct {
-	ID   string
-	Name string
-}
-
-// ServiceLineRef is the compact service-line reference embedded in Employee (Phase-5 stub).
-type ServiceLineRef struct {
-	ID   string
-	Name string
-}
-
-// ClientCompanyRef is the compact client-company reference embedded in Employee (Phase-5 stub).
+// ClientCompanyRef is the compact client-company reference embedded in Employee.
 type ClientCompanyRef struct {
 	ID   string
 	Name string

@@ -42,9 +42,8 @@ type Clock func() time.Time
 type AttendanceFilter struct {
 	CompanyID          *string
 	EmployeeID         *string
-	ServiceLine        *string
 	SiteID             *string
-	PositionID         *string
+	Position           *string
 	VerificationStatus []string
 	Status             []string
 	DateFrom           *time.Time
@@ -100,9 +99,8 @@ type CreateManualAttendanceParams struct {
 	PlacementID        string
 	ScheduleID         *string
 	CompanyID          string
-	ServiceLine        string
 	SiteID             string
-	PositionID         string
+	Position           string
 	AttendanceCodeID   *string
 	ShiftStartAt       *time.Time
 	ShiftEndAt         *time.Time
@@ -480,13 +478,11 @@ type ManualCreateRequest struct {
 type ManualAutofillData struct {
 	PlacementID     string
 	CompanyID       string
-	ServiceLine     string
 	SiteID          string
-	PositionID      string
+	Position        string
 	EmployeeName    string
 	CompanyName     string
 	SiteName        *string
-	PositionName    *string
 	ScheduleID      *string
 	ShiftStartAt    *time.Time
 	ShiftEndAt      *time.Time
@@ -585,9 +581,8 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 		PlacementID:        pl.PlacementID,
 		ScheduleID:         schedulePtr,
 		CompanyID:          pl.CompanyID,
-		ServiceLine:        pl.ServiceLine,
 		SiteID:             pl.SiteID,
-		PositionID:         pl.PositionID,
+		Position:           pl.Position,
 		ShiftStartAt:       shiftStartPtr,
 		ShiftEndAt:         shiftEndPtr,
 		CheckInAt:          req.CheckInAt,
