@@ -32,8 +32,8 @@ import { getAttendanceRecordsMock } from './gen/e5/attendance-records/attendance
 import { getAttendanceVerificationMock } from './gen/e5/attendance-verification/attendance-verification.msw.ts';
 import { getClockInOutMock } from './gen/e5/clock-in-out/clock-in-out.msw.ts';
 import { getCorrectionsMock as getE5CorrectionsMock } from './gen/e5/corrections/corrections.msw.ts';
+import { getLeaveBalancesMock } from './gen/e6/leave-balances/leave-balances.msw.ts';
 import { getLeaveCalendarMock } from './gen/e6/leave-calendar/leave-calendar.msw.ts';
-import { getLeaveQuotasMock } from './gen/e6/leave-quotas/leave-quotas.msw.ts';
 import { getLeaveRequestsMock } from './gen/e6/leave-requests/leave-requests.msw.ts';
 import { getHolidaysMock } from './gen/e7/holidays/holidays.msw.ts';
 import { getOvertimeInternalMock } from './gen/e7/overtime-internal/overtime-internal.msw.ts';
@@ -73,7 +73,7 @@ export const handlers: RequestHandler[] = [
   ...getAttendanceVerificationMock(),
   ...getE5CorrectionsMock(),
   // E6 Leave / Cuti (leave-types served by E2 master-data; omitted here to avoid a path clash)
-  ...getLeaveQuotasMock(),
+  ...getLeaveBalancesMock(),
   ...getLeaveRequestsMock(),
   ...getLeaveCalendarMock(),
   // E7 Overtime / Lembur

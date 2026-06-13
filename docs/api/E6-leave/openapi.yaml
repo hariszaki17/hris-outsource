@@ -3,8 +3,8 @@ info:
   title: hris-outsource — E6 Leave Management API
   version: 1.0.0
   description: |
-    OpenAPI contract for **E6 — Leave Management**: leave types (read-through), the per-employee
-    **leave-balance ledger** (grant-lots + consumptions), agent leave requests, two-level
+    OpenAPI contract for **E6 — Leave Management**: leave types (read-through), the
+    **per-type quota ledger** (cap_basis windows), agent leave requests, two-level
     (Shift Leader → HR) approval, HR overrides, schedule integration side-effects, and team/agent
     calendar reads.
 
@@ -13,27 +13,29 @@ info:
     notifications, idempotency, RBAC scope semantics, ID prefix table).
 
     ## Locked product decisions (EPICS.md §8 + FEATURE.md §7)
-    - **Balance = per-employee grant-lot ledger** *(resolved 2026-06-08 — supersedes the per-type
-      `LeaveQuota` model)*. One **pool** per employee held as **`LeaveGrant` lots**; consumption is
-      **FIFO by soonest `expires_at`**, recorded per-lot as **`LeaveConsumption`** rows. `leave_type`
-      is only a **label + document gate (`is_document_required`) + calendar color** — **not** a
-      balance axis. See `GET /leave-balances/by-employee/{employee_id}`, `POST /leave-grants`,
-      `GET /leave-grants`.
-      - **Lots:** one row per insert (`source ∈ {ANNUAL, ADJUSTMENT, MATERNITY, STATUTORY, MIGRATION, BONUS}`),
-        each with its own **hard `expires_at`** (no carryover; an expiry sweep zeroes lapsed lots).
-      - **Earmark:** `null` = the flat pool drawn by ordinary FIFO; a non-null `earmark` purpose code
-        restricts the lot to a request of that purpose and hides it from ordinary FIFO.
-      - **No negative balance:** a request allocates only available (unexpired, matching-earmark) lots;
-        over-balance is blocked (HR pre-funds a lot via `POST /leave-grants` instead).
-      - **Reservation lifecycle:** submit → FIFO **reserve** (`pending_days`); final approve → **commit**
-        (`consumed_days` + `LeaveConsumption` rows); reject/cancel/shorten → **release/reverse**.
+    - **Balance = per-type quota ledger** *(resolved 2026-06-12 — supersedes the grant-lot model)*.
+      `leave_type` is the cap axis: each type carries its own **`cap_basis`** (`ANNUAL_POOL |
+      PER_EVENT | PER_MONTH | PER_YEAR_COUNT | UNCAPPED | LIFETIME_ONCE | SERVICE_UNPAID`) which
+      drives a per-type quota **window** keyed by `period_key` (year · year-month · `EMP`). Each
+      quota-bearing window tracks `entitled_days / used_days / pending_days`; `remaining =
+      entitled − used − pending`. See `GET /leave-balances/by-employee/{employee_id}/types` and
+      `POST /leave-quotas:adjust-entitled`.
+      - **Window auto-open:** the first reserve against a quota-bearing type opens its window at the
+        type entitlement (ANNUAL_POOL: the agreement's annual days; else `cap_value`).
+      - **PER_EVENT / UNCAPPED** types hold **no standing window** — validated per-occurrence at
+        request time (event day-cap / document-bounded), no `entitled/used/pending` row.
+      - **Eligibility gates** (request-time): gender · notice_days · min_service_years ·
+        once-per-year (PER_YEAR_COUNT) · once-per-employment (LIFETIME_ONCE / SERVICE_UNPAID).
+      - **No negative balance:** a quota-bearing reserve/commit is blocked when it would exceed the
+        window's remaining (HR may `:approve-override` to force, or `:adjust-entitled` to raise it).
+      - **Reservation lifecycle:** submit → **reserve** (`pending_days`); final approve → **commit**
+        (`pending → used`); reject/cancel/shorten → **release / reverse**.
     - **Duration** = working days **excluding public holidays**.
       A "working day" is a day the agent would otherwise be **rostered** for a shift (cross-references E4
       `Schedule` for the period). Public holidays come from the E7 holiday calendar (`SWP-HOL-*`).
       Both inputs feed the server-side duration calculation on every `POST /leave-requests`.
-    - **Annual auto-grant** writes a single `ANNUAL` lot (`amount_days = entitlement`,
-      `expires_at = period end`), sourcing `employment_agreements.annual_leave_entitlement_days` (E2).
-    - **Probation / mid-year joiners** = **pro-rated** annual lot (`entitlement × remaining_months / 12`).
+    - **Annual auto-grant** opens the ANNUAL_POOL window at the agreement's
+      `annual_leave_entitlement_days` (E2), expiring at period end.
     - **Half-day leave** — **not in v1**. All requests are full-day units.
     - **Delegate** — informational only (non-binding suggested backfill; coverage is solved by E4 re-roster).
     - **No-leader → HR sole approver** (LA-2): when the agent's company has no `ShiftLeaderAssignment`,
@@ -42,15 +44,14 @@ info:
     - **Team calendar** shows **approved** entries always and **pending** entries via a
       `show_pending` query toggle (default `false`).
 
-    > **Deprecated 2026-06-08:** the per-type `LeaveQuota` schemas + `/leave-quotas*` endpoints are
-    > **superseded** by the grant-lot ledger above. They remain in this spec (marked `deprecated`)
-    > only until consumers migrate to `/leave-grants` + `/leave-balances`; new integrations MUST NOT
-    > use them.
+    > **History:** the grant-lot ledger (`/leave-grants`, `/leave-balances`) and the legacy per-type
+    > `/leave-quotas` list/adjust/bulk-grant endpoints were **removed 2026-06-12** in favor of the
+    > per-type cap_basis ledger above.
 
     ## Cross-epic dependencies
-    - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The flags
-      `is_quota_tracked`, `is_document_required`, and `allows_backdated` on the leave type drive
-      this spec's validation.
+    - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The type's
+      `cap_basis` (+ `cap_value`, gender / notice / service gates) and the
+      `is_document_required` / `allows_backdated` flags drive this spec's validation.
     - **E3** — `Placement` + `ShiftLeaderAssignment` are the source of truth for level-1 routing
       (which leader receives `PENDING_L1`).
     - **E4** — implicit side-effect on `POST /leave-requests/{id}:approve-final` and
@@ -64,9 +65,7 @@ info:
 
     ## Resource ID prefixes (E6-scoped — see CONVENTIONS §4 for the full table)
     - `SWP-LR-*` — Leave Request
-    - `SWP-LG-*` — Leave Grant (one grant-lot in the per-employee ledger)
-    - `SWP-LC-*` — Leave Consumption (one lot-drawdown row linking a request to a grant)
-    - `SWP-LQ-*` — Leave Quota *(deprecated 2026-06-08 — superseded by `SWP-LG`/`SWP-LC`)*
+    - `SWP-LQ-*` — Leave Quota (one per-type quota window in the cap_basis ledger)
     - Cross-epic: `SWP-EMP-*`, `SWP-LT-*`, `SWP-CMP-*`, `SWP-SVC-*`, `SWP-SCH-*`, `SWP-HOL-*`, `SWP-FILE-*`.
   contact:
     name: hris-outsource product+architecture
@@ -82,14 +81,9 @@ servers:
 tags:
   - name: leave-balances
     description: |
-      F6.1 — Per-employee **leave-balance ledger**. Grant-lots (`/leave-grants`), the
-      computed balance (`/leave-balances`), and the per-lot consumption history. Replaces the
-      deprecated `/leave-quotas*` per-type model (2026-06-08).
-  - name: leave-quotas
-    description: |
-      **DEPRECATED 2026-06-08** — per-type `LeaveQuota` (annual + per-type), HR bulk-grant
-      ("Terbitkan Kuota Tahunan") and per-employee adjustments. **Superseded by `leave-balances`**
-      (grant-lot ledger). Retained for migration only; do not build new clients against it.
+      F6.1/F6.5 — Per-type **quota ledger**. The per-type balance view
+      (`/leave-balances/by-employee/{id}/types`) and the HR per-type entitlement adjust
+      (`/leave-quotas:adjust-entitled`), both over the cap_basis windows.
   - name: leave-requests
     description: |
       F6.2 + F6.3 — Agent request lifecycle and two-level (SL → HR) approval workflow,
@@ -106,225 +100,6 @@ tags:
 #  PATHS
 # ────────────────────────────────────────────────────────────────────────────────
 paths:
-
-  # ──────────────────────  LEAVE BALANCE LEDGER (grant-lots)  ──────────────────────
-  /leave-grants:
-    get:
-      tags: [leave-balances]
-      summary: List grant-lots for an employee (the ledger)
-      description: |
-        Returns the per-employee **grant-lots** (`LeaveGrant`). Each lot is one insert with its own
-        `expires_at`; `remaining_days = amount_days - consumed_days - pending_days`. Default scope is
-        **active** lots (`now < expires_at`); set `include_expired=true` for the full ledger.
-
-        Ordering mirrors FIFO allocation: `expires_at` ascending, then `granted_at`, then `id`.
-        Filter `earmark` to see only general-pool (`earmark` omitted → all) or a specific purpose's lots.
-      operationId: listLeaveGrants
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      x-design-screens:
-        - "P6HZ7E"  # E6 · Saldo & Hibah Cuti (HR)
-      parameters:
-        - { $ref: '#/components/parameters/EmployeeIdQuery' }
-        - name: earmark
-          in: query
-          description: Filter by earmark purpose code. Use `__null` to return only general-pool (unearmarked) lots.
-          schema: { type: string, example: MATERNITY }
-        - name: source
-          in: query
-          description: Filter by grant source.
-          schema: { $ref: '#/components/schemas/LeaveGrantSource' }
-        - name: include_expired
-          in: query
-          description: Include lots where `now >= expires_at` (the historical ledger). Defaults to false.
-          schema: { type: boolean, default: false }
-        - name: company_id
-          in: query
-          description: Scope to one client company (resolved via the employee's active placement). Required for `shift_leader` callers.
-          schema: { type: string, example: SWP-CMP-014 }
-        - { $ref: '#/components/parameters/LimitQuery' }
-        - { $ref: '#/components/parameters/CursorQuery' }
-      responses:
-        '200':
-          description: Paginated list of grant-lots.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveGrantListResponse' }
-              examples:
-                ledger:
-                  $ref: '#/components/examples/LeaveGrantListExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-    post:
-      tags: [leave-balances]
-      summary: HR grants a lot — annual / adjustment / bonus / statutory pre-fund (LQ-1, LQ-6, LQ-11)
-      description: |
-        Inserts **one** `LeaveGrant` lot into an employee's ledger. Covers every HR grant flow:
-
-        - **Adjustment / bonus** — unearmarked lot (`earmark` omitted), drawn by ordinary FIFO.
-        - **Statutory / maternity pre-fund (LQ-11)** — earmarked lot (e.g. `source: MATERNITY`,
-          `earmark: "MATERNITY"`); the employee then files a request of that purpose, which draws
-          **only** this lot (LQ-10). No bypass flag, no separate table.
-        - **Manual annual repair** — `source: ANNUAL` with `expires_at` = the period end.
-
-        `remark` is **required** (audited per LQ-6). The server refuses to insert a lot whose
-        `amount_days < 0`. The bulk annual auto-grant remains a scheduled job (not exposed here);
-        the deprecated `/leave-quotas:bulk-grant` is the only batch surface and is migration-only.
-      operationId: createLeaveGrant
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "CGCnL"  # E6 · Tambah Hibah / Sesuaikan Saldo (modal)
-        - "P6HZ7E"
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LeaveGrantWriteRequest' }
-            examples:
-              adjustment_plus_two:
-                $ref: '#/components/examples/CreateGrantAdjustmentExample'
-              maternity_prefund:
-                $ref: '#/components/examples/CreateGrantMaternityExample'
-      responses:
-        '201':
-          description: Lot created.
-          headers:
-            Location:
-              description: URI of the new grant-lot.
-              schema: { type: string, example: /api/v1/leave-grants/SWP-LG-2026-0117 }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveGrant' }
-              examples:
-                created:
-                  $ref: '#/components/examples/LeaveGrantExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/IdempotencyConflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-
-  /leave-grants/{id}:
-    parameters:
-      - name: id
-        in: path
-        required: true
-        schema: { type: string, example: SWP-LG-2026-0117 }
-    get:
-      tags: [leave-balances]
-      summary: Get one grant-lot (with its consumptions)
-      description: |
-        Returns the `LeaveGrant` plus the `LeaveConsumption` rows drawn from it (`consumptions[]`),
-        so HR can audit exactly which requests consumed the lot.
-      operationId: getLeaveGrant
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      parameters:
-        - name: include_consumptions
-          in: query
-          description: Embed the `LeaveConsumption` rows drawn from this lot.
-          schema: { type: boolean, default: true }
-      responses:
-        '200':
-          description: The grant-lot.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveGrant' }
-              examples:
-                lot_with_consumptions:
-                  $ref: '#/components/examples/LeaveGrantWithConsumptionsExample'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-    patch:
-      tags: [leave-balances]
-      summary: HR adjusts an existing lot (amount / expires_at / earmark) with reason (LQ-6)
-      description: |
-        Adjusts a single lot's `amount_days`, `expires_at`, or `earmark`. `remark` is **required**
-        (audited). The server refuses an adjustment that would set `amount_days` below the lot's
-        current `consumed_days + pending_days` (returns 422 `RULE_VIOLATION` with `fields.amount_days`).
-      operationId: adjustLeaveGrant
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "CGCnL"  # E6 · Sesuaikan Saldo (modal)
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LeaveGrantPatchRequest' }
-            examples:
-              extend_expiry:
-                summary: HR extends a lot's expiry and notes why.
-                value:
-                  expires_at: "2027-03-31"
-                  remark: "Perpanjangan masa berlaku sesuai kebijakan HRD 2026-06-08."
-      responses:
-        '200':
-          description: Lot after adjustment.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveGrant' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-
-  /leave-balances/by-employee/{employee_id}:
-    get:
-      tags: [leave-balances]
-      summary: Computed leave balance — total pool + per-earmark lots
-      description: |
-        The agent/HR balance view. Computes, over **active** lots (`now < expires_at`):
-
-        - **`pool_remaining`** — Σ(`amount − consumed − pending`) over **unearmarked** lots (the flat pool).
-        - **`earmarked[]`** — one line **per active earmarked lot**: `{ grant_id, earmark, source,
-          remaining_days, expires_at }` (LQ-10 — drawn only by a request of that purpose).
-        - **`next_expiry`** — the soonest `expires_at` among lots with remaining > 0 (for the
-          "X hari kedaluwarsa DD MMM" hint).
-
-        Mobile balance card (agent self-view, screen `o1BUa`) reads from here; agents may only call
-        with their own `employee_id` (server enforces `scope: self`).
-      operationId: getLeaveBalanceByEmployee
-      x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
-        scope: self
-      x-design-screens:
-        - "o1BUa"  # Agen · Cuti Saya (Saldo & Riwayat) — mobile
-      parameters:
-        - name: employee_id
-          in: path
-          required: true
-          schema: { type: string, example: SWP-EMP-1042 }
-        - name: include_expired_lots
-          in: query
-          description: Also return zeroed/expired lots in `all_lots[]` for the history view.
-          schema: { type: boolean, default: false }
-      responses:
-        '200':
-          description: The employee's computed balance.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveBalance' }
-              examples:
-                agent_self_view:
-                  $ref: '#/components/examples/LeaveBalanceExample'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
 
   /leave-balances/by-employee/{employee_id}/types:
     get:
@@ -364,47 +139,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /leave-balances:
-    get:
-      tags: [leave-balances]
-      summary: List per-employee leave balances (aggregate — the /leave/quotas screen)
-      description: |
-        Returns **ONE ROW PER EMPLOYEE** (`EmployeeLeaveBalance`), rolling up **all** of the
-        employee's **active** grant-lots (`now < expires_at`) into a single line: the flat-pool
-        totals (`pool_total/consumed/pending/remaining` over unearmarked lots), the combined
-        `earmarked_remaining`, the soonest `next_expiry`, and the active `lot_count`. This is the
-        searchable quota directory; drill-in to individual lots uses
-        `GET /leave-grants?employee_id=…` + `GET /leave-balances/by-employee/{employee_id}`.
-
-        An employee appears iff they hold **≥ 1 active (non-expired) lot** — including employees whose
-        lots are fully consumed (a lot is still listed while non-expired). Employees whose lots are all
-        expired are omitted. `q` filters by `full_name`, `nik`, or `nip` (ILIKE), mirroring the people
-        directory. Ordered deterministically by `full_name`, then `employee_id`; keyset cursor on the
-        same pair.
-      operationId: listLeaveBalances
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      x-design-screens:
-        - "P6HZ7E"  # E6 · Saldo & Hibah Cuti (HR)
-      parameters:
-        - name: q
-          in: query
-          description: Free-text search over the employee's `full_name`, `nik`, or `nip` (ILIKE).
-          schema: { type: string, example: "Budi" }
-        - { $ref: '#/components/parameters/LimitQuery' }
-        - { $ref: '#/components/parameters/CursorQuery' }
-      responses:
-        '200':
-          description: Paginated list of per-employee balances.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/EmployeeLeaveBalanceListResponse' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  # ──────────────  LEAVE QUOTAS — DEPRECATED 2026-06-08 (migration only)  ──────────────
   /leave-quotas:adjust-entitled:
     post:
       tags: [leave-balances]
@@ -419,7 +153,7 @@ paths:
         roles: [hr_admin, super_admin]
         scope: all
       parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
       requestBody:
         required: true
         content:
@@ -445,200 +179,6 @@ paths:
                   data: { $ref: '#/components/schemas/LeaveQuota' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-
-  /leave-quotas:
-    get:
-      deprecated: true
-      tags: [leave-quotas]
-      summary: "[DEPRECATED] List leave quotas / balances — use /leave-grants + /leave-balances"
-      description: |
-        Returns balances per `(employee, leave_type, period)`. The default scope is the current
-        calendar-year period. `remaining = total - used - pending` (LQ-1, LQ-2, LQ-5);
-        `pending` reflects `PENDING_L1` + `PENDING_HR` requests holding soft-reservations against the quota
-        so the agent's pre-check matches what they will see on approval.
-      operationId: listLeaveQuotas
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      x-design-screens:
-        - "P6HZ7E"  # E6 · Kuota & Hibah Cuti (HR)
-      parameters:
-        - { $ref: '#/components/parameters/EmployeeIdQuery' }
-        - { $ref: '#/components/parameters/LeaveTypeIdQuery' }
-        - { $ref: '#/components/parameters/PeriodYearQuery' }
-        - name: company_id
-          in: query
-          description: Scope balances to one client company (resolved via the employee's active placement). Required for `shift_leader` callers (server enforces own-company).
-          schema: { type: string, example: SWP-CMP-014 }
-        - name: include_closed
-          in: query
-          description: Include period-end-closed quotas (LQ-4). Defaults to false (current period only).
-          schema: { type: boolean, default: false }
-        - { $ref: '#/components/parameters/LimitQuery' }
-        - { $ref: '#/components/parameters/CursorQuery' }
-      responses:
-        '200':
-          description: Paginated list of LeaveQuota rows.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveQuotaListResponse' }
-              examples:
-                hr_view:
-                  $ref: '#/components/examples/LeaveQuotaListResponseExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /leave-quotas/by-employee/{employee_id}:
-    get:
-      deprecated: true
-      tags: [leave-quotas]
-      summary: "[DEPRECATED] all current-period quotas for one employee — use /leave-balances/by-employee"
-      description: |
-        Mobile balance card (agent self-view, screen `o1BUa`) reads from here. Returns one row per
-        quota-tracked leave type for the **active** calendar-year period; closed/prior periods only
-        when `include_history=true`. Agents may only call with their own `employee_id` (server enforces
-        `scope: self`).
-      operationId: getLeaveQuotasByEmployee
-      x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
-        scope: self  # leader/HR widen via base /leave-quotas
-      x-design-screens:
-        - "o1BUa"  # Agen · Cuti Saya (Saldo & Riwayat) — mobile
-      parameters:
-        - name: employee_id
-          in: path
-          required: true
-          schema: { type: string, example: SWP-EMP-1042 }
-        - name: include_history
-          in: query
-          description: Include closed prior-period quotas for the cross-period selector (audit M14).
-          schema: { type: boolean, default: false }
-      responses:
-        '200':
-          description: Quotas for this employee in the active period (or all periods if `include_history`).
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  employee_id: { type: string, example: SWP-EMP-1042 }
-                  period: { type: integer, example: 2026 }
-                  quotas:
-                    type: array
-                    items: { $ref: '#/components/schemas/LeaveQuota' }
-              examples:
-                agent_self_view:
-                  $ref: '#/components/examples/AgentBalanceExample'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /leave-quotas:bulk-grant:
-    post:
-      deprecated: true
-      tags: [leave-quotas]
-      summary: "[DEPRECATED] HR bulk grant of per-type quotas — annual auto-grant now writes ANNUAL lots"
-      description: |
-        HR-initiated "Terbitkan Kuota Tahunan" — typically run at the start of each calendar year, but
-        also usable as a **repair** mid-period (e.g. catch up new joiners). Idempotent per
-        `Idempotency-Key`; safe to retry. Set `preview: true` to compute the projected counts without
-        writing any rows (the modal's "84 karyawan akan menerima…" affordance).
-
-        - **`pro_rate: true`** — applies `entitlement × remaining_months / 12` to probation employees
-          (active < 12 months) and mid-year joiners (LQ-8). Rounding is half-up to the nearest day.
-        - **`employee_ids: ["all"]`** is a sentinel meaning "every active employee with a placement
-          covering any day of `period`". Here **"active" means the employee's employment agreement is
-          active** (F2.7); the placement need only be **non-terminal** (`Active` / `Scheduled` /
-          `Expiring`) on a covered day. Explicit lists are validated against the active employee set.
-        - **Does NOT overwrite `used`** (`total` is set; `remaining = total - used - pending`). The
-          server refuses to set `total` below the current `used` value for any employee — those rows are
-          returned in `failed[]` per the bulk shape (CONVENTIONS §14).
-      operationId: bulkGrantLeaveQuotas
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "W2zYM"  # E6 · Terbitkan Kuota Tahunan (modal)
-        - "P6HZ7E"
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LeaveQuotaBulkGrantRequest' }
-            examples:
-              annual_2026_with_prorate:
-                $ref: '#/components/examples/BulkGrantAnnualExample'
-              preview_only:
-                $ref: '#/components/examples/BulkGrantPreviewExample'
-      responses:
-        '200':
-          description: |
-            Grant applied (or, if `preview: true`, projected counts only).
-            Returns the standard bulk shape: `succeeded[]` / `failed[]` per affected employee.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveQuotaBulkGrantResponse' }
-              examples:
-                applied:
-                  $ref: '#/components/examples/BulkGrantApplyResponseExample'
-                preview:
-                  $ref: '#/components/examples/BulkGrantPreviewResponseExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/IdempotencyConflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-
-  /leave-quotas/{id}:adjust:
-    post:
-      deprecated: true
-      tags: [leave-quotas]
-      summary: "[DEPRECATED] HR per-type quota adjustment — use POST/PATCH /leave-grants instead"
-      description: |
-        Adjusts a single `LeaveQuota.total` by `delta` (positive grant or negative deduction).
-        `reason` is **required** (audited per LQ-6, surfaced on screen `CGCnL`). The server refuses
-        adjustments that would cause `total < used` (returns 422 `RULE_VIOLATION` with
-        `fields.delta`).
-      operationId: adjustLeaveQuota
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "CGCnL"  # E6 · Sesuaikan Kuota (modal)
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, example: SWP-LQ-2026-EMP-1042-LT-001 }
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/LeaveQuotaAdjustRequest' }
-            examples:
-              add_one_day:
-                summary: HR grants Budi +1 annual day for a goodwill correction.
-                value:
-                  delta: 1
-                  reason: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-      responses:
-        '200':
-          description: Quota after adjustment.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveQuota' }
-              examples:
-                after_adjust:
-                  $ref: '#/components/examples/QuotaAfterAdjustExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
   # ───────────────────────────  LEAVE REQUESTS  ───────────────────────────
@@ -1634,313 +1174,52 @@ components:
       type: string
       enum: [APPROVED, REJECTED, OVERRIDE_APPROVED]
 
-    LeaveGrantSource:
-      type: string
-      description: |
-        Provenance of a grant-lot.
-        - `ANNUAL` — annual entitlement auto-grant (sources `employment_agreements.annual_leave_entitlement_days`).
-        - `ADJUSTMENT` — HR manual correction.
-        - `MATERNITY` — pre-funded maternity lot (usually earmarked `MATERNITY`).
-        - `STATUTORY` — other statutory long-leave pre-fund.
-        - `MIGRATION` — E9 backfill of legacy remaining balance.
-        - `BONUS` — discretionary extra days.
-      enum: [ANNUAL, ADJUSTMENT, MATERNITY, STATUTORY, MIGRATION, BONUS]
-
-    # ── core resources (grant-lot ledger, 2026-06-08) ──
-    LeaveGrant:
-      type: object
-      description: |
-        **One grant-lot** in the per-employee leave-balance ledger (F6.1, resolved 2026-06-08).
-        One row per insert, each with its own hard `expires_at` (no carryover).
-        `remaining_days = amount_days - consumed_days - pending_days`. A lot is **active** while
-        `now < expires_at`. `earmark = null` ⇒ the flat pool (ordinary FIFO); a non-null `earmark`
-        restricts the lot to a request of that purpose and hides it from ordinary FIFO (LQ-10).
-      required: [id, employee_id, amount_days, source, expires_at, consumed_days, pending_days, remaining_days, created_at]
-      properties:
-        id: { type: string, example: SWP-LG-2026-0117 }
-        employee_id: { type: string, example: SWP-EMP-1042 }
-        employee_name: { type: string, example: "Budi Santoso" }
-        amount_days:
-          type: integer
-          minimum: 0
-          description: Days granted by this lot.
-          example: 12
-        source: { $ref: '#/components/schemas/LeaveGrantSource' }
-        earmark:
-          type: [string, "null"]
-          description: |
-            Purpose code restricting consumption. `null` = general pool (drawn by ordinary FIFO);
-            non-null = drawn ONLY by a request of that purpose (LQ-10). Matched against the request's
-            leave-type purpose.
-          example: null
-        remark:
-          type: string
-          description: Required free-text note (audited per LQ-6).
-          example: "Hibah kuota tahunan 2026."
-        granted_at:
-          type: string
-          format: date
-          description: When the lot was granted (defaults to today on create).
-          example: "2026-01-01"
-        effective_from:
-          type: string
-          format: date
-          description: First date the lot may be drawn (defaults to `granted_at`).
-          example: "2026-01-01"
-        expires_at:
-          type: string
-          format: date
-          description: Hard per-lot expiry; remaining is zeroed by the expiry sweep when `now >= expires_at` (LQ-4).
-          example: "2026-12-31"
-        consumed_days:
-          type: integer
-          minimum: 0
-          description: Days committed by APPROVED requests (sum of this lot's `LeaveConsumption.days`).
-          example: 4
-        pending_days:
-          type: integer
-          minimum: 0
-          description: Days reserved by open PENDING_* requests (released on reject/cancel).
-          example: 0
-        remaining_days:
-          type: integer
-          description: '`amount_days - consumed_days - pending_days`. Never driven negative by allocation (LQ-5).'
-          example: 8
-        is_active:
-          type: boolean
-          description: '`now < expires_at`. False once the lot has expired.'
-          example: true
-        consumptions:
-          type: array
-          description: Present on `GET /leave-grants/{id}` when `include_consumptions=true`.
-          items: { $ref: '#/components/schemas/LeaveConsumption' }
-        created_by: { type: string, example: SWP-USR-022 }
-        created_at: { type: string, format: date-time, example: "2026-01-01T00:00:00Z" }
-        updated_at: { type: string, format: date-time, example: "2026-04-22T10:11:00Z" }
-
-    LeaveConsumption:
-      type: object
-      description: |
-        **One lot-drawdown row** (F6.1). Links a `LeaveRequest` to the `LeaveGrant` it drew from.
-        A request that FIFO-spans multiple lots produces one row per lot. Reversed exactly on
-        cancel/shorten (LQ-3).
-      required: [id, leave_request_id, grant_id, days, created_at]
-      properties:
-        id: { type: string, example: SWP-LC-2026-0331 }
-        leave_request_id: { type: string, example: SWP-LR-2026-0042 }
-        grant_id: { type: string, example: SWP-LG-2026-0117 }
-        days:
-          type: integer
-          minimum: 1
-          description: Days drawn from this lot by the request.
-          example: 3
-        created_at: { type: string, format: date-time, example: "2026-06-05T10:00:00Z" }
-
-    LeaveGrantWriteRequest:
-      type: object
-      required: [employee_id, amount_days, expires_at, source, remark]
-      properties:
-        employee_id: { type: string, example: SWP-EMP-1042 }
-        amount_days:
-          type: integer
-          minimum: 0
-          description: Days granted by this lot.
-          example: 2
-        expires_at:
-          type: string
-          format: date
-          description: Hard per-lot expiry (LQ-4). For an `ANNUAL` lot use the period end.
-          example: "2026-12-31"
-        source: { $ref: '#/components/schemas/LeaveGrantSource' }
-        earmark:
-          type: [string, "null"]
-          description: |
-            Optional purpose code. Omit / `null` for a general-pool lot. Set (e.g. `"MATERNITY"`)
-            to pre-fund statutory/long leave that only a request of that purpose may draw (LQ-10/LQ-11).
-          example: null
-        remark:
-          type: string
-          minLength: 5
-          maxLength: 500
-          description: Required (LQ-6 audit).
-          example: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-        effective_from:
-          type: [string, "null"]
-          format: date
-          description: First date the lot may be drawn. Defaults to today.
-          example: null
-
-    LeaveGrantPatchRequest:
-      type: object
-      required: [remark]
-      description: |
-        Adjust an existing lot. `remark` is required (audited). Cannot set `amount_days` below the
-        lot's current `consumed_days + pending_days`.
-      properties:
-        amount_days: { type: [integer, "null"], minimum: 0, example: 3 }
-        expires_at: { type: [string, "null"], format: date, example: "2027-03-31" }
-        earmark: { type: [string, "null"], example: MATERNITY }
-        remark:
-          type: string
-          minLength: 5
-          maxLength: 500
-          example: "Perpanjangan masa berlaku sesuai kebijakan HRD."
-
-    LeaveGrantListResponse:
-      type: object
-      required: [data, has_more]
-      properties:
-        data:
-          type: array
-          items: { $ref: '#/components/schemas/LeaveGrant' }
-        next_cursor: { type: [string, "null"] }
-        has_more: { type: boolean }
-
-    LeaveBalance:
-      type: object
-      description: |
-        Computed per-employee balance over **active** lots (F6.1). `pool_remaining` is the flat
-        (unearmarked) pool; `earmarked[]` is one line per active earmarked lot.
-      required: [employee_id, pool_remaining, pending_total, earmarked]
-      properties:
-        employee_id: { type: string, example: SWP-EMP-1042 }
-        employee_name: { type: string, example: "Budi Santoso" }
-        pool_remaining:
-          type: integer
-          description: Σ(`amount - consumed - pending`) over active **unearmarked** lots.
-          example: 8
-        pending_total:
-          type: integer
-          description: Days currently reserved by this employee's open PENDING_* requests (across all lots).
-          example: 0
-        next_expiry:
-          type: [string, "null"]
-          format: date
-          description: Soonest `expires_at` among lots with remaining > 0 (for the "kedaluwarsa" hint).
-          example: "2026-12-31"
-        earmarked:
-          type: array
-          description: One line per active earmarked lot (drawn only by a request of that purpose, LQ-10).
-          items: { $ref: '#/components/schemas/LeaveBalanceEarmarkLine' }
-        all_lots:
-          type: array
-          description: Full active-lot breakdown (and expired lots when `include_expired_lots=true`).
-          items: { $ref: '#/components/schemas/LeaveGrant' }
-
-    LeaveBalanceEarmarkLine:
-      type: object
-      required: [grant_id, earmark, remaining_days, expires_at]
-      properties:
-        grant_id: { type: string, example: SWP-LG-2026-0205 }
-        earmark: { type: string, example: MATERNITY }
-        source: { $ref: '#/components/schemas/LeaveGrantSource' }
-        remaining_days: { type: integer, example: 90 }
-        expires_at: { type: string, format: date, example: "2027-03-31" }
-
-    EmployeeLeaveBalance:
-      type: object
-      description: |
-        One aggregate row in the per-employee balance LIST (`GET /leave-balances`, the
-        `/leave/quotas` screen). Rolls up all of the employee's **active** lots: the flat-pool
-        totals (over unearmarked lots) + the combined earmarked remaining + the soonest expiry +
-        the active lot count. `id` mirrors `employee_id` (the list row key).
-      required:
-        [id, employee_id, full_name, nik, nip, pool_total, pool_consumed, pool_pending,
-         pool_remaining, earmarked_remaining, lot_count]
-      properties:
-        id: { type: string, example: SWP-EMP-1042, description: Row key — equals `employee_id`. }
-        employee_id: { type: string, example: SWP-EMP-1042 }
-        full_name: { type: string, example: "Budi Santoso" }
-        nik: { type: string, example: "3201234567890001", description: Indonesian KTP number. }
-        nip: { type: string, example: "SWP-0042", description: SWP internal employee number. }
-        pool_total:
-          type: integer
-          description: Σ `amount_days` over active **unearmarked** lots (the flat pool grant total).
-          example: 12
-        pool_consumed:
-          type: integer
-          description: Σ `consumed_days` over active unearmarked lots.
-          example: 4
-        pool_pending:
-          type: integer
-          description: Σ `pending_days` over active unearmarked lots (open PENDING_* reservations).
-          example: 0
-        pool_remaining:
-          type: integer
-          description: "`pool_total - pool_consumed - pool_pending`."
-          example: 8
-        earmarked_remaining:
-          type: integer
-          description: Σ(`amount - consumed - pending`) over active **earmarked** lots (LQ-10).
-          example: 90
-        next_expiry:
-          type: [string, "null"]
-          format: date
-          description: Soonest `expires_at` among active lots with remaining > 0; null when none remain.
-          example: "2026-12-31"
-        lot_count:
-          type: integer
-          description: Count of active (non-expired) lots held by the employee (earmarked + pool).
-          example: 3
-
-    EmployeeLeaveBalanceListResponse:
-      type: object
-      required: [data, has_more]
-      properties:
-        data:
-          type: array
-          items: { $ref: '#/components/schemas/EmployeeLeaveBalance' }
-        next_cursor: { type: [string, "null"] }
-        has_more: { type: boolean }
-
-    # ── deprecated per-type quota schemas (2026-06-08) ──
     LeaveQuota:
-      deprecated: true
       type: object
       description: |
-        **DEPRECATED 2026-06-08 — superseded by `LeaveGrant`/`LeaveConsumption` (grant-lot ledger).**
-        One row per `(employee, leave_type, period)`. `pending` reflects soft-reservations
-        from open `PENDING_*` requests; `remaining = total - used - pending`.
-      required: [id, employee_id, leave_type_id, period, total, used, pending, remaining]
+        One per-type quota **window** under the cap_basis ledger (2026-06-12): one row
+        per `(employee, leave_type, period_key)`. `period_key` is the window key —
+        `<year>` (ANNUAL_POOL / PER_YEAR_COUNT) · `<year>-<MM>` (PER_MONTH) · `EMP`
+        (LIFETIME_ONCE / SERVICE_UNPAID). `remaining = entitled_days - used_days -
+        pending_days`. Returned by `POST /leave-quotas:adjust-entitled`.
+      required: [id, employee_id, leave_type_id, period_key, entitled_days, used_days, pending_days, remaining]
       properties:
-        id: { type: string, example: SWP-LQ-2026-EMP-1042-LT-001 }
+        id: { type: string, example: SWP-LQ-1042-001-2026 }
         employee_id: { type: string, example: SWP-EMP-1042 }
         employee_name: { type: string, example: "Budi Santoso" }
         leave_type_id: { type: string, example: SWP-LT-001 }
         leave_type_name: { type: string, example: "Cuti Tahunan" }
-        period: { type: integer, description: Calendar year., example: 2026 }
-        period_start: { type: string, format: date, example: "2026-01-01" }
-        period_end: { type: string, format: date, example: "2026-12-31" }
-        total:
+        period_key:
+          type: string
+          description: The window key (year · year-month · `EMP`) per the type's cap_basis.
+          example: "2026"
+        entitled_days:
           type: integer
-          description: Entitlement in days (possibly pro-rated per LQ-8).
+          description: Entitlement in days for this window.
           example: 12
-        used:
+        used_days:
           type: integer
-          description: Days deducted from already-APPROVED requests.
+          description: Days committed by APPROVED requests.
           example: 4
-        pending:
+        pending_days:
           type: integer
           description: Days held by open PENDING_L1 / PENDING_HR requests.
           example: 0
         remaining:
           type: integer
-          description: |
-            `total - used - pending`. May go negative if an HR `:approve-override` was used
-            (LA-8); `last_override` will be set.
+          description: "`entitled_days - used_days - pending_days` (never negative by design)."
           example: 8
-        is_prorated:
-          type: boolean
-          description: True if this row received the LQ-8 pro-ration treatment.
-          example: false
-        prorate_months:
-          type: integer
-          description: Number of remaining months used in the pro-rate formula (when `is_prorated`).
-          example: 0
-        closed:
-          type: boolean
-          description: True after the period-end expiry job ran (LQ-4).
-          example: false
+        source:
+          type: string
+          enum: [AUTO, ADJUSTMENT, MIGRATION]
+          description: How the window was created.
+          example: AUTO
+        remark: { type: string, example: "Kuota tahunan 2026." }
+        expires_at:
+          type: string
+          format: date
+          nullable: true
+          example: "2026-12-31"
         last_adjustment:
           type: object
           description: Last LQ-6 manual adjustment (if any).
@@ -1961,109 +1240,6 @@ components:
             overridden_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time, example: "2026-01-01T00:00:00Z" }
         updated_at: { type: string, format: date-time, example: "2026-06-01T08:32:00Z" }
-
-    LeaveQuotaListResponse:
-      deprecated: true
-      type: object
-      required: [data, has_more]
-      properties:
-        data:
-          type: array
-          items: { $ref: '#/components/schemas/LeaveQuota' }
-        next_cursor: { type: string, nullable: true }
-        has_more: { type: boolean }
-
-    LeaveQuotaAdjustRequest:
-      deprecated: true
-      type: object
-      required: [delta, reason]
-      properties:
-        delta:
-          type: integer
-          description: |
-            Signed integer added to `total`. Negative deductions cannot bring `total` below
-            current `used` (server returns 422 `RULE_VIOLATION`).
-          example: 1
-        reason:
-          type: string
-          minLength: 5
-          maxLength: 500
-          description: Required (LQ-6 audit).
-          example: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-
-    LeaveQuotaBulkGrantRequest:
-      deprecated: true
-      type: object
-      required: [leave_type_id, period]
-      properties:
-        leave_type_id:
-          type: string
-          description: Quota-tracked leave type (`is_quota_tracked == true`).
-          example: SWP-LT-001
-        period:
-          type: integer
-          description: Calendar year.
-          example: 2026
-        default_entitlement_days:
-          type: integer
-          description: |
-            Default days granted (e.g. 12 for annual). When omitted, falls back to
-            `LeaveType.default_entitlement_days` from E2 master.
-          example: 12
-        employee_ids:
-          oneOf:
-            - type: array
-              items: { type: string }
-              example: ["SWP-EMP-1042", "SWP-EMP-1043"]
-            - type: array
-              items: { type: string, enum: [all] }
-              description: "Sentinel — `[\"all\"]` means every employee with an active employment agreement (F2.7) holding a non-terminal placement (Active/Scheduled/Expiring)."
-              example: ["all"]
-        pro_rate:
-          type: boolean
-          description: |
-            When `true`, employees on probation (active < 12 months) or with a mid-year join date
-            receive `entitlement × remaining_months / 12` rounded half-up (LQ-8).
-          default: false
-        preview:
-          type: boolean
-          description: |
-            When `true`, server computes and returns the projected counts (per-employee totals)
-            but writes nothing — powers the modal preview ("84 karyawan akan menerima…").
-          default: false
-
-    LeaveQuotaBulkGrantResponse:
-      deprecated: true
-      type: object
-      required: [preview, total_affected, succeeded, failed]
-      properties:
-        preview:
-          type: boolean
-          description: Mirrors the request flag.
-        total_affected:
-          type: integer
-          description: Number of employees in the grant set.
-          example: 84
-        succeeded:
-          type: array
-          description: |
-            Employees that were granted (or would be, in preview). One entry per row.
-          items:
-            type: object
-            properties:
-              employee_id: { type: string, example: SWP-EMP-1042 }
-              employee_name: { type: string, example: "Budi Santoso" }
-              quota_id: { type: string, nullable: true, example: SWP-LQ-2026-EMP-1042-LT-001 }
-              total: { type: integer, example: 12 }
-              is_prorated: { type: boolean, example: false }
-              prorate_months: { type: integer, nullable: true, example: null }
-        failed:
-          type: array
-          items:
-            type: object
-            properties:
-              employee_id: { type: string, example: SWP-EMP-1099 }
-              error: { $ref: '#/components/schemas/ErrorDetail' }
 
     LeaveType:
       type: object
@@ -2229,36 +1405,20 @@ components:
     BalanceCheck:
       type: object
       description: |
-        Snapshot of the **allocation** at the time of the most recent server-side check
-        (submit-reserve or final-approve-commit). `remaining_days_at_check` is the available balance
-        over eligible (unexpired, matching-earmark) grant-lots at check time. `allocation[]` lists the
-        per-lot FIFO split (LQ-9). Re-used in `422 BALANCE_RECHECK_FAILED` payloads.
+        Snapshot taken at the most recent server-side check (submit-reserve or
+        final-approve-commit). `remaining_days_at_check` is the per-type window's
+        available balance (entitled − used − pending) at check time. Re-used in the
+        `422` over-cap payloads.
       properties:
         requested_days: { type: integer, example: 3 }
         remaining_days_at_check:
           type: integer
-          description: Available balance over eligible grant-lots at check time (LQ-5/LQ-9).
+          description: The per-type window's available balance at check time.
           example: 8
-        earmark:
-          type: [string, "null"]
-          description: The earmark the request draws against (`null` = ordinary pool).
-          example: null
-        allocation:
-          type: array
-          description: |
-            Per-lot FIFO split that was reserved (submit) or committed (final approval). One entry
-            per lot drawn, ordered by soonest `expires_at` (LQ-9).
-          items:
-            type: object
-            required: [grant_id, days, expires_at]
-            properties:
-              grant_id: { type: string, example: SWP-LG-2026-0117 }
-              days: { type: integer, example: 3 }
-              expires_at: { type: string, format: date, example: "2026-12-31" }
         checked_at: { type: string, format: date-time, example: "2026-06-03T08:00:01Z" }
         requires_override:
           type: boolean
-          description: True when `requested_days > remaining_days_at_check` and HR may override (LA-5 / LA-8) or pre-fund a lot (LQ-11).
+          description: True when `requested_days > remaining_days_at_check` and HR may override (LA-5 / LA-8).
           example: false
 
     ScheduleImpactEntry:
@@ -2427,331 +1587,6 @@ components:
   # ──────────────────────────────  EXAMPLES  ─────────────────────────────
   examples:
     # ── grant-lot ledger (2026-06-08) ──
-    LeaveGrantListExample:
-      summary: Budi's active ledger — an ANNUAL lot plus a small ADJUSTMENT lot.
-      value:
-        data:
-          - id: SWP-LG-2026-0117
-            employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            amount_days: 12
-            source: ANNUAL
-            earmark: null
-            remark: "Hibah kuota tahunan 2026."
-            granted_at: "2026-01-01"
-            effective_from: "2026-01-01"
-            expires_at: "2026-12-31"
-            consumed_days: 4
-            pending_days: 0
-            remaining_days: 8
-            is_active: true
-            created_by: SWP-USR-022
-            created_at: "2026-01-01T00:00:00Z"
-            updated_at: "2026-04-22T10:11:00Z"
-          - id: SWP-LG-2026-0188
-            employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            amount_days: 2
-            source: ADJUSTMENT
-            earmark: null
-            remark: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-            granted_at: "2026-06-01"
-            effective_from: "2026-06-01"
-            expires_at: "2026-12-31"
-            consumed_days: 0
-            pending_days: 0
-            remaining_days: 2
-            is_active: true
-            created_by: SWP-USR-022
-            created_at: "2026-06-01T08:32:00Z"
-            updated_at: "2026-06-01T08:32:00Z"
-        next_cursor: null
-        has_more: false
-
-    LeaveGrantExample:
-      summary: A newly created ADJUSTMENT lot.
-      value:
-        id: SWP-LG-2026-0188
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        amount_days: 2
-        source: ADJUSTMENT
-        earmark: null
-        remark: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-        granted_at: "2026-06-01"
-        effective_from: "2026-06-01"
-        expires_at: "2026-12-31"
-        consumed_days: 0
-        pending_days: 0
-        remaining_days: 2
-        is_active: true
-        created_by: SWP-USR-022
-        created_at: "2026-06-01T08:32:00Z"
-        updated_at: "2026-06-01T08:32:00Z"
-
-    LeaveGrantWithConsumptionsExample:
-      summary: The ANNUAL lot with the consumption rows that drew from it.
-      value:
-        id: SWP-LG-2026-0117
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        amount_days: 12
-        source: ANNUAL
-        earmark: null
-        remark: "Hibah kuota tahunan 2026."
-        granted_at: "2026-01-01"
-        effective_from: "2026-01-01"
-        expires_at: "2026-12-31"
-        consumed_days: 4
-        pending_days: 0
-        remaining_days: 8
-        is_active: true
-        consumptions:
-          - id: SWP-LC-2026-0210
-            leave_request_id: SWP-LR-2026-0021
-            grant_id: SWP-LG-2026-0117
-            days: 1
-            created_at: "2026-03-10T09:00:00Z"
-          - id: SWP-LC-2026-0331
-            leave_request_id: SWP-LR-2026-0042
-            grant_id: SWP-LG-2026-0117
-            days: 3
-            created_at: "2026-06-05T10:00:00Z"
-        created_by: SWP-USR-022
-        created_at: "2026-01-01T00:00:00Z"
-        updated_at: "2026-06-05T10:00:00Z"
-
-    CreateGrantAdjustmentExample:
-      summary: HR grants Budi +2 general-pool days (ADJUSTMENT).
-      value:
-        employee_id: SWP-EMP-1042
-        amount_days: 2
-        expires_at: "2026-12-31"
-        source: ADJUSTMENT
-        remark: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-
-    CreateGrantMaternityExample:
-      summary: HR pre-funds a 90-day MATERNITY lot, earmarked so only a maternity request draws it.
-      value:
-        employee_id: SWP-EMP-1188
-        amount_days: 90
-        expires_at: "2027-03-31"
-        source: MATERNITY
-        earmark: MATERNITY
-        remark: "Cuti melahirkan sesuai SK cuti 2026-06-08."
-
-    LeaveBalanceExample:
-      summary: Mobile balance card (Budi) — flat pool + one earmarked maternity lot.
-      value:
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        pool_remaining: 10
-        pending_total: 0
-        next_expiry: "2026-12-31"
-        earmarked:
-          - grant_id: SWP-LG-2026-0205
-            earmark: MATERNITY
-            source: MATERNITY
-            remaining_days: 90
-            expires_at: "2027-03-31"
-        all_lots:
-          - id: SWP-LG-2026-0117
-            employee_id: SWP-EMP-1042
-            amount_days: 12
-            source: ANNUAL
-            earmark: null
-            remark: "Hibah kuota tahunan 2026."
-            granted_at: "2026-01-01"
-            effective_from: "2026-01-01"
-            expires_at: "2026-12-31"
-            consumed_days: 4
-            pending_days: 0
-            remaining_days: 8
-            is_active: true
-            created_by: SWP-USR-022
-            created_at: "2026-01-01T00:00:00Z"
-            updated_at: "2026-04-22T10:11:00Z"
-          - id: SWP-LG-2026-0188
-            employee_id: SWP-EMP-1042
-            amount_days: 2
-            source: ADJUSTMENT
-            earmark: null
-            remark: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-            granted_at: "2026-06-01"
-            effective_from: "2026-06-01"
-            expires_at: "2026-12-31"
-            consumed_days: 0
-            pending_days: 0
-            remaining_days: 2
-            is_active: true
-            created_by: SWP-USR-022
-            created_at: "2026-06-01T08:32:00Z"
-            updated_at: "2026-06-01T08:32:00Z"
-
-    # ── deprecated quota examples (2026-06-08) ──
-    LeaveQuotaListResponseExample:
-      summary: "[DEPRECATED] HR view — quota table for the 2026 period."
-      value:
-        data:
-          - id: SWP-LQ-2026-EMP-1042-LT-001
-            employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            leave_type_id: SWP-LT-001
-            leave_type_name: "Cuti Tahunan"
-            period: 2026
-            period_start: "2026-01-01"
-            period_end: "2026-12-31"
-            total: 12
-            used: 4
-            pending: 0
-            remaining: 8
-            is_prorated: false
-            prorate_months: 0
-            closed: false
-            last_adjustment: null
-            last_override: null
-            created_at: "2026-01-01T00:00:00Z"
-            updated_at: "2026-04-22T10:11:00Z"
-          - id: SWP-LQ-2026-EMP-1042-LT-002
-            employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            leave_type_id: SWP-LT-002
-            leave_type_name: "Cuti Sakit"
-            period: 2026
-            period_start: "2026-01-01"
-            period_end: "2026-12-31"
-            total: 12
-            used: 2
-            pending: 0
-            remaining: 10
-            is_prorated: false
-            prorate_months: 0
-            closed: false
-            last_adjustment: null
-            last_override: null
-            created_at: "2026-01-01T00:00:00Z"
-            updated_at: "2026-03-08T07:00:00Z"
-        next_cursor: null
-        has_more: false
-
-    AgentBalanceExample:
-      summary: Mobile balance card (Budi).
-      value:
-        employee_id: SWP-EMP-1042
-        period: 2026
-        quotas:
-          - id: SWP-LQ-2026-EMP-1042-LT-001
-            employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            leave_type_id: SWP-LT-001
-            leave_type_name: "Cuti Tahunan"
-            period: 2026
-            period_start: "2026-01-01"
-            period_end: "2026-12-31"
-            total: 12
-            used: 4
-            pending: 0
-            remaining: 8
-            is_prorated: false
-            prorate_months: 0
-            closed: false
-            created_at: "2026-01-01T00:00:00Z"
-            updated_at: "2026-04-22T10:11:00Z"
-
-    BulkGrantAnnualExample:
-      summary: HR runs Terbitkan Kuota Tahunan for 2026 with pro-rate.
-      value:
-        leave_type_id: SWP-LT-001
-        period: 2026
-        default_entitlement_days: 12
-        employee_ids: ["all"]
-        pro_rate: true
-        preview: false
-
-    BulkGrantPreviewExample:
-      summary: Same call but preview only.
-      value:
-        leave_type_id: SWP-LT-001
-        period: 2026
-        default_entitlement_days: 12
-        employee_ids: ["all"]
-        pro_rate: true
-        preview: true
-
-    BulkGrantApplyResponseExample:
-      summary: 84 employees granted; 1 failed (would have set total < used).
-      value:
-        preview: false
-        total_affected: 85
-        succeeded:
-          - employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            quota_id: SWP-LQ-2026-EMP-1042-LT-001
-            total: 12
-            is_prorated: false
-            prorate_months: null
-          - employee_id: SWP-EMP-1188
-            employee_name: "Dewi Lestari"
-            quota_id: SWP-LQ-2026-EMP-1188-LT-001
-            total: 7
-            is_prorated: true
-            prorate_months: 7
-        failed:
-          - employee_id: SWP-EMP-1099
-            error:
-              code: RULE_VIOLATION
-              message: "Total baru (12) lebih rendah dari yang sudah terpakai (14)."
-              fields:
-                used: 14
-                requested_total: 12
-
-    BulkGrantPreviewResponseExample:
-      summary: Preview run — no rows written.
-      value:
-        preview: true
-        total_affected: 84
-        succeeded:
-          - employee_id: SWP-EMP-1042
-            employee_name: "Budi Santoso"
-            quota_id: null
-            total: 12
-            is_prorated: false
-            prorate_months: null
-          - employee_id: SWP-EMP-1188
-            employee_name: "Dewi Lestari"
-            quota_id: null
-            total: 7
-            is_prorated: true
-            prorate_months: 7
-        failed: []
-
-    QuotaAfterAdjustExample:
-      summary: After HR +1 adjustment on Budi.
-      value:
-        id: SWP-LQ-2026-EMP-1042-LT-001
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        period: 2026
-        period_start: "2026-01-01"
-        period_end: "2026-12-31"
-        total: 13
-        used: 4
-        pending: 0
-        remaining: 9
-        is_prorated: false
-        prorate_months: 0
-        closed: false
-        last_adjustment:
-          delta: 1
-          reason: "Koreksi entitlement sesuai surat HRD 2026-06-01."
-          adjusted_by: SWP-USR-022
-          adjusted_at: "2026-06-01T08:32:00Z"
-        last_override: null
-        created_at: "2026-01-01T00:00:00Z"
-        updated_at: "2026-06-01T08:32:00Z"
-
     HRQueueExample:
       summary: HR L2 queue — 2 pending HR rows.
       value:
