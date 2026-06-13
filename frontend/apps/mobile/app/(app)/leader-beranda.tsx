@@ -1,16 +1,17 @@
 /**
  * Shift Leader — Beranda (Home Dashboard) screen.
  *
- * Design reference: .pen frame UMzuO
+ * Design reference: brainstorm.pen frame UMzuO ("E10 · Beranda Pemimpin Shift (Mobile)").
  * Feature: F10.2 · DB-8 (LeaderDashboard mobile surface)
  * API: useGetMyDashboard() → Dashboard → narrow to LeaderDashboard (role === 'shift_leader')
  *
- * Layout (vertical): AppBar title "Beranda" + company scope subtitle → Body sections:
- *  1. Hari Ini   — date + 4-stat row + pending_verifications line
- *  2. Perlu Tindakan — pending_counts rows with count chips + chevron
- *  3. Peringatan Jadwal — schedule_alerts[] rows with warn/bad tone + deep-link
+ * Layout: AppBar (title "Beranda" + bell, company-scope subtitle, bottom border) → Body:
+ *  1. Hari Ini        — date + 4 stat tiles (surface-2) + pending-verifications warn line
+ *  2. Perlu Tindakan  — pending_counts rows with count chips + chevron
+ *  3. Peringatan Jadwal — schedule_alerts[] rows with warn/bad tone icon
  *
- * No new API endpoint; no codegen. Types imported from @swp/api-client/e10.
+ * Scope subtitle = company.name only (service line was removed 2026-06-12; the .pen frame still
+ * shows "· Facility Services" but that is stale). No new API endpoint; no codegen.
  */
 import {
   type Dashboard,
@@ -20,33 +21,34 @@ import {
   type LeaderDashboardToday,
   useGetMyDashboard,
 } from '@swp/api-client/e10';
+import { color } from '@swp/design-tokens';
 import { formatDate } from '@swp/shared/datetime';
 import { useRouter } from 'expo-router';
+import { Bell, ChevronRight, TriangleAlert } from 'lucide-react-native';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
-import { Card } from '../../src/ui/Card';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../../src/ui/Text';
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-/** Single numeric stat chip with a label below. */
-function StatBox({
+// Card shell — .pen sections: rounded-card, 1px border, surface, padding 14, vertical gap 12.
+function SectionCard({ children }: { children: React.ReactNode }) {
+  return (
+    <View className="gap-3 rounded-card border border-border bg-surface p-3.5">{children}</View>
+  );
+}
+
+/** One stat tile (surface-2 chip): big colored value + small label. */
+function StatTile({
   value,
   label,
   textClass,
-}: {
-  value: number;
-  label: string;
-  textClass?: string;
-}) {
+}: { value: number; label: string; textClass: string }) {
   return (
-    <View className="flex-1 items-center">
-      <Text variant="title" className={`font-bold ${textClass ?? 'text-text'}`}>
-        {String(value)}
-      </Text>
-      <Text variant="caption" className="mt-1 text-center text-text-3">
-        {label}
-      </Text>
+    <View className="flex-1 items-center gap-0.5 rounded-[10px] bg-surface-2 p-2">
+      <Text className={`text-[19px] font-sans-bold ${textClass}`}>{String(value)}</Text>
+      <Text className="text-xs font-sans-medium text-text-2">{label}</Text>
     </View>
   );
 }
@@ -55,44 +57,48 @@ function StatBox({
 function HariIniCard({ today }: { today: LeaderDashboardToday }) {
   const { t } = useTranslation();
   return (
-    <Card>
-      <Text variant="caption" className="text-text-3">
-        {formatDate(today.date)}
-      </Text>
+    <SectionCard>
+      <View className="flex-row items-center justify-between">
+        <Text className="text-sm font-sans-semibold text-text">
+          {t('m:leaderBeranda.sectionToday')}
+        </Text>
+        <Text className="text-xs font-sans-medium text-text-2">{formatDate(today.date)}</Text>
+      </View>
 
-      {/* 4-stat row */}
-      <View className="mt-3 flex-row">
-        <StatBox value={today.shifts_total} label={t('m:leaderBeranda.statShifts')} />
-        <StatBox
+      <View className="flex-row gap-2">
+        <StatTile
+          value={today.shifts_total}
+          label={t('m:leaderBeranda.statShifts')}
+          textClass="text-text"
+        />
+        <StatTile
           value={today.clocked_in}
           label={t('m:leaderBeranda.statClockedIn')}
           textClass="text-ok-text"
         />
-        <StatBox
+        <StatTile
           value={today.late_count}
           label={t('m:leaderBeranda.statLate')}
-          textClass="text-warn-text"
+          textClass="text-orange-text"
         />
-        <StatBox
+        <StatTile
           value={today.absent_count}
           label={t('m:leaderBeranda.statAbsent')}
           textClass="text-bad-text"
         />
       </View>
 
-      {/* Pending verifications line */}
       {today.pending_verifications > 0 ? (
-        <View className="mt-3 rounded-control bg-warn-bg px-3 py-2">
-          <Text variant="caption" className="text-warn-text font-semibold">
-            {t('m:leaderBeranda.pendingVerif', { count: today.pending_verifications })}
+        <View className="flex-row items-center justify-between rounded-input bg-warn-bg px-2.5 py-2">
+          <Text className="text-xs font-sans-medium text-warn-text">
+            {t('m:leaderBeranda.pendingVerif')}
+          </Text>
+          <Text className="text-xs font-sans-bold text-warn-text">
+            {String(today.pending_verifications)}
           </Text>
         </View>
-      ) : (
-        <Text variant="caption" className="mt-3 text-text-3">
-          {t('m:leaderBeranda.noVerifPending')}
-        </Text>
-      )}
-    </Card>
+      ) : null}
+    </SectionCard>
   );
 }
 
@@ -101,8 +107,8 @@ function CountChip({ count, tone }: { count: number; tone: 'warn' | 'bad' | 'inf
   const bgClass = { warn: 'bg-warn-bg', bad: 'bg-bad-bg', info: 'bg-info-bg' }[tone];
   const textClass = { warn: 'text-warn-text', bad: 'text-bad-text', info: 'text-info-text' }[tone];
   return (
-    <View className={`rounded-pill px-2 py-1 ${bgClass}`}>
-      <Text className={`text-xs font-semibold ${textClass}`}>{String(count)}</Text>
+    <View className={`rounded-pill px-2 py-0.5 ${bgClass}`}>
+      <Text className={`text-xs font-sans-semibold ${textClass}`}>{String(count)}</Text>
     </View>
   );
 }
@@ -113,22 +119,23 @@ function ActionRow({
   count,
   tone,
   onPress,
+  divider,
 }: {
   label: string;
   count: number;
   tone: 'warn' | 'bad' | 'info';
   onPress: () => void;
+  divider: boolean;
 }) {
   return (
-    <Pressable onPress={onPress}>
-      <View className="flex-row items-center justify-between py-2">
-        <Text variant="body">{label}</Text>
-        <View className="flex-row items-center gap-2">
-          <CountChip count={count} tone={tone} />
-          <Text variant="caption" className="text-text-3">
-            ›
-          </Text>
-        </View>
+    <Pressable
+      onPress={onPress}
+      className={`flex-row items-center justify-between py-2 ${divider ? 'border-t border-border-soft' : ''}`}
+    >
+      <Text className="text-[13px] font-sans-medium text-text">{label}</Text>
+      <View className="flex-row items-center gap-2">
+        <CountChip count={count} tone={tone} />
+        <ChevronRight size={16} color={color.text2} />
       </View>
     </Pressable>
   );
@@ -138,60 +145,56 @@ function ActionRow({
 function PerluTindakanCard({ pending }: { pending: LeaderDashboardPendingCounts }) {
   const { t } = useTranslation();
   const router = useRouter();
-
-  const allZero =
-    pending.attendance_verify === 0 && pending.leave_approve === 0 && pending.ot_approve === 0;
+  const rows = [
+    {
+      label: t('m:leaderBeranda.actionVerifAttendance'),
+      count: pending.attendance_verify,
+      tone: 'warn' as const,
+      route: '/sl-verifikasi',
+    },
+    {
+      label: t('m:leaderBeranda.actionApproveLeave'),
+      count: pending.leave_approve,
+      tone: 'info' as const,
+      route: '/leave',
+    },
+    {
+      label: t('m:leaderBeranda.actionApproveOT'),
+      count: pending.ot_approve,
+      tone: 'info' as const,
+      route: '/overtime',
+    },
+  ];
 
   return (
-    <Card>
-      <Text variant="body" className="font-semibold">
+    <SectionCard>
+      <Text className="text-sm font-sans-semibold text-text">
         {t('m:leaderBeranda.sectionAction')}
       </Text>
-      {allZero ? (
-        <Text variant="caption" className="mt-2 text-text-3">
-          {t('m:leaderBeranda.actionEmpty')}
-        </Text>
-      ) : (
-        <View className="mt-2 divide-y divide-border">
-          {pending.attendance_verify > 0 ? (
+      <View>
+          {rows.map((r, i) => (
             <ActionRow
-              label={t('m:leaderBeranda.actionVerifAttendance')}
-              count={pending.attendance_verify}
-              tone="warn"
-              // DB-5: deep-link to the attendance verification screen (E5).
-              onPress={() => router.push('/attendance')}
+              key={r.route}
+              label={r.label}
+              count={r.count}
+              tone={r.tone}
+              divider={i > 0}
+              onPress={() => router.push(r.route)}
             />
-          ) : null}
-          {pending.leave_approve > 0 ? (
-            <ActionRow
-              label={t('m:leaderBeranda.actionApproveLeave')}
-              count={pending.leave_approve}
-              tone="info"
-              onPress={() => router.push('/leave')}
-            />
-          ) : null}
-          {pending.ot_approve > 0 ? (
-            <ActionRow
-              label={t('m:leaderBeranda.actionApproveOT')}
-              count={pending.ot_approve}
-              tone="info"
-              onPress={() => router.push('/overtime')}
-            />
-          ) : null}
+          ))}
         </View>
-      )}
-    </Card>
+    </SectionCard>
   );
 }
 
 /** Tone map for schedule alert kind (warn for coverage/unassigned, bad for expiring). */
 const alertKindTone: Record<string, 'warn' | 'bad'> = {
-  COVERAGE_GAP: 'warn',
+  COVERAGE_GAP: 'bad',
   UNASSIGNED_SHIFT: 'warn',
   PLACEMENT_EXPIRING: 'bad',
 };
 
-/** One alert row. */
+/** One alert row — tone-tinted bg + triangle-alert icon (matches .pen CardAlerts). */
 function AlertRow({
   alert,
   onPress,
@@ -202,23 +205,19 @@ function AlertRow({
   const tone = alertKindTone[alert.kind] ?? 'warn';
   const textClass = tone === 'bad' ? 'text-bad-text' : 'text-warn-text';
   const bgClass = tone === 'bad' ? 'bg-bad-bg' : 'bg-warn-bg';
+  const iconColor = tone === 'bad' ? color.bad.text : color.warn.text;
 
   return (
-    <Pressable onPress={onPress}>
-      <View className={`mb-2 rounded-control px-3 py-2 ${bgClass}`}>
-        <View className="flex-row items-center justify-between">
-          <Text variant="caption" className={`flex-1 font-semibold ${textClass}`}>
-            {alert.label}
-          </Text>
-          {alert.date ? (
-            <Text variant="caption" className={`ml-2 ${textClass}`}>
-              {formatDate(alert.date)}
-            </Text>
-          ) : null}
-          <Text variant="caption" className={`ml-2 ${textClass}`}>
-            ›
-          </Text>
-        </View>
+    <Pressable
+      onPress={onPress}
+      className={`flex-row items-center gap-2.5 rounded-input px-2.5 py-1.5 ${bgClass}`}
+    >
+      <TriangleAlert size={16} color={iconColor} />
+      <View className="flex-1 gap-px">
+        <Text className={`text-xs font-sans-semibold ${textClass}`}>{alert.label}</Text>
+        {alert.date ? (
+          <Text className={`text-[11px] font-sans-medium ${textClass}`}>{formatDate(alert.date)}</Text>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -230,29 +229,26 @@ function PeringatanJadwalCard({ alerts }: { alerts: LeaderDashboardScheduleAlert
   const router = useRouter();
 
   return (
-    <Card>
-      <Text variant="body" className="font-semibold">
+    <SectionCard>
+      <Text className="text-sm font-sans-semibold text-text">
         {t('m:leaderBeranda.sectionAlerts')}
       </Text>
       {alerts.length === 0 ? (
-        <Text variant="caption" className="mt-2 text-text-3">
+        <Text variant="caption" className="text-text-3">
           {t('m:leaderBeranda.alertsEmpty')}
         </Text>
       ) : (
-        <View className="mt-2">
+        <View className="gap-2">
           {alerts.map((a, idx) => (
             <AlertRow
-              // DB-5: deep-link via alert.deep_link.path when target screen exists.
-              // For now route to the closest available screen; TODO: use a:deep_link.path when
-              // the E4/E3 screens are wired in the leader tab set.
               key={`${a.kind}-${idx}`}
               alert={a}
-              onPress={() => router.push('/attendance')}
+              onPress={() => router.push('/sl-verifikasi')}
             />
           ))}
         </View>
       )}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -260,54 +256,58 @@ function PeringatanJadwalCard({ alerts }: { alerts: LeaderDashboardScheduleAlert
 
 export default function LeaderBerandaScreen() {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
   const dash = useGetMyDashboard();
-  const payload = dash.data?.data as Dashboard | undefined;
-
-  // Narrow to the shift_leader variant (DB-8: role discriminator).
+  // /dashboards/me 200 is typed unenveloped but the API double-envelopes in `{ data }`, so the
+  // payload is one level deeper than the generated type (same unwrap as leave.tsx / index.tsx).
+  // TODO: envelope the dashboard 200 schema in docs/api/E10 and regenerate, then drop this cast.
+  const env = dash.data?.data as { data?: Dashboard } | undefined;
+  const payload = env?.data;
   const leaderData: LeaderDashboard | null =
     payload && 'role' in payload && payload.role === 'shift_leader'
       ? (payload as LeaderDashboard)
       : null;
 
   return (
-    <ScrollView className="flex-1 bg-app-bg">
-      <View className="gap-4 p-6">
-        {/* Screen header: title + company scope subtitle (from company.name) */}
-        <View>
-          <Text variant="title">{t('m:leaderBeranda.title')}</Text>
-          {leaderData ? (
-            <Text variant="caption" className="mt-1 text-text-3">
-              {leaderData.company.name}
-            </Text>
-          ) : null}
+    <View className="flex-1 bg-app-bg">
+      {/* AppBar: title + bell, company-scope subtitle, bottom border */}
+      <View
+        className="gap-px border-b border-border bg-surface px-4 pb-3"
+        style={{ paddingTop: insets.top + 8 }}
+      >
+        <View className="flex-row items-center justify-between">
+          <Text className="text-[22px] font-sans-bold text-text">{t('m:leaderBeranda.title')}</Text>
+          <Pressable onPress={() => router.push('/notifications')} hitSlop={8}>
+            <Bell size={24} color={color.text2} />
+          </Pressable>
         </View>
+        {leaderData ? (
+          <Text className="text-[13px] font-sans-medium text-text-2">{leaderData.company.name}</Text>
+        ) : null}
+      </View>
 
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }}>
         {dash.isLoading ? (
           <View className="items-center py-10">
             <ActivityIndicator />
           </View>
         ) : dash.isError ? (
-          <Card>
+          <SectionCard>
             <Text className="text-danger">{t('m:common.errorGeneric')}</Text>
-          </Card>
+          </SectionCard>
         ) : !leaderData ? (
-          // DB C-1: dashboard returned but not the shift_leader variant
-          <Card>
+          <SectionCard>
             <Text variant="caption">{t('m:common.emptyGeneric')}</Text>
-          </Card>
+          </SectionCard>
         ) : (
           <>
-            {/* Section 1: Hari Ini */}
             <HariIniCard today={leaderData.today} />
-
-            {/* Section 2: Perlu Tindakan */}
             <PerluTindakanCard pending={leaderData.pending_counts} />
-
-            {/* Section 3: Peringatan Jadwal */}
             <PeringatanJadwalCard alerts={leaderData.schedule_alerts} />
           </>
         )}
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
