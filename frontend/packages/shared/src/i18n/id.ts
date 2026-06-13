@@ -2099,14 +2099,13 @@ export const id = {
   },
   leaveQuotas: {
     title: 'Kuota Cuti',
-    subtitle: 'Kuota cuti per karyawan',
+    subtitle:
+      'Kuota cuti tahunan (CT) per karyawan · ijin khusus dimeteran per jenis. Klik baris untuk rincian per jenis cuti.',
     footerNote:
-      'Penambahan & penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6).',
+      'Penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6). Klik baris untuk rincian kuota per jenis cuti.',
     actions: {
-      export: 'Ekspor',
-      grantLot: 'Tambah Kuota',
+      addQuota: 'Tambah Kuota',
       adjust: 'Sesuaikan',
-      adjustAriaLabel: 'Sesuaikan lot {{id}}',
       cancel: 'Batal',
       back: 'Kembali',
       retry: 'Coba Lagi',
@@ -2114,89 +2113,65 @@ export const id = {
     },
     filters: {
       searchPlaceholder: 'Cari nama, NIK, atau NIP karyawan',
-      allSources: 'Semua sumber',
     },
-    // Per-employee aggregate list columns
-    list: {
-      total: 'Total kuota',
-      consumed: 'Terpakai',
-      pending: 'Pending',
-      remaining: 'Sisa',
-      earmark: 'Earmark',
-      nextExpiry: 'Kedaluwarsa berikutnya',
-      lotCount: 'Lot aktif',
-    },
-    // Pool summary (EmployeePoolSummary)
-    pool: {
-      remainingLabel: 'hari tersisa (pool)',
-      expiryHint: 'Lot pertama kedaluwarsa',
-      days: 'hari',
-    },
+    // Directory table (one row per employee — annual CT inline)
     table: {
       employee: 'Karyawan',
-      source: 'Sumber',
-      earmark: 'Earmark',
-      amount: 'Jumlah',
-      consumed: 'Terpakai',
+      quotaCt: 'Kuota CT',
+      used: 'Terpakai',
       pending: 'Pending',
       remaining: 'Sisa',
-      expires: 'Kedaluwarsa',
-      remark: 'Catatan',
-      poolGeneral: 'Pool umum',
+      special: 'Ijin Khusus',
+      ctExpiry: 'Hangus CT',
     },
-    // LeaveGrantSource labels
-    source: {
-      ANNUAL: 'Tahunan',
-      ADJUSTMENT: 'Penyesuaian',
-      MATERNITY: 'Cuti Melahirkan',
-      STATUTORY: 'Statutory',
-      MIGRATION: 'Migrasi',
-      BONUS: 'Bonus',
+    // Per-type drill-in table
+    detail: {
+      type: 'Jenis Cuti',
+      entitled: 'Kuota',
+      used: 'Terpakai',
+      pending: 'Pending',
+      remaining: 'Sisa',
+      expiry: 'Kedaluwarsa',
+      perRule: 'sesuai ketentuan',
     },
     pagination: {
       rangeLabel: 'Menampilkan {{count}} karyawan',
     },
     states: {
+      loading: 'Memuat…',
       freshTitle: 'Belum ada kuota cuti',
-      freshDesc: 'Tambah kuota pertama untuk mulai mencatat saldo cuti.',
+      freshDesc: 'Kuota terbuka otomatis saat pengajuan pertama, atau tambahkan manual.',
       filteredZeroTitle: 'Tidak ada hasil',
       filteredZeroDesc: 'Coba ubah kata kunci pencarian.',
       errorTitle: 'Gagal memuat data',
       noPermissionTitle: 'Akses Ditolak',
       noPermissionDesc: 'Anda tidak memiliki izin untuk melihat halaman ini.',
     },
-    // Grant-lot create form (POST /leave-grants)
-    grant: {
+    // Tambah Kuota (qDhTz) — assign / raise a per-type quota
+    add: {
       title: 'Tambah Kuota',
       employeeLabel: 'Karyawan',
-      employeePlaceholder: 'Ketik nama, NIK, atau NIP…',
-      amountLabel: 'Jumlah hari',
-      expiresLabel: 'Berlaku hingga (kedaluwarsa)',
-      sourceLabel: 'Sumber',
-      earmarkLabel: 'Earmark (tujuan khusus)',
-      earmarkPlaceholder: 'mis. MATERNITY',
-      earmarkHint:
-        'Lot earmark hanya bisa ditarik oleh pengajuan dengan tujuan yang sama (LQ-10). Kosongkan untuk pool umum.',
-      remarkLabel: 'Catatan (wajib)',
-      remarkPlaceholder: 'Jelaskan alasan penambahan kuota ini…',
-      auditNote: 'Penambahan kuota wajib beralasan dan tercatat di audit log (LQ-6).',
+      typeLabel: 'Jenis Cuti',
+      typePlaceholder: 'Pilih jenis cuti…',
+      deltaLabel: 'Jumlah hari (tambahan)',
       saveBtn: 'Simpan',
-      successTitle: 'Kuota ditambahkan',
-      successDesc: 'Lot berhasil ditambahkan ke ledger karyawan.',
-      errorTitle: 'Gagal menyimpan',
     },
-    // Lot adjust form (PATCH /leave-grants/{id})
+    // Sesuaikan Kuota (ny4xT) — adjust an existing window entitlement
     adjust: {
       title: 'Sesuaikan Kuota',
-      amountCurrent: 'Jumlah saat ini',
-      consumedCurrent: 'Terpakai',
+      entitledCurrent: 'Jumlah saat ini',
+      usedCurrent: 'Terpakai',
       remainingCurrent: 'Sisa',
-      amountLabel: 'Jumlah baru (hari)',
-      expiresLabel: 'Berlaku hingga (baru)',
-      remarkLabel: 'Catatan penyesuaian (wajib)',
-      remarkPlaceholder: 'Jelaskan alasan penyesuaian ini...',
+      deltaLabel: 'Penyesuaian (+/− hari)',
+      newEntitled: 'Total baru',
+      newRemaining: 'Sisa baru',
+      saveBtn: 'Simpan Penyesuaian',
+    },
+    // Shared save (adjust-entitled)
+    save: {
+      reasonLabel: 'Catatan penyesuaian (wajib)',
+      reasonPlaceholder: 'Jelaskan alasan penyesuaian kuota ini…',
       auditNote: 'Penyesuaian manual wajib beralasan dan tercatat di audit log (LQ-6).',
-      saveBtn: 'Simpan',
       successTitle: 'Kuota diperbarui',
       successDesc: 'Penyesuaian berhasil disimpan.',
       errorTitle: 'Gagal menyimpan',

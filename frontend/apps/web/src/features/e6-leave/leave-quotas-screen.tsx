@@ -1,41 +1,30 @@
 /**
- * E6 · Kuota Cuti (HR) — per-employee aggregate list + lot drill-in
+ * E6 · Kuota Cuti (HR) — per-type quota ledger (2026-06-12)
  *
  * .pen frames:
- *   P6HZ7E  Saldo & Hibah Cuti (HR) — main balance ledger (2026-06-08)
- *   CGCnL   Tambah Kuota / Sesuaikan Saldo (modal) — grant-lot form + adjust (LQ-6)
+ *   P6HZ7E  E6 · Kuota & Hibah Cuti (HR) — employee directory + per-type quota row
+ *   ny4xT   Sesuaikan Kuota (modal) — adjust an existing (employee, type, window) entitlement
+ *   qDhTz   Tambah Kuota (modal)   — assign / raise a per-type quota
  *
- * F6.1 — grant-lot ledger (resolved 2026-06-08): balance = per-employee POOL of LeaveGrant lots,
- * each with its own expires_at. earmark=null → general pool (FIFO); non-null → purpose-restricted.
+ * Per-type cap_basis ledger (EPICS §8): leave_type is the cap axis; each type meters a quota
+ * window keyed by period_key. The HR directory lists employees (E2) with their annual CT quota
+ * inline (KUOTA CT / TERPAKAI / PENDING / SISA); clicking a row drills into the full per-type
+ * breakdown. Manual entitlement changes go through POST /leave-quotas:adjust-entitled (LQ-6,
+ * reason required, audited).
  *
- * LIST  = one row per employee via useListLeaveBalances (GET /leave-balances, q = name/NIK/NIP).
- * DRILL = clicking a row selects employee_id, shows EmployeePoolSummary + per-lot DataTable via
- *         useListLeaveGrants({ employee_id }) + useGetLeaveBalanceByEmployee.
- *
- * ENGINEERING.md D1 — typed URL search params + cursor pagination.
- * ENGINEERING.md B1 — classifyError / applyFieldErrors.
- * LQ-6: manual grant/adjust requires remark, recorded in audit log.
+ * ENGINEERING.md D1 — typed URL search params. B1 — classifyError / applyFieldErrors.
  */
 
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useListEmployees } from '@swp/api-client/e2';
 import {
-  type EmployeeLeaveBalance,
-  type LeaveGrant,
-  type LeaveGrantPatchRequest,
-  LeaveGrantSource,
-  type LeaveGrantWriteRequest,
-  type ListLeaveBalancesParams,
-  type ListLeaveGrantsParams,
-  getGetLeaveBalanceByEmployeeQueryKey,
-  getListLeaveBalancesQueryKey,
-  getListLeaveGrantsQueryKey,
-  useAdjustLeaveGrant,
-  useCreateLeaveGrant,
-  useGetLeaveBalanceByEmployee,
-  useListLeaveBalances,
-  useListLeaveGrants,
+  type AdjustTypeQuotaBody,
+  type LeaveType,
+  type LeaveTypeBalance,
+  useAdjustTypeQuota,
+  useGetEmployeeTypeBalances,
+  useListLeaveTypes,
 } from '@swp/api-client/e6';
 import {
   Button,
@@ -47,166 +36,123 @@ import {
   DateText,
   EmptyState,
   FormField,
-  IdChip,
   Modal,
   ModalBody,
   ModalFooter,
   ModalHeader,
   SearchField,
   StateView,
-  StatusBadge,
   useToast,
 } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { CalendarPlus, ChevronLeft, Info, PackagePlus, Settings2, Tag } from 'lucide-react';
+import { ChevronLeft, Info, PackagePlus, Settings2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
-// Search params type (D1 — typed URL search params)
+// Search params (D1 — typed URL search params)
 // ---------------------------------------------------------------------------
 
 export type LeaveQuotasSearch = {
-  /** Free-text search for the employee list (name / NIK / NIP → q param). */
+  /** Free-text employee search (name / NIK / NIP → q param). */
   q?: string;
-  /** Employee selected for drill-in (shows lot detail panel). */
+  /** Employee selected for the per-type drill-in. */
   employee_id?: string;
   cursor?: string;
 };
 
+const PAGE_SIZE = 25;
+const CAP_ANNUAL = 'ANNUAL_POOL';
+/** Any date inside the current window — the server resolves the window by cap_basis. */
+const today = () => new Date().toISOString().slice(0, 10);
+
 // ---------------------------------------------------------------------------
-// Zod schemas (hand-written — Zod deferred for codegen WEB-STACK §4)
+// Envelope unwrap (mutator may single- or double-nest `data`)
 // ---------------------------------------------------------------------------
 
-const grantSchema = z.object({
+function unwrap<T>(raw: unknown): T | undefined {
+  if (raw && typeof raw === 'object' && 'data' in raw) {
+    const inner = (raw as { data: unknown }).data;
+    if (inner && typeof inner === 'object' && 'data' in inner) {
+      return (inner as { data: T }).data;
+    }
+    return inner as T;
+  }
+  return raw as T | undefined;
+}
+
+type EmployeeRow = { id: string; full_name: string; nik: string; nip?: string };
+
+// ---------------------------------------------------------------------------
+// Zod — adjust/add form (hand-written; Zod codegen deferred, WEB-STACK §4)
+// ---------------------------------------------------------------------------
+
+const quotaSchema = z.object({
   employee_id: z.string().min(1, 'Pilih karyawan'),
-  /** Display name for the employee combobox (stored separately from id). */
-  employee_name: z.string().optional(),
-  amount_days: z
+  leave_type_id: z.string().min(1, 'Pilih jenis cuti'),
+  delta: z
     .number({ invalid_type_error: 'Wajib diisi' })
     .int('Harus bilangan bulat')
-    .min(0, 'Minimal 0'),
-  expires_at: z.string().min(1, 'Tanggal kedaluwarsa wajib diisi'),
-  source: z.nativeEnum(LeaveGrantSource),
-  earmark: z.string().optional(),
-  remark: z.string().min(5, 'Catatan minimal 5 karakter').max(500, 'Catatan maksimal 500 karakter'),
-  effective_from: z.string().optional(),
+    .refine((v) => v !== 0, 'Tidak boleh 0'),
+  reason: z.string().min(5, 'Catatan minimal 5 karakter').max(500, 'Catatan maksimal 500 karakter'),
 });
-type GrantFormValues = z.infer<typeof grantSchema>;
+type QuotaFormValues = z.infer<typeof quotaSchema>;
 
-const adjustSchema = z.object({
-  amount_days: z
-    .number({ invalid_type_error: 'Wajib diisi' })
-    .int('Harus bilangan bulat')
-    .min(0, 'Minimal 0')
-    .optional(),
-  expires_at: z.string().optional(),
-  earmark: z.string().optional(),
-  remark: z.string().min(5, 'Catatan minimal 5 karakter').max(500, 'Catatan maksimal 500 karakter'),
-});
-type AdjustFormValues = z.infer<typeof adjustSchema>;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const EARMARK_SOURCES: LeaveGrantSource[] = [
-  LeaveGrantSource.MATERNITY,
-  LeaveGrantSource.STATUTORY,
-];
-
-function sourceLabelKey(source: LeaveGrantSource): string {
-  return `leaveQuotas.source.${source}`;
-}
-
-function earmarkBadgeTone(earmark: string | null | undefined): 'ok' | 'warn' | 'neutral' {
-  if (!earmark) return 'neutral';
-  if (earmark === 'MATERNITY') return 'warn';
-  return 'ok';
-}
-
-const PAGE_SIZE = 50;
-
-// ---------------------------------------------------------------------------
-// Grant-lot row: remaining days computation
-// ---------------------------------------------------------------------------
-
-function remainingDays(lot: LeaveGrant): number {
-  return lot.amount_days - lot.consumed_days - lot.pending_days;
+/** The (employee, type, window) being adjusted from the drill-in. */
+export interface AdjustTarget {
+  employeeId: string;
+  employeeName: string;
+  leaveTypeId: string;
+  code: string;
+  name: string;
+  entitled: number;
+  used: number;
+  remaining: number;
 }
 
 // ---------------------------------------------------------------------------
-// EmployeeCombobox — typeahead that resolves employee_id from name/NIK/NIP
+// EmployeeCombobox — typeahead resolving employee_id from name/NIK/NIP
 // ---------------------------------------------------------------------------
-
-interface EmployeeComboboxProps {
-  value: string | null;
-  onChange: (employeeId: string | null) => void;
-  disabled?: boolean;
-  error?: string;
-  placeholder?: string;
-}
 
 function EmployeeCombobox({
   value,
   onChange,
-  disabled,
   error,
   placeholder,
-}: EmployeeComboboxProps) {
+}: {
+  value: string | null;
+  onChange: (id: string | null) => void;
+  error?: string;
+  placeholder?: string;
+}) {
   const [q, setQ] = useState('');
-
   const listQuery = useListEmployees(q.length >= 1 ? { q, limit: 20 } : undefined, {
     query: { enabled: q.length >= 1 },
   });
-
-  type EmpListData = { data: Array<{ id: string; full_name: string; nip?: string; nik: string }> };
-  const outer = listQuery.data?.data as { data: EmpListData } | EmpListData | undefined;
-  const listData =
-    outer &&
-    typeof outer === 'object' &&
-    'data' in outer &&
-    typeof (outer as { data: unknown }).data === 'object' &&
-    !Array.isArray((outer as { data: unknown }).data)
-      ? (outer as { data: EmpListData }).data
-      : (outer as EmpListData | undefined);
-  const employees = listData?.data ?? [];
-
+  const employees = unwrap<EmployeeRow[]>(listQuery.data?.data) ?? [];
   const options: ComboboxOption[] = employees.map((e) => ({
     value: e.id,
     label: e.full_name,
     sublabel: e.nip ?? e.nik,
-    meta: e.id,
   }));
-
-  // Remember the picked employee so the trigger keeps showing their name after
-  // the popover closes and the search query (hence options) resets to empty.
   const [selected, setSelected] = useState<ComboboxOption | null>(null);
-  const mergedOptions =
+  const merged =
     selected && !options.some((o) => o.value === selected.value) ? [selected, ...options] : options;
-
-  const handleChange = (id: string | null) => {
-    if (id) {
-      const picked = options.find((o) => o.value === id) ?? selected;
-      setSelected(picked ?? null);
-    } else {
-      setSelected(null);
-    }
-    onChange(id);
-  };
 
   return (
     <Combobox
       value={value}
-      onChange={handleChange}
-      options={mergedOptions}
+      onChange={(id) => {
+        setSelected(id ? (options.find((o) => o.value === id) ?? selected) : null);
+        onChange(id);
+      }}
+      options={merged}
       onSearch={setQ}
       isLoading={listQuery.isLoading}
       placeholder={placeholder ?? 'Ketik nama, NIK, atau NIP…'}
-      disabled={disabled}
       emptyText={q.length < 1 ? 'Ketik untuk mencari karyawan' : 'Tidak ada karyawan ditemukan'}
       error={!!error}
     />
@@ -214,152 +160,82 @@ function EmployeeCombobox({
 }
 
 // ---------------------------------------------------------------------------
-// GrantLotModal (CGCnL) — create (POST /leave-grants) or adjust (PATCH)
+// QuotaModal — adjust-entitled (add mode: pick employee+type; adjust mode: fixed target)
 // ---------------------------------------------------------------------------
 
-interface GrantLotModalProps {
-  /** When set, we are adjusting an existing lot (PATCH). When undefined, creating (POST). */
-  adjustTarget?: LeaveGrant;
-  /** Pre-filled employee_id when known (from drill-in context). */
-  defaultEmployeeId?: string;
-  open: boolean;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function GrantLotModal({
-  adjustTarget,
-  defaultEmployeeId,
+function QuotaModal({
+  target,
   open,
   onClose,
   onSuccess,
-}: GrantLotModalProps) {
+}: {
+  /** Set → "Sesuaikan Kuota" (ny4xT) for a fixed (employee, type). Unset → "Tambah Kuota" (qDhTz). */
+  target?: AdjustTarget;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const { t } = useTranslation('leaveQuotas');
   const { toast } = useToast();
-  const isAdjust = Boolean(adjustTarget);
+  const isAdjust = Boolean(target);
+  const mutation = useAdjustTypeQuota();
 
-  const createMutation = useCreateLeaveGrant();
-  const adjustMutation = useAdjustLeaveGrant();
+  const typesQuery = useListLeaveTypes(undefined, { query: { enabled: open && !isAdjust } });
+  const leaveTypes = (unwrap<LeaveType[]>(typesQuery.data?.data) ?? []).filter((lt) => lt.active);
 
-  // ── Grant form (create) ──────────────────────────────────────────────────
   const {
-    register: registerGrant,
-    handleSubmit: handleGrantSubmit,
-    reset: resetGrant,
-    setError: setGrantError,
-    setValue: setGrantValue,
-    watch: watchGrant,
-    formState: { errors: grantErrors, isSubmitting: grantSubmitting },
-  } = useForm<GrantFormValues>({
-    resolver: zodResolver(grantSchema),
-    defaultValues: {
-      employee_id: defaultEmployeeId ?? '',
-      employee_name: '',
-      amount_days: 0,
-      expires_at: '',
-      source: LeaveGrantSource.ADJUSTMENT,
-      earmark: '',
-      remark: '',
-      effective_from: '',
-    },
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<QuotaFormValues>({
+    resolver: zodResolver(quotaSchema),
+    defaultValues: { employee_id: '', leave_type_id: '', delta: 0, reason: '' },
   });
-
-  // ── Adjust form (patch) ──────────────────────────────────────────────────
-  const {
-    register: registerAdjust,
-    handleSubmit: handleAdjustSubmit,
-    reset: resetAdjust,
-    setError: setAdjustError,
-    formState: { errors: adjustErrors, isSubmitting: adjustSubmitting },
-  } = useForm<AdjustFormValues>({
-    resolver: zodResolver(adjustSchema),
-    defaultValues: {
-      amount_days: adjustTarget?.amount_days,
-      expires_at: adjustTarget?.expires_at ?? '',
-      earmark: adjustTarget?.earmark ?? '',
-      remark: '',
-    },
-  });
-
-  const grantSource = watchGrant('source');
-  const grantEmployeeId = watchGrant('employee_id');
-  const showEarmark = EARMARK_SOURCES.includes(grantSource as LeaveGrantSource);
 
   useEffect(() => {
     if (open) {
-      if (isAdjust && adjustTarget) {
-        resetAdjust({
-          amount_days: adjustTarget.amount_days,
-          expires_at: adjustTarget.expires_at,
-          earmark: adjustTarget.earmark ?? '',
-          remark: '',
-        });
-      } else {
-        resetGrant({
-          employee_id: defaultEmployeeId ?? '',
-          employee_name: '',
-          amount_days: 0,
-          expires_at: '',
-          source: LeaveGrantSource.ADJUSTMENT,
-          earmark: '',
-          remark: '',
-          effective_from: '',
-        });
-      }
+      reset({
+        employee_id: target?.employeeId ?? '',
+        leave_type_id: target?.leaveTypeId ?? '',
+        delta: 0,
+        reason: '',
+      });
     }
-  }, [open, isAdjust, adjustTarget, defaultEmployeeId, resetGrant, resetAdjust]);
+  }, [open, target, reset]);
 
-  async function onGrantSubmit(values: GrantFormValues) {
+  const employeeId = watch('employee_id');
+  const delta = watch('delta');
+  // Adjust mode previews the resulting entitlement/remaining ("Total baru" / "Sisa baru").
+  const newEntitled = target ? target.entitled + (Number.isFinite(delta) ? delta : 0) : 0;
+  const newRemaining = target ? newEntitled - target.used : 0;
+
+  async function onSubmit(values: QuotaFormValues) {
     try {
-      const body: LeaveGrantWriteRequest = {
+      const body: AdjustTypeQuotaBody = {
         employee_id: values.employee_id,
-        amount_days: values.amount_days,
-        expires_at: values.expires_at,
-        source: values.source,
-        remark: values.remark,
-        ...(showEarmark && values.earmark ? { earmark: values.earmark } : {}),
-        ...(values.effective_from ? { effective_from: values.effective_from } : {}),
+        leave_type_id: values.leave_type_id,
+        start_date: today(),
+        delta: values.delta,
+        reason: values.reason,
       };
-      await createMutation.mutateAsync({ data: body });
-      toast({
-        tone: 'success',
-        title: t('grant.successTitle'),
-        description: t('grant.successDesc'),
-      });
+      await mutation.mutateAsync({ data: body });
+      toast({ tone: 'success', title: t('save.successTitle'), description: t('save.successDesc') });
       onSuccess();
       onClose();
     } catch (err) {
-      if (!applyFieldErrors(err, setGrantError)) {
+      if (!applyFieldErrors(err, setError)) {
         const { message } = classifyError(err);
-        toast({ tone: 'error', title: t('grant.errorTitle'), description: message });
+        toast({ tone: 'error', title: t('save.errorTitle'), description: message });
       }
     }
   }
 
-  async function onAdjustSubmit(values: AdjustFormValues) {
-    if (!adjustTarget) return;
-    try {
-      const body: LeaveGrantPatchRequest = {
-        remark: values.remark,
-        ...(values.amount_days !== undefined ? { amount_days: values.amount_days } : {}),
-        ...(values.expires_at ? { expires_at: values.expires_at } : {}),
-        ...(values.earmark !== undefined ? { earmark: values.earmark || null } : {}),
-      };
-      await adjustMutation.mutateAsync({ id: adjustTarget.id, data: body });
-      toast({
-        tone: 'success',
-        title: t('adjust.successTitle'),
-        description: t('adjust.successDesc'),
-      });
-      onSuccess();
-      onClose();
-    } catch (err) {
-      if (!applyFieldErrors(err, setAdjustError)) {
-        const { message } = classifyError(err);
-        toast({ tone: 'error', title: t('adjust.errorTitle'), description: message });
-      }
-    }
-  }
+  const inputCls =
+    'w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary';
 
   return (
     <Modal
@@ -369,31 +245,25 @@ function GrantLotModal({
       }}
       size="md"
     >
-      {isAdjust ? (
-        /* ── Adjust form ─────────────────────────────────────────────────── */
-        <form onSubmit={handleAdjustSubmit(onAdjustSubmit)}>
-          <ModalHeader
-            icon={Settings2}
-            tone="neutral"
-            title={t('adjust.title')}
-            onClose={onClose}
-          />
-          <ModalBody>
-            {adjustTarget && (
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <ModalHeader
+          icon={isAdjust ? Settings2 : PackagePlus}
+          tone={isAdjust ? 'neutral' : 'brand'}
+          title={isAdjust ? t('adjust.title') : t('add.title')}
+          onClose={onClose}
+        />
+        <ModalBody>
+          {isAdjust && target && (
+            <>
               <p className="mb-[14px] text-[12px] text-text-3">
-                <IdChip id={adjustTarget.id} /> ·{' '}
-                {adjustTarget.employee_name ?? adjustTarget.employee_id}
+                {target.employeeName} · {target.name} ({target.code})
               </p>
-            )}
-
-            {/* Current stats */}
-            {adjustTarget && (
               <div className="grid grid-cols-3 gap-[10px] mb-[14px]">
                 {(
                   [
-                    { label: t('adjust.amountCurrent'), value: adjustTarget.amount_days },
-                    { label: t('adjust.consumedCurrent'), value: adjustTarget.consumed_days },
-                    { label: t('adjust.remainingCurrent'), value: remainingDays(adjustTarget) },
+                    { label: t('adjust.entitledCurrent'), value: target.entitled },
+                    { label: t('adjust.usedCurrent'), value: target.used },
+                    { label: t('adjust.remainingCurrent'), value: target.remaining },
                   ] as const
                 ).map(({ label, value }) => (
                   <div
@@ -405,406 +275,356 @@ function GrantLotModal({
                   </div>
                 ))}
               </div>
-            )}
+            </>
+          )}
 
-            <FormField
-              label={t('adjust.amountLabel')}
-              htmlFor="adj-amount"
-              error={adjustErrors.amount_days?.message}
-            >
-              <input
-                id="adj-amount"
-                type="number"
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                {...registerAdjust('amount_days', { valueAsNumber: true })}
-              />
-            </FormField>
-
-            <FormField
-              label={t('adjust.expiresLabel')}
-              htmlFor="adj-expires"
-              error={adjustErrors.expires_at?.message}
-            >
-              <input
-                id="adj-expires"
-                type="date"
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                {...registerAdjust('expires_at')}
-              />
-            </FormField>
-
-            <FormField
-              label={t('adjust.remarkLabel')}
-              htmlFor="adj-remark"
-              required
-              error={adjustErrors.remark?.message}
-            >
-              <textarea
-                id="adj-remark"
-                rows={3}
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                placeholder={t('adjust.remarkPlaceholder')}
-                {...registerAdjust('remark')}
-              />
-            </FormField>
-
-            <div className="flex items-start gap-[8px] rounded-[8px] border border-info-bd bg-info-bg py-[10px] px-[12px] mt-[14px]">
-              <Info aria-hidden className="h-[14px] w-[14px] shrink-0 text-info-tx mt-[1px]" />
-              <span className="text-[12px] text-info-tx leading-[1.4]">
-                {t('adjust.auditNote')}
-              </span>
-            </div>
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="secondary" onClick={onClose}>
-              {t('actions.cancel')}
-            </Button>
-            <Button type="submit" variant="primary" disabled={adjustSubmitting}>
-              {t('adjust.saveBtn')}
-            </Button>
-          </ModalFooter>
-        </form>
-      ) : (
-        /* ── Grant (create) form ─────────────────────────────────────────── */
-        <form onSubmit={handleGrantSubmit(onGrantSubmit)}>
-          <ModalHeader icon={PackagePlus} tone="brand" title={t('grant.title')} onClose={onClose} />
-          <ModalBody>
-            {/* Employee search (combobox — resolves employee_id from name/NIK/NIP) */}
-            <FormField
-              label={t('grant.employeeLabel')}
-              htmlFor="g-employee"
-              required
-              error={grantErrors.employee_id?.message}
-            >
-              {defaultEmployeeId ? (
-                /* If called from drill-in context, employee is fixed — show read-only. */
-                <div className="flex items-center gap-[8px] rounded-[8px] border border-border bg-surface-2 py-[10px] px-[12px] text-[14px] text-text">
-                  <span className="font-mono text-[12px] text-text-3">{defaultEmployeeId}</span>
-                </div>
-              ) : (
-                <EmployeeCombobox
-                  value={grantEmployeeId || null}
-                  onChange={(id) => {
-                    setGrantValue('employee_id', id ?? '', { shouldValidate: true });
-                  }}
-                  error={grantErrors.employee_id?.message}
-                  placeholder={t('grant.employeePlaceholder')}
-                />
-              )}
-            </FormField>
-
-            {/* Amount days */}
-            <FormField
-              label={t('grant.amountLabel')}
-              htmlFor="g-amount"
-              required
-              error={grantErrors.amount_days?.message}
-            >
-              <input
-                id="g-amount"
-                type="number"
-                min={0}
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                {...registerGrant('amount_days', { valueAsNumber: true })}
-              />
-            </FormField>
-
-            {/* Expires at */}
-            <FormField
-              label={t('grant.expiresLabel')}
-              htmlFor="g-expires"
-              required
-              error={grantErrors.expires_at?.message}
-            >
-              <input
-                id="g-expires"
-                type="date"
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                {...registerGrant('expires_at')}
-              />
-            </FormField>
-
-            {/* Source */}
-            <FormField
-              label={t('grant.sourceLabel')}
-              htmlFor="g-source"
-              required
-              error={grantErrors.source?.message}
-            >
-              <select
-                id="g-source"
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                {...registerGrant('source')}
-              >
-                {Object.values(LeaveGrantSource).map((s) => (
-                  <option key={s} value={s}>
-                    {t(sourceLabelKey(s))}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-
-            {/* Earmark — only for statutory/maternity sources */}
-            {showEarmark && (
+          {!isAdjust && (
+            <>
               <FormField
-                label={t('grant.earmarkLabel')}
-                htmlFor="g-earmark"
-                error={grantErrors.earmark?.message}
+                label={t('add.employeeLabel')}
+                htmlFor="q-employee"
+                required
+                error={errors.employee_id?.message}
               >
-                <input
-                  id="g-earmark"
-                  type="text"
-                  className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder={t('grant.earmarkPlaceholder')}
-                  {...registerGrant('earmark')}
+                <EmployeeCombobox
+                  value={employeeId || null}
+                  onChange={(id) => setValue('employee_id', id ?? '', { shouldValidate: true })}
+                  error={errors.employee_id?.message}
                 />
-                <p className="mt-[4px] text-[12px] text-text-3">{t('grant.earmarkHint')}</p>
               </FormField>
-            )}
 
-            {/* Remark (required) */}
-            <FormField
-              label={t('grant.remarkLabel')}
-              htmlFor="g-remark"
-              required
-              error={grantErrors.remark?.message}
-            >
-              <textarea
-                id="g-remark"
-                rows={3}
-                className="w-full rounded-[8px] border border-border bg-surface py-[10px] px-[12px] text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                placeholder={t('grant.remarkPlaceholder')}
-                {...registerGrant('remark')}
-              />
-            </FormField>
+              <FormField
+                label={t('add.typeLabel')}
+                htmlFor="q-type"
+                required
+                error={errors.leave_type_id?.message}
+              >
+                <select id="q-type" className={inputCls} {...register('leave_type_id')}>
+                  <option value="">{t('add.typePlaceholder')}</option>
+                  {leaveTypes.map((lt) => (
+                    <option key={lt.id} value={lt.id}>
+                      {lt.name} ({lt.code})
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </>
+          )}
 
-            {/* Audit note */}
-            <div className="flex items-start gap-[8px] rounded-[8px] border border-info-bd bg-info-bg py-[10px] px-[12px] mt-[14px]">
-              <Info aria-hidden className="h-[14px] w-[14px] shrink-0 text-info-tx mt-[1px]" />
-              <span className="text-[12px] text-info-tx leading-[1.4]">{t('grant.auditNote')}</span>
+          <FormField
+            label={isAdjust ? t('adjust.deltaLabel') : t('add.deltaLabel')}
+            htmlFor="q-delta"
+            required
+            error={errors.delta?.message}
+          >
+            <input
+              id="q-delta"
+              type="number"
+              className={inputCls}
+              {...register('delta', { valueAsNumber: true })}
+            />
+          </FormField>
+
+          {isAdjust && target && (
+            <div className="grid grid-cols-2 gap-[10px] mb-[2px]">
+              <div className="flex flex-col gap-[2px] rounded-[8px] bg-surface-2 py-[10px] px-[12px]">
+                <span className="text-[11px] text-text-3">{t('adjust.newEntitled')}</span>
+                <span className="text-[16px] font-bold text-text leading-none">{newEntitled}</span>
+              </div>
+              <div className="flex flex-col gap-[2px] rounded-[8px] bg-surface-2 py-[10px] px-[12px]">
+                <span className="text-[11px] text-text-3">{t('adjust.newRemaining')}</span>
+                <span
+                  className={`text-[16px] font-bold leading-none ${newRemaining < 0 ? 'text-bad-tx' : 'text-text'}`}
+                >
+                  {newRemaining}
+                </span>
+              </div>
             </div>
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="secondary" onClick={onClose}>
-              {t('actions.cancel')}
-            </Button>
-            <Button type="submit" variant="primary" disabled={grantSubmitting}>
-              {t('grant.saveBtn')}
-            </Button>
-          </ModalFooter>
-        </form>
-      )}
+          )}
+
+          <FormField
+            label={t('save.reasonLabel')}
+            htmlFor="q-reason"
+            required
+            error={errors.reason?.message}
+          >
+            <textarea
+              id="q-reason"
+              rows={3}
+              className={`${inputCls} resize-none`}
+              placeholder={t('save.reasonPlaceholder')}
+              {...register('reason')}
+            />
+          </FormField>
+
+          <div className="flex items-start gap-[8px] rounded-[8px] border border-info-bd bg-info-bg py-[10px] px-[12px] mt-[14px]">
+            <Info aria-hidden className="h-[14px] w-[14px] shrink-0 text-info-tx mt-[1px]" />
+            <span className="text-[12px] text-info-tx leading-[1.4]">{t('save.auditNote')}</span>
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('actions.cancel')}
+          </Button>
+          <Button type="submit" variant="primary" disabled={isSubmitting}>
+            {isAdjust ? t('adjust.saveBtn') : t('add.saveBtn')}
+          </Button>
+        </ModalFooter>
+      </form>
     </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
-// EmployeePoolSummary — inline balance summary shown above the lot table
+// Directory row — fetches the employee's per-type balances; renders the CT line
 // ---------------------------------------------------------------------------
 
-interface PoolSummaryProps {
-  employeeId: string;
+const COL = {
+  emp: 300,
+  ct: 110,
+  used: 100,
+  pending: 90,
+  remaining: 90,
+  special: 90,
+  expiry: 160,
+} as const;
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
-function EmployeePoolSummary({ employeeId }: PoolSummaryProps) {
-  const { t } = useTranslation('leaveQuotas');
-  const balanceQuery = useGetLeaveBalanceByEmployee(employeeId, undefined);
+function EmployeeQuotaRow({ emp, onSelect }: { emp: EmployeeRow; onSelect: () => void }) {
+  const balQuery = useGetEmployeeTypeBalances(emp.id);
+  const balances = unwrap<LeaveTypeBalance[]>(balQuery.data?.data) ?? [];
+  const ct = balances.find((b) => b.cap_basis === CAP_ANNUAL);
+  const specialUsed = balances.filter(
+    (b) => b.cap_basis !== CAP_ANNUAL && (b.used_days > 0 || b.pending_days > 0),
+  ).length;
 
-  const outer = balanceQuery.data?.data as
-    | ({
-        pool_remaining: number;
-        next_expiry?: string | null;
-        earmarked: { earmark: string; remaining_days: number; expires_at: string }[];
-      } & { data?: unknown })
-    | undefined;
-  const balance =
-    outer && typeof outer === 'object' && 'data' in outer && outer.data
-      ? (outer.data as typeof outer)
-      : outer;
-
-  if (balanceQuery.isLoading) {
-    return <div className="h-[72px] animate-pulse rounded-[10px] bg-surface-2" />;
-  }
-
-  if (!balance) return null;
+  const cell = (w: number, node: React.ReactNode, align: 'left' | 'right' = 'right') => (
+    <div
+      style={{ width: w }}
+      className={`shrink-0 flex items-center ${align === 'right' ? 'justify-end' : ''}`}
+    >
+      {node}
+    </div>
+  );
+  const mono = 'font-mono text-[14px]';
+  const dash = <span className="text-[14px] text-text-3">—</span>;
 
   return (
-    <div className="rounded-[10px] border border-border bg-surface-2 px-[16px] py-[14px] flex items-center gap-[24px]">
-      {/* Pool total */}
-      <div className="flex flex-col gap-[2px]">
-        <span className="text-[28px] font-bold text-ok-tx leading-none">
-          {balance.pool_remaining}
-        </span>
-        <span className="text-[12px] text-text-3">{t('pool.remainingLabel')}</span>
-      </div>
-
-      {/* Next expiry hint */}
-      {balance.next_expiry && (
-        <div className="flex items-center gap-[6px] text-[12px] text-text-3">
-          <CalendarPlus aria-hidden className="h-[13px] w-[13px] shrink-0" />
-          <span>
-            {t('pool.expiryHint')}{' '}
-            <DateText kind="date" value={balance.next_expiry} className="font-medium text-text" />
+    <button
+      type="button"
+      onClick={onSelect}
+      className="flex items-center w-full text-left py-[12px] px-[18px] border-b border-border-subtle bg-surface hover:bg-surface-2 transition-colors"
+    >
+      {cell(
+        COL.emp,
+        <div className="flex items-center gap-[10px] min-w-0">
+          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-surface-2 text-[13px] font-semibold text-text-2">
+            {initials(emp.full_name)}
           </span>
-        </div>
+          <div className="flex flex-col gap-[1px] min-w-0">
+            <span className="text-[14px] font-semibold text-text truncate">{emp.full_name}</span>
+            <span className="text-[11px] font-mono text-text-3">{emp.id}</span>
+          </div>
+        </div>,
+        'left',
       )}
-
-      {/* Earmarked lots */}
-      {balance.earmarked.length > 0 && (
-        <div className="ml-auto flex items-center gap-[8px] flex-wrap">
-          {balance.earmarked.map((el) => (
-            <div
-              key={el.earmark}
-              className="flex items-center gap-[4px] rounded-full bg-warn-bg px-[10px] py-[4px]"
-            >
-              <Tag aria-hidden className="h-[10px] w-[10px] text-warn-tx" />
-              <span className="text-[11px] font-semibold text-warn-tx">
-                {el.earmark} · {el.remaining_days} {t('pool.days')}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+      {balQuery.isLoading
+        ? [COL.ct, COL.used, COL.pending, COL.remaining, COL.special, COL.expiry].map((w, i) =>
+            cell(
+              w,
+              <span className="h-[12px] w-[28px] rounded bg-surface-2 animate-pulse" />,
+              i === 5 ? 'left' : 'right',
+            ),
+          )
+        : ct
+          ? [
+              cell(
+                COL.ct,
+                <span className={`${mono} font-semibold text-text`}>
+                  {ct.entitled_days ?? ct.cap_value ?? 0}
+                </span>,
+              ),
+              cell(COL.used, <span className={`${mono} text-text-2`}>{ct.used_days}</span>),
+              cell(
+                COL.pending,
+                <span
+                  className={`${mono} ${ct.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
+                >
+                  {ct.pending_days}
+                </span>,
+              ),
+              cell(
+                COL.remaining,
+                <span
+                  className={`${mono} font-semibold ${(ct.remaining_days ?? 0) <= 0 ? 'text-text-3' : 'text-ok-tx'}`}
+                >
+                  {ct.remaining_days ?? 0}
+                </span>,
+              ),
+              cell(
+                COL.special,
+                specialUsed > 0 ? (
+                  <span className="text-[13px] text-text-2">{specialUsed}</span>
+                ) : (
+                  dash
+                ),
+              ),
+              cell(
+                COL.expiry,
+                ct.expires_at ? (
+                  <DateText kind="date" value={ct.expires_at} className="text-[13px] text-text-2" />
+                ) : (
+                  dash
+                ),
+                'left',
+              ),
+            ]
+          : [
+              cell(COL.ct, dash),
+              cell(COL.used, dash),
+              cell(COL.pending, dash),
+              cell(COL.remaining, dash),
+              cell(
+                COL.special,
+                specialUsed > 0 ? (
+                  <span className="text-[13px] text-text-2">{specialUsed}</span>
+                ) : (
+                  dash
+                ),
+              ),
+              cell(COL.expiry, dash, 'left'),
+            ]}
+    </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// EmployeeLotDetail — drill-in view: pool summary + per-lot table
+// Per-type drill-in — full cap_basis breakdown for one employee
 // ---------------------------------------------------------------------------
 
-interface EmployeeLotDetailProps {
-  row: EmployeeLeaveBalance;
-  onBack: () => void;
-  onAddQuota: () => void;
-  onAdjust: (lot: LeaveGrant) => void;
-  onRefetch: () => void;
-}
-
-function EmployeeLotDetail({
-  row,
+function EmployeeTypeDetail({
+  emp,
   onBack,
-  onAddQuota,
   onAdjust,
-  onRefetch,
-}: EmployeeLotDetailProps) {
+}: {
+  emp: EmployeeRow;
+  onBack: () => void;
+  onAdjust: (target: AdjustTarget) => void;
+}) {
   const { t } = useTranslation('leaveQuotas');
+  const balQuery = useGetEmployeeTypeBalances(emp.id);
+  const balances = unwrap<LeaveTypeBalance[]>(balQuery.data?.data) ?? [];
+  const error = balQuery.error ? classifyError(balQuery.error) : null;
+  const isEmpty = !balQuery.isLoading && !error && balances.length === 0;
 
-  const queryParams: ListLeaveGrantsParams = { limit: PAGE_SIZE, employee_id: row.employee_id };
-  const grantsQuery = useListLeaveGrants(queryParams);
-
-  type GrantListData = { data: LeaveGrant[]; next_cursor?: string | null; has_more: boolean };
-  const grantsOuter = grantsQuery.data?.data as { data: GrantListData } | GrantListData | undefined;
-  const grantList =
-    grantsOuter &&
-    typeof grantsOuter === 'object' &&
-    'data' in grantsOuter &&
-    typeof (grantsOuter as { data: unknown }).data === 'object' &&
-    !Array.isArray((grantsOuter as { data: unknown }).data)
-      ? (grantsOuter as { data: GrantListData }).data
-      : (grantsOuter as GrantListData | undefined);
-
-  const lots: LeaveGrant[] = grantList?.data ?? [];
-
-  const lotColumns: Column<LeaveGrant>[] = [
+  const columns: Column<LeaveTypeBalance>[] = [
     {
-      id: 'source',
-      header: t('table.source'),
-      width: 130,
-      cell: (lot) => (
-        <span className="text-[13px] text-text-2">
-          {t(sourceLabelKey(lot.source as LeaveGrantSource))}
-        </span>
+      id: 'type',
+      header: t('detail.type'),
+      width: 260,
+      cell: (b) => (
+        <div className="flex items-center gap-[8px] min-w-0">
+          <span
+            className="h-[10px] w-[10px] shrink-0 rounded-full"
+            style={{ backgroundColor: b.color }}
+          />
+          <div className="flex flex-col min-w-0">
+            <span className="text-[14px] text-text truncate">{b.name}</span>
+            <span className="text-[11px] font-mono text-text-3">{b.code}</span>
+          </div>
+        </div>
       ),
     },
     {
-      id: 'earmark',
-      header: t('table.earmark'),
-      width: 150,
-      cell: (lot) =>
-        lot.earmark ? (
-          <StatusBadge tone={earmarkBadgeTone(lot.earmark)} dot={false}>
-            {lot.earmark}
-          </StatusBadge>
+      id: 'entitled',
+      header: t('detail.entitled'),
+      width: 110,
+      align: 'right',
+      cell: (b) =>
+        b.has_window || b.entitled_days != null || b.cap_value != null ? (
+          <span className="font-mono text-[14px] font-semibold text-text">
+            {b.entitled_days ?? b.cap_value ?? 0}
+          </span>
         ) : (
-          <span className="text-[12px] text-text-3">{t('table.poolGeneral')}</span>
+          <span className="text-[12px] text-text-3">{t('detail.perRule')}</span>
         ),
     },
     {
-      id: 'amount',
-      header: t('table.amount'),
-      width: 100,
+      id: 'used',
+      header: t('detail.used'),
+      width: 90,
       align: 'right',
-      cell: (lot) => <span className="text-[14px] font-semibold text-text">{lot.amount_days}</span>,
-    },
-    {
-      id: 'consumed',
-      header: t('table.consumed'),
-      width: 100,
-      align: 'right',
-      cell: (lot) => <span className="text-[14px] text-text">{lot.consumed_days}</span>,
+      cell: (b) => <span className="font-mono text-[14px] text-text-2">{b.used_days}</span>,
     },
     {
       id: 'pending',
-      header: t('table.pending'),
-      width: 100,
+      header: t('detail.pending'),
+      width: 90,
       align: 'right',
-      cell: (lot) => (
+      cell: (b) => (
         <span
-          className={`text-[14px] ${lot.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
+          className={`font-mono text-[14px] ${b.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
         >
-          {lot.pending_days}
+          {b.pending_days}
         </span>
       ),
     },
     {
       id: 'remaining',
-      header: t('table.remaining'),
-      width: 110,
+      header: t('detail.remaining'),
+      width: 90,
       align: 'right',
-      cell: (lot) => {
-        const rem = remainingDays(lot);
-        return (
+      cell: (b) =>
+        b.remaining_days == null ? (
+          <span className="text-[13px] text-text-3">—</span>
+        ) : (
           <span
-            className={`text-[14px] font-semibold ${
-              rem < 0 ? 'text-bad-tx' : rem === 0 ? 'text-text-3' : 'text-ok-tx'
-            }`}
+            className={`font-mono text-[14px] font-semibold ${b.remaining_days <= 0 ? 'text-text-3' : 'text-ok-tx'}`}
           >
-            {rem}
+            {b.remaining_days}
           </span>
-        );
-      },
+        ),
     },
     {
-      id: 'expires_at',
-      header: t('table.expires'),
+      id: 'expiry',
+      header: t('detail.expiry'),
       width: 130,
-      cell: (lot) => (
-        <DateText kind="date" value={lot.expires_at} className="text-[13px] text-text-2" />
-      ),
-    },
-    {
-      id: 'remark',
-      header: t('table.remark'),
-      width: 200,
-      cell: (lot) => (
-        <span className="text-[12px] text-text-3 truncate" title={lot.remark ?? ''}>
-          {lot.remark ?? '—'}
-        </span>
-      ),
+      cell: (b) =>
+        b.expires_at ? (
+          <DateText kind="date" value={b.expires_at} className="text-[13px] text-text-2" />
+        ) : (
+          <span className="text-[13px] text-text-3">—</span>
+        ),
     },
     {
       id: 'actions',
       header: '',
-      width: 110,
+      width: 120,
       align: 'right',
-      cell: (lot) => (
+      cell: (b) => (
         <Button
           type="button"
           variant="secondary"
           size="sm"
-          aria-label={t('actions.adjustAriaLabel', { id: lot.id })}
-          onClick={() => onAdjust(lot)}
+          onClick={() =>
+            onAdjust({
+              employeeId: emp.id,
+              employeeName: emp.full_name,
+              leaveTypeId: b.leave_type_id,
+              code: b.code,
+              name: b.name,
+              entitled: b.entitled_days ?? b.cap_value ?? 0,
+              used: b.used_days,
+              remaining: b.remaining_days ?? 0,
+            })
+          }
         >
           {t('actions.adjust')}
         </Button>
@@ -812,49 +632,34 @@ function EmployeeLotDetail({
     },
   ];
 
-  const isLoading = grantsQuery.isLoading;
-  const error = grantsQuery.error ? classifyError(grantsQuery.error) : null;
-  const isEmpty = !isLoading && !error && lots.length === 0;
-
   return (
     <div className="flex flex-col gap-[16px] w-full">
-      {/* Back + employee header */}
-      <div className="flex items-center justify-between w-full">
-        <div className="flex items-center gap-[10px]">
-          <Button type="button" variant="secondary" size="sm" onClick={onBack}>
-            <ChevronLeft aria-hidden className="h-[14px] w-[14px]" />
-            {t('actions.back')}
-          </Button>
-          <div className="flex flex-col gap-[2px]">
-            <span className="text-[16px] font-semibold text-text">{row.full_name}</span>
-            <span className="text-[12px] font-mono text-text-3">{row.employee_id}</span>
-          </div>
-        </div>
-        <Button type="button" variant="primary" onClick={onAddQuota}>
-          <PackagePlus aria-hidden className="h-[16px] w-[16px]" />
-          {t('actions.grantLot')}
+      <div className="flex items-center gap-[10px]">
+        <Button type="button" variant="secondary" size="sm" onClick={onBack}>
+          <ChevronLeft aria-hidden className="h-[14px] w-[14px]" />
+          {t('actions.back')}
         </Button>
+        <div className="flex flex-col gap-[2px]">
+          <span className="text-[16px] font-semibold text-text">{emp.full_name}</span>
+          <span className="text-[12px] font-mono text-text-3">{emp.id}</span>
+        </div>
       </div>
 
-      {/* Pool summary */}
-      <EmployeePoolSummary employeeId={row.employee_id} />
-
-      {/* Lot table */}
       {error ? (
         <StateView
           kind="error"
           title={t('states.errorTitle')}
           description={error.message}
-          onRetry={onRefetch}
+          onRetry={() => balQuery.refetch()}
           retryLabel={t('actions.retry')}
         />
       ) : (
         <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
           <DataTable
-            columns={lotColumns}
-            data={lots}
-            getRowId={(lot) => lot.id}
-            isLoading={isLoading}
+            columns={columns}
+            data={balances}
+            getRowId={(b) => b.leave_type_id}
+            isLoading={balQuery.isLoading}
             empty={
               isEmpty ? (
                 <EmptyState
@@ -872,7 +677,7 @@ function EmployeeLotDetail({
 }
 
 // ---------------------------------------------------------------------------
-// LeaveQuotasScreen — per-employee aggregate list
+// Screen
 // ---------------------------------------------------------------------------
 
 export function LeaveQuotasScreen() {
@@ -881,229 +686,84 @@ export function LeaveQuotasScreen() {
   const search = useSearch({ strict: false }) as LeaveQuotasSearch;
   const queryClient = useQueryClient();
 
-  const [grantOpen, setGrantOpen] = useState(false);
-  const [adjustTarget, setAdjustTarget] = useState<LeaveGrant | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [adjustTarget, setAdjustTarget] = useState<AdjustTarget | null>(null);
 
-  // ── Aggregate list (one row per employee) ──────────────────────────────
-  const listParams: ListLeaveBalancesParams = {
+  const listQuery = useListEmployees({
     limit: PAGE_SIZE,
     ...(search.q ? { q: search.q } : {}),
     ...(search.cursor ? { cursor: search.cursor } : {}),
-  };
+  });
 
-  const balancesQuery = useListLeaveBalances(listParams);
-
-  type BalanceListData = {
-    data: EmployeeLeaveBalance[];
-    next_cursor?: string | null;
-    has_more: boolean;
-  };
-  const balancesOuter = balancesQuery.data?.data as
-    | { data: BalanceListData }
-    | BalanceListData
-    | undefined;
-  const balanceList =
-    balancesOuter &&
-    typeof balancesOuter === 'object' &&
-    'data' in balancesOuter &&
-    typeof (balancesOuter as { data: unknown }).data === 'object' &&
-    !Array.isArray((balancesOuter as { data: unknown }).data)
-      ? (balancesOuter as { data: BalanceListData }).data
-      : (balancesOuter as BalanceListData | undefined);
-
-  const rows: EmployeeLeaveBalance[] = balanceList?.data ?? [];
-  const hasMore = balanceList?.has_more ?? false;
-  const nextCursor = balanceList?.next_cursor ?? null;
-
-  // ── Drill-in selection ─────────────────────────────────────────────────
-  const selectedEmployee = search.employee_id
-    ? (rows.find((r) => r.employee_id === search.employee_id) ?? null)
-    : null;
+  type EmpList = { data: EmployeeRow[]; next_cursor?: string | null; has_more?: boolean };
+  const list = unwrap<EmpList>(listQuery.data?.data);
+  const employees: EmployeeRow[] = list?.data ?? [];
+  const hasMore = list?.has_more ?? false;
+  const nextCursor = list?.next_cursor ?? null;
 
   type NavFn = (o: { to: string; search?: Record<string, unknown> }) => void;
   const nav = navigate as unknown as NavFn;
 
+  const selected = search.employee_id
+    ? (employees.find((e) => e.id === search.employee_id) ?? null)
+    : null;
+
   function setSearch(patch: Partial<LeaveQuotasSearch>) {
     nav({ to: '/leave/quotas', search: { ...search, ...patch, cursor: undefined } });
   }
-
-  function selectEmployee(row: EmployeeLeaveBalance) {
-    nav({
-      to: '/leave/quotas',
-      search: { ...search, employee_id: row.employee_id, cursor: undefined },
+  function onSuccess() {
+    listQuery.refetch();
+    queryClient.invalidateQueries({
+      predicate: (q) =>
+        q.queryKey.some((k) => typeof k === 'string' && k.includes('leave-balances')),
     });
   }
 
-  function clearSelection() {
-    nav({
-      to: '/leave/quotas',
-      search: { q: search.q, cursor: undefined },
-    });
-  }
-
-  function onRefetch() {
-    balancesQuery.refetch();
-    if (search.employee_id) {
-      queryClient.invalidateQueries({
-        queryKey: getGetLeaveBalanceByEmployeeQueryKey(search.employee_id),
-      });
-      queryClient.invalidateQueries({ queryKey: getListLeaveGrantsQueryKey() });
-    }
-    queryClient.invalidateQueries({ queryKey: getListLeaveBalancesQueryKey() });
-  }
-
-  const listError = balancesQuery.error ? classifyError(balancesQuery.error) : null;
-
-  // ── Aggregate list columns ─────────────────────────────────────────────
-  const listColumns: Column<EmployeeLeaveBalance>[] = [
-    {
-      id: 'employee',
-      header: t('table.employee'),
-      width: 240,
-      cell: (row) => (
-        <div className="flex flex-col min-w-0">
-          <span className="text-[14px] font-medium text-text truncate">{row.full_name}</span>
-          <span className="text-[11px] font-mono text-text-3">{row.employee_id}</span>
-          <span className="text-[11px] text-text-3">
-            {row.nip ? `NIP ${row.nip}` : `NIK ${row.nik}`}
-          </span>
-        </div>
-      ),
-    },
-    {
-      id: 'pool_total',
-      header: t('list.total'),
-      width: 110,
-      align: 'right',
-      cell: (row) => <span className="text-[14px] font-semibold text-text">{row.pool_total}</span>,
-    },
-    {
-      id: 'pool_consumed',
-      header: t('list.consumed'),
-      width: 100,
-      align: 'right',
-      cell: (row) => <span className="text-[14px] text-text">{row.pool_consumed}</span>,
-    },
-    {
-      id: 'pool_pending',
-      header: t('list.pending'),
-      width: 90,
-      align: 'right',
-      cell: (row) => (
-        <span
-          className={`text-[14px] ${row.pool_pending > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
-        >
-          {row.pool_pending}
-        </span>
-      ),
-    },
-    {
-      id: 'pool_remaining',
-      header: t('list.remaining'),
-      width: 90,
-      align: 'right',
-      cell: (row) => {
-        const rem = row.pool_remaining;
-        return (
-          <span
-            className={`text-[14px] font-semibold ${
-              rem < 0 ? 'text-bad-tx' : rem === 0 ? 'text-text-3' : 'text-ok-tx'
-            }`}
-          >
-            {rem}
-          </span>
-        );
-      },
-    },
-    {
-      id: 'earmarked_remaining',
-      header: t('list.earmark'),
-      width: 90,
-      align: 'right',
-      cell: (row) =>
-        row.earmarked_remaining > 0 ? (
-          <span className="text-[14px] font-medium text-warn-tx">{row.earmarked_remaining}</span>
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
-    },
-    {
-      id: 'next_expiry',
-      header: t('list.nextExpiry'),
-      width: 150,
-      cell: (row) =>
-        row.next_expiry ? (
-          <DateText
-            kind="date"
-            value={row.next_expiry as string}
-            className="text-[13px] text-text-2"
-          />
-        ) : (
-          <span className="text-[13px] text-text-3">—</span>
-        ),
-    },
-  ];
-
-  const isLoading = balancesQuery.isLoading;
-  const isEmpty = !isLoading && !listError && rows.length === 0;
+  const listError = listQuery.error ? classifyError(listQuery.error) : null;
+  const isLoading = listQuery.isLoading;
+  const isEmpty = !isLoading && !listError && employees.length === 0;
   const hasActiveFilter = !!search.q;
   const isForbidden = listError?.kind === 'forbidden';
 
-  // ── If an employee is selected → show drill-in ─────────────────────────
-  if (selectedEmployee) {
+  // ── Drill-in ────────────────────────────────────────────────────────────
+  if (selected) {
     return (
       <div className="flex flex-col gap-[18px] p-[24px] bg-app-bg min-h-full w-full">
-        {/* Title band */}
         <div className="flex flex-col gap-[4px]">
           <h1 className="text-[30px] font-bold text-text leading-none">{t('title')}</h1>
           <p className="text-[14px] text-text-3">{t('subtitle')}</p>
         </div>
-
-        <EmployeeLotDetail
-          row={selectedEmployee}
-          onBack={clearSelection}
-          onAddQuota={() => setGrantOpen(true)}
-          onAdjust={(lot) => setAdjustTarget(lot)}
-          onRefetch={onRefetch}
+        <EmployeeTypeDetail
+          emp={selected}
+          onBack={() => nav({ to: '/leave/quotas', search: { q: search.q } })}
+          onAdjust={setAdjustTarget}
         />
-
-        {/* Grant modal (create) */}
-        <GrantLotModal
-          open={grantOpen}
-          defaultEmployeeId={selectedEmployee.employee_id}
-          onClose={() => setGrantOpen(false)}
-          onSuccess={onRefetch}
-        />
-
-        {/* Adjust modal (patch) */}
         {adjustTarget && (
-          <GrantLotModal
-            adjustTarget={adjustTarget}
+          <QuotaModal
+            target={adjustTarget}
             open
             onClose={() => setAdjustTarget(null)}
-            onSuccess={onRefetch}
+            onSuccess={onSuccess}
           />
         )}
       </div>
     );
   }
 
-  // ── Default: aggregate list ────────────────────────────────────────────
+  // ── Directory ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-[18px] p-[24px] bg-app-bg min-h-full w-full">
-      {/* Title band */}
       <div className="flex items-center justify-between w-full">
         <div className="flex flex-col gap-[4px]">
           <h1 className="text-[30px] font-bold text-text leading-none">{t('title')}</h1>
           <p className="text-[14px] text-text-3">{t('subtitle')}</p>
         </div>
-        <Button type="button" variant="primary" onClick={() => setGrantOpen(true)}>
+        <Button type="button" variant="primary" onClick={() => setAddOpen(true)}>
           <PackagePlus aria-hidden className="h-[16px] w-[16px]" />
-          {t('actions.grantLot')}
+          {t('actions.addQuota')}
         </Button>
       </div>
 
-      {/* Search — name / NIK / NIP → wires to q param */}
       <div className="flex items-center gap-[10px] w-full">
         <SearchField
           value={search.q ?? ''}
@@ -1112,7 +772,6 @@ export function LeaveQuotasScreen() {
         />
       </div>
 
-      {/* Table card */}
       {isForbidden ? (
         <EmptyState
           variant="no-permission"
@@ -1124,55 +783,86 @@ export function LeaveQuotasScreen() {
           kind="error"
           title={t('states.errorTitle')}
           description={listError.message}
-          onRetry={onRefetch}
+          onRetry={() => listQuery.refetch()}
           retryLabel={t('actions.retry')}
         />
       ) : (
         <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
-          <DataTable
-            columns={listColumns}
-            data={rows}
-            getRowId={(row) => row.id}
-            isLoading={isLoading}
-            onRowClick={selectEmployee}
-            empty={
-              isEmpty && hasActiveFilter ? (
-                <EmptyState
-                  variant="filtered"
-                  title={t('states.filteredZeroTitle')}
-                  description={t('states.filteredZeroDesc')}
-                  action={
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => nav({ to: '/leave/quotas', search: {} })}
-                    >
-                      {t('actions.clearFilters')}
-                    </Button>
-                  }
-                />
-              ) : (
-                <EmptyState
-                  variant="fresh"
-                  title={t('states.freshTitle')}
-                  description={t('states.freshDesc')}
-                />
-              )
-            }
-          />
+          {/* Header */}
+          <div className="flex items-center py-[11px] px-[18px] bg-surface-2 border-b border-border">
+            {(
+              [
+                [COL.emp, t('table.employee'), 'left'],
+                [COL.ct, t('table.quotaCt'), 'right'],
+                [COL.used, t('table.used'), 'right'],
+                [COL.pending, t('table.pending'), 'right'],
+                [COL.remaining, t('table.remaining'), 'right'],
+                [COL.special, t('table.special'), 'right'],
+                [COL.expiry, t('table.ctExpiry'), 'left'],
+              ] as const
+            ).map(([w, label, align]) => (
+              <div
+                key={label}
+                style={{ width: w }}
+                className={`shrink-0 flex ${align === 'right' ? 'justify-end' : ''}`}
+              >
+                <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {isLoading ? (
+            <div className="p-[18px] text-[13px] text-text-3">{t('states.loading')}</div>
+          ) : isEmpty ? (
+            hasActiveFilter ? (
+              <EmptyState
+                variant="filtered"
+                title={t('states.filteredZeroTitle')}
+                description={t('states.filteredZeroDesc')}
+                action={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => nav({ to: '/leave/quotas', search: {} })}
+                  >
+                    {t('actions.clearFilters')}
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                variant="fresh"
+                title={t('states.freshTitle')}
+                description={t('states.freshDesc')}
+              />
+            )
+          ) : (
+            employees.map((emp) => (
+              <EmployeeQuotaRow
+                key={emp.id}
+                emp={emp}
+                onSelect={() =>
+                  nav({
+                    to: '/leave/quotas',
+                    search: { ...search, employee_id: emp.id, cursor: undefined },
+                  })
+                }
+              />
+            ))
+          )}
         </div>
       )}
 
-      {/* Footer note (LQ-6) */}
-      {!isLoading && !listError && rows.length > 0 && (
+      {!isLoading && !listError && employees.length > 0 && (
         <p className="text-[12px] text-text-3">{t('footerNote')}</p>
       )}
 
-      {/* Cursor pagination */}
-      {rows.length > 0 && (
+      {employees.length > 0 && (
         <CursorPagination
-          rangeLabel={t('pagination.rangeLabel', { count: rows.length })}
+          rangeLabel={t('pagination.rangeLabel', { count: employees.length })}
           hasPrev={!!search.cursor}
           hasNext={hasMore}
           onPrev={() => nav({ to: '/leave/quotas', search: { ...search, cursor: undefined } })}
@@ -1182,18 +872,7 @@ export function LeaveQuotasScreen() {
         />
       )}
 
-      {/* Grant modal (create) */}
-      <GrantLotModal open={grantOpen} onClose={() => setGrantOpen(false)} onSuccess={onRefetch} />
-
-      {/* Adjust modal (patch) — should not appear from list view but safety check */}
-      {adjustTarget && (
-        <GrantLotModal
-          adjustTarget={adjustTarget}
-          open
-          onClose={() => setAdjustTarget(null)}
-          onSuccess={onRefetch}
-        />
-      )}
+      <QuotaModal open={addOpen} onClose={() => setAddOpen(false)} onSuccess={onSuccess} />
     </div>
   );
 }

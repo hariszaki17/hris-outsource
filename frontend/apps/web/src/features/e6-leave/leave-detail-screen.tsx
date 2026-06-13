@@ -423,13 +423,9 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
                   value={lr.balance_check.requested_days ?? 0}
                   t={t}
                 />
-                {/* Pool remaining (unearmarked) or earmarked lot remaining */}
+                {/* Per-type window remaining at the last check. */}
                 <BalanceStat
-                  label={
-                    lr.balance_check.earmark
-                      ? t('detail.balanceEarmarked', { earmark: lr.balance_check.earmark })
-                      : t('detail.balancePool')
-                  }
+                  label={t('detail.balancePool')}
                   value={lr.balance_check.remaining_days_at_check ?? 0}
                   t={t}
                   negative={Boolean(lr.balance_check.requires_override)}
