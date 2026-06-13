@@ -1,9 +1,23 @@
+// Agen · Ajukan Cuti — built from brainstorm.pen frame QT92D.
+// Per-type contract: type chips + a per-type balance hint banner for the selected type
+// (useGetEmployeeTypeBalances / LeaveTypeBalance) + a standing quota-rejection warning.
+// Deferred vs the frame (capability gaps, not omissions): native date picker (ISO text inputs
+// for now), working-days count, delegation picker, and document upload (doc-required types are
+// filtered out — no attachment flow yet).
 import { ApiError } from '@swp/api-client';
-import { type LeaveType, useCreateLeaveRequest, useListLeaveTypes } from '@swp/api-client/e6';
+import {
+  type LeaveType,
+  type LeaveTypeBalance,
+  useCreateLeaveRequest,
+  useGetEmployeeTypeBalances,
+  useListLeaveTypes,
+} from '@swp/api-client/e6';
+import { formatDate } from '@swp/shared/datetime';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, TextInput, View } from 'react-native';
+import { useSession } from '../src/providers/session';
 import { Button } from '../src/ui/Button';
 import { Screen } from '../src/ui/Screen';
 import { Text } from '../src/ui/Text';
@@ -13,8 +27,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export default function LeaveNew() {
   const { t } = useTranslation();
   const router = useRouter();
+  const { user } = useSession();
+  const employeeId = user?.employee_id ?? '';
   const typesQ = useListLeaveTypes();
   const create = useCreateLeaveRequest();
+
+  const balancesQ = useGetEmployeeTypeBalances(employeeId, { query: { enabled: !!employeeId } });
+  const balances = (balancesQ.data?.data as { data?: LeaveTypeBalance[] } | undefined)?.data ?? [];
 
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
   // Document-required types are deferred (no attachment upload yet).
@@ -62,6 +81,15 @@ export default function LeaveNew() {
 
   const inputClass = 'rounded-input border border-border bg-surface px-4 py-3 text-text';
 
+  // Per-type balance hint for the selected type (frame QT92D's green banner). Only types with a
+  // tracked depleting pool (ANNUAL_POOL / PER_YEAR_COUNT → entitled + remaining present) show it.
+  const selectedBal = balances.find((b) => b.leave_type_id === typeId);
+  const showHint =
+    selectedBal != null && selectedBal.entitled_days != null && selectedBal.remaining_days != null;
+  const hintDesc = selectedBal?.expires_at
+    ? t('m:leave.bal.expires', { date: formatDate(selectedBal.expires_at) })
+    : t('m:leave.bal.annual');
+
   return (
     <Screen>
       <View className="mb-6 flex-row items-center justify-between">
@@ -92,6 +120,21 @@ export default function LeaveNew() {
             ))}
           </View>
         </View>
+
+        {showHint && selectedBal ? (
+          <View className="rounded-input border border-ok-border bg-ok-bg px-4 py-3">
+            <Text className="text-ok-text font-semibold">
+              {t('m:leave.balHint', {
+                name: selectedBal.name,
+                code: selectedBal.code,
+                remaining: selectedBal.remaining_days,
+              })}
+            </Text>
+            <Text className="text-ok-text mt-0.5 text-xs">
+              {t('m:leave.balHintSub', { entitled: selectedBal.entitled_days, desc: hintDesc })}
+            </Text>
+          </View>
+        ) : null}
 
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -132,6 +175,10 @@ export default function LeaveNew() {
             className={`${inputClass} h-24`}
             style={{ textAlignVertical: 'top' }}
           />
+        </View>
+
+        <View className="rounded-input border border-warn-border bg-warn-bg px-4 py-3">
+          <Text className="text-warn-text text-xs">{t('m:leave.quotaWarn')}</Text>
         </View>
 
         {err ? <Text className="text-danger">{err}</Text> : null}
