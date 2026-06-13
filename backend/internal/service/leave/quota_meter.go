@@ -258,7 +258,7 @@ func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEnt
 
 // resolveOrOpen row-locks the window, auto-opening it at its entitlement if absent.
 func (m *QuotaMeter) resolveOrOpen(ctx context.Context, tx pgx.Tx, cap dom.LeaveTypeCap, employeeID string, start time.Time) (dom.LeaveQuota, error) {
-	key, period, ps, pe, exp := windowFor(cap.CapBasis, start)
+	key, _, _, _, exp := windowFor(cap.CapBasis, start)
 	win, err := m.store.ResolveQuotaWindow(ctx, tx, employeeID, cap.ID, key)
 	if !errors.Is(err, domain.ErrNotFound) {
 		return win, err
@@ -269,7 +269,6 @@ func (m *QuotaMeter) resolveOrOpen(ctx context.Context, tx pgx.Tx, cap dom.Leave
 	}
 	return m.store.OpenQuotaWindow(ctx, tx, dom.QuotaWindowSpec{
 		EmployeeID: employeeID, LeaveTypeID: cap.ID, PeriodKey: key,
-		Period: period, PeriodStart: ps, PeriodEnd: pe,
 		EntitledDays: entitled, Source: dom.QuotaSourceAuto,
 		Remark: "auto-open " + string(cap.CapBasis), ExpiresAt: exp,
 	})

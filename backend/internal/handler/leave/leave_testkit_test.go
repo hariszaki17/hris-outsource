@@ -457,158 +457,19 @@ func (r *fakeLeaveRepo) ListCalendarEntries(_ context.Context, f svc.CalendarFil
 var _ svc.LeaveRepository = (*fakeLeaveRepo)(nil)
 
 // ---------------------------------------------------------------------------
-// fakeQuotaRepo — in-memory svc.QuotaRepository over shared maps.
-//
-// Keyed by id AND by (employee,type,period) so the approve-final balance
-// re-check + bulk-grant FindQuotaForEmployeeTypePeriod resolve the same row.
-// Deduct/Adjust/Upsert mutate in place so List observes the new totals.
+// fakeQuotaRepo — in-memory svc.QuotaRepository (per-type balance read only).
 // ---------------------------------------------------------------------------
 
 type fakeQuotaRepo struct {
-	byID     map[string]dom.LeaveQuota
-	pending  map[string]int // keyed by quota id (recompute-on-read source)
-	grantSet []svc.GrantCandidate
+	balances map[string][]dom.TypeBalance // employee_id → per-type rows
 }
 
 func newFakeQuotaRepo() *fakeQuotaRepo {
-	return &fakeQuotaRepo{byID: map[string]dom.LeaveQuota{}, pending: map[string]int{}}
+	return &fakeQuotaRepo{balances: map[string][]dom.TypeBalance{}}
 }
 
-func quotaKey(emp, lt string, period int) string {
-	return emp + "|" + lt + "|" + itoa(period)
-}
-
-func (r *fakeQuotaRepo) put(q dom.LeaveQuota) { r.byID[q.ID] = q }
-
-func (r *fakeQuotaRepo) ListLeaveQuotas(_ context.Context, f svc.QuotaFilter) ([]dom.LeaveQuota, error) {
-	var out []dom.LeaveQuota
-	for _, q := range r.byID {
-		if f.EmployeeID != nil && q.EmployeeID != *f.EmployeeID {
-			continue
-		}
-		if f.Period != nil && q.Period != *f.Period {
-			continue
-		}
-		out = append(out, q)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].ID > out[j].ID
-		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
-	})
-	if f.CursorCreated != nil && f.CursorID != nil {
-		var trimmed []dom.LeaveQuota
-		for _, q := range out {
-			if q.CreatedAt.Before(*f.CursorCreated) ||
-				(q.CreatedAt.Equal(*f.CursorCreated) && q.ID < *f.CursorID) {
-				trimmed = append(trimmed, q)
-			}
-		}
-		out = trimmed
-	}
-	if f.Limit > 0 && len(out) > f.Limit {
-		out = out[:f.Limit]
-	}
-	return out, nil
-}
-
-func (r *fakeQuotaRepo) GetLeaveQuota(_ context.Context, id string) (dom.LeaveQuota, error) {
-	q, ok := r.byID[id]
-	if !ok {
-		return dom.LeaveQuota{}, domain.ErrNotFound
-	}
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) GetLeaveQuotaForUpdate(_ context.Context, _ pgx.Tx, id string) (dom.LeaveQuota, error) {
-	return r.GetLeaveQuota(context.Background(), id)
-}
-
-func (r *fakeQuotaRepo) FindQuotaForEmployeeTypePeriod(_ context.Context, emp, lt string, period int) (dom.LeaveQuota, error) {
-	for _, q := range r.byID {
-		if q.EmployeeID == emp && q.LeaveTypeID == lt && q.Period == period {
-			return q, nil
-		}
-	}
-	return dom.LeaveQuota{}, domain.ErrNotFound
-}
-
-func (r *fakeQuotaRepo) ListEmployeeTypeBalances(_ context.Context, _, _, _ string) ([]dom.TypeBalance, error) {
-	return nil, nil
-}
-
-func (r *fakeQuotaRepo) UpsertLeaveQuota(_ context.Context, _ pgx.Tx, p svc.UpsertQuotaParams) (dom.LeaveQuota, error) {
-	// Find existing (employee,type,period); preserve used/pending.
-	for id, q := range r.byID {
-		if q.EmployeeID == p.EmployeeID && q.LeaveTypeID == p.LeaveTypeID && q.Period == p.Period {
-			q.Total = p.Total
-			q.IsProrated = p.IsProrated
-			q.ProrateMonths = p.ProrateMonths
-			r.byID[id] = q
-			return q, nil
-		}
-	}
-	q := dom.LeaveQuota{
-		ID:            "SWP-LQ-" + p.EmployeeID,
-		EmployeeID:    p.EmployeeID,
-		LeaveTypeID:   p.LeaveTypeID,
-		Period:        p.Period,
-		PeriodStart:   p.PeriodStart,
-		PeriodEnd:     p.PeriodEnd,
-		Total:         p.Total,
-		IsProrated:    p.IsProrated,
-		ProrateMonths: p.ProrateMonths,
-		CreatedAt:     fixedNow,
-		UpdatedAt:     fixedNow,
-	}
-	r.byID[q.ID] = q
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) AdjustLeaveQuotaTotal(_ context.Context, _ pgx.Tx, id string, delta int, adj dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error) {
-	q := r.byID[id]
-	q.Total += delta
-	a := adj
-	q.LastAdjustment = &a
-	q.UpdatedAt = fixedNow
-	r.byID[id] = q
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) DeductLeaveQuota(_ context.Context, _ pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
-	q := r.byID[id]
-	q.Used += delta
-	r.byID[id] = q
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) RestoreLeaveQuota(_ context.Context, _ pgx.Tx, id string, delta int) (dom.LeaveQuota, error) {
-	q := r.byID[id]
-	q.Used -= delta
-	r.byID[id] = q
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) SetLeaveQuotaOverride(_ context.Context, _ pgx.Tx, id string, ov dom.LeaveQuotaOverride) (dom.LeaveQuota, error) {
-	q := r.byID[id]
-	o := ov
-	q.LastOverride = &o
-	r.byID[id] = q
-	return q, nil
-}
-
-func (r *fakeQuotaRepo) CountPendingLeaveDaysForQuota(_ context.Context, emp, lt string, _, _ time.Time) (int, error) {
-	for id, q := range r.byID {
-		if q.EmployeeID == emp && q.LeaveTypeID == lt {
-			return r.pending[id], nil
-		}
-	}
-	return 0, nil
-}
-
-func (r *fakeQuotaRepo) ListActivePlacedEmployeesForGrant(_ context.Context, _, _ time.Time) ([]svc.GrantCandidate, error) {
-	return r.grantSet, nil
+func (r *fakeQuotaRepo) ListEmployeeTypeBalances(_ context.Context, employeeID, _, _ string) ([]dom.TypeBalance, error) {
+	return r.balances[employeeID], nil
 }
 
 var _ svc.QuotaRepository = (*fakeQuotaRepo)(nil)
@@ -745,7 +606,6 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-l1", handler.ApproveLeaveRequestL1)
 		r.With(idem.Handler).Post("/leave-requests/{id}:reject", handler.RejectLeaveRequest)
-		r.Get("/leave-quotas", handler.ListLeaveQuotas)
 		r.Get("/leave-calendar", handler.GetLeaveCalendar)
 		r.With(idem.Handler).Post("/leave-requests/{id}:cancel-approved", handler.CancelApprovedLeaveRequest)
 	})
@@ -762,10 +622,10 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-final", handler.ApproveLeaveRequestFinal)
 		r.With(idem.Handler).Post("/leave-requests/{id}:approve-override", handler.ApproveLeaveRequestOverride)
 	})
+	// HR per-type quota adjust (LQ-6).
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-		r.With(idem.Handler).Post("/leave-quotas/{id}:adjust", handler.AdjustLeaveQuota)
-		r.With(idem.Handler).Post("/leave-quotas:bulk-grant", handler.BulkGrantLeaveQuotas)
+		r.With(idem.Handler).Post("/leave-quotas:adjust-entitled", handler.AdjustTypeQuota)
 	})
 
 	h.router = r
@@ -835,27 +695,6 @@ func (h *harness) seedLeaveTypeFull(id, code string, isAnnual, docRequired, allo
 		ID: id, Code: code, Name: code, IsAnnual: isAnnual,
 		IsDocumentRequired: docRequired, AllowsBackdated: allowsBackdated,
 	}
-}
-
-// seedQuota plants a leave_quotas row (annual, calendar-year period).
-func (h *harness) seedQuota(id, employee, leaveType string, period, total, used, pending int) dom.LeaveQuota {
-	q := dom.LeaveQuota{
-		ID:           id,
-		EmployeeID:   employee,
-		LeaveTypeID:  leaveType,
-		Period:       period,
-		PeriodStart:  ymd(period, time.January, 1),
-		PeriodEnd:    ymd(period, time.December, 31),
-		Total:        total,
-		Used:         used,
-		Pending:      pending,
-		CreatedAt:    fixedNow,
-		UpdatedAt:    fixedNow,
-		EmployeeName: strp("Agent " + employee),
-	}
-	h.quota.byID[id] = q
-	h.quota.pending[id] = pending
-	return q
 }
 
 // seedGrant seeds an employee's leave balance under the per-type ledger: it sets the

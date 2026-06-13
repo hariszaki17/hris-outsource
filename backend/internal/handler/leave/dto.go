@@ -46,20 +46,6 @@ type shortenRequest struct {
 	Reason     string `json:"reason"`
 }
 
-type adjustRequest struct {
-	Delta  int    `json:"delta"`
-	Reason string `json:"reason"`
-}
-
-type bulkGrantRequest struct {
-	LeaveTypeID            string   `json:"leave_type_id"`
-	Period                 int      `json:"period"`
-	DefaultEntitlementDays *int     `json:"default_entitlement_days"`
-	EmployeeIDs            []string `json:"employee_ids"`
-	ProRate                bool     `json:"pro_rate"`
-	Preview                bool     `json:"preview"`
-}
-
 // --- response: LeaveRequest ---
 
 type routingResponse struct {
@@ -142,54 +128,26 @@ type quotaOverrideResponse struct {
 	OverriddenAt   string `json:"overridden_at"`
 }
 
+// leaveQuotaResponse is the per-type window (openapi LeaveQuota) returned by the HR
+// adjust-entitled action. remaining = entitled - used - pending (derived).
 type leaveQuotaResponse struct {
 	ID             string                   `json:"id"`
 	EmployeeID     string                   `json:"employee_id"`
 	EmployeeName   *string                  `json:"employee_name,omitempty"`
 	LeaveTypeID    string                   `json:"leave_type_id"`
 	LeaveTypeName  *string                  `json:"leave_type_name,omitempty"`
-	Period         int                      `json:"period"`
-	PeriodStart    string                   `json:"period_start"`
-	PeriodEnd      string                   `json:"period_end"`
-	Total          int                      `json:"total"`
-	Used           int                      `json:"used"`
-	Pending        int                      `json:"pending"`
+	PeriodKey      string                   `json:"period_key"`
+	EntitledDays   int                      `json:"entitled_days"`
+	UsedDays       int                      `json:"used_days"`
+	PendingDays    int                      `json:"pending_days"`
 	Remaining      int                      `json:"remaining"`
-	IsProrated     bool                     `json:"is_prorated"`
-	ProrateMonths  int                      `json:"prorate_months"`
-	Closed         bool                     `json:"closed"`
+	Source         string                   `json:"source"`
+	Remark         string                   `json:"remark,omitempty"`
+	ExpiresAt      *string                  `json:"expires_at,omitempty"`
 	LastAdjustment *quotaAdjustmentResponse `json:"last_adjustment"`
 	LastOverride   *quotaOverrideResponse   `json:"last_override"`
 	CreatedAt      string                   `json:"created_at"`
 	UpdatedAt      string                   `json:"updated_at"`
-}
-
-// --- response: bulk-grant ---
-
-type bulkGrantSucceededRow struct {
-	EmployeeID    string  `json:"employee_id"`
-	EmployeeName  *string `json:"employee_name,omitempty"`
-	QuotaID       *string `json:"quota_id"`
-	Total         int     `json:"total"`
-	IsProrated    bool    `json:"is_prorated"`
-	ProrateMonths *int    `json:"prorate_months"`
-}
-
-type bulkGrantFailedRow struct {
-	EmployeeID string         `json:"employee_id"`
-	Error      bulkGrantError `json:"error"`
-}
-
-type bulkGrantError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type bulkGrantResponse struct {
-	Preview       bool                    `json:"preview"`
-	TotalAffected int                     `json:"total_affected"`
-	Succeeded     []bulkGrantSucceededRow `json:"succeeded"`
-	Failed        []bulkGrantFailedRow    `json:"failed"`
 }
 
 // --- response: calendar ---
@@ -309,18 +267,19 @@ func toLeaveQuotaResponse(q dom.LeaveQuota) leaveQuotaResponse {
 		EmployeeName:  q.EmployeeName,
 		LeaveTypeID:   q.LeaveTypeID,
 		LeaveTypeName: q.LeaveTypeName,
-		Period:        q.Period,
-		PeriodStart:   dateStr(q.PeriodStart),
-		PeriodEnd:     dateStr(q.PeriodEnd),
-		Total:         q.Total,
-		Used:          q.Used,
-		Pending:       q.Pending,
-		Remaining:     q.Remaining(),
-		IsProrated:    q.IsProrated,
-		ProrateMonths: q.ProrateMonths,
-		Closed:        q.Closed,
+		PeriodKey:     q.PeriodKey,
+		EntitledDays:  q.EntitledDays,
+		UsedDays:      q.UsedDays,
+		PendingDays:   q.PendingDays,
+		Remaining:     q.RemainingPerType(),
+		Source:        string(q.Source),
+		Remark:        q.Remark,
 		CreatedAt:     rfc3339(q.CreatedAt),
 		UpdatedAt:     rfc3339(q.UpdatedAt),
+	}
+	if q.ExpiresAt != nil {
+		s := dateStr(*q.ExpiresAt)
+		out.ExpiresAt = &s
 	}
 	if q.LastAdjustment != nil {
 		out.LastAdjustment = &quotaAdjustmentResponse{
@@ -337,32 +296,6 @@ func toLeaveQuotaResponse(q dom.LeaveQuota) leaveQuotaResponse {
 			OverriddenBy:   q.LastOverride.OverriddenBy,
 			OverriddenAt:   rfc3339(q.LastOverride.OverriddenAt),
 		}
-	}
-	return out
-}
-
-func toBulkGrantResponse(r svc.BulkGrantResult) bulkGrantResponse {
-	out := bulkGrantResponse{
-		Preview:       r.Preview,
-		TotalAffected: r.TotalAffected,
-		Succeeded:     make([]bulkGrantSucceededRow, 0, len(r.Succeeded)),
-		Failed:        make([]bulkGrantFailedRow, 0, len(r.Failed)),
-	}
-	for _, s := range r.Succeeded {
-		out.Succeeded = append(out.Succeeded, bulkGrantSucceededRow{
-			EmployeeID:    s.EmployeeID,
-			EmployeeName:  s.EmployeeName,
-			QuotaID:       s.QuotaID,
-			Total:         s.Total,
-			IsProrated:    s.IsProrated,
-			ProrateMonths: s.ProrateMonths,
-		})
-	}
-	for _, f := range r.Failed {
-		out.Failed = append(out.Failed, bulkGrantFailedRow{
-			EmployeeID: f.EmployeeID,
-			Error:      bulkGrantError{Code: f.Code, Message: f.Message},
-		})
 	}
 	return out
 }

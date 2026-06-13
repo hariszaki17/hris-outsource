@@ -7,59 +7,9 @@ package sqlcgen
 
 import (
 	"context"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
-
-const adjustLeaveQuotaTotal = `-- name: AdjustLeaveQuotaTotal :one
-UPDATE leave_quotas
-SET total           = total + $1,
-    last_adjustment = $2,
-    updated_at      = now()
-WHERE id = $3
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
-`
-
-type AdjustLeaveQuotaTotalParams struct {
-	Delta          int32
-	LastAdjustment []byte
-	ID             string
-}
-
-// :adjust — signed delta on total + audited last_adjustment snapshot. Service
-// guards delta cannot drop total below used (422 RULE_VIOLATION) before calling.
-func (q *Queries) AdjustLeaveQuotaTotal(ctx context.Context, arg AdjustLeaveQuotaTotalParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, adjustLeaveQuotaTotal, arg.Delta, arg.LastAdjustment, arg.ID)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
 
 const adjustQuotaEntitled = `-- name: AdjustQuotaEntitled :one
 UPDATE leave_quotas
@@ -69,7 +19,7 @@ SET entitled_days   = entitled_days + $1,
     last_adjustment = $3,
     updated_at      = now()
 WHERE id = $4
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type AdjustQuotaEntitledParams struct {
@@ -93,15 +43,6 @@ func (q *Queries) AdjustQuotaEntitled(ctx context.Context, arg AdjustQuotaEntitl
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -124,7 +65,7 @@ SET pending_days = GREATEST(pending_days - $1, 0),
     used_days    = used_days + $1,
     updated_at   = now()
 WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type CommitQuotaDaysParams struct {
@@ -140,15 +81,6 @@ func (q *Queries) CommitQuotaDays(ctx context.Context, arg CommitQuotaDaysParams
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -198,368 +130,10 @@ func (q *Queries) CountApprovedRequestsForType(ctx context.Context, arg CountApp
 	return count, err
 }
 
-const deductLeaveQuota = `-- name: DeductLeaveQuota :one
-UPDATE leave_quotas
-SET used       = used + $1,
-    updated_at = now()
-WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
-`
-
-type DeductLeaveQuotaParams struct {
-	Delta int32
-	ID    string
-}
-
-// Final-approval deduct: move days from the soft-reservation into used.
-func (q *Queries) DeductLeaveQuota(ctx context.Context, arg DeductLeaveQuotaParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, deductLeaveQuota, arg.Delta, arg.ID)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const findQuotaForEmployeeTypePeriod = `-- name: FindQuotaForEmployeeTypePeriod :one
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end, lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed, lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at, lq.period_key, lq.entitled_days, lq.used_days, lq.pending_days, lq.source, lq.remark, lq.expires_at, lq.created_by
-FROM leave_quotas lq
-WHERE lq.employee_id   = $1
-  AND lq.leave_type_id = $2
-  AND lq.period        = $3
-`
-
-type FindQuotaForEmployeeTypePeriodParams struct {
-	EmployeeID  string
-	LeaveTypeID string
-	Period      int32
-}
-
-// INV-1 quota guard lookup by (employee_id, leave_type_id, period).
-func (q *Queries) FindQuotaForEmployeeTypePeriod(ctx context.Context, arg FindQuotaForEmployeeTypePeriodParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, findQuotaForEmployeeTypePeriod, arg.EmployeeID, arg.LeaveTypeID, arg.Period)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const getLeaveQuota = `-- name: GetLeaveQuota :one
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end,
-       lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed,
-       lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at,
-       e.full_name AS employee_name,
-       lt.name     AS leave_type_name,
-       lt.code     AS leave_type_code
-FROM leave_quotas lq
-LEFT JOIN employees e    ON e.id  = lq.employee_id
-LEFT JOIN leave_types lt ON lt.id = lq.leave_type_id
-WHERE lq.id = $1
-`
-
-type GetLeaveQuotaRow struct {
-	ID             string
-	EmployeeID     string
-	LeaveTypeID    string
-	Period         int32
-	PeriodStart    pgtype.Date
-	PeriodEnd      pgtype.Date
-	Total          int32
-	Used           int32
-	Pending        int32
-	IsProrated     bool
-	ProrateMonths  int32
-	Closed         bool
-	LastAdjustment []byte
-	LastOverride   []byte
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	EmployeeName   *string
-	LeaveTypeName  *string
-	LeaveTypeCode  *string
-}
-
-func (q *Queries) GetLeaveQuota(ctx context.Context, id string) (GetLeaveQuotaRow, error) {
-	row := q.db.QueryRow(ctx, getLeaveQuota, id)
-	var i GetLeaveQuotaRow
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.EmployeeName,
-		&i.LeaveTypeName,
-		&i.LeaveTypeCode,
-	)
-	return i, err
-}
-
-const getLeaveQuotaForUpdate = `-- name: GetLeaveQuotaForUpdate :one
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end, lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed, lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at, lq.period_key, lq.entitled_days, lq.used_days, lq.pending_days, lq.source, lq.remark, lq.expires_at, lq.created_by
-FROM leave_quotas lq
-WHERE lq.id = $1
-FOR UPDATE
-`
-
-// Row-lock for :adjust and the final-approval deduct/restore.
-func (q *Queries) GetLeaveQuotaForUpdate(ctx context.Context, id string) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, getLeaveQuotaForUpdate, id)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const listActivePlacedEmployeesForGrant = `-- name: ListActivePlacedEmployeesForGrant :many
-SELECT DISTINCT e.id AS employee_id,
-       e.full_name   AS employee_name,
-       p.start_date  AS placement_start_date
-FROM employees e
-JOIN placements p ON p.employee_id = e.id
-WHERE p.lifecycle_status IN ('ACTIVE','EXPIRING')
-  AND p.deleted_at IS NULL
-  AND e.deleted_at IS NULL
-  AND p.start_date <= $1::date
-  AND (p.end_date IS NULL OR p.end_date >= $2::date)
-ORDER BY e.id ASC
-`
-
-type ListActivePlacedEmployeesForGrantParams struct {
-	PeriodEnd   pgtype.Date
-	PeriodStart pgtype.Date
-}
-
-type ListActivePlacedEmployeesForGrantRow struct {
-	EmployeeID         string
-	EmployeeName       string
-	PlacementStartDate pgtype.Date
-}
-
-// bulk-grant employee_ids:["all"] sentinel + pro-rate join-date source: employees
-// with an ACTIVE/EXPIRING placement covering any day of the [period_start,period_end].
-func (q *Queries) ListActivePlacedEmployeesForGrant(ctx context.Context, arg ListActivePlacedEmployeesForGrantParams) ([]ListActivePlacedEmployeesForGrantRow, error) {
-	rows, err := q.db.Query(ctx, listActivePlacedEmployeesForGrant, arg.PeriodEnd, arg.PeriodStart)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListActivePlacedEmployeesForGrantRow{}
-	for rows.Next() {
-		var i ListActivePlacedEmployeesForGrantRow
-		if err := rows.Scan(&i.EmployeeID, &i.EmployeeName, &i.PlacementStartDate); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLeaveQuotas = `-- name: ListLeaveQuotas :many
-
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end,
-       lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed,
-       lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at,
-       e.full_name AS employee_name,
-       lt.name     AS leave_type_name,
-       lt.code     AS leave_type_code
-FROM leave_quotas lq
-LEFT JOIN employees e    ON e.id  = lq.employee_id
-LEFT JOIN leave_types lt ON lt.id = lq.leave_type_id
-WHERE ($1::text   IS NULL OR lq.employee_id   = $1::text)
-  AND ($2::text IS NULL OR lq.leave_type_id = $2::text)
-  AND ($3::int         IS NULL OR lq.period        = $3::int)
-  AND ($4::bool IS TRUE OR lq.closed = false)
-  AND ($5::text IS NULL OR EXISTS (
-        SELECT 1 FROM placements p
-        WHERE p.employee_id = lq.employee_id
-          AND p.client_company_id = $5::text
-          AND p.deleted_at IS NULL))
-  AND ($6::timestamptz IS NULL OR
-       (lq.created_at, lq.id) < ($6::timestamptz, $7::text))
-ORDER BY lq.created_at DESC, lq.id DESC
-LIMIT $8
-`
-
-type ListLeaveQuotasParams struct {
-	EmployeeID      *string
-	LeaveTypeID     *string
-	Period          *int32
-	IncludeClosed   *bool
-	CompanyID       *string
-	CursorCreatedAt *time.Time
-	CursorID        *string
-	Lim             int32
-}
-
-type ListLeaveQuotasRow struct {
-	ID             string
-	EmployeeID     string
-	LeaveTypeID    string
-	Period         int32
-	PeriodStart    pgtype.Date
-	PeriodEnd      pgtype.Date
-	Total          int32
-	Used           int32
-	Pending        int32
-	IsProrated     bool
-	ProrateMonths  int32
-	Closed         bool
-	LastAdjustment []byte
-	LastOverride   []byte
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	EmployeeName   *string
-	LeaveTypeName  *string
-	LeaveTypeCode  *string
-}
-
-// E6 leave-quota queries (F6.3 / SWP-LQ-*). remaining = total-used-pending is a
-// DERIVED domain method (not a column). Reads LEFT JOIN employees/leave_types for
-// denormalized names. Dates come back as pgtype.Date (08-02 repo converts).
-// last_adjustment / last_override are jsonb → []byte in sqlc (08-02 marshals).
-// Keyset cursor (created_at,id) DESC. Filters (narg): employee_id, leave_type_id,
-// period, company_id (via the employee's covering placement), include_closed.
-func (q *Queries) ListLeaveQuotas(ctx context.Context, arg ListLeaveQuotasParams) ([]ListLeaveQuotasRow, error) {
-	rows, err := q.db.Query(ctx, listLeaveQuotas,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-		arg.Period,
-		arg.IncludeClosed,
-		arg.CompanyID,
-		arg.CursorCreatedAt,
-		arg.CursorID,
-		arg.Lim,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListLeaveQuotasRow{}
-	for rows.Next() {
-		var i ListLeaveQuotasRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.EmployeeID,
-			&i.LeaveTypeID,
-			&i.Period,
-			&i.PeriodStart,
-			&i.PeriodEnd,
-			&i.Total,
-			&i.Used,
-			&i.Pending,
-			&i.IsProrated,
-			&i.ProrateMonths,
-			&i.Closed,
-			&i.LastAdjustment,
-			&i.LastOverride,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.EmployeeName,
-			&i.LeaveTypeName,
-			&i.LeaveTypeCode,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const openQuotaWindow = `-- name: OpenQuotaWindow :one
 INSERT INTO leave_quotas (
     employee_id, leave_type_id, period_key,
-    period, period_start, period_end,
-    entitled_days, source, remark, expires_at, created_by,
-    total
+    entitled_days, source, remark, expires_at, created_by
 ) VALUES (
     $1,
     $2,
@@ -568,26 +142,19 @@ INSERT INTO leave_quotas (
     $5,
     $6,
     $7,
-    $8,
-    $9,
-    $10,
-    $11,
-    $7
+    $8
 )
 ON CONFLICT (employee_id, leave_type_id, period_key) DO UPDATE
 SET entitled_days = EXCLUDED.entitled_days,
     expires_at    = EXCLUDED.expires_at,
     updated_at    = now()
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type OpenQuotaWindowParams struct {
 	EmployeeID   string
 	LeaveTypeID  string
 	PeriodKey    *string
-	Period       int32
-	PeriodStart  pgtype.Date
-	PeriodEnd    pgtype.Date
 	EntitledDays int32
 	Source       string
 	Remark       string
@@ -602,9 +169,6 @@ func (q *Queries) OpenQuotaWindow(ctx context.Context, arg OpenQuotaWindowParams
 		arg.EmployeeID,
 		arg.LeaveTypeID,
 		arg.PeriodKey,
-		arg.Period,
-		arg.PeriodStart,
-		arg.PeriodEnd,
 		arg.EntitledDays,
 		arg.Source,
 		arg.Remark,
@@ -616,15 +180,6 @@ func (q *Queries) OpenQuotaWindow(ctx context.Context, arg OpenQuotaWindowParams
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -646,7 +201,7 @@ UPDATE leave_quotas
 SET pending_days = GREATEST(pending_days - $1, 0),
     updated_at   = now()
 WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type ReleaseQuotaDaysParams struct {
@@ -662,15 +217,6 @@ func (q *Queries) ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysPara
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -692,7 +238,7 @@ UPDATE leave_quotas
 SET pending_days = pending_days + $1,
     updated_at   = now()
 WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type ReserveQuotaDaysParams struct {
@@ -708,15 +254,6 @@ func (q *Queries) ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysPara
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -735,7 +272,7 @@ func (q *Queries) ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysPara
 
 const resolveQuotaWindow = `-- name: ResolveQuotaWindow :one
 
-SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.period, lq.period_start, lq.period_end, lq.total, lq.used, lq.pending, lq.is_prorated, lq.prorate_months, lq.closed, lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at, lq.period_key, lq.entitled_days, lq.used_days, lq.pending_days, lq.source, lq.remark, lq.expires_at, lq.created_by
+SELECT lq.id, lq.employee_id, lq.leave_type_id, lq.last_adjustment, lq.last_override, lq.created_at, lq.updated_at, lq.period_key, lq.entitled_days, lq.used_days, lq.pending_days, lq.source, lq.remark, lq.expires_at, lq.created_by
 FROM leave_quotas lq
 WHERE lq.employee_id   = $1
   AND lq.leave_type_id = $2
@@ -749,13 +286,11 @@ type ResolveQuotaWindowParams struct {
 	PeriodKey   *string
 }
 
-// ============================================================================
-// Per-type ledger (2026-06-12, EPICS §8). New live path: meter per (employee,
-// leave_type, period_key) window. Reserve at submit, commit at approve, release
-// at reject/cancel; no-negative enforced by the entitled/used/pending CHECKs.
-// Legacy period/period_start/period_end are still supplied (NOT NULL until 00052+
-// drops them); period_key is the authoritative window key.
-// ============================================================================
+// E6 per-type leave-quota window queries (F6.1 LQ-13 / SWP-LQ-*). The cap_basis
+// ledger meters per (employee, leave_type, period_key) window: reserve at submit,
+// commit at approve, release at reject/cancel; remaining = entitled-used-pending is a
+// DERIVED domain method. no-negative enforced by the entitled/used/pending CHECKs.
+// last_adjustment / last_override are jsonb → []byte in sqlc.
 // Row-locked lookup of the per-type window for reserve/commit/release.
 func (q *Queries) ResolveQuotaWindow(ctx context.Context, arg ResolveQuotaWindowParams) (LeaveQuota, error) {
 	row := q.db.QueryRow(ctx, resolveQuotaWindow, arg.EmployeeID, arg.LeaveTypeID, arg.PeriodKey)
@@ -764,61 +299,6 @@ func (q *Queries) ResolveQuotaWindow(ctx context.Context, arg ResolveQuotaWindow
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const restoreLeaveQuota = `-- name: RestoreLeaveQuota :one
-UPDATE leave_quotas
-SET used       = GREATEST(used - $1, 0),
-    updated_at = now()
-WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
-`
-
-type RestoreLeaveQuotaParams struct {
-	Delta int32
-	ID    string
-}
-
-// Cancel/withdraw restore: return days to the balance (used - delta).
-func (q *Queries) RestoreLeaveQuota(ctx context.Context, arg RestoreLeaveQuotaParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, restoreLeaveQuota, arg.Delta, arg.ID)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,
@@ -840,7 +320,7 @@ UPDATE leave_quotas
 SET used_days  = GREATEST(used_days - $1, 0),
     updated_at = now()
 WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
+RETURNING id, employee_id, leave_type_id, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
 `
 
 type ReverseCommittedQuotaDaysParams struct {
@@ -856,137 +336,6 @@ func (q *Queries) ReverseCommittedQuotaDays(ctx context.Context, arg ReverseComm
 		&i.ID,
 		&i.EmployeeID,
 		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const setLeaveQuotaOverride = `-- name: SetLeaveQuotaOverride :one
-UPDATE leave_quotas
-SET last_override = $1,
-    updated_at    = now()
-WHERE id = $2
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
-`
-
-type SetLeaveQuotaOverrideParams struct {
-	LastOverride []byte
-	ID           string
-}
-
-// HR override that drove remaining negative (LA-8): records last_override.
-func (q *Queries) SetLeaveQuotaOverride(ctx context.Context, arg SetLeaveQuotaOverrideParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, setLeaveQuotaOverride, arg.LastOverride, arg.ID)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
-		&i.LastAdjustment,
-		&i.LastOverride,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PeriodKey,
-		&i.EntitledDays,
-		&i.UsedDays,
-		&i.PendingDays,
-		&i.Source,
-		&i.Remark,
-		&i.ExpiresAt,
-		&i.CreatedBy,
-	)
-	return i, err
-}
-
-const upsertLeaveQuota = `-- name: UpsertLeaveQuota :one
-INSERT INTO leave_quotas (
-    employee_id, leave_type_id, period, period_start, period_end,
-    total, is_prorated, prorate_months
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7,
-    $8
-)
-ON CONFLICT (employee_id, leave_type_id, period) DO UPDATE
-SET total          = EXCLUDED.total,
-    is_prorated    = EXCLUDED.is_prorated,
-    prorate_months = EXCLUDED.prorate_months,
-    updated_at     = now()
-RETURNING id, employee_id, leave_type_id, period, period_start, period_end, total, used, pending, is_prorated, prorate_months, closed, last_adjustment, last_override, created_at, updated_at, period_key, entitled_days, used_days, pending_days, source, remark, expires_at, created_by
-`
-
-type UpsertLeaveQuotaParams struct {
-	EmployeeID    string
-	LeaveTypeID   string
-	Period        int32
-	PeriodStart   pgtype.Date
-	PeriodEnd     pgtype.Date
-	Total         int32
-	IsProrated    bool
-	ProrateMonths int32
-}
-
-// Bulk-grant: insert or update entitlement total for a (employee,type,period).
-// DOES NOT overwrite used/pending. id allocated by column DEFAULT when inserting.
-func (q *Queries) UpsertLeaveQuota(ctx context.Context, arg UpsertLeaveQuotaParams) (LeaveQuota, error) {
-	row := q.db.QueryRow(ctx, upsertLeaveQuota,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-		arg.Period,
-		arg.PeriodStart,
-		arg.PeriodEnd,
-		arg.Total,
-		arg.IsProrated,
-		arg.ProrateMonths,
-	)
-	var i LeaveQuota
-	err := row.Scan(
-		&i.ID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.Period,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Total,
-		&i.Used,
-		&i.Pending,
-		&i.IsProrated,
-		&i.ProrateMonths,
-		&i.Closed,
 		&i.LastAdjustment,
 		&i.LastOverride,
 		&i.CreatedAt,

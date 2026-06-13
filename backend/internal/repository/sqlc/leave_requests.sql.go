@@ -42,38 +42,6 @@ func (q *Queries) CheckOverlappingLeave(ctx context.Context, arg CheckOverlappin
 	return overlaps, err
 }
 
-const countPendingLeaveDaysForQuota = `-- name: CountPendingLeaveDaysForQuota :one
-SELECT COALESCE(SUM(lr.duration_days), 0)::bigint AS pending_days
-FROM leave_requests lr
-WHERE lr.employee_id   = $1
-  AND lr.leave_type_id = $2
-  AND lr.status IN ('PENDING_L1','PENDING_HR')
-  AND lr.start_date >= $3::date
-  AND lr.start_date <= $4::date
-  AND lr.deleted_at IS NULL
-`
-
-type CountPendingLeaveDaysForQuotaParams struct {
-	EmployeeID  string
-	LeaveTypeID string
-	PeriodStart pgtype.Date
-	PeriodEnd   pgtype.Date
-}
-
-// Soft-reservation recompute: sum duration_days of this employee+leave_type's open
-// PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
-func (q *Queries) CountPendingLeaveDaysForQuota(ctx context.Context, arg CountPendingLeaveDaysForQuotaParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPendingLeaveDaysForQuota,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-		arg.PeriodStart,
-		arg.PeriodEnd,
-	)
-	var pending_days int64
-	err := row.Scan(&pending_days)
-	return pending_days, err
-}
-
 const createLeaveRequest = `-- name: CreateLeaveRequest :one
 INSERT INTO leave_requests (
     employee_id, placement_id, company_id, leave_type_id,

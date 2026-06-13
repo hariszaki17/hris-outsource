@@ -157,25 +157,14 @@ type LeaveQuotaOverride struct {
 	OverriddenAt   time.Time `json:"overridden_at"`
 }
 
-// LeaveQuota is the domain entity for one (employee, leave_type, period) quota row
-// (openapi LeaveQuota). remaining is the DERIVED Remaining() method, NOT a column.
+// LeaveQuota is the domain entity for one per-type quota window (openapi LeaveQuota):
+// one (employee, leave_type, period_key) row under the cap_basis ledger. PeriodKey is
+// the window key (year | year-month | "EMP"). remaining = entitled - used - pending is
+// the DERIVED RemainingPerType() method, never a column.
 type LeaveQuota struct {
-	ID            string
-	EmployeeID    string
-	LeaveTypeID   string
-	Period        int
-	PeriodStart   time.Time
-	PeriodEnd     time.Time
-	Total         int
-	Used          int
-	Pending       int
-	IsProrated    bool
-	ProrateMonths int
-	Closed        bool
-
-	// Per-type ledger (2026-06-12, EPICS §8). PeriodKey generalizes Period across
-	// cap_basis windows (year | year-month | "EMP"). EntitledDays/UsedDays/
-	// PendingDays supersede Total/Used/Pending once the service is rewired (Phase 4).
+	ID           string
+	EmployeeID   string
+	LeaveTypeID  string
 	PeriodKey    string
 	EntitledDays int
 	UsedDays     int
@@ -197,13 +186,8 @@ type LeaveQuota struct {
 	LeaveTypeCode *string
 }
 
-// Remaining is the derived balance: total - used - pending. May go negative after
-// an HR :approve-override (LA-8); last_override is set in that case.
-func (q LeaveQuota) Remaining() int { return q.Total - q.Used - q.Pending }
-
-// RemainingPerType is the per-type-ledger derived balance (entitled - used -
-// pending). Used by the per-type model (Phase 4 onward); never negative by design
-// (allocation only ever draws available, INV-6).
+// RemainingPerType is the derived balance (entitled - used - pending). Never negative
+// by design (allocation only ever draws available, INV-6).
 func (q LeaveQuota) RemainingPerType() int { return q.EntitledDays - q.UsedDays - q.PendingDays }
 
 // LeaveTypeCap is a leave type's metering mechanics (leave_types cap_* columns,
@@ -269,15 +253,11 @@ func (b TypeBalance) Remaining() *int {
 	return nil // quota-bearing but no day cap (e.g. hajj)
 }
 
-// QuotaWindowSpec opens (or upserts) a per-type quota window. Legacy Period/
-// PeriodStart/PeriodEnd are supplied transitionally (NOT NULL until Phase 8).
+// QuotaWindowSpec opens (or upserts) a per-type quota window keyed by PeriodKey.
 type QuotaWindowSpec struct {
 	EmployeeID   string
 	LeaveTypeID  string
 	PeriodKey    string
-	Period       int
-	PeriodStart  time.Time
-	PeriodEnd    time.Time
 	EntitledDays int
 	Source       QuotaSource
 	Remark       string
@@ -353,22 +333,3 @@ type LeaveCalendarEntry struct {
 	DelegateName   *string
 }
 
-// LeaveQuotaAdjustParams carries the :adjust inputs (08-02 service → repo).
-type LeaveQuotaAdjustParams struct {
-	QuotaID    string
-	Delta      int
-	Reason     string
-	AdjustedBy string
-}
-
-// LeaveQuotaBulkGrantParams carries the :bulk-grant inputs (08-02 service → repo).
-type LeaveQuotaBulkGrantParams struct {
-	LeaveTypeID     string
-	Period          int
-	PeriodStart     time.Time
-	PeriodEnd       time.Time
-	EntitlementDays int
-	EmployeeIDs     []string // ["all"] sentinel resolved in the service
-	ProRate         bool
-	Preview         bool
-}

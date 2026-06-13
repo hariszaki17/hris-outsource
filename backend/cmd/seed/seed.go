@@ -763,20 +763,17 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	thu := monday.AddDate(0, 0, 3).Format("2006-01-02")
 	fri := monday.AddDate(0, 0, 4).Format("2006-01-02")
 	year := monday.Year()
-	periodStart := fmt.Sprintf("%d-01-01", year)
 	periodEnd := fmt.Sprintf("%d-12-31", year)
 
-	// --- leave_quotas (per-type ledger, 2026-06-12; the live balance model) ---
+	// --- leave_quotas (per-type ledger; the live balance model) ---
 	// ANNUAL_POOL (CT = SWP-LT-001) window per demo agent so
-	// GET /leave-balances/by-employee/{id}/types is non-trivial. Legacy
-	// period/period_start/period_end/total are filled transitionally (NOT NULL).
+	// GET /leave-balances/by-employee/{id}/types is non-trivial. expires_at = year-end;
 	// created_by is NULL (FK → users; no seed user row).
 	const lqQ = `
 		INSERT INTO leave_quotas
-			(id, employee_id, leave_type_id, period, period_start, period_end, total,
-			 period_key, entitled_days, used_days, pending_days, source, expires_at, remark, created_by)
-		VALUES ($1, $2, 'SWP-LT-001', $3, $4::date, $5::date, $6,
-		        $7, $6, $8, $9, 'AUTO', $5::date, $10, NULL)
+			(id, employee_id, leave_type_id, period_key,
+			 entitled_days, used_days, pending_days, source, expires_at, remark, created_by)
+		VALUES ($1, $2, 'SWP-LT-001', $3, $4, $5, 0, 'AUTO', $6::date, $7, NULL)
 		ON CONFLICT (employee_id, leave_type_id, period_key) DO NOTHING`
 	pk := fmt.Sprint(year)
 	quotas := []struct {
@@ -788,7 +785,7 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		{"SWP-LQ-8002", "SWP-EMP-2891", 12, 11, "Kuota tahunan " + pk + " (Budi)."},
 	}
 	for _, q := range quotas {
-		if _, err := pool.Pool.Exec(ctx, lqQ, q.id, q.employeeID, year, periodStart, periodEnd, q.entitled, pk, q.used, 0, q.remark); err != nil {
+		if _, err := pool.Pool.Exec(ctx, lqQ, q.id, q.employeeID, pk, q.entitled, q.used, periodEnd, q.remark); err != nil {
 			return fmt.Errorf("seed leave_quota %q: %w", q.id, err)
 		}
 		slog.Info("seed: upserted leave quota", "id", q.id, "employee_id", q.employeeID, "remaining", q.entitled-q.used)

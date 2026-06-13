@@ -307,15 +307,6 @@ type LeaveQuota struct {
 	ID             string
 	EmployeeID     string
 	LeaveTypeID    string
-	Period         int32
-	PeriodStart    pgtype.Date
-	PeriodEnd      pgtype.Date
-	Total          int32
-	Used           int32
-	Pending        int32
-	IsProrated     bool
-	ProrateMonths  int32
-	Closed         bool
 	LastAdjustment []byte
 	LastOverride   []byte
 	CreatedAt      time.Time

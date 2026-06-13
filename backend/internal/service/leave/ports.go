@@ -46,41 +46,6 @@ type RequestFilter struct {
 	CursorID      *string
 }
 
-// QuotaFilter is the decoded GET /leave-quotas query (cursor-paged) — DEPRECATED
-// 2026-06-08; the live path is GrantFilter / leave-grants.
-type QuotaFilter struct {
-	EmployeeID    *string
-	LeaveTypeID   *string
-	Period        *int
-	CompanyID     *string
-	IncludeClosed bool
-	Limit         int
-	CursorCreated *time.Time
-	CursorID      *string
-}
-
-// BalanceListFilter is the decoded GET /leave-balances query (cursor-paged, one row
-// per employee). Q mirrors ListEmployees: ILIKE over full_name/nik/nip. Cursor is
-// keyset on (full_name, employee_id).
-type BalanceListFilter struct {
-	Q              *string
-	Limit          int
-	CursorFullName *string
-	CursorID       *string
-}
-
-// GrantFilter is the decoded GET /leave-grants query (cursor-paged, FIFO-ordered).
-type GrantFilter struct {
-	EmployeeID     *string
-	Earmark        *string // "__null" sentinel = unearmarked only (openapi `earmark=__null`)
-	Source         *string
-	CompanyID      *string
-	IncludeExpired bool
-	Limit          int
-	CursorExpires  *time.Time
-	CursorID       *string
-}
-
 // CalendarFilter is the decoded GET /leave-calendar query.
 type CalendarFilter struct {
 	CompanyID   *string
@@ -202,44 +167,13 @@ type ApprovalRow struct {
 
 // --- quota repository port ---
 
-// QuotaRepository is the data dependency for the quota service.
+// QuotaRepository is the data dependency for the per-type quota balance read (F6.5).
+// The window-mutating side (reserve/commit/...) is the QuotaMeterStore interface,
+// implemented by the same concrete QuotaRepo.
 type QuotaRepository interface {
-	ListLeaveQuotas(ctx context.Context, f QuotaFilter) ([]dom.LeaveQuota, error)
-	GetLeaveQuota(ctx context.Context, id string) (dom.LeaveQuota, error)
-	GetLeaveQuotaForUpdate(ctx context.Context, tx pgx.Tx, id string) (dom.LeaveQuota, error)
-	FindQuotaForEmployeeTypePeriod(ctx context.Context, employeeID, leaveTypeID string, period int) (dom.LeaveQuota, error)
-
 	// Per-type ledger (2026-06-12): every active leave type + the employee's
 	// current-window quota (F6.5 balance). curYear="2026", curMonth="2026-06".
 	ListEmployeeTypeBalances(ctx context.Context, employeeID, curYear, curMonth string) ([]dom.TypeBalance, error)
-
-	UpsertLeaveQuota(ctx context.Context, tx pgx.Tx, p UpsertQuotaParams) (dom.LeaveQuota, error)
-	AdjustLeaveQuotaTotal(ctx context.Context, tx pgx.Tx, id string, delta int, adj dom.LeaveQuotaAdjustment) (dom.LeaveQuota, error)
-	DeductLeaveQuota(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)
-	RestoreLeaveQuota(ctx context.Context, tx pgx.Tx, id string, delta int) (dom.LeaveQuota, error)
-	SetLeaveQuotaOverride(ctx context.Context, tx pgx.Tx, id string, ov dom.LeaveQuotaOverride) (dom.LeaveQuota, error)
-
-	CountPendingLeaveDaysForQuota(ctx context.Context, employeeID, leaveTypeID string, periodStart, periodEnd time.Time) (int, error)
-	ListActivePlacedEmployeesForGrant(ctx context.Context, periodStart, periodEnd time.Time) ([]GrantCandidate, error)
-}
-
-// UpsertQuotaParams carries one bulk-grant total upsert (does NOT touch used/pending).
-type UpsertQuotaParams struct {
-	EmployeeID    string
-	LeaveTypeID   string
-	Period        int
-	PeriodStart   time.Time
-	PeriodEnd     time.Time
-	Total         int
-	IsProrated    bool
-	ProrateMonths int
-}
-
-// GrantCandidate is one employee in the bulk-grant set (+ join date for pro-rate).
-type GrantCandidate struct {
-	EmployeeID     string
-	EmployeeName   *string
-	PlacementStart time.Time
 }
 
 // --- scheduling INV-3 port (satisfied by the existing scheduling repo) ---

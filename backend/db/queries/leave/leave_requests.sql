@@ -222,15 +222,3 @@ SET balance_requested_days     = sqlc.narg(requested_days),
     updated_at                 = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
-
--- name: CountPendingLeaveDaysForQuota :one
--- Soft-reservation recompute: sum duration_days of this employee+leave_type's open
--- PENDING_L1/PENDING_HR requests in the period (drives quota.pending on read).
-SELECT COALESCE(SUM(lr.duration_days), 0)::bigint AS pending_days
-FROM leave_requests lr
-WHERE lr.employee_id   = sqlc.arg(employee_id)
-  AND lr.leave_type_id = sqlc.arg(leave_type_id)
-  AND lr.status IN ('PENDING_L1','PENDING_HR')
-  AND lr.start_date >= sqlc.arg(period_start)::date
-  AND lr.start_date <= sqlc.arg(period_end)::date
-  AND lr.deleted_at IS NULL;

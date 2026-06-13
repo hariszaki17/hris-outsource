@@ -285,70 +285,13 @@ func mapApproval(r sqlcgen.LeaveApproval) dom.LeaveApproval {
 
 // --- leave-quota mappers ---
 
-func mapQuotaFromList(r sqlcgen.ListLeaveQuotasRow) dom.LeaveQuota {
-	return dom.LeaveQuota{
-		ID:             r.ID,
-		EmployeeID:     r.EmployeeID,
-		LeaveTypeID:    r.LeaveTypeID,
-		Period:         int(r.Period),
-		PeriodStart:    pgDateToTime(r.PeriodStart),
-		PeriodEnd:      pgDateToTime(r.PeriodEnd),
-		Total:          int(r.Total),
-		Used:           int(r.Used),
-		Pending:        int(r.Pending),
-		IsProrated:     r.IsProrated,
-		ProrateMonths:  int(r.ProrateMonths),
-		Closed:         r.Closed,
-		LastAdjustment: unmarshalAdjustment(r.LastAdjustment),
-		LastOverride:   unmarshalOverride(r.LastOverride),
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-		EmployeeName:   r.EmployeeName,
-		LeaveTypeName:  r.LeaveTypeName,
-		LeaveTypeCode:  r.LeaveTypeCode,
-	}
-}
-
-func mapQuotaFromGet(r sqlcgen.GetLeaveQuotaRow) dom.LeaveQuota {
-	return dom.LeaveQuota{
-		ID:             r.ID,
-		EmployeeID:     r.EmployeeID,
-		LeaveTypeID:    r.LeaveTypeID,
-		Period:         int(r.Period),
-		PeriodStart:    pgDateToTime(r.PeriodStart),
-		PeriodEnd:      pgDateToTime(r.PeriodEnd),
-		Total:          int(r.Total),
-		Used:           int(r.Used),
-		Pending:        int(r.Pending),
-		IsProrated:     r.IsProrated,
-		ProrateMonths:  int(r.ProrateMonths),
-		Closed:         r.Closed,
-		LastAdjustment: unmarshalAdjustment(r.LastAdjustment),
-		LastOverride:   unmarshalOverride(r.LastOverride),
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
-		EmployeeName:   r.EmployeeName,
-		LeaveTypeName:  r.LeaveTypeName,
-		LeaveTypeCode:  r.LeaveTypeCode,
-	}
-}
-
-// mapQuotaFromModel maps the bare LeaveQuota model (no denormalized names) returned
-// by FindQuotaForEmployeeTypePeriod / *ForUpdate / the mutation queries.
+// mapQuotaFromModel maps the bare per-type LeaveQuota window model returned by the
+// QuotaMeter store queries (ResolveQuotaWindow / OpenQuotaWindow / the mutations).
 func mapQuotaFromModel(r sqlcgen.LeaveQuota) dom.LeaveQuota {
 	return dom.LeaveQuota{
 		ID:             r.ID,
 		EmployeeID:     r.EmployeeID,
 		LeaveTypeID:    r.LeaveTypeID,
-		Period:         int(r.Period),
-		PeriodStart:    pgDateToTime(r.PeriodStart),
-		PeriodEnd:      pgDateToTime(r.PeriodEnd),
-		Total:          int(r.Total),
-		Used:           int(r.Used),
-		Pending:        int(r.Pending),
-		IsProrated:     r.IsProrated,
-		ProrateMonths:  int(r.ProrateMonths),
-		Closed:         r.Closed,
 		PeriodKey:      derefStr(r.PeriodKey),
 		EntitledDays:   int(r.EntitledDays),
 		UsedDays:       int(r.UsedDays),
