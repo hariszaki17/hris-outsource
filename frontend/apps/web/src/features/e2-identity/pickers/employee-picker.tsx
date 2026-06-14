@@ -39,6 +39,19 @@ export interface EmployeePickerProps {
 }
 
 // ---------------------------------------------------------------------------
+// Display-name cache — every option the picker ever loads records its id → label
+// so callers that render their own chips (e.g. the E11 template line card) can
+// resolve a freshly-picked id to a name without a round-trip, independent of the
+// onPick callback. Keyed by BOTH user_id and employee_id (whichever was bound).
+// ---------------------------------------------------------------------------
+const employeeNameCache = new Map<string, string>();
+
+/** Resolve a previously-loaded employee/user id to its display name, if known. */
+export function resolveEmployeeName(id: string | null | undefined): string | undefined {
+  return id ? employeeNameCache.get(id) : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -95,6 +108,14 @@ export function EmployeePicker({
     sublabel: emp.nip ?? emp.nik,
     meta: emp.current_position?.name,
   }));
+
+  // Record id → name for any caller that resolves a picked id to a name later.
+  for (const emp of employees) {
+    if (emp.full_name) {
+      employeeNameCache.set(emp.id, emp.full_name);
+      if (emp.user_id) employeeNameCache.set(emp.user_id, emp.full_name);
+    }
+  }
 
   const handleChange = (v: string | null) => {
     onChange(v);

@@ -17,7 +17,10 @@
  * i18n namespace: approvals (keys under `approvals.template.*`).
  */
 
-import { EmployeePicker } from '@/features/e2-identity/pickers/employee-picker.tsx';
+import {
+  EmployeePicker,
+  resolveEmployeeName,
+} from '@/features/e2-identity/pickers/employee-picker.tsx';
 import { Avatar, Button, StatusBadge } from '@swp/ui';
 import { Plus, Split, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
@@ -117,7 +120,7 @@ export function ApprovalTemplateLineCard({
       {/* Members — OR-set of chips + add control */}
       <div className="flex flex-wrap items-center gap-2">
         {members.map((m) => {
-          const label = m.display_name ?? m.user_id;
+          const label = m.display_name ?? resolveEmployeeName(m.user_id) ?? m.user_id;
           const inactive = m.active === false;
           return (
             <span
