@@ -60,8 +60,8 @@ info:
 
     ## Cross-epic dependencies
     - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The type's
-      `cap_basis` (+ `cap_value`, gender / notice / service gates) and the
-      `is_document_required` / `allows_backdated` flags drive this spec's validation.
+      `cap_basis` (+ `cap_value`, gender / notice / service gates) and the `requires_document`
+      flag drive this spec's validation.
     - **E3** — `Placement` is the source of truth for the agent's company, which selects the
       E11 approval template the request routes through.
     - **E4** — implicit side-effect of the leave **`OnApproved`** hook (fired by E11 on terminal
@@ -261,12 +261,12 @@ paths:
 
         ### Server-side validation order (stop on first failure)
         1. **`INVALID_DATE_RANGE`** (422) — `end_date < start_date`.
-        2. **`MISSING_REQUIRED_DOCUMENT`** (422) — `leave_type.is_document_required == true`
+        2. **`MISSING_REQUIRED_DOCUMENT`** (422) — `leave_type.requires_document == true`
            but no `document_file_id` provided (LR-2 / INV-5).
         3. **`OVERLAPPING_LEAVE`** (409) — any non-rejected, non-cancelled `LeaveRequest` for the
            same employee overlaps `[start_date, end_date]` (LR-5).
-        4. **`BACKDATED_LEAVE`** (422) — `start_date < today` and the leave type does not
-           `allows_backdated` (or, when it does, server flags it). When `requires_hr_override: true`
+        4. **`BACKDATED_LEAVE`** (422) — `start_date < today` and the leave type does not permit
+           backdating (or, when it does, server flags it). When `requires_hr_override: true`
            is returned in `error.fields`, the agent's UI may still submit but only HR may approve.
         5. **`QUOTA_EXCEEDED`** (422) — for quota-tracked types, `duration_days > remaining`.
            Includes `requested_days` and `remaining_days` in `error.fields` per the locked
@@ -747,8 +747,8 @@ paths:
       description: |
         Convenience read for forms (mobile request type picker, HR queue filter). The canonical
         master-data endpoint with all CRUD operations lives in the **E2 spec** (`/leave-types`).
-        Returns the same shape; flags `is_quota_tracked`, `is_document_required`, `allows_backdated`
-        govern E6 validation behaviour.
+        Returns the same shape; the `requires_document` flag governs E6 attachment validation
+        (LR-2 / INV-5).
       operationId: listLeaveTypes
       x-rbac:
         roles: [agent, shift_leader, hr_admin, super_admin]
@@ -757,10 +757,10 @@ paths:
         - "QT92D"  # mobile type picker
         - "yho5i"  # HR queue filter
       parameters:
-        - name: active
+        - name: status
           in: query
-          schema: { type: boolean, default: true }
-        - name: is_quota_tracked
+          schema: { type: string, enum: [ACTIVE, INACTIVE] }
+        - name: is_annual
           in: query
           schema: { type: boolean }
       responses:
@@ -987,20 +987,32 @@ components:
 
     LeaveType:
       type: object
-      description: Master data (E2). Subset of fields visible to E6 clients.
-      required: [id, code, name, is_quota_tracked, is_document_required, active]
+      description: |
+        Master data (E2). This read-through mirrors the canonical E2 `LeaveType` schema
+        exactly — same field names and shape — so the generated E2/E6 clients agree.
+      required: [id, name, code, is_annual, requires_document, status]
       properties:
         id: { type: string, example: SWP-LT-001 }
-        code: { type: string, example: ANNUAL }
         name: { type: string, example: "Cuti Tahunan" }
-        is_quota_tracked: { type: boolean, example: true }
-        is_document_required: { type: boolean, example: false }
-        allows_backdated: { type: boolean, example: false }
-        default_entitlement_days:
+        code: { type: string, example: ANNUAL }
+        description: { type: string }
+        default_annual_quota:
           type: integer
-          nullable: true
-          example: 12
-        active: { type: boolean, example: true }
+          minimum: 0
+          description: Default per-year quota days (consumed by E6 quota seeding).
+        is_annual:
+          type: boolean
+          description: If true, quota accrues annually (LT-2).
+        requires_document:
+          type: boolean
+          description: If true, leave request must attach a document (LT-3).
+        color:
+          type: string
+          description: Hex color used by calendar UIs. Tokenized — DESIGN-SYSTEM §2.
+          example: "#188E4D"
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
 
     LeaveRequest:
       type: object
@@ -1050,7 +1062,7 @@ components:
         document_file_id:
           type: string
           nullable: true
-          description: '`SWP-FILE-*`; required when `leave_type.is_document_required == true`.'
+          description: '`SWP-FILE-*`; required when `leave_type.requires_document == true`.'
           example: SWP-FILE-9912
         document_url:
           type: string
@@ -1148,7 +1160,7 @@ components:
           type: string
           nullable: true
           description: |
-            Required when `leave_type.is_document_required == true` (LR-2 / INV-5).
+            Required when `leave_type.requires_document == true` (LR-2 / INV-5).
             Upload via `POST /leave-requests/{id}/attachments`.
           example: SWP-FILE-9912
         submit:
@@ -1490,35 +1502,35 @@ components:
           - id: SWP-LT-001
             code: ANNUAL
             name: "Cuti Tahunan"
-            is_quota_tracked: true
-            is_document_required: false
-            allows_backdated: false
-            default_entitlement_days: 12
-            active: true
+            default_annual_quota: 12
+            is_annual: true
+            requires_document: false
+            color: "#188E4D"
+            status: ACTIVE
           - id: SWP-LT-002
             code: SICK
             name: "Cuti Sakit"
-            is_quota_tracked: true
-            is_document_required: true
-            allows_backdated: true
-            default_entitlement_days: 12
-            active: true
+            default_annual_quota: 12
+            is_annual: false
+            requires_document: true
+            color: "#E8833A"
+            status: ACTIVE
           - id: SWP-LT-003
             code: MATERNITY
             name: "Cuti Melahirkan"
-            is_quota_tracked: true
-            is_document_required: true
-            allows_backdated: false
-            default_entitlement_days: 90
-            active: true
+            default_annual_quota: 90
+            is_annual: false
+            requires_document: true
+            color: "#C6538C"
+            status: ACTIVE
           - id: SWP-LT-004
             code: UNPAID
             name: "Cuti Tidak Dibayar"
-            is_quota_tracked: false
-            is_document_required: false
-            allows_backdated: false
-            default_entitlement_days: null
-            active: true
+            default_annual_quota: 0
+            is_annual: false
+            requires_document: false
+            color: "#6B7280"
+            status: ACTIVE
 
     # ── error examples ──
     ErrorInvalidRequestExample:

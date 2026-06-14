@@ -8,6 +8,7 @@ import { ApiError } from '@swp/api-client';
 import {
   type LeaveType,
   type LeaveTypeBalance,
+  LeaveTypeStatus,
   useCreateLeaveRequest,
   useGetEmployeeTypeBalances,
   useListLeaveTypes,
@@ -37,7 +38,9 @@ export default function LeaveNew() {
 
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
   // Document-required types are deferred (no attachment upload yet).
-  const types = allTypes.filter((lt) => lt.active && !lt.is_document_required);
+  const types = allTypes.filter(
+    (lt) => lt.status === LeaveTypeStatus.ACTIVE && !lt.requires_document,
+  );
 
   const [typeId, setTypeId] = useState('');
   const [start, setStart] = useState('');

@@ -8,7 +8,12 @@
  * matches docs/design/brainstorm.pen "Agen Web · Ajukan Cuti (modal)".
  */
 import { ApiError } from '@swp/api-client';
-import { type LeaveType, useCreateLeaveRequest, useListLeaveTypes } from '@swp/api-client/e6';
+import {
+  type LeaveType,
+  LeaveTypeStatus,
+  useCreateLeaveRequest,
+  useListLeaveTypes,
+} from '@swp/api-client/e6';
 import {
   Button,
   FormField,
@@ -66,7 +71,9 @@ export function AgentLeaveCreateModal({
 
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
   // Exclude document-required types (no attachment upload in v1, LR-2 deferred).
-  const types = allTypes.filter((lt) => lt.active && !lt.is_document_required);
+  const types = allTypes.filter(
+    (lt) => lt.status === LeaveTypeStatus.ACTIVE && !lt.requires_document,
+  );
 
   const [typeId, setTypeId] = useState('');
   const [start, setStart] = useState('');

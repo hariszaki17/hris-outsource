@@ -22,6 +22,7 @@ import {
   type AdjustTypeQuotaBody,
   type LeaveType,
   type LeaveTypeBalance,
+  LeaveTypeStatus,
   useAdjustTypeQuota,
   useGetEmployeeTypeBalances,
   useListLeaveTypes,
@@ -181,7 +182,9 @@ function QuotaModal({
   const mutation = useAdjustTypeQuota();
 
   const typesQuery = useListLeaveTypes(undefined, { query: { enabled: open && !isAdjust } });
-  const leaveTypes = (unwrap<LeaveType[]>(typesQuery.data?.data) ?? []).filter((lt) => lt.active);
+  const leaveTypes = (unwrap<LeaveType[]>(typesQuery.data?.data) ?? []).filter(
+    (lt) => lt.status === LeaveTypeStatus.ACTIVE,
+  );
 
   const {
     register,

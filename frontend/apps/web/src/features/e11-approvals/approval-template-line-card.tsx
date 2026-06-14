@@ -46,7 +46,7 @@ export interface ApprovalTemplateLineCardProps {
   disabled?: boolean;
   /** Field-level error for this line (e.g. empty line, inactive member — 422). */
   error?: string;
-  onAddMember: (userId: string) => void;
+  onAddMember: (userId: string, displayName?: string) => void;
   onRemoveMember: (userId: string) => void;
   onRemoveLine: () => void;
 }
@@ -158,8 +158,9 @@ export function ApprovalTemplateLineCard({
               <EmployeePicker
                 value={null}
                 valueField="user_id"
-                onChange={(v) => {
-                  if (v) onAddMember(v);
+                onChange={() => {}}
+                onPick={(v, label) => {
+                  if (v) onAddMember(v, label);
                   setAdding(false);
                 }}
                 placeholder={t('template.memberPlaceholder')}

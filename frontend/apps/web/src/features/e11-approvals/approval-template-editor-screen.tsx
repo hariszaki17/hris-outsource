@@ -198,14 +198,21 @@ export default function ApprovalTemplateEditorScreen({
   const addLine = () =>
     setLines((prev) => (prev.length < MAX_LINES ? [...prev, { members: [] }] : prev));
   const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx));
-  const addMember = (idx: number, userId: string) =>
+  const addMember = (idx: number, userId: string, displayName?: string) => {
+    // A user may belong to at most ONE line per template (no reassignment across
+    // lines). Reject + explain if already assigned anywhere in the chain.
+    if (lines.some((l) => l.members.some((m) => m.user_id === userId))) {
+      toast({ tone: 'error', title: t('template.memberAlreadyAssigned') });
+      return;
+    }
     setLines((prev) =>
       prev.map((l, i) =>
-        i === idx && !l.members.some((m) => m.user_id === userId)
-          ? { members: [...l.members, { user_id: userId, active: true }] }
+        i === idx
+          ? { members: [...l.members, { user_id: userId, display_name: displayName, active: true }] }
           : l,
       ),
     );
+  };
   const removeMember = (idx: number, userId: string) =>
     setLines((prev) =>
       prev.map((l, i) =>

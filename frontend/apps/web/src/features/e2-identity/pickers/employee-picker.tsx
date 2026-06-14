@@ -22,6 +22,12 @@ import { useTranslation } from 'react-i18next';
 export interface EmployeePickerProps {
   value: string | null;
   onChange: (value: string | null) => void;
+  /**
+   * Fires alongside onChange with the selected option's display label (the
+   * employee's full_name). Lets callers that render their own chips show the name
+   * for a fresh pick without a round-trip. `label` is undefined when cleared.
+   */
+  onPick?: (value: string | null, label?: string) => void;
   disabled?: boolean;
   error?: boolean;
   placeholder?: string;
@@ -39,6 +45,7 @@ export interface EmployeePickerProps {
 export function EmployeePicker({
   value,
   onChange,
+  onPick,
   disabled,
   error,
   placeholder,
@@ -89,10 +96,15 @@ export function EmployeePicker({
     meta: emp.current_position?.name,
   }));
 
+  const handleChange = (v: string | null) => {
+    onChange(v);
+    onPick?.(v, v == null ? undefined : options.find((o) => o.value === v)?.label);
+  };
+
   return (
     <Combobox
       value={value}
-      onChange={onChange}
+      onChange={handleChange}
       options={options}
       onSearch={setQuery}
       isLoading={result.isLoading}
