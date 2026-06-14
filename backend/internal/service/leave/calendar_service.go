@@ -55,7 +55,7 @@ func (s *CalendarService) Get(ctx context.Context, f CalendarFilter) (CalendarRe
 	from, to := rangeFor(f.Period, f.Month)
 	statusIn := []string{string(dom.LeaveStatusApproved)}
 	if f.ShowPending {
-		statusIn = append(statusIn, string(dom.LeaveStatusPendingL1), string(dom.LeaveStatusPendingHR))
+		statusIn = append(statusIn, string(dom.LeaveStatusPending))
 	}
 
 	entries, err := s.repo.ListCalendarEntries(ctx, f, statusIn, from, to)

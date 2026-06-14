@@ -14,6 +14,7 @@ SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
        ot.overtime_rule_id, ot.holiday_id, ot.flagged_no_preapproval, ot.reason,
+       ot.approval_instance_id,
        ot.created_by, ot.created_at, ot.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name
@@ -45,6 +46,7 @@ SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
        ot.overtime_rule_id, ot.holiday_id, ot.flagged_no_preapproval, ot.reason,
+       ot.approval_instance_id,
        ot.created_by, ot.created_at, ot.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name
@@ -128,25 +130,10 @@ RETURNING id, employee_id, company_id, placement_id, attendance_id,
           reference_multiplier, overtime_rule_id, holiday_id, flagged_no_preapproval,
           reason, created_by, created_at, updated_at;
 
--- name: ListOvertimeApprovals :many
--- The approval timeline for GET /overtime/{id} (Overtime.approvals[]), chronological.
-SELECT oa.id, oa.overtime_id, oa.level, oa.decision, oa.approver_id, oa.approver_name,
-       oa.reason, oa.decided_at
-FROM overtime_approvals oa
-WHERE oa.overtime_id = sqlc.arg(overtime_id)
-ORDER BY oa.decided_at ASC, oa.id ASC;
-
--- name: InsertOvertimeApproval :one
--- One immutable decision-trail row per approval action (L1/HR approve, override,
--- reject) — written in-tx with each transition.
-INSERT INTO overtime_approvals (
-    overtime_id, level, decision, approver_id, approver_name, reason
-) VALUES (
-    sqlc.arg(overtime_id),
-    sqlc.arg(level),
-    sqlc.arg(decision),
-    sqlc.narg(approver_id),
-    sqlc.narg(approver_name),
-    sqlc.narg(reason)
-)
-RETURNING id, overtime_id, level, decision, approver_id, approver_name, reason, decided_at;
+-- name: SetOvertimeApprovalInstanceID :exec
+-- E11 linkage: bind an OT record to its governing approval instance.
+UPDATE overtime
+SET approval_instance_id = sqlc.narg(approval_instance_id),
+    updated_at           = now()
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL;

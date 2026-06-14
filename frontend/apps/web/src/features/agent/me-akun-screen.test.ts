@@ -1,23 +1,21 @@
 /**
- * Unit tests for the agent /me/akun "Ubah Profil" tiered field partitioning (Plan §E/§F).
+ * Unit tests for the agent /me/akun "Ubah Profil" instant-edit payload (EPICS §8 E11, 2026-06-14).
  *
  * Scope: pure-logic assertions (no DOM render) — mirrors the e6 leave-quotas / e5 attendance
- * test pattern. The partitioning logic lives inline in `me-akun-screen.tsx`'s `onSave`; these
- * tests re-encode the SAME diff rules so the tier boundary can't silently drift:
+ * test pattern. The diff logic lives inline in `me-akun-screen.tsx`'s `onSave`; these tests
+ * re-encode the SAME diff rules so they can't silently drift.
  *
- *   - INSTANT tier (PATCH /me/profile, no approval): alamat, bahasa aplikasi, foto.
- *   - APPROVAL tier (POST change-request): telepon, kontak darurat, rekening bank.
- *
- * The two submits are independent: an agent may save only instant fields, only approval fields,
- * or both in one "Simpan". A field is only included when it actually changed from the current
- * employee record. See docs/eng/AGENT-WEB-ACCESS.md + E2 employee-profile.md.
+ * Since the E2 profile change-request surface was removed, ALL editable fields — alamat, bahasa
+ * aplikasi, foto, telepon, kontak darurat, rekening bank — are now applied INSTANTLY in a single
+ * `PATCH /me/profile` (SelfProfileUpdate). A field is only included when it actually changed from
+ * the current employee record. See docs/eng/AGENT-WEB-ACCESS.md + E2 employee-profile.md.
  */
 
 import type { BankAccount, EmergencyContact, SelfProfileUpdate } from '@swp/api-client/e2';
 import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mirrors me-akun-screen.tsx onSave() — INSTANT diff (PATCH /me/profile)
+// Mirrors me-akun-screen.tsx onSave() — single instant PATCH /me/profile payload
 // ---------------------------------------------------------------------------
 
 interface EmpSnapshot {
@@ -40,44 +38,31 @@ interface FormState {
   bankHolder: string;
 }
 
-/** INSTANT tier payload — only changed instant fields (address / app_language / photo). */
-function buildInstant(emp: EmpSnapshot, f: FormState): SelfProfileUpdate {
-  const instant: SelfProfileUpdate = {};
-  if (f.address !== (emp.address ?? '')) instant.address = f.address;
-  if (f.language !== (emp.app_language ?? 'id')) instant.app_language = f.language as 'id' | 'en';
-  if (f.photoObjectKey) instant.photo_object_key = f.photoObjectKey;
-  return instant;
-}
-
-/** APPROVAL tier payload — only changed approval fields (phone / emergency_contact / bank). */
-function buildChanges(
-  emp: EmpSnapshot,
-  f: FormState,
-): { phone?: string; emergency_contact?: EmergencyContact; bank_account?: BankAccount } {
-  const changes: {
-    phone?: string;
-    emergency_contact?: EmergencyContact;
-    bank_account?: BankAccount;
-  } = {};
-  if (f.phone !== (emp.phone ?? '')) changes.phone = f.phone;
+/** Instant PATCH payload — every changed field (all instant now, no approval tier). */
+function buildPatch(emp: EmpSnapshot, f: FormState): SelfProfileUpdate {
+  const patch: SelfProfileUpdate = {};
+  if (f.address !== (emp.address ?? '')) patch.address = f.address;
+  if (f.language !== (emp.app_language ?? 'id')) patch.app_language = f.language as 'id' | 'en';
+  if (f.phone !== (emp.phone ?? '')) patch.phone = f.phone;
   if (
     f.ecName !== (emp.emergency_contact?.name ?? '') ||
     f.ecPhone !== (emp.emergency_contact?.phone ?? '')
   ) {
-    changes.emergency_contact = { name: f.ecName, phone: f.ecPhone };
+    patch.emergency_contact = { name: f.ecName, phone: f.ecPhone };
   }
   if (
     f.bankName !== (emp.bank_account?.bank_name ?? '') ||
     f.bankNumber !== (emp.bank_account?.account_number ?? '') ||
     f.bankHolder !== (emp.bank_account?.account_holder_name ?? '')
   ) {
-    changes.bank_account = {
+    patch.bank_account = {
       bank_name: f.bankName,
       account_number: f.bankNumber,
       account_holder_name: f.bankHolder,
     };
   }
-  return changes;
+  if (f.photoObjectKey) patch.photo_object_key = f.photoObjectKey;
+  return patch;
 }
 
 const EMP: EmpSnapshot = {
@@ -103,93 +88,88 @@ function pristineForm(emp: EmpSnapshot): FormState {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Tier boundary — which fields land in which submit
+// 1. Diff — only changed fields land in the single instant payload
 // ---------------------------------------------------------------------------
 
-describe('Ubah Profil tier partitioning — instant vs approval', () => {
-  it('no edits → both payloads empty (the "Tidak ada perubahan" path)', () => {
-    const f = pristineForm(EMP);
-    expect(buildInstant(EMP, f)).toEqual({});
-    expect(buildChanges(EMP, f)).toEqual({});
+describe('Ubah Profil — single instant PATCH /me/profile payload', () => {
+  it('no edits → empty payload (the "Tidak ada perubahan" path)', () => {
+    expect(buildPatch(EMP, pristineForm(EMP))).toEqual({});
   });
 
-  it('alamat is INSTANT — it never enters the change-request', () => {
+  it('alamat is instant', () => {
     const f = { ...pristineForm(EMP), address: 'Jl. Baru No. 9' };
-    expect(buildInstant(EMP, f)).toEqual({ address: 'Jl. Baru No. 9' });
-    expect(buildChanges(EMP, f)).toEqual({});
+    expect(buildPatch(EMP, f)).toEqual({ address: 'Jl. Baru No. 9' });
   });
 
-  it('bahasa aplikasi is INSTANT', () => {
+  it('bahasa aplikasi is instant', () => {
     const f = { ...pristineForm(EMP), language: 'en' };
-    expect(buildInstant(EMP, f)).toEqual({ app_language: 'en' });
-    expect(buildChanges(EMP, f)).toEqual({});
+    expect(buildPatch(EMP, f)).toEqual({ app_language: 'en' });
   });
 
-  it('foto (object key from presigned PUT) is INSTANT', () => {
+  it('foto (object key from presigned PUT) is instant', () => {
     const f = { ...pristineForm(EMP), photoObjectKey: 'profile-photos/SWP-EMP-1/01J.jpg' };
-    expect(buildInstant(EMP, f)).toEqual({
+    expect(buildPatch(EMP, f)).toEqual({
       photo_object_key: 'profile-photos/SWP-EMP-1/01J.jpg',
     });
-    expect(buildChanges(EMP, f)).toEqual({});
   });
 
-  it('telepon is APPROVAL — it never enters the instant PATCH', () => {
+  it('telepon is now instant (was approval-tier)', () => {
     const f = { ...pristineForm(EMP), phone: '081299998888' };
-    expect(buildInstant(EMP, f)).toEqual({});
-    expect(buildChanges(EMP, f)).toEqual({ phone: '081299998888' });
+    expect(buildPatch(EMP, f)).toEqual({ phone: '081299998888' });
   });
 
-  it('kontak darurat is APPROVAL — emitted as a {name, phone} object', () => {
+  it('kontak darurat is instant — emitted as a {name, phone} object', () => {
     const f = { ...pristineForm(EMP), ecName: 'Andi', ecPhone: '081333333333' };
-    expect(buildInstant(EMP, f)).toEqual({});
-    expect(buildChanges(EMP, f)).toEqual({
+    expect(buildPatch(EMP, f)).toEqual({
       emergency_contact: { name: 'Andi', phone: '081333333333' },
     });
   });
 
   it('changing only the emergency phone still re-sends the whole {name, phone} object', () => {
     const f = { ...pristineForm(EMP), ecPhone: '081344444444' };
-    expect(buildChanges(EMP, f)).toEqual({
+    expect(buildPatch(EMP, f)).toEqual({
       emergency_contact: { name: 'Siti', phone: '081344444444' },
     });
   });
 
-  it('rekening bank is APPROVAL — re-sends the full bank object', () => {
+  it('rekening bank is instant — re-sends the full bank object', () => {
     const f = { ...pristineForm(EMP), bankNumber: '9999999999' };
-    expect(buildInstant(EMP, f)).toEqual({});
-    expect(buildChanges(EMP, f)).toEqual({
+    expect(buildPatch(EMP, f)).toEqual({
       bank_account: { bank_name: 'BCA', account_number: '9999999999', account_holder_name: 'Budi' },
     });
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Mixed edit — instant applies immediately, approval queues, in one Simpan
+// 2. Mixed edit — every field flows through ONE instant submit
 // ---------------------------------------------------------------------------
 
-describe('Ubah Profil — mixed instant + approval in one save', () => {
-  it('an alamat + telepon edit splits across BOTH submits', () => {
+describe('Ubah Profil — all fields in one instant save', () => {
+  it('an alamat + telepon edit lands in a single payload', () => {
     const f = { ...pristineForm(EMP), address: 'Jl. Baru No. 9', phone: '081299998888' };
-    const instant = buildInstant(EMP, f);
-    const changes = buildChanges(EMP, f);
-    expect(instant).toEqual({ address: 'Jl. Baru No. 9' });
-    expect(changes).toEqual({ phone: '081299998888' });
-    // Mirrors onSave's result-toast branching: both non-empty → mixed-success.
-    const instantApplied = Object.keys(instant).length > 0;
-    const approvalSubmitted = Object.keys(changes).length > 0;
-    expect(instantApplied && approvalSubmitted).toBe(true);
+    expect(buildPatch(EMP, f)).toEqual({
+      address: 'Jl. Baru No. 9',
+      phone: '081299998888',
+    });
   });
 
-  it('editing every approval field at once produces a MULTIPLE-style change set', () => {
+  it('editing every field at once produces one combined payload', () => {
     const f: FormState = {
       ...pristineForm(EMP),
+      address: 'Jl. Baru No. 9',
+      language: 'en',
       phone: '081299998888',
       ecName: 'Andi',
       ecPhone: '081333333333',
       bankNumber: '9999999999',
     };
-    const changes = buildChanges(EMP, f);
-    expect(Object.keys(changes).sort()).toEqual(['bank_account', 'emergency_contact', 'phone']);
-    expect(buildInstant(EMP, f)).toEqual({});
+    const patch = buildPatch(EMP, f);
+    expect(Object.keys(patch).sort()).toEqual([
+      'address',
+      'app_language',
+      'bank_account',
+      'emergency_contact',
+      'phone',
+    ]);
   });
 });

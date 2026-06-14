@@ -112,10 +112,14 @@ func capAnnual() dom.LeaveTypeCap {
 	return dom.LeaveTypeCap{ID: "SWP-LT-001", CapBasis: dom.CapBasisAnnualPool, CapUnit: "DAYS"}
 }
 
+// newMeterSvc builds a meter-backed LeaveService + a fake approval engine (Submit
+// routes DRAFT → PENDING through the engine). Callers that want to assert engine
+// behavior overwrite it via SetApprovalEngine.
 func newMeterSvc(lr *fakeLeaveRepo, sp *fakeSchedule, store QuotaMeterStore, reader QuotaMeterReader) *LeaveService {
 	s := NewLeaveService(lr, sp, fakeRunner{})
 	s.SetClock(func() time.Time { return fixedNow })
 	s.SetMeter(NewQuotaMeter(store, reader))
+	s.SetApprovalEngine(newFakeEngine())
 	return s
 }
 
@@ -135,13 +139,15 @@ func TestMeter_Submit_OpensAndReserves(t *testing.T) {
 	}
 }
 
-func TestMeter_ApproveFinal_Commits(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPendingHR, "SWP-CMP-0021", "SWP-EMP-3001", 3)}
+// The engine's terminal OnApproved hook commits the SUBMIT-time reservation
+// (pending → used) against the per-type window.
+func TestMeter_OnApproved_Commits(t *testing.T) {
+	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusPending, "SWP-CMP-0021", "SWP-EMP-3001", 3), leaveType: annualType()}
 	store := newMemStore()
 	store.seed("SWP-EMP-3001", "SWP-LT-001", "2026", 12, 0, 3)
 	s := newMeterSvc(lr, &fakeSchedule{}, store, memReader{cap: capAnnual(), annual: iptr(12)})
 
-	if _, err := s.ApproveFinal(hrCtx(), "SWP-LR-8001", ""); err != nil {
+	if err := s.OnApproved(hrCtx(), fakeTx{}, "SWP-LR-8001"); err != nil {
 		t.Fatal(err)
 	}
 	w := store.windowFor("SWP-EMP-3001", "SWP-LT-001", "2026")

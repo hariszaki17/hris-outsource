@@ -2,28 +2,23 @@ import { useCurrentUser } from '@/lib/use-auth.ts';
 /**
  * /me/akun — Agent "Akun" (account). Merges the old /me/profile and /me/payslip surfaces into
  * one screen with two in-page tabs (Plan §E · brainstorm.pen frames i0zzG / l2BKa):
- *   - Profil   → read-only profile card + photo + "Ubah Profil" (tiered) modal
+ *   - Profil   → read-only profile card + photo + "Ubah Profil" modal
  *   - Slip Gaji→ payslip history (cursor pagination)
  *
- * Tiered "Ubah Profil" modal (Plan §E · §C tiers):
- *   - INSTANT section (no approval): alamat, bahasa aplikasi, foto. Applied immediately via
- *     `PATCH /me/profile` (useUpdateMyProfile). Photo flow: useInitProfilePhotoUpload → PUT the
- *     bytes to the returned presigned URL → pass `photo_object_key` to PATCH.
- *   - APPROVAL section (needs HR/SL approval): telepon, kontak darurat, rekening bank. Submitted
- *     via `POST /employees/{id}/change-requests` (useCreateChangeRequest) with the new shape.
- *
- * The instant + approval submits are independent — an agent can save just instant fields, just
- * approval fields, or both in one "Simpan". The server resolves the agent from the principal for
- * the instant path (no id), and from the path id for the change-request path.
+ * "Ubah Profil" modal — ALL agent self-edits are now INSTANT (no approval queue) since the E2
+ * profile change-request surface was removed (EPICS §8 E11, 2026-06-14). Every editable field —
+ * alamat, bahasa aplikasi, foto, telepon, kontak darurat, rekening bank — is applied immediately
+ * via a single `PATCH /me/profile` (useUpdateMyProfile). Photo flow: useInitProfilePhotoUpload →
+ * PUT the bytes to the returned presigned URL → pass `photo_object_key` to PATCH. Phone is a
+ * unique login identifier (E2 D2): a 409 conflict surfaces inline on the phone field.
  */
+import { ApiError } from '@swp/api-client';
 import {
   type BankAccount,
-  type EmergencyContact,
   type Employee,
   InitProfilePhotoUploadBodyContentType,
   type SelfProfileUpdate,
   type UploadTicket,
-  useCreateChangeRequest,
   useGetEmployee,
   useInitProfilePhotoUpload,
   useUpdateMyProfile,
@@ -145,7 +140,6 @@ export function AgentAkunScreen() {
       {editOpen && emp && (
         <UbahProfilModal
           emp={emp}
-          employeeId={employeeId}
           open
           onOpenChange={setEditOpen}
           onChanged={() => void q.refetch()}
@@ -454,35 +448,32 @@ function PayslipPanel() {
 
 interface UbahProfilModalProps {
   emp: Employee;
-  employeeId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onChanged?: () => void;
 }
 
-function UbahProfilModal({ emp, employeeId, open, onOpenChange, onChanged }: UbahProfilModalProps) {
+function UbahProfilModal({ emp, open, onOpenChange, onChanged }: UbahProfilModalProps) {
   const { t } = useTranslation('agent');
   const { toast } = useToast();
   const updateProfile = useUpdateMyProfile();
   const initUpload = useInitProfilePhotoUpload();
-  const createCR = useCreateChangeRequest();
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // INSTANT fields
+  // All fields are now instant (single PATCH /me/profile).
   const [address, setAddress] = useState(emp.address ?? '');
   const [language, setLanguage] = useState<string>(emp.app_language ?? 'id');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-
-  // APPROVAL fields
   const [phone, setPhone] = useState(emp.phone ?? '');
+  const [phoneError, setPhoneError] = useState('');
   const [ecName, setEcName] = useState(emp.emergency_contact?.name ?? '');
   const [ecPhone, setEcPhone] = useState(emp.emergency_contact?.phone ?? '');
   const [bankName, setBankName] = useState(emp.bank_account?.bank_name ?? '');
   const [bankNumber, setBankNumber] = useState(emp.bank_account?.account_number ?? '');
   const [bankHolder, setBankHolder] = useState(emp.bank_account?.account_holder_name ?? '');
 
-  const busy = updateProfile.isPending || initUpload.isPending || createCR.isPending;
+  const busy = updateProfile.isPending || initUpload.isPending;
 
   function onPickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
@@ -523,76 +514,63 @@ function UbahProfilModal({ emp, employeeId, open, onOpenChange, onChanged }: Uba
   }
 
   async function onSave() {
-    let instantApplied = false;
-    let approvalSubmitted = false;
+    setPhoneError('');
 
-    // ---- INSTANT tier (PATCH /me/profile) ----
-    const instant: SelfProfileUpdate = {};
-    if (address !== (emp.address ?? '')) instant.address = address;
-    if (language !== (emp.app_language ?? 'id')) instant.app_language = language as 'id' | 'en';
-
-    try {
-      if (photoFile) {
-        const key = await uploadPhoto(photoFile);
-        if (key === null) return; // upload failed — abort the whole save
-        instant.photo_object_key = key;
-      }
-      if (Object.keys(instant).length > 0) {
-        await updateProfile.mutateAsync({ data: instant });
-        instantApplied = true;
-      }
-    } catch {
-      toast({ tone: 'error', title: t('profileError') });
-      return;
-    }
-
-    // ---- APPROVAL tier (change-request) ----
-    const changes: {
-      phone?: string;
-      emergency_contact?: EmergencyContact;
-      bank_account?: BankAccount;
-    } = {};
-    if (phone !== (emp.phone ?? '')) changes.phone = phone;
+    // Build a single instant payload (PATCH /me/profile) from every changed field.
+    const patch: SelfProfileUpdate = {};
+    if (address !== (emp.address ?? '')) patch.address = address;
+    if (language !== (emp.app_language ?? 'id')) patch.app_language = language as 'id' | 'en';
+    if (phone !== (emp.phone ?? '')) patch.phone = phone;
     if (
       ecName !== (emp.emergency_contact?.name ?? '') ||
       ecPhone !== (emp.emergency_contact?.phone ?? '')
     ) {
-      changes.emergency_contact = { name: ecName, phone: ecPhone };
+      patch.emergency_contact = { name: ecName, phone: ecPhone };
     }
     if (
       bankName !== (emp.bank_account?.bank_name ?? '') ||
       bankNumber !== (emp.bank_account?.account_number ?? '') ||
       bankHolder !== (emp.bank_account?.account_holder_name ?? '')
     ) {
-      changes.bank_account = {
+      patch.bank_account = {
         bank_name: bankName,
         account_number: bankNumber,
         account_holder_name: bankHolder,
       };
     }
 
-    if (Object.keys(changes).length > 0) {
-      try {
-        await createCR.mutateAsync({ employeeId, data: { changes } });
-        approvalSubmitted = true;
-      } catch {
-        toast({ tone: 'error', title: t('profileError') });
-        return;
+    try {
+      if (photoFile) {
+        const key = await uploadPhoto(photoFile);
+        if (key === null) return; // upload failed — abort the whole save
+        patch.photo_object_key = key;
       }
+    } catch {
+      toast({ tone: 'error', title: t('profileError') });
+      return;
     }
 
-    if (!instantApplied && !approvalSubmitted) {
+    if (Object.keys(patch).length === 0) {
       toast({ tone: 'info', title: t('profileNoChange') });
       return;
     }
-    // Compose a result toast: instant applied immediately, approval queued.
-    if (instantApplied && approvalSubmitted) {
-      toast({ tone: 'success', title: t('profileMixedSuccess') });
-    } else if (instantApplied) {
-      toast({ tone: 'success', title: t('profileInstantSuccess') });
-    } else {
-      toast({ tone: 'success', title: t('profileSuccess') });
+
+    try {
+      await updateProfile.mutateAsync({ data: patch });
+    } catch (err) {
+      // Phone is a unique login identifier (E2 D2): a 409 surfaces inline on the field.
+      const code = err instanceof ApiError ? err.code : '';
+      const conflict =
+        err instanceof ApiError && (err.status === 409 || code.toUpperCase().includes('PHONE'));
+      if (conflict && patch.phone !== undefined) {
+        setPhoneError(t('profilePhoneTaken'));
+        return;
+      }
+      toast({ tone: 'error', title: t('profileError') });
+      return;
     }
+
+    toast({ tone: 'success', title: t('profileSuccess') });
     onOpenChange(false);
     onChanged?.();
   }
@@ -607,13 +585,7 @@ function UbahProfilModal({ emp, employeeId, open, onOpenChange, onChanged }: Uba
       />
 
       <ModalBody className="gap-5">
-        {/* ---- INSTANT section ---- */}
         <section className="flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-bold text-text">{t('profileSectionInstant')}</span>
-            <StatusBadge tone="ok">{t('profileBadgeInstant')}</StatusBadge>
-          </div>
-
           {/* Photo */}
           <FormField label={t('profilePhoto')} htmlFor="profile-photo-btn">
             <div className="flex items-center gap-4">
@@ -666,25 +638,20 @@ function UbahProfilModal({ emp, employeeId, open, onOpenChange, onChanged }: Uba
               <option value="en">{t('languageEn')}</option>
             </FilterSelect>
           </FormField>
-        </section>
-
-        {/* ---- APPROVAL section ---- */}
-        <section className="flex flex-col gap-4 border-t border-border-soft pt-5">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-bold text-text">{t('profileSectionApproval')}</span>
-            <StatusBadge tone="warn">{t('profileBadgeApproval')}</StatusBadge>
-          </div>
 
           <FormField label={t('profileName')} htmlFor="profile-name">
             <Input id="profile-name" value={emp.full_name ?? '—'} disabled />
           </FormField>
 
-          <FormField label={t('profilePhone')} htmlFor="profile-phone">
+          <FormField label={t('profilePhone')} htmlFor="profile-phone" error={phoneError}>
             <Input
               id="profile-phone"
               type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                if (phoneError) setPhoneError('');
+              }}
             />
           </FormField>
 
@@ -724,11 +691,6 @@ function UbahProfilModal({ emp, employeeId, open, onOpenChange, onChanged }: Uba
                 onChange={(e) => setBankHolder(e.target.value)}
               />
             </FormField>
-          </div>
-
-          <div className="flex items-center gap-2 rounded-md border border-info-bd bg-info-bg px-3 py-2.5 text-xs font-medium text-info-tx">
-            <Info className="size-3.5 shrink-0" aria-hidden />
-            {t('profileChangePending')}
           </div>
         </section>
       </ModalBody>

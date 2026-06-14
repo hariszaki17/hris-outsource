@@ -16,6 +16,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
@@ -355,6 +356,15 @@ func (s *PlacementService) GetPlacement(ctx context.Context, id string) (Placeme
 	}
 	if err != nil {
 		return PlacementDetail{}, apperr.Internal(err)
+	}
+
+	// Agent self-scope (E3 getPlacement x-rbac, scope:self): an agent may read ONLY
+	// their own placement. Reading anyone else is hidden as 404 (no existence leak),
+	// mirroring the employee/attendance/leave self-scope rule. Staff roles unaffected.
+	if pr, ok := auth.PrincipalFrom(ctx); ok && pr.Role == auth.RoleAgent {
+		if pr.EmployeeID == "" || pr.EmployeeID != p.EmployeeID {
+			return PlacementDetail{}, apperr.NotFound()
+		}
 	}
 
 	chain, err := s.repo.GetPlacementChain(ctx, id)

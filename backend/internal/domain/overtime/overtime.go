@@ -5,10 +5,13 @@
 //
 // Convention (mirrors internal/domain/leave + internal/domain/attendance):
 // nullable columns are pointers; denormalized read-time fields (EmployeeName,
-// CompanyName) are pointers too. The workflow state machine
-// (PENDING_AGENT_CONFIRM → PENDING_L1 → PENDING_HR → APPROVED; reject at either
-// level → REJECTED; withdraw → WITHDRAWN) is enforced in the 09-02 service; these
-// types only carry state.
+// CompanyName) are pointers too.
+//
+// Approval routing + the chain-progress timeline are OWNED BY E11 (the configurable
+// approval engine): the OT record only carries an ApprovalInstanceID linking to the
+// E11 ApprovalInstance. The old two-level (PENDING_L1 → PENDING_HR) state machine +
+// the overtime_approvals decision trail were ripped out — clients read the chain via
+// GET /approval-instances/{id}.
 //
 // V1 records HOURS/MINUTES ONLY (INV-2): ReferenceMultiplier is a STORED reference
 // from the applied E2 OvertimeRule — it is NEVER applied (no monetary method).
@@ -17,16 +20,17 @@ package overtime
 import "time"
 
 // OvertimeStatus is the persisted OT lifecycle state. Values are pinned to
-// openapi schemas.OvertimeStatus (AUTHORITATIVE) — byte-for-byte.
+// openapi schemas.OvertimeStatus (AUTHORITATIVE) — byte-for-byte. The intermediate
+// PENDING_L1 / PENDING_HR states collapsed into a single PENDING (E11 owns chain
+// progress); WITHDRAWN collapsed into CANCELLED.
 type OvertimeStatus string
 
 const (
 	OvertimeStatusPendingAgentConfirm OvertimeStatus = "PENDING_AGENT_CONFIRM"
-	OvertimeStatusPendingL1           OvertimeStatus = "PENDING_L1"
-	OvertimeStatusPendingHR           OvertimeStatus = "PENDING_HR"
+	OvertimeStatusPending             OvertimeStatus = "PENDING"
 	OvertimeStatusApproved            OvertimeStatus = "APPROVED"
 	OvertimeStatusRejected            OvertimeStatus = "REJECTED"
-	OvertimeStatusWithdrawn           OvertimeStatus = "WITHDRAWN"
+	OvertimeStatusCancelled           OvertimeStatus = "CANCELLED"
 )
 
 // OvertimeSource is how the OT entered the system (openapi schemas.OvertimeSource).
@@ -81,20 +85,10 @@ const (
 	HolidayCategoryCustom   HolidayCategory = "CUSTOM"
 )
 
-// OvertimeApproval is one immutable decision-trail row (the overtime_approvals
-// table). 09-02 maps these into Overtime.Approvals[] (openapi Overtime.approvals).
-type OvertimeApproval struct {
-	Level        int     // 1 = leader/L1, 2 = HR final
-	Decision     string  // APPROVED | REJECTED | OVERRIDE_APPROVED
-	ApproverID   *string // SWP-USR-* / SWP-EMP-*
-	ApproverName *string
-	Reason       *string
-	DecidedAt    time.Time
-}
-
 // Overtime is the domain entity for one OT record (openapi Overtime). Nullable
-// openapi fields are pointers; *Name fields are denormalized via JOINs. Approvals
-// is assembled by 09-02 from the overtime_approvals rows.
+// openapi fields are pointers; *Name fields are denormalized via JOINs. The approval
+// chain is OWNED BY E11 — clients read it via ApprovalInstanceID, not an inline
+// approvals[] trail.
 //
 // ReferenceMultiplier is STORED reference only, NOT applied (INV-2): there is no
 // monetary method on this type.
@@ -130,12 +124,13 @@ type Overtime struct {
 	FlaggedNoPreapproval bool
 	Reason               *string
 
+	// ApprovalInstanceID links the E11 ApprovalInstance tracking this OT's approval
+	// chain (null while PENDING_AGENT_CONFIRM, set at :confirm / direct create).
+	ApprovalInstanceID *string
+
 	CreatedBy *string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-
-	// Assembled read-time aggregate (09-02).
-	Approvals []OvertimeApproval
 }
 
 // CountedFromWorked rounds worked minutes DOWN to the nearest 30-minute increment

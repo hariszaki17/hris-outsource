@@ -6,65 +6,35 @@
 // Convention (mirrors internal/domain/attendance): nullable columns are pointers;
 // denormalized read-time fields (employee_name, company_name, …) are pointers too.
 // remaining = total - used - pending is a DERIVED method (LeaveQuota.Remaining),
-// never a stored column. The two-level approval state machine
-// (PENDING_L1 → PENDING_HR → APPROVED; reject → REJECTED; withdraw → CANCELLED)
-// is enforced in the 08-02 service; these types only carry state.
+// never a stored column.
+//
+// Approval routing + the chain-progress timeline are OWNED BY E11 (the configurable
+// approval engine, 2026-06-xx): the leave request only carries an
+// ApprovalInstanceID linking to the E11 ApprovalInstance. The old two-level
+// (PENDING_L1 → PENDING_HR) state machine + the leave_approvals decision trail were
+// ripped out — clients read the chain via GET /approval-instances/{id}.
 package leave
 
 import "time"
 
 // LeaveStatus is the persisted request lifecycle state. Values are pinned to
-// openapi schemas.LeaveStatus (AUTHORITATIVE) — byte-for-byte.
+// openapi schemas.LeaveStatus (AUTHORITATIVE) — byte-for-byte. The intermediate
+// PENDING_L1 / PENDING_HR states were collapsed into a single PENDING (E11 owns the
+// chain progress).
 type LeaveStatus string
 
 const (
 	LeaveStatusDraft     LeaveStatus = "DRAFT"
-	LeaveStatusPendingL1 LeaveStatus = "PENDING_L1"
-	LeaveStatusPendingHR LeaveStatus = "PENDING_HR"
+	LeaveStatusPending   LeaveStatus = "PENDING"
 	LeaveStatusApproved  LeaveStatus = "APPROVED"
 	LeaveStatusRejected  LeaveStatus = "REJECTED"
 	LeaveStatusCancelled LeaveStatus = "CANCELLED"
 )
 
-// LeaveStage is the approval stage at which a decision was recorded (openapi
-// schemas.LeaveStage).
-type LeaveStage string
-
-const (
-	StageL1 LeaveStage = "L1"
-	StageHR LeaveStage = "HR"
-)
-
-// LeaveDecision is the recorded decision on a stage (openapi schemas.LeaveDecision).
-type LeaveDecision string
-
-const (
-	DecisionApproved         LeaveDecision = "APPROVED"
-	DecisionRejected         LeaveDecision = "REJECTED"
-	DecisionOverrideApproved LeaveDecision = "OVERRIDE_APPROVED"
-)
-
-// TimelineStatus is the per-timeline-entry status the FE renders (openapi
-// LeaveTimelineEntry.status).
-type TimelineStatus string
-
-const (
-	TimelineStatusPending          TimelineStatus = "PENDING"
-	TimelineStatusApproved         TimelineStatus = "APPROVED"
-	TimelineStatusRejected         TimelineStatus = "REJECTED"
-	TimelineStatusOverrideApproved TimelineStatus = "OVERRIDE_APPROVED"
-)
-
-// LeaveRouting is the openapi LeaveRequest.routing object (LA-2 no-leader routing).
-type LeaveRouting struct {
-	NoLeader         bool    `json:"no_leader"`
-	AssignedLeaderID *string `json:"assigned_leader_id,omitempty"`
-	AssignedLeader   *string `json:"assigned_leader_name,omitempty"`
-}
-
 // BalanceCheck is the openapi LeaveRequest.balance_check snapshot taken at
-// submit-reserve or final-approve-commit. RequestedDays / RemainingDaysAtCheck are the
-// recorded-at-check values (per-type ledger; no per-lot allocation).
+// submit-reserve or the OnApproved-hook commit re-check. RequestedDays /
+// RemainingDaysAtCheck are the recorded-at-check values (per-type ledger; no
+// per-lot allocation).
 type BalanceCheck struct {
 	RequestedDays        *int       `json:"requested_days,omitempty"`
 	RemainingDaysAtCheck *int       `json:"remaining_days_at_check,omitempty"`
@@ -72,25 +42,9 @@ type BalanceCheck struct {
 	RequiresOverride     bool       `json:"requires_override"`
 }
 
-// LeaveTimelineEntry is one decision in the request's approval timeline (openapi
-// LeaveTimelineEntry). Assembled from the leave_approvals rows in 08-02.
-type LeaveTimelineEntry struct {
-	Stage          LeaveStage     `json:"stage"`
-	Status         TimelineStatus `json:"status"`
-	ActorID        *string        `json:"actor_id,omitempty"`
-	ActorName      *string        `json:"actor_name,omitempty"`
-	ActorRole      *string        `json:"actor_role,omitempty"`
-	Decision       *LeaveDecision `json:"decision,omitempty"`
-	DecisionNote   *string        `json:"decision_note,omitempty"`
-	RejectReason   *string        `json:"reject_reason,omitempty"`
-	Override       bool           `json:"override"`
-	OverrideReason *string        `json:"override_reason,omitempty"`
-	OccurredAt     time.Time      `json:"occurred_at"`
-}
-
 // ScheduleImpactEntry is one cancelled/affected E4 schedule entry caused by an
 // approved leave (openapi LeaveRequest.schedule_impact[]). Populated by the INV-3
-// loop-closer in 08-02.
+// loop-closer in the OnApproved hook.
 type ScheduleImpactEntry struct {
 	ScheduleID      string `json:"schedule_id"`
 	Date            string `json:"date"`
@@ -101,8 +55,11 @@ type ScheduleImpactEntry struct {
 
 // LeaveRequest is the domain entity for one leave request (openapi LeaveRequest).
 // Nullable openapi fields are pointers; *Name fields are denormalized via JOINs.
-// Timeline / ScheduleImpact are assembled by 08-02 from the leave_approvals +
-// schedule-cancel side-effects.
+//
+// NoLeader / AssignedLeaderID remain as persisted columns (the DB still carries
+// them for migration/rollback compatibility), but the routing object is no longer
+// exposed at the DTO — E11 owns routing. ApprovalInstanceID links to the E11
+// ApprovalInstance tracking this request's approval chain.
 type LeaveRequest struct {
 	ID          string
 	EmployeeID  string
@@ -122,8 +79,15 @@ type LeaveRequest struct {
 	Backdated       bool
 	ClockInConflict bool
 
-	// routing.* + balance_check.* snapshot columns.
-	Routing      LeaveRouting
+	// Persisted routing columns (not exposed at the DTO; E11 owns routing).
+	NoLeader         bool
+	AssignedLeaderID *string
+
+	// ApprovalInstanceID links the E11 ApprovalInstance (null while DRAFT, set at
+	// :submit). Clients call GET /approval-instances/{id} to render the chain.
+	ApprovalInstanceID *string
+
+	// balance_check.* snapshot columns.
 	BalanceCheck BalanceCheck
 
 	CreatedBy *string
@@ -136,8 +100,7 @@ type LeaveRequest struct {
 	LeaveTypeName *string
 	LeaveTypeCode *string
 
-	// Assembled read-time aggregates (08-02).
-	Timeline       []LeaveTimelineEntry
+	// Assembled read-time aggregate (set by the OnApproved hook on the approve path).
 	ScheduleImpact []ScheduleImpactEntry
 }
 
@@ -299,22 +262,6 @@ func (c LeaveTypeCapBasis) QuotaBearing() bool {
 	}
 }
 
-// LeaveApproval is one immutable decision-trail row (the leave_approvals table /
-// the FEATURE ER decision log). 08-02 maps these into LeaveRequest.timeline[].
-type LeaveApproval struct {
-	ID             int64
-	LeaveRequestID string
-	Stage          LeaveStage
-	Decision       LeaveDecision
-	ActorID        *string
-	ActorRole      *string
-	DecisionNote   *string
-	RejectReason   *string
-	IsOverride     bool
-	OverrideReason *string
-	OccurredAt     time.Time
-}
-
 // LeaveCalendarEntry is one calendar cell-spanning entry (openapi
 // LeaveCalendarEntry — what leave-calendar-screen.tsx renders).
 type LeaveCalendarEntry struct {
@@ -332,4 +279,3 @@ type LeaveCalendarEntry struct {
 	DelegateID     *string
 	DelegateName   *string
 }
-

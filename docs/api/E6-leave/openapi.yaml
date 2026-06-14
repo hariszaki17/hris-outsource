@@ -4,9 +4,18 @@ info:
   version: 1.0.0
   description: |
     OpenAPI contract for **E6 — Leave Management**: leave types (read-through), the
-    **per-type quota ledger** (cap_basis windows), agent leave requests, two-level
-    (Shift Leader → HR) approval, HR overrides, schedule integration side-effects, and team/agent
-    calendar reads.
+    **per-type quota ledger** (cap_basis windows), agent leave requests, schedule integration
+    side-effects, and team/agent calendar reads.
+
+    > **Approval routes through the E11 engine (EPICS §8 E11).**
+    > Leave approval does **not** run its own state machine. It **routes through the
+    > E11 configurable approval engine** ([`docs/api/E11-approvals/openapi.yaml`](../E11-approvals/openapi.yaml)):
+    > submitting a request **creates an `ApprovalInstance`** (`request_type: LEAVE`, surfaced as
+    > `approval_instance_id` on the request), and all approval decisions are made via
+    > `POST /approval-instances/{id}:approve | :reject | :bypass`. `LeaveRequest.status` is
+    > `DRAFT | PENDING | APPROVED | REJECTED | CANCELLED`, synced to the E11 instance (the chain
+    > tracks per-line progress internally). The balance **reserve→commit→release** lifecycle fires
+    > from leave's E11 `OnApproved`/`OnRejected` **hook** (re-check + commit / release).
 
     **Inherits all shared rules from [`docs/api/CONVENTIONS.md`](../CONVENTIONS.md).**
     Where this spec is silent, CONVENTIONS wins (auth, pagination, error envelope, audit log,
@@ -27,7 +36,8 @@ info:
       - **Eligibility gates** (request-time): gender · notice_days · min_service_years ·
         once-per-year (PER_YEAR_COUNT) · once-per-employment (LIFETIME_ONCE / SERVICE_UNPAID).
       - **No negative balance:** a quota-bearing reserve/commit is blocked when it would exceed the
-        window's remaining (HR may `:approve-override` to force, or `:adjust-entitled` to raise it).
+        window's remaining (HR raises it via `:adjust-entitled`, or a super admin bypasses the
+        approval instance in E11).
       - **Reservation lifecycle:** submit → **reserve** (`pending_days`); final approve → **commit**
         (`pending → used`); reject/cancel/shorten → **release / reverse**.
     - **Duration** = working days **excluding public holidays**.
@@ -38,9 +48,9 @@ info:
       `annual_leave_entitlement_days` (E2), expiring at period end.
     - **Half-day leave** — **not in v1**. All requests are full-day units.
     - **Delegate** — informational only (non-binding suggested backfill; coverage is solved by E4 re-roster).
-    - **No-leader → HR sole approver** (LA-2): when the agent's company has no `ShiftLeaderAssignment`,
-      the request skips `PENDING_L1` and routes directly to `PENDING_HR`. The response carries
-      `routing: { no_leader: true }` so clients can render the collapsed timeline (E6 audit M9).
+    - **No template → super-admin fallback** (E11 INV-7): when the agent's company has no approval
+      template configured, the request routes to a single implicit super-admin line (never
+      auto-approves, never blocks the agent). Routing/lines/order are owned by E11.
     - **Team calendar** shows **approved** entries always and **pending** entries via a
       `show_pending` query toggle (default `false`).
 
@@ -52,10 +62,10 @@ info:
     - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The type's
       `cap_basis` (+ `cap_value`, gender / notice / service gates) and the
       `is_document_required` / `allows_backdated` flags drive this spec's validation.
-    - **E3** — `Placement` + `ShiftLeaderAssignment` are the source of truth for level-1 routing
-      (which leader receives `PENDING_L1`).
-    - **E4** — implicit side-effect on `POST /leave-requests/{id}:approve-final` and
-      `:approve-override`: overlapping `Schedule` entries are cancelled / marked `LEAVE`
+    - **E3** — `Placement` is the source of truth for the agent's company, which selects the
+      E11 approval template the request routes through.
+    - **E4** — implicit side-effect of the leave **`OnApproved`** hook (fired by E11 on terminal
+      approve/bypass): overlapping `Schedule` entries are cancelled / marked `LEAVE`
       (LI-1, LI-2). Cancel/shorten reverses (LI-4). No explicit API surface here — clients learn
       affected dates via the response `schedule_impact[]` array.
     - **E5** — implicit side-effect: leave-covered dates suppress `Absent` records on the
@@ -86,9 +96,9 @@ tags:
       (`/leave-quotas:adjust-entitled`), both over the cap_basis windows.
   - name: leave-requests
     description: |
-      F6.2 + F6.3 — Agent request lifecycle and two-level (SL → HR) approval workflow,
-      including HR override when balance is exceeded (LA-5 / LA-8) and HR shorten / cancel
-      of approved leave with schedule restore (LI-4).
+      F6.2 + F6.3 — Agent request lifecycle (create, submit, cancel/withdraw) plus HR
+      post-approval edits (shorten / cancel of approved leave with schedule restore, LI-4).
+      Approval **decisions** are made through the E11 engine, not here.
   - name: leave-calendar
     description: F6.5 — Team leave calendar (leader / HR).
   - name: leave-types
@@ -206,7 +216,7 @@ paths:
         - name: status__in
           in: query
           description: Comma-separated `LeaveStatus` values.
-          schema: { type: string, example: "PENDING_L1,PENDING_HR" }
+          schema: { type: string, example: "PENDING,APPROVED" }
         - { $ref: '#/components/parameters/LeaveTypeIdQuery' }
         - name: company_id
           in: query
@@ -244,9 +254,10 @@ paths:
       summary: Submit a new leave request (agent or HR-on-behalf)
       description: |
         Agent files from mobile screen `QT92D`. HR may file on behalf (screen TBD; same payload).
-        The request is created in **`DRAFT`** if `submit: false` (default for HR-on-behalf flows),
-        otherwise it transitions immediately to `PENDING_L1` — or to `PENDING_HR` when the agent's
-        company has no shift leader (LA-2: collapsed timeline; the response sets `routing.no_leader: true`).
+        The request is created in **`DRAFT`** if `submit: false` (HR-on-behalf save-before-submit),
+        otherwise it transitions immediately to **`PENDING`** and an E11 `ApprovalInstance`
+        (`request_type: LEAVE`) is created for the agent's company (its template selects the chain;
+        no template → super-admin fallback, E11 INV-7). `approval_instance_id` carries the instance ID.
 
         ### Server-side validation order (stop on first failure)
         1. **`INVALID_DATE_RANGE`** (422) — `end_date < start_date`.
@@ -302,10 +313,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LeaveRequest' }
               examples:
-                pending_l1:
-                  $ref: '#/components/examples/CreatedPendingL1Example'
-                pending_hr_no_leader:
-                  $ref: '#/components/examples/CreatedPendingHRNoLeaderExample'
+                pending:
+                  $ref: '#/components/examples/CreatedPendingExample'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -340,15 +349,11 @@ paths:
       - { $ref: '#/components/parameters/LeaveRequestIdPath' }
     get:
       tags: [leave-requests]
-      summary: Get a leave request (full timeline)
+      summary: Get a leave request
       description: |
-        Returns the full `LeaveRequest` including the embedded **approval timeline**
-        (`timeline[]`). The timeline is shape-aware:
-
-        - **Two-stage (normal)** — `timeline = [{stage: "L1", ...}, {stage: "HR", ...}]`.
-        - **One-stage (no-leader collapsed)** — `timeline = [{stage: "HR", routing: {no_leader: true}, ...}]`
-          (LA-2). The L1 stage is **absent**, not a "skipped" entry, so clients render the collapsed
-          timeline per audit M9 ("Tidak ada Shift Leader — eskalasi langsung ke HR").
+        Returns the full `LeaveRequest`. The **approval chain progress** (lines, who acted, who's
+        pending) is **owned by E11** — clients read `approval_instance_id` and call
+        `GET /approval-instances/{id}` (E11) to render the chain timeline.
 
         Cross-epic conflict signals are surfaced as flags on the request:
         - `clock_in_conflict: true` if any day in `[start_date, end_date]` already has an
@@ -369,10 +374,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LeaveRequest' }
               examples:
-                two_stage:
-                  $ref: '#/components/examples/RequestDetailTwoStageExample'
-                no_leader_collapsed:
-                  $ref: '#/components/examples/RequestDetailNoLeaderExample'
+                pending:
+                  $ref: '#/components/examples/RequestDetailPendingExample'
                 clock_in_conflict:
                   $ref: '#/components/examples/RequestDetailClockInConflictExample'
         '401': { $ref: '#/components/responses/Unauthenticated' }
@@ -384,7 +387,7 @@ paths:
       summary: Edit a DRAFT leave request (agent only)
       description: |
         Partial update allowed only while `status == DRAFT`. Same validation rules as `POST`
-        re-run on submission via `:submit`. Once a request is `PENDING_L1` or beyond, edits are
+        re-run on submission via `:submit`. Once a request is `PENDING` or beyond, edits are
         rejected (`409 CONFLICT`).
       operationId: updateLeaveRequest
       x-rbac:
@@ -416,11 +419,11 @@ paths:
   /leave-requests/{id}:submit:
     post:
       tags: [leave-requests]
-      summary: Submit a DRAFT → PENDING_L1 (or PENDING_HR if no leader)
+      summary: Submit a DRAFT → PENDING (creates the E11 approval instance)
       description: |
-        Transitions `DRAFT → PENDING_L1`. When the agent's active placement company has **no**
-        assigned shift leader, the request skips to `PENDING_HR` and `routing.no_leader: true`
-        is set on the response (LA-2). Re-runs the same validation suite as `POST /leave-requests`.
+        Transitions `DRAFT → PENDING` and creates an E11 `ApprovalInstance`
+        (`request_type: LEAVE`) for the agent's company; `approval_instance_id` is set on the
+        response. Re-runs the same validation suite as `POST /leave-requests`.
       operationId: submitLeaveRequest
       x-rbac:
         roles: [agent, hr_admin, super_admin]
@@ -432,7 +435,7 @@ paths:
         - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
       responses:
         '200':
-          description: Submitted; transitioned to `PENDING_L1` or `PENDING_HR`.
+          description: Submitted; transitioned to `PENDING`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LeaveRequest' }
@@ -446,268 +449,15 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
-  /leave-requests/{id}:approve-l1:
-    post:
-      tags: [leave-requests]
-      summary: Shift Leader L1 approval — forwards to HR (LA-1)
-      description: |
-        Transitions `PENDING_L1 → PENDING_HR`. Caller must be the assigned `ShiftLeaderAssignment`
-        for the agent's active placement company; if the agent moved companies between submit and
-        L1 review, the request is **re-routed** to the new company's leader (server-side; not a
-        client concern).
-
-        - Returns **`403 OUT_OF_SCOPE`** when a leader attempts to approve a request whose agent is
-          not currently placed at the caller's company.
-        - HR / super_admin may also call this endpoint (acts as L1 stand-in; audited).
-        - **Cannot self-approve** (LA-6): if `caller.employee_id == request.employee_id`, returns
-          `403 FORBIDDEN` and the request remains in `PENDING_L1` (HR must take it).
-        - Adds an entry to `timeline[]` with `stage: "L1"`, `decision: "APPROVED"`.
-        - No quota is deducted yet (LA-4: deduction happens at final HR approval only).
-      operationId: approveLeaveRequestL1
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - "qb0S0"  # SL L1 queue (M4 — SL detail TBD)
-      parameters:
-        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note:
-                  type: string
-                  description: Optional leader comment (recorded in the timeline entry).
-                  maxLength: 500
-                  example: "Coverage Plaza Senayan aman, Rina backfill."
-      responses:
-        '200':
-          description: Approved at L1; now `PENDING_HR`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveRequest' }
-              examples:
-                approved_l1:
-                  $ref: '#/components/examples/ApprovedL1Example'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403':
-          description: Leader is out of scope, or attempted self-approve.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                out_of_scope:
-                  $ref: '#/components/examples/ErrorOutOfScopeExample'
-                self_approve:
-                  $ref: '#/components/examples/ErrorSelfApproveExample'
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Not in `PENDING_L1`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /leave-requests/{id}:approve-final:
-    post:
-      tags: [leave-requests]
-      summary: HR final approval — deducts quota, fires schedule integration (LA-4, LA-5)
-      description: |
-        Transitions `PENDING_HR → APPROVED`. Allowed callers: `hr_admin`, `super_admin`.
-
-        ### LA-5 — balance re-check at final approval
-        Re-computes `remaining` at decision time. If `duration_days > remaining` **now**
-        (even though it passed at submit), the call returns `422 BALANCE_RECHECK_FAILED`
-        with `error.fields.requires_override: true`. Clients should surface the inline warning
-        (audit M8) and offer the HR override CTA (`:approve-override`).
-
-        ### Side-effects (implicit; documented here per CONVENTIONS §16.3)
-        - **Quota** — deducts `duration_days` from the matching `LeaveQuota`
-          (`used += d`, `remaining -= d`) for quota-tracked types only (LQ-2).
-        - **E4 schedule** — overlapping `Schedule` entries are set to `status: LEAVE` (LI-1).
-          The response `schedule_impact[]` lists the affected `SWP-SCH-*` IDs.
-        - **E5 attendance** — those dates are tagged so the end-of-day job skips creating
-          `Absent` records (LI-2).
-        - **Clock-in conflict** — if the agent already clocked-in on any of the dates, the leave
-          is still approved but `clock_in_conflict: true` is set on the request and on each
-          affected day in `schedule_impact[]` (LI-3) — leader/HR review required.
-        - **Notifications** — submitter notified (CONVENTIONS §16.2).
-      operationId: approveLeaveRequestFinal
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "DJrBn"  # HR detail with Setujui (final)
-      parameters:
-        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note:
-                  type: string
-                  maxLength: 500
-                  example: "Approved — sesuai SOP cuti tahunan."
-      responses:
-        '200':
-          description: Approved; quota deducted and schedule integration fired.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveRequest' }
-              examples:
-                approved_clean:
-                  $ref: '#/components/examples/ApprovedFinalExample'
-                approved_with_conflict:
-                  $ref: '#/components/examples/ApprovedFinalWithConflictExample'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Not in `PENDING_HR`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-        '422':
-          description: |
-            Balance re-check failed (LA-5). Client may retry with `:approve-override`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                balance_recheck:
-                  $ref: '#/components/examples/ErrorBalanceRecheckExample'
-
-  /leave-requests/{id}:approve-override:
-    post:
-      tags: [leave-requests]
-      summary: HR override approval — force-approve when balance is exceeded (LA-8)
-      description: |
-        Same effects as `:approve-final`, **but** accepts a balance overrun. The `LeaveQuota`
-        will go to a **negative `remaining`** (single value tolerated; audited and flagged on the
-        quota row). `override_reason` is **required** and recorded in:
-
-        1. the new timeline entry (`override: true`, `override_reason: "..."`),
-        2. the audit log (E1) as a separate `OVERRIDE` action distinct from `APPROVE`,
-        3. the `LeaveQuota.last_override` field for downstream HR review.
-
-        Only `hr_admin` / `super_admin` may call. Not exposed to shift leaders or agents.
-
-        **Use this only after `:approve-final` returns `BALANCE_RECHECK_FAILED`** — or for
-        out-of-band policy approvals. The override applies to the **single** request and does
-        not re-grant quota.
-      operationId: approveLeaveRequestOverride
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - "DJrBn"  # HR detail (override CTA — audit M17)
-      parameters:
-        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [override_reason]
-              properties:
-                override_reason:
-                  type: string
-                  minLength: 10
-                  maxLength: 500
-                  description: |
-                    Mandatory free-text justification, stored on the audit log and the timeline entry.
-                    Minimum 10 characters to discourage rubber-stamp overrides.
-                  example: "Direstui Direktur Operasional — saldo cuti tahunan akan ditopup retroaktif via grant 2026-Q3."
-      responses:
-        '200':
-          description: Override-approved.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveRequest' }
-              examples:
-                override_approved:
-                  $ref: '#/components/examples/OverrideApprovedExample'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Not in `PENDING_HR` (or already terminal).
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /leave-requests/{id}:reject:
-    post:
-      tags: [leave-requests]
-      summary: Reject at L1 or HR — server decides stage from current status (LA-1)
-      description: |
-        Single endpoint handles both L1 reject (status was `PENDING_L1`) and HR reject (status
-        was `PENDING_HR`). `reason` is **required**. The response shows the terminal
-        `status: REJECTED` with a final timeline entry stamped at the stage the rejector held.
-
-        Self-reject is disallowed by the same LA-6 rule as approve.
-      operationId: rejectLeaveRequest
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - "DJrBn"  # detail (Tolak button)
-        - "yho5i"  # HR queue (row Tolak — pending modal design per audit M1)
-        - "qb0S0"  # SL queue (row Tolak)
-      parameters:
-        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
-        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason:
-                  type: string
-                  minLength: 5
-                  maxLength: 500
-                  example: "Coverage Plaza Senayan tidak mencukupi tanggal 15–17 Jun."
-      responses:
-        '200':
-          description: Rejected.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LeaveRequest' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403':
-          description: Out of scope or self-reject attempted.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Already terminal (`APPROVED` / `REJECTED` / `CANCELLED`).
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
   /leave-requests/{id}:cancel:
     post:
       tags: [leave-requests]
       summary: Agent withdraws a not-yet-approved request (LR-7)
       description: |
-        Allowed while `status ∈ {DRAFT, PENDING_L1, PENDING_HR}`. Transitions to `CANCELLED`
-        and restores any `pending` reservation on the matching `LeaveQuota` (quota-tracked types).
-        No schedule effect (the request never reached APPROVED so no shifts were cancelled).
+        Allowed while `status ∈ {DRAFT, PENDING}`. Transitions to `CANCELLED`, closes the E11
+        approval instance, and restores any `pending` reservation on the matching `LeaveQuota`
+        (quota-tracked types). No schedule effect (the request never reached APPROVED so no shifts
+        were cancelled).
 
         For cancelling an **APPROVED** future leave, see `:cancel-approved`.
       operationId: cancelLeaveRequest
@@ -947,8 +697,8 @@ paths:
 
         ### `show_pending` toggle (per audit M10)
         - `false` (default per FEATURE.md §7 D6) — only `APPROVED` entries.
-        - `true` — `APPROVED` + `PENDING_L1` + `PENDING_HR`, with each entry's `status` set
-          so the client can render dashed / striped pending visuals.
+        - `true` — `APPROVED` + `PENDING`, with each entry's `status` set so the client can
+          render dashed / striped pending visuals.
       operationId: getLeaveCalendar
       x-rbac:
         roles: [shift_leader, hr_admin, super_admin]
@@ -974,7 +724,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 12, example: 6 }
         - name: show_pending
           in: query
-          description: Include PENDING_L1 / PENDING_HR entries (rendered with `status` so the client styles them as pending).
+          description: Include PENDING entries (rendered with `status` so the client styles them as pending).
           schema: { type: boolean, default: false }
       responses:
         '200':
@@ -1152,27 +902,19 @@ components:
     LeaveStatus:
       type: string
       description: |
-        Lifecycle states for `LeaveRequest`.
+        Lifecycle states for `LeaveRequest`. Approval sub-states are collapsed into a single
+        `PENDING` — the E11 approval chain tracks per-line progress internally (read via
+        `approval_instance_id`).
 
-        Two-level path: `DRAFT → PENDING_L1 → PENDING_HR → APPROVED`.
-        No-leader collapsed path (LA-2): `DRAFT → PENDING_HR → APPROVED`.
-        Terminal via reject: `→ REJECTED`. Terminal via withdraw: `→ CANCELLED`.
+        Path: `DRAFT → PENDING → APPROVED`.
+        Terminal via reject: `→ REJECTED` (an E11 line member rejected).
+        Terminal via withdraw: `→ CANCELLED`.
       enum:
         - DRAFT
-        - PENDING_L1
-        - PENDING_HR
+        - PENDING
         - APPROVED
         - REJECTED
         - CANCELLED
-
-    LeaveStage:
-      type: string
-      description: Approval stage at which a timeline entry was recorded.
-      enum: [L1, HR]
-
-    LeaveDecision:
-      type: string
-      enum: [APPROVED, REJECTED, OVERRIDE_APPROVED]
 
     LeaveQuota:
       type: object
@@ -1203,7 +945,7 @@ components:
           example: 4
         pending_days:
           type: integer
-          description: Days held by open PENDING_L1 / PENDING_HR requests.
+          description: Days held by open PENDING requests (reserved, not yet committed).
           example: 0
         remaining:
           type: integer
@@ -1231,7 +973,9 @@ components:
             adjusted_at: { type: string, format: date-time, example: "2026-06-01T08:32:00Z" }
         last_override:
           type: object
-          description: Set when an HR override (LA-8) caused `remaining` to go negative.
+          description: |
+            Set when a super-admin **bypass** of the leave approval instance (E11 INV-5)
+            force-approved past the balance re-check (E6 LA-5) and drove `remaining` negative.
           nullable: true
           properties:
             leave_request_id: { type: string, example: SWP-LR-2026-0099 }
@@ -1261,12 +1005,10 @@ components:
     LeaveRequest:
       type: object
       description: |
-        A leave request and its full approval timeline.
-
-        **No-leader case (LA-2):** when the agent's company has no `ShiftLeaderAssignment`,
-        `timeline` contains a **single** HR-stage entry (no L1 entry at all), and `routing.no_leader`
-        is `true`. The client renders the collapsed-timeline variant (audit M9).
-      required: [id, employee_id, leave_type_id, start_date, end_date, duration_days, status, timeline, created_at]
+        A leave request. Approval routing and the chain-progress timeline are **owned by E11**:
+        read `approval_instance_id` and call `GET /approval-instances/{id}` (E11) to render the
+        lines, who acted, and who's pending.
+      required: [id, employee_id, leave_type_id, start_date, end_date, duration_days, status, created_at]
       properties:
         id: { type: string, example: SWP-LR-2026-0042 }
         employee_id: { type: string, example: SWP-EMP-1042 }
@@ -1288,6 +1030,17 @@ components:
           example: "Mengantar orang tua kontrol rumah sakit."
         notes: { type: string, nullable: true }
         status: { $ref: '#/components/schemas/LeaveStatus' }
+        approval_instance_id:
+          type: string
+          nullable: true
+          readOnly: true
+          pattern: '^SWP-APV-'
+          description: |
+            ID of the E11 `ApprovalInstance` tracking this request's approval chain; null only
+            transiently before the instance is created (i.e. while `status == DRAFT`, before
+            `:submit`). The frontend calls `GET /approval-instances/{id}` (E11) to render the
+            chain timeline.
+          example: SWP-APV-2026-0042
         delegate_id:
           type: string
           nullable: true
@@ -1312,103 +1065,28 @@ components:
           type: boolean
           description: |
             True if any day in `[start_date, end_date]` already has an attendance clock-in
-            (LI-3 — surfaces backdated-approval conflict). Set on `:approve-final` / `:approve-override`.
+            (LI-3 — surfaces backdated-approval conflict). Set when the leave `OnApproved` hook
+            fires (E11 terminal approve/bypass).
           example: false
-        routing:
-          $ref: '#/components/schemas/LeaveRouting'
         balance_check:
           $ref: '#/components/schemas/BalanceCheck'
-        timeline:
-          type: array
-          description: |
-            Chronological approval/decision entries. **One** entry per stage decision.
-            In the no-leader case, `L1` is absent entirely.
-          items: { $ref: '#/components/schemas/LeaveTimelineEntry' }
         schedule_impact:
           type: array
           description: |
-            Set on `:approve-final` / `:approve-override` (LI-1 / LI-2). Lists the E4 schedule
-            entries that were cancelled/marked LEAVE so the leader sees affected slots and can
-            backfill via E4.
+            Set when the leave `OnApproved` hook fires (E11 terminal approve/bypass; LI-1 / LI-2).
+            Lists the E4 schedule entries that were cancelled/marked LEAVE so the leader sees
+            affected slots and can backfill via E4.
           items: { $ref: '#/components/schemas/ScheduleImpactEntry' }
         created_at: { type: string, format: date-time, example: "2026-06-03T08:00:00Z" }
         updated_at: { type: string, format: date-time, example: "2026-06-03T10:12:00Z" }
 
-    LeaveRouting:
-      type: object
-      description: |
-        Where the request is routed. Set at create/submit time and updated on stage transitions.
-      properties:
-        no_leader:
-          type: boolean
-          description: |
-            **True** when the agent's company had no `ShiftLeaderAssignment` at submit time;
-            request skipped `PENDING_L1` and went straight to `PENDING_HR` (LA-2). Client renders
-            the collapsed-timeline variant (audit M9 — "Tidak ada Shift Leader — eskalasi langsung ke HR").
-          example: false
-        assigned_leader_id:
-          type: string
-          nullable: true
-          description: "The `ShiftLeaderAssignment.employee_id` who currently holds L1 review. Null when `no_leader: true`."
-          example: SWP-EMP-2003
-        assigned_leader_name:
-          type: string
-          nullable: true
-          example: "Rudi Wijaya"
-
-    LeaveTimelineEntry:
-      type: object
-      description: |
-        One stage decision (or "pending" marker if the stage hasn't decided yet).
-        The first entry is always the implicit "submitted" event (`stage: L1` if there is a leader,
-        else `stage: HR`).
-      required: [stage, status, occurred_at]
-      properties:
-        stage: { $ref: '#/components/schemas/LeaveStage' }
-        status:
-          type: string
-          description: '`PENDING`, `APPROVED`, `REJECTED`, or `OVERRIDE_APPROVED`.'
-          enum: [PENDING, APPROVED, REJECTED, OVERRIDE_APPROVED]
-        actor_id:
-          type: string
-          nullable: true
-          description: Who decided (null on the implicit "pending" stage markers).
-          example: SWP-EMP-2003
-        actor_name: { type: string, nullable: true, example: "Rudi Wijaya" }
-        actor_role:
-          type: string
-          nullable: true
-          enum: [shift_leader, hr_admin, super_admin]
-          example: shift_leader
-        decision: { $ref: '#/components/schemas/LeaveDecision' }
-        decision_note:
-          type: string
-          nullable: true
-          description: Optional comment captured at decision time.
-          example: "Coverage aman, Rina backfill."
-        reject_reason:
-          type: string
-          nullable: true
-          description: Required when `decision == REJECTED`.
-        override:
-          type: boolean
-          description: True for HR `:approve-override` entries (LA-8).
-          example: false
-        override_reason:
-          type: string
-          nullable: true
-        occurred_at:
-          type: string
-          format: date-time
-          example: "2026-06-03T09:15:00Z"
-
     BalanceCheck:
       type: object
       description: |
-        Snapshot taken at the most recent server-side check (submit-reserve or
-        final-approve-commit). `remaining_days_at_check` is the per-type window's
-        available balance (entitled − used − pending) at check time. Re-used in the
-        `422` over-cap payloads.
+        Snapshot taken at the most recent server-side check (submit-reserve, or the
+        `OnApproved`-hook commit re-check at E11 terminal approve). `remaining_days_at_check`
+        is the per-type window's available balance (entitled − used − pending) at check time.
+        Re-used in the `422` over-cap payloads.
       properties:
         requested_days: { type: integer, example: 3 }
         remaining_days_at_check:
@@ -1418,7 +1096,9 @@ components:
         checked_at: { type: string, format: date-time, example: "2026-06-03T08:00:01Z" }
         requires_override:
           type: boolean
-          description: True when `requested_days > remaining_days_at_check` and HR may override (LA-5 / LA-8).
+          description: |
+            True when `requested_days > remaining_days_at_check` at the finalize re-check (LA-5);
+            the hook fails the transaction and a super admin may bypass the instance (E11 INV-5).
           example: false
 
     ScheduleImpactEntry:
@@ -1562,13 +1242,11 @@ components:
             - `BACKDATED_LEAVE` (422) — `fields.requires_hr_override` (boolean).
             - `INVALID_DATE_RANGE` (422) — `fields.end_date`.
             - `OVERLAPPING_LEAVE` (409) — `fields.conflicting_leave_request_id`.
-            - `BALANCE_RECHECK_FAILED` (422) — `fields.requires_override: true`,
+            - `BALANCE_RECHECK_FAILED` (422) — raised by the leave `OnApproved` hook at E11
+              finalize when remaining dropped below the request (LA-5); the instance stays at its
+              line and a super admin may bypass. `fields.requires_override: true`,
               `fields.requested_days`, `fields.remaining_days`.
             - `LEAVE_TYPE_REQUIRES_DOC` (422) — leave-type / document mismatch on upload.
-            - `OUT_OF_SCOPE` (403) — leader acting on non-own-company resource.
-            - `NO_LEADER_ASSIGNED` — **NOT** an error; informational signal carried as
-              `routing.no_leader: true` on a `200`/`201` response (LA-2). Never returned as a
-              4xx code.
             - `IDEMPOTENCY_KEY_REUSED` (409) — same `Idempotency-Key`, different body.
           example: QUOTA_EXCEEDED
         message:
@@ -1588,7 +1266,7 @@ components:
   examples:
     # ── grant-lot ledger (2026-06-08) ──
     HRQueueExample:
-      summary: HR L2 queue — 2 pending HR rows.
+      summary: Approval queue — 2 pending rows.
       value:
         data:
           - id: SWP-LR-2026-0042
@@ -1602,32 +1280,15 @@ components:
             end_date: "2026-06-17"
             duration_days: 3
             reason: "Mengantar orang tua kontrol rumah sakit."
-            status: PENDING_HR
+            status: PENDING
+            approval_instance_id: SWP-APV-2026-0042
             backdated: false
             clock_in_conflict: false
-            routing:
-              no_leader: false
-              assigned_leader_id: SWP-EMP-2003
-              assigned_leader_name: "Rudi Wijaya"
             balance_check:
-              earmark: null
               requested_days: 3
               remaining_days_at_check: 8
               checked_at: "2026-06-03T09:16:00Z"
               requires_override: false
-            timeline:
-              - stage: L1
-                status: APPROVED
-                actor_id: SWP-EMP-2003
-                actor_name: "Rudi Wijaya"
-                actor_role: shift_leader
-                decision: APPROVED
-                decision_note: "Coverage aman, Rina backfill."
-                override: false
-                occurred_at: "2026-06-03T09:15:00Z"
-              - stage: HR
-                status: PENDING
-                occurred_at: "2026-06-03T09:15:01Z"
             created_at: "2026-06-03T08:00:00Z"
             updated_at: "2026-06-03T09:15:00Z"
         next_cursor: null
@@ -1663,8 +1324,8 @@ components:
         reason: "Cuti dibuat HR atas permintaan agen — verifikasi dulu."
         submit: false
 
-    CreatedPendingL1Example:
-      summary: 201 — created in PENDING_L1 (normal case).
+    CreatedPendingExample:
+      summary: 201 — created PENDING; E11 approval instance attached.
       value:
         id: SWP-LR-2026-0042
         employee_id: SWP-EMP-1042
@@ -1677,70 +1338,24 @@ components:
         end_date: "2026-06-17"
         duration_days: 3
         reason: "Mengantar orang tua kontrol rumah sakit."
-        status: PENDING_L1
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0042
         delegate_id: SWP-EMP-1055
         delegate_name: "Citra Putri"
         document_file_id: null
         backdated: false
         clock_in_conflict: false
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
         balance_check:
-          earmark: null
           requested_days: 3
           remaining_days_at_check: 8
           checked_at: "2026-06-03T08:00:01Z"
           requires_override: false
-        timeline:
-          - stage: L1
-            status: PENDING
-            occurred_at: "2026-06-03T08:00:01Z"
         schedule_impact: []
         created_at: "2026-06-03T08:00:00Z"
         updated_at: "2026-06-03T08:00:01Z"
 
-    CreatedPendingHRNoLeaderExample:
-      summary: 201 — agent's company has no leader; collapsed to PENDING_HR (LA-2).
-      value:
-        id: SWP-LR-2026-0043
-        employee_id: SWP-EMP-1099
-        employee_name: "Andika Pratama"
-        employee_company_id: SWP-CMP-027
-        employee_company_name: "Menara Kuningan"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        start_date: "2026-06-20"
-        end_date: "2026-06-22"
-        duration_days: 3
-        reason: "Acara keluarga."
-        status: PENDING_HR
-        delegate_id: null
-        delegate_name: null
-        document_file_id: null
-        backdated: false
-        clock_in_conflict: false
-        routing:
-          no_leader: true
-          assigned_leader_id: null
-          assigned_leader_name: null
-        balance_check:
-          earmark: null
-          requested_days: 3
-          remaining_days_at_check: 11
-          checked_at: "2026-06-03T08:10:00Z"
-          requires_override: false
-        timeline:
-          - stage: HR
-            status: PENDING
-            occurred_at: "2026-06-03T08:10:00Z"
-        schedule_impact: []
-        created_at: "2026-06-03T08:10:00Z"
-        updated_at: "2026-06-03T08:10:00Z"
-
-    RequestDetailTwoStageExample:
-      summary: HR detail — full two-stage timeline, L1 approved + HR pending.
+    RequestDetailPendingExample:
+      summary: Request detail — PENDING; chain progress read via the E11 instance.
       value:
         id: SWP-LR-2026-0042
         employee_id: SWP-EMP-1042
@@ -1753,78 +1368,22 @@ components:
         end_date: "2026-06-17"
         duration_days: 3
         reason: "Mengantar orang tua kontrol rumah sakit."
-        status: PENDING_HR
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0042
         delegate_id: SWP-EMP-1055
         delegate_name: "Citra Putri"
         document_file_id: null
         document_url: null
         backdated: false
         clock_in_conflict: false
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
         balance_check:
-          earmark: null
           requested_days: 3
           remaining_days_at_check: 8
           checked_at: "2026-06-03T09:16:00Z"
           requires_override: false
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            decision_note: "Coverage aman, Rina backfill."
-            override: false
-            occurred_at: "2026-06-03T09:15:00Z"
-          - stage: HR
-            status: PENDING
-            occurred_at: "2026-06-03T09:15:01Z"
         schedule_impact: []
         created_at: "2026-06-03T08:00:00Z"
         updated_at: "2026-06-03T09:15:00Z"
-
-    RequestDetailNoLeaderExample:
-      summary: HR detail — no-leader collapsed timeline (LA-2 / audit M9).
-      value:
-        id: SWP-LR-2026-0043
-        employee_id: SWP-EMP-1099
-        employee_name: "Andika Pratama"
-        employee_company_id: SWP-CMP-027
-        employee_company_name: "Menara Kuningan"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        start_date: "2026-06-20"
-        end_date: "2026-06-22"
-        duration_days: 3
-        reason: "Acara keluarga."
-        status: PENDING_HR
-        delegate_id: null
-        delegate_name: null
-        document_file_id: null
-        document_url: null
-        backdated: false
-        clock_in_conflict: false
-        routing:
-          no_leader: true
-          assigned_leader_id: null
-          assigned_leader_name: null
-        balance_check:
-          earmark: null
-          requested_days: 3
-          remaining_days_at_check: 11
-          checked_at: "2026-06-03T08:10:00Z"
-          requires_override: false
-        timeline:
-          - stage: HR
-            status: PENDING
-            occurred_at: "2026-06-03T08:10:00Z"
-        schedule_impact: []
-        created_at: "2026-06-03T08:10:00Z"
-        updated_at: "2026-06-03T08:10:00Z"
 
     RequestDetailClockInConflictExample:
       summary: Backdated sick leave covering a day Budi already clocked-in (LI-3).
@@ -1840,36 +1399,19 @@ components:
         end_date: "2026-06-02"
         duration_days: 2
         reason: "Sakit demam — surat dokter."
-        status: PENDING_HR
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0061
         delegate_id: null
         delegate_name: null
         document_file_id: SWP-FILE-9912
         document_url: "https://api.swp.example.com/api/v1/files/SWP-FILE-9912"
         backdated: true
         clock_in_conflict: true
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
         balance_check:
-          earmark: null
           requested_days: 2
           remaining_days_at_check: 10
           checked_at: "2026-06-03T07:00:00Z"
           requires_override: false
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            decision_note: null
-            override: false
-            occurred_at: "2026-06-03T07:30:00Z"
-          - stage: HR
-            status: PENDING
-            occurred_at: "2026-06-03T07:30:01Z"
         schedule_impact:
           - schedule_id: SWP-SCH-771122
             date: "2026-06-01"
@@ -1878,217 +1420,6 @@ components:
             clock_in_conflict: true
         created_at: "2026-06-03T07:00:00Z"
         updated_at: "2026-06-03T07:30:00Z"
-
-    ApprovedL1Example:
-      summary: After SL Rudi approves.
-      value:
-        id: SWP-LR-2026-0042
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        start_date: "2026-06-15"
-        end_date: "2026-06-17"
-        duration_days: 3
-        reason: "Mengantar orang tua kontrol rumah sakit."
-        status: PENDING_HR
-        backdated: false
-        clock_in_conflict: false
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
-        balance_check:
-          earmark: null
-          requested_days: 3
-          remaining_days_at_check: 8
-          checked_at: "2026-06-03T09:16:00Z"
-          requires_override: false
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            decision_note: "Coverage Plaza Senayan aman, Rina backfill."
-            override: false
-            occurred_at: "2026-06-03T09:15:00Z"
-          - stage: HR
-            status: PENDING
-            occurred_at: "2026-06-03T09:15:01Z"
-        schedule_impact: []
-        created_at: "2026-06-03T08:00:00Z"
-        updated_at: "2026-06-03T09:15:00Z"
-
-    ApprovedFinalExample:
-      summary: HR Sari final-approves; quota deducted, 3 shifts marked LEAVE.
-      value:
-        id: SWP-LR-2026-0042
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        start_date: "2026-06-15"
-        end_date: "2026-06-17"
-        duration_days: 3
-        status: APPROVED
-        backdated: false
-        clock_in_conflict: false
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
-        balance_check:
-          earmark: null
-          requested_days: 3
-          remaining_days_at_check: 8
-          checked_at: "2026-06-03T10:11:00Z"
-          requires_override: false
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            decision_note: "Coverage aman."
-            override: false
-            occurred_at: "2026-06-03T09:15:00Z"
-          - stage: HR
-            status: APPROVED
-            actor_id: SWP-EMP-9001
-            actor_name: "Sari Hadi"
-            actor_role: hr_admin
-            decision: APPROVED
-            decision_note: "OK."
-            override: false
-            occurred_at: "2026-06-03T10:12:00Z"
-        schedule_impact:
-          - schedule_id: SWP-SCH-771122
-            date: "2026-06-15"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: false
-          - schedule_id: SWP-SCH-771123
-            date: "2026-06-16"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: false
-          - schedule_id: SWP-SCH-771124
-            date: "2026-06-17"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: false
-        created_at: "2026-06-03T08:00:00Z"
-        updated_at: "2026-06-03T10:12:00Z"
-
-    ApprovedFinalWithConflictExample:
-      summary: Backdated sick approved; clock-in conflict flagged on 2026-06-01 (LI-3).
-      value:
-        id: SWP-LR-2026-0061
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        leave_type_id: SWP-LT-002
-        leave_type_name: "Cuti Sakit"
-        start_date: "2026-06-01"
-        end_date: "2026-06-02"
-        duration_days: 2
-        status: APPROVED
-        backdated: true
-        clock_in_conflict: true
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
-        balance_check:
-          earmark: null
-          requested_days: 2
-          remaining_days_at_check: 10
-          checked_at: "2026-06-03T11:00:00Z"
-          requires_override: false
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            override: false
-            occurred_at: "2026-06-03T07:30:00Z"
-          - stage: HR
-            status: APPROVED
-            actor_id: SWP-EMP-9001
-            actor_name: "Sari Hadi"
-            actor_role: hr_admin
-            decision: APPROVED
-            decision_note: "Approved — flag clock-in conflict 2026-06-01 untuk reconciliation."
-            override: false
-            occurred_at: "2026-06-03T11:01:00Z"
-        schedule_impact:
-          - schedule_id: SWP-SCH-771122
-            date: "2026-06-01"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: true
-          - schedule_id: SWP-SCH-771123
-            date: "2026-06-02"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: false
-        created_at: "2026-06-03T07:00:00Z"
-        updated_at: "2026-06-03T11:01:00Z"
-
-    OverrideApprovedExample:
-      summary: HR override-approves after BALANCE_RECHECK_FAILED.
-      value:
-        id: SWP-LR-2026-0099
-        employee_id: SWP-EMP-1042
-        employee_name: "Budi Santoso"
-        leave_type_id: SWP-LT-001
-        leave_type_name: "Cuti Tahunan"
-        start_date: "2026-12-20"
-        end_date: "2026-12-22"
-        duration_days: 3
-        status: APPROVED
-        backdated: false
-        clock_in_conflict: false
-        routing:
-          no_leader: false
-          assigned_leader_id: SWP-EMP-2003
-          assigned_leader_name: "Rudi Wijaya"
-        balance_check:
-          earmark: null
-          requested_days: 3
-          remaining_days_at_check: 1
-          checked_at: "2026-12-15T10:00:00Z"
-          requires_override: true
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_name: "Rudi Wijaya"
-            actor_role: shift_leader
-            decision: APPROVED
-            override: false
-            occurred_at: "2026-12-14T16:00:00Z"
-          - stage: HR
-            status: OVERRIDE_APPROVED
-            actor_id: SWP-EMP-9001
-            actor_name: "Sari Hadi"
-            actor_role: hr_admin
-            decision: OVERRIDE_APPROVED
-            override: true
-            override_reason: "Direstui Direktur Operasional — saldo cuti tahunan akan ditopup retroaktif via grant 2026-Q3."
-            occurred_at: "2026-12-15T10:05:00Z"
-        schedule_impact:
-          - schedule_id: SWP-SCH-991100
-            date: "2026-12-20"
-            prior_status: PUBLISHED
-            new_status: LEAVE
-            clock_in_conflict: false
-        created_at: "2026-12-14T15:00:00Z"
-        updated_at: "2026-12-15T10:05:00Z"
 
     CancelApprovedExample:
       summary: HR cancels an APPROVED future leave — schedule restored.
@@ -2102,21 +1433,7 @@ components:
         end_date: "2026-06-17"
         duration_days: 3
         status: CANCELLED
-        timeline:
-          - stage: L1
-            status: APPROVED
-            actor_id: SWP-EMP-2003
-            actor_role: shift_leader
-            decision: APPROVED
-            override: false
-            occurred_at: "2026-06-03T09:15:00Z"
-          - stage: HR
-            status: APPROVED
-            actor_id: SWP-EMP-9001
-            actor_role: hr_admin
-            decision: APPROVED
-            override: false
-            occurred_at: "2026-06-03T10:12:00Z"
+        approval_instance_id: SWP-APV-2026-0042
         schedule_impact:
           - schedule_id: SWP-SCH-771122
             date: "2026-06-15"
@@ -2275,31 +1592,15 @@ components:
           request_id: "req_01J5XK..."
 
     ErrorBalanceRecheckExample:
-      summary: 422 BALANCE_RECHECK_FAILED — offered override (LA-5).
+      summary: 422 BALANCE_RECHECK_FAILED — leave OnApproved hook blocked at E11 finalize (LA-5).
       value:
         error:
           code: BALANCE_RECHECK_FAILED
-          message: "Saldo cuti berubah sejak pengajuan; persetujuan diblokir. HR dapat melakukan override."
+          message: "Saldo cuti berubah sejak pengajuan; persetujuan diblokir. Super admin dapat bypass atau HR menyesuaikan kuota."
           fields:
             requested_days: 3
             remaining_days: 1
             requires_override: true
-          request_id: "req_01J5XK..."
-
-    ErrorOutOfScopeExample:
-      summary: 403 OUT_OF_SCOPE — leader tried to act on another company's request.
-      value:
-        error:
-          code: OUT_OF_SCOPE
-          message: "Anda bukan shift leader untuk perusahaan agen ini."
-          request_id: "req_01J5XK..."
-
-    ErrorSelfApproveExample:
-      summary: 403 FORBIDDEN — self-approve attempt (LA-6).
-      value:
-        error:
-          code: FORBIDDEN
-          message: "Tidak dapat menyetujui pengajuan cuti milik sendiri."
           request_id: "req_01J5XK..."
 
 # ────────────────────────────────────────────────────────────────────────────────

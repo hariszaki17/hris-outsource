@@ -7,6 +7,7 @@ import { Check, Circle, Eye, EyeOff } from 'lucide-react-native';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../src/ui/Button';
 import { Text } from '../../src/ui/Text';
 import { TextField } from '../../src/ui/TextField';
@@ -14,8 +15,10 @@ import { TextField } from '../../src/ui/TextField';
 function ReqRow({ met, label }: { met: boolean; label: string }) {
   return (
     <View className="flex-row items-center gap-2">
-      {met ? <Check size={16} color={color.ok.text} /> : <Circle size={16} color={color.text3} />}
-      <Text className={`text-[13px] ${met ? 'text-ok-text' : 'text-text-3'}`}>{label}</Text>
+      {met ? <Check size={14} color={color.ok.text} /> : <Circle size={14} color={color.text3} />}
+      <Text variant="caption" className={met ? 'text-ok-text' : 'text-text-3'}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -23,6 +26,7 @@ function ReqRow({ met, label }: { met: boolean; label: string }) {
 export default function ResetPassword() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -40,16 +44,18 @@ export default function ResetPassword() {
 
   return (
     <ScrollView className="flex-1 bg-surface" contentContainerStyle={{ flexGrow: 1 }}>
-      <View className="flex-1 pb-7" style={{ paddingTop: 60 }}>
+      <View
+        className="flex-1"
+        style={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 28 }}
+      >
         <View className="flex-1 px-7">
+          {/* .pen Form: title, subtitle, both fields share one uniform 14px gap. */}
           <View className="gap-3.5">
-            <Text variant="section">{t('m:reset.setNewTitle')}</Text>
+            <Text variant="displayTitle">{t('m:reset.setNewTitle')}</Text>
             <Text variant="secondary" className="text-text-3" style={{ lineHeight: 22 }}>
               {t('m:reset.setNewSubtitle')}
             </Text>
-          </View>
 
-          <View className="gap-3.5 pt-6">
             <TextField
               label={t('m:reset.newPasswordLabel')}
               value={newPass}
@@ -82,7 +88,7 @@ export default function ResetPassword() {
             </TextField>
           </View>
 
-          <View className="gap-1.5 pt-4">
+          <View className="gap-1 pt-[22px]">
             <ReqRow met={minChars} label={t('m:reset.reqMinChars')} />
             <ReqRow met={hasUpperLower} label={t('m:reset.reqUpper')} />
             <ReqRow met={hasNumberSymbol} label={t('m:reset.reqNumber')} />
@@ -92,11 +98,13 @@ export default function ResetPassword() {
             label={t('m:reset.saveBtn')}
             onPress={() => void onSubmit()}
             disabled={!minChars || !hasUpperLower || !hasNumberSymbol || !matches}
-            className="mt-5"
+            className="mt-[22px]"
           />
         </View>
 
-        <Text className="text-center text-[12px] text-text-3">{t('m:login.footer')}</Text>
+        <Text variant="caption" className="text-center text-text-3">
+          {t('m:login.footer')}
+        </Text>
       </View>
     </ScrollView>
   );

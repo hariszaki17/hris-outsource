@@ -1,26 +1,26 @@
 # E6 — Leave Management · Feature Document
 
 > **Epic:** E6 Leave Management · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
-> A **per-type** leave ledger (each leave type carries its own entitlement/cap mechanics), agent leave requests with documents, two-level (leader → HR) approval, and integration with scheduling/attendance.
+> A **per-type** leave ledger (each leave type carries its own entitlement/cap mechanics), agent leave requests with documents, **approval via the E11 configurable engine** (per-company chain), and integration with scheduling/attendance.
 
 ---
 
 ## 1. Goal & outcome
 
-Let agents request leave from mobile, track their **leave entitlement per leave type** (cuti), route requests through **shift-leader then HR** approval, and ensure approved leave **cancels scheduled shifts and never reads as "absent"** in attendance. **`leave_type` is the cap axis:** each type carries its own **`cap_basis`** — `ANNUAL_POOL` (the one accruing, year-end-expiring, no-carryover pool, sourced from the E2 agreement), `PER_EVENT`, `PER_MONTH`, `PER_YEAR_COUNT`, `UNCAPPED`, `LIFETIME_ONCE`, or `SERVICE_UNPAID`. A request is metered against **its own type's window** — statutory event/sick/religious leave **never depletes the annual pool** (Indonesian law: Pasal 93 vs Pasal 79 UU 13/2003 / PP 35/2021). Over-cap requests are **blocked**; balance never goes negative *(per-type ledger, resolved 2026-06-12 — supersedes the 2026-06-08 grant-lot/one-pool model; see §7)*. The active catalog is the **18-code SWP `Fitur Ijin` set** defined in [E2 operational-master-data §5a](../E2-identity/prds/operational-master-data.md).
+Let agents request leave from mobile, track their **leave entitlement per leave type** (cuti), route requests through the **per-company E11 approval chain**, and ensure approved leave **cancels scheduled shifts and never reads as "absent"** in attendance. **`leave_type` is the cap axis:** each type carries its own **`cap_basis`** — `ANNUAL_POOL` (the one accruing, year-end-expiring, no-carryover pool, sourced from the E2 agreement), `PER_EVENT`, `PER_MONTH`, `PER_YEAR_COUNT`, `UNCAPPED`, `LIFETIME_ONCE`, or `SERVICE_UNPAID`. A request is metered against **its own type's window** — statutory event/sick/religious leave **never depletes the annual pool** (Indonesian law: Pasal 93 vs Pasal 79 UU 13/2003 / PP 35/2021). Over-cap requests are **blocked**; balance never goes negative *(per-type ledger, resolved 2026-06-12 — supersedes the 2026-06-08 grant-lot/one-pool model; see §7)*. The active catalog is the **18-code SWP `Fitur Ijin` set** defined in [E2 operational-master-data §5a](../E2-identity/prds/operational-master-data.md).
 
 ## 2. Actors & roles
 
 | Actor | Involvement |
 |---|---|
 | **Agent** | Requests leave (mobile), uploads documents, names a delegate, views balance/history. |
-| **Shift Leader** | First-level approver for their company's agents. |
-| **HR / Super Admin** | Second-level approver; manages the **leave-type catalog + per-type quotas** (annual auto-grant from the E2 agreement, manual adjustments); handles no-leader escalation. |
-| **System** | Meters each request against its **leave type's `cap_basis` window**, enforces no-negative balance + eligibility gates (gender/notice/service/lifetime), runs the two-level flow, cancels shifts, suppresses absent, expires annual quotas, audits, notifies. |
+| **Approval line members** | Approve/reject leave where they sit on the agent company's **E11 approval line** (routing by membership, not role — may be the on-site shift leader, lead, HR, …). |
+| **HR / Super Admin** | Manages the **leave-type catalog + per-type quotas** (annual auto-grant from the E2 agreement, manual adjustments); configures the E11 template; super admin may **bypass**. |
+| **System** | Meters each request against its **leave type's `cap_basis` window**, enforces no-negative balance + eligibility gates (gender/notice/service/lifetime), **creates an E11 approval instance** + fires the commit/integrate hook on approval, cancels shifts, suppresses absent, expires annual quotas, audits, notifies. |
 
 ## 3. Scope
 
-**In scope:** per-type leave entitlement ledger (`LeaveQuota` windows by `cap_basis`), leave request (+ documents, delegate), two-level approval, leave↔schedule/attendance integration, leave calendar & balances.
+**In scope:** per-type leave entitlement ledger (`LeaveQuota` windows by `cap_basis`), leave request (+ documents, delegate), approval **via E11** (leave contributes the commit/integrate hook), leave↔schedule/attendance integration, leave calendar & balances.
 **Out of scope:** leave-type definitions (E2 master). Payroll effect of unpaid leave (E8 context). Overtime (E7).
 
 ## 4. Domain entities
@@ -32,7 +32,7 @@ erDiagram
     LEAVE_TYPE ||--o{ LEAVE_QUOTA : "meters"
     LEAVE_TYPE ||--o{ LEAVE_REQUEST : "caps + gates"
     LEAVE_QUOTA ||--o{ LEAVE_REQUEST : "drawn by (quota-bearing types)"
-    LEAVE_REQUEST ||--o{ LEAVE_APPROVAL : "decided via"
+    LEAVE_REQUEST ||--o| APPROVAL_INSTANCE : "decided via (E11)"
 
     LEAVE_QUOTA {
         string id PK "SWP-LQ-*"
@@ -68,26 +68,23 @@ erDiagram
         date start_date
         date end_date
         int duration_days
-        string status "Pending|LeaderApproved|Approved|Rejected|Cancelled"
+        string status "Pending|Approved|Rejected|Cancelled (synced to E11 instance)"
         text notes
         text admin_notes
         string document_url "if required"
         datetime issued_at
     }
-    LEAVE_APPROVAL {
-        bigint id PK
-        bigint leave_request_id FK
-        int level "1=leader, 2=HR"
-        bigint approver_id FK
-        string decision "Approved|Rejected"
-        text reason
-        datetime decided_at
+    APPROVAL_INSTANCE {
+        string id PK "SWP-APV-* (owned by E11)"
+        string request_type "LEAVE"
+        int current_line
+        string status "PENDING|APPROVED|REJECTED"
     }
 ```
 
 **Invariants:** *(per-type ledger, resolved 2026-06-12 — supersedes the grant-lot forms)*
 - **INV-1:** a request is metered **against its own leave type's `cap_basis` window** — it draws/charges **only** that type's entitlement and **never** another type's (statutory/sick/religious leave never depletes the annual pool). It **cannot exceed the type's cap** in that window — over-cap is **blocked**. Quota-bearing bases (`ANNUAL_POOL`, `PER_MONTH`, `PER_YEAR_COUNT`, `LIFETIME_ONCE`, `SERVICE_UNPAID`) draw a `LeaveQuota` row (`remaining = entitled − used − pending`); `PER_EVENT` caps `duration_days ≤ cap_value` per occurrence (no standing row); `UNCAPPED` is bounded only by the document gate.
-- **INV-2:** **two-level approval** — `Pending → LeaderApproved → Approved`; a reject at either level ends it (`Rejected`).
+- **INV-2:** approval is **routed through the E11 engine** (per-company configurable chain) *(reworked 2026-06-14)* — `LeaveRequest.status` tracks the E11 instance (`Pending → Approved | Rejected`); leave contributes the `OnApproved` hook (re-check + commit quota + integrate) and `OnRejected` (release reservation). *(Supersedes the old fixed two-level `Pending → LeaderApproved → Approved`.)*
 - **INV-3:** an **Approved** leave **cancels overlapping scheduled shifts** (E4) and **suppresses "Absent"** in attendance (E5) for those days.
 - **INV-4:** **`ANNUAL_POOL` quota expires at its `period_key` year-end — no carryover.** `PER_MONTH` quotas reset each calendar month; `PER_YEAR_COUNT` each year; `LIFETIME_ONCE`/`SERVICE_UNPAID` never reset (one-time per employment). The annual entitlement sources `employment_agreements.annual_leave_entitlement_days` (E2), pro-rated for probation/mid-year joiners.
 - **INV-5:** leave types flagged `requires_document` (E2) require a document upload before submission. `leave_type` is the **entitlement/cap axis** (`cap_basis` + gates), not merely a label.
@@ -100,7 +97,7 @@ erDiagram
 |----|---------|-----|
 | **F6.1** | Leave Entitlement Ledger (per-type quotas) | [leave-quota-balances.md](prds/leave-quota-balances.md) |
 | **F6.2** | Leave Request (documents, delegate) | [leave-request.md](prds/leave-request.md) |
-| **F6.3** | Two-Level Approval Workflow | [leave-approval.md](prds/leave-approval.md) |
+| **F6.3** | Leave Approval (via the E11 engine) | [leave-approval.md](prds/leave-approval.md) |
 | **F6.4** | Leave–Schedule/Attendance Integration | [leave-schedule-integration.md](prds/leave-schedule-integration.md) |
 | **F6.5** | Leave Calendar & Balance Views | [leave-calendar-views.md](prds/leave-calendar-views.md) |
 
@@ -108,9 +105,9 @@ erDiagram
 
 | Surface | Who | What |
 |---|---|---|
-| **Mobile app** | Agent | Request leave, upload docs, pick delegate, view balance & status. |
-| **Web / mobile** | Shift Leader | First-level approve/reject for their company. |
-| **Web console** | HR / Super Admin | Second-level approval, leave-type catalog + per-type quota grants/adjustments, reporting. |
+| **Mobile app** | Agent | Request leave, upload docs, pick delegate, view balance & status + chain timeline. |
+| **Web / mobile** | Approval line members | Approve/reject the current line of a leave instance (E11 inbox). |
+| **Web console** | HR / Super Admin | Configure the E11 template, leave-type catalog + per-type quota grants/adjustments, reporting; super admin may bypass. |
 
 ---
 
@@ -167,33 +164,25 @@ flowchart TD
 
 ---
 
-### F6.3 — Two-Level Approval Workflow
+### F6.3 — Leave Approval (via the E11 engine)
 
-Shift leader approves first; then HR confirms. Reject at either level ends the request. On final approval, the reservation is **committed** (pending → used on the type's window quota) and downstream integration (F6.4) fires.
+*(Reworked 2026-06-14.)* Leave routes through the **E11 configurable approval engine** (per-company chain), not a fixed two-level flow. On submit, leave reserves `pending_days` and creates an E11 instance. On the engine's **terminal approve** (last line cleared or super-admin bypass), leave's `OnApproved` hook **re-checks** remaining, **commits** the reservation, and fires integration (F6.4); on **terminal reject**, the `OnRejected` hook **releases** the reservation.
 
 ```mermaid
 flowchart TD
-    subgraph SL[Shift Leader]
-        L1([Pending request]) --> L2{Approve?}
-        L2 -- Reject --> R1[Rejected + reason]
-        L2 -- Approve --> L3[LeaderApproved]
-    end
-    subgraph HR[HR Admin]
-        L3 --> H1{Approve?}
-        H1 -- Reject --> R1
-        H1 -- Approve --> H2[Approved]
-    end
-    subgraph SYS[System]
-        H2 --> S1[Commit reservation → pending_days → used_days on the type quota F6.1]
-        S1 --> S2[Cancel shifts + suppress absent F6.4]
-        S2 --> S3[(Persist approvals + audit)]
-        S3 --> S4[Notify agent]
-        R1 --> S5[Release reservation pending_days]
-        S5 --> S4
-    end
+    R0([Pending request - pending_days reserved]) --> E0[Create E11 ApprovalInstance request_type=LEAVE]
+    E0 --> E1{E11 chain - per-company lines}
+    E1 -- "Any current-line member rejects" --> RJ[Rejected + reason]
+    E1 -- "Lines cleared in sequence OR super-admin bypass" --> AP[Approved]
+    AP --> S1[OnApproved hook: re-check remaining → commit pending_days → used_days F6.1]
+    S1 --> S2[Cancel shifts + suppress absent F6.4]
+    S2 --> S3[(append approval_actions + audit)]
+    S3 --> S4[Notify agent]
+    RJ --> S5[OnRejected hook: release reservation pending_days]
+    S5 --> S4
 ```
 
-**Entities:** `LeaveApproval`, `LeaveRequest`, `LeaveQuota`. **Depends on:** F3.4 (leader scope / HR escalation).
+**Entities:** `LeaveRequest` (status synced to the E11 instance), `LeaveQuota`. Approval routing/trail = **E11** (`ApprovalInstance`, `ApprovalAction`); the old `LeaveApproval` table is removed. **Depends on:** E11 (engine), F6.1 (commit/re-check hook), F6.4 (integration).
 
 ---
 
@@ -238,7 +227,7 @@ flowchart LR
 **Resolved (2026-05-29):**
 - ✅ **Annual lump grant** per period; tracked total/used/remaining (matches legacy `employee_leave_quotas`). *(superseded 2026-06-08 — annual entitlement is now a single `ANNUAL` grant-lot in the per-employee ledger; see the Resolved 2026-06-08 block.)*
 - ✅ **Expire at period end** (no carryover). *(superseded 2026-06-08 — replaced by hard per-lot `expires_at`.)*
-- ✅ **Two-level approval**: shift leader → HR (escalate to HR if no leader).
+- ~~✅ **Two-level approval**: shift leader → HR (escalate to HR if no leader).~~ — **superseded 2026-06-14**: leave routes through the **E11 configurable approval engine** (per-company chain; no-template → super-admin fallback); see F6.3 + [leave-approval PRD](prds/leave-approval.md).
 - ✅ **Block** annual requests beyond remaining balance. *(kept — restated as no-negative allocation across grant-lots, 2026-06-08.)*
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**

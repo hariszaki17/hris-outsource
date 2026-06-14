@@ -166,36 +166,15 @@ func (r *LeaveRepo) SetBalanceSnapshot(ctx context.Context, tx pgx.Tx, p svc.Bal
 	})
 }
 
-// --- approvals (decision trail) ---
+// --- E11 instance linkage ---
 
-func (r *LeaveRepo) InsertLeaveApproval(ctx context.Context, tx pgx.Tx, p svc.ApprovalRow) (dom.LeaveApproval, error) {
-	row, err := r.q.WithTx(tx).InsertLeaveApproval(ctx, sqlcgen.InsertLeaveApprovalParams{
-		LeaveRequestID: p.LeaveRequestID,
-		Stage:          string(p.Stage),
-		Decision:       string(p.Decision),
-		ActorID:        p.ActorID,
-		ActorRole:      p.ActorRole,
-		DecisionNote:   p.DecisionNote,
-		RejectReason:   p.RejectReason,
-		IsOverride:     p.IsOverride,
-		OverrideReason: p.OverrideReason,
+// SetApprovalInstanceID links the E11 ApprovalInstance to the leave request (called
+// inside the submit tx after engine.CreateInstance).
+func (r *LeaveRepo) SetApprovalInstanceID(ctx context.Context, tx pgx.Tx, id, instanceID string) error {
+	return r.q.WithTx(tx).SetLeaveRequestApprovalInstanceID(ctx, sqlcgen.SetLeaveRequestApprovalInstanceIDParams{
+		ApprovalInstanceID: &instanceID,
+		ID:                 id,
 	})
-	if err != nil {
-		return dom.LeaveApproval{}, mapErr(err)
-	}
-	return mapApproval(row), nil
-}
-
-func (r *LeaveRepo) ListLeaveApprovalsForRequest(ctx context.Context, id string) ([]dom.LeaveApproval, error) {
-	rows, err := r.q.ListLeaveApprovalsForRequest(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]dom.LeaveApproval, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, mapApproval(row))
-	}
-	return out, nil
 }
 
 // --- leave-type read-through (is_annual gate) ---

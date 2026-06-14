@@ -13,6 +13,8 @@ import {
   visibleNav,
 } from './nav.ts';
 
+const INBOX = NAV_ITEMS.find((i) => i.to === '/inbox')!;
+
 /**
  * Permission-keyed nav gating (capability axis — docs/eng/NAVIGATION-AND-RBAC.md). The shell
  * filters nav against the user's effective permissions, never their role. These tests drive the
@@ -64,11 +66,26 @@ describe('visibleNav (permission-keyed)', () => {
     expect(hasPermission(permissionsForRole('shift_leader'), SETTINGS_ITEM.requires)).toBe(false);
   });
 
-  it('the inbox is visible to anyone who can approve anything (anyOf)', () => {
-    // shift_leader has leave.approve / overtime.approve → inbox shows.
-    expect(labels('shift_leader')).toContain('nav.inbox');
-    // agent has no approve permission → no inbox (and no web nav at all).
+  it('the inbox is visible to E11 approval-line members + attendance verifiers (anyOf)', () => {
+    // E11: inbox visibility is approvals.act (line-member queue) OR attendance.verify (E5 queue).
+    expect(INBOX.requires).toEqual({ anyOf: ['approvals.act', 'attendance.verify'] });
+    // Every staff role on an approval line / verifying attendance sees it.
+    for (const role of ['super_admin', 'hr_admin', 'lead', 'shift_leader'] as const) {
+      expect(labels(role)).toContain('nav.inbox');
+      expect(hasPermission(permissionsForRole(role), INBOX.requires)).toBe(true);
+    }
+    // agent holds no approvals.act / attendance.verify → no inbox (and no web nav at all).
     expect(labels('agent')).toEqual([]);
+    expect(hasPermission(permissionsForRole('agent'), INBOX.requires)).toBe(false);
+  });
+
+  it('inbox visibility derives from approvals.act, not removed *.approve / change_requests keys', () => {
+    // A holder of ONLY attendance.verify still sees the inbox (E5 verification queue).
+    expect(hasPermission(['attendance.verify'], INBOX.requires)).toBe(true);
+    // A holder of ONLY approvals.act sees it (E11 line membership decides acting, server-side).
+    expect(hasPermission(['approvals.act'], INBOX.requires)).toBe(true);
+    // attendance.read alone (no verify, no approvals.act) does NOT reveal the inbox.
+    expect(hasPermission(['attendance.read'], INBOX.requires)).toBe(false);
   });
 });
 
@@ -109,14 +126,19 @@ describe('section sub-nav (sub-features live under their parent module)', () => 
     expect(subnavForSection('/client-companies', permissionsForRole('shift_leader'))).toEqual([]);
   });
 
-  it('shift_leader sees Karyawan → Perubahan Data tab (change requests route to the SL)', () => {
-    // As of the agent-console redesign the SL reviews profile change requests (change_requests.read),
-    // so the Karyawan sub-nav now strips to Karyawan + Perubahan Data (not agreements, which is HR).
-    const slEmployees = subnavForSection('/employees', permissionsForRole('shift_leader')).map(
-      (s) => s.labelKey,
-    );
-    expect(slEmployees).toEqual(['nav.employees', 'nav.changeRequests']);
+  it('shift_leader Karyawan sub-nav is Karyawan only — no change requests (E11 removed them)', () => {
+    // 2026-06-14 (E11 decision A): the change_requests.* keys are deleted — profile edits are now
+    // instant self-edit, configurable approval moved to E11. The SL no longer reviews profile
+    // changes, so the Karyawan sub-nav for a shift_leader strips to Karyawan only (agreements is HR).
+    const slEmployees = visibleNav(
+      SECTION_SUBNAV['/employees'] ?? [],
+      permissionsForRole('shift_leader'),
+    ).map((s) => s.labelKey);
+    expect(slEmployees).toEqual(['nav.employees']);
+    expect(slEmployees).not.toContain('nav.changeRequests');
     expect(slEmployees).not.toContain('nav.agreements');
+    // A single visible tab collapses to no sub-nav strip (renders as a plain page).
+    expect(subnavForSection('/employees', permissionsForRole('shift_leader'))).toEqual([]);
   });
 
   it('every sub-nav route is a real, distinct destination', () => {
@@ -147,7 +169,7 @@ describe('AGENT_NAV_ITEMS (agent self-service backbone, 3 merged homes)', () => 
 
   it('the agent role resolves to the self-service backbone; staff get the modules', () => {
     expect(navForRole('agent')).toBe(AGENT_NAV_ITEMS);
-    for (const role of ['super_admin', 'hr_admin', 'shift_leader'] as const) {
+    for (const role of ['super_admin', 'hr_admin', 'lead', 'shift_leader'] as const) {
       expect(navForRole(role)).toBe(NAV_ITEMS);
     }
   });
@@ -173,7 +195,7 @@ describe('AGENT_NAV_ITEMS (agent self-service backbone, 3 merged homes)', () => 
   it('staff roles never render the agent backbone — the shell switches by role, not permission', () => {
     // Defense in depth: even though the super-admin bundle technically satisfies self.* keys,
     // navForRole keys the backbone off the ROLE, so only the agent role ever gets AGENT_NAV_ITEMS.
-    for (const role of ['super_admin', 'hr_admin', 'shift_leader'] as const) {
+    for (const role of ['super_admin', 'hr_admin', 'lead', 'shift_leader'] as const) {
       expect(navForRole(role)).not.toBe(AGENT_NAV_ITEMS);
     }
     expect(navForRole('agent')).toBe(AGENT_NAV_ITEMS);

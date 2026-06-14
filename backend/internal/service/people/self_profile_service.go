@@ -1,9 +1,13 @@
 // Package people — SelfProfileService implements the agent self-service profile
-// surface (E2 F2.1 / EP-5, 2026-06-11 redesign):
-//   - UpdateMyProfile: instant-tier self apply of {address, app_language,
-//     photo_object_key}. No approval, no notification — audited. Approval-tier
-//     fields (phone/emergency_contact/bank_account) are rejected here with
-//     FIELD_REQUIRES_APPROVAL (the agent must file a change request instead).
+// surface (E2 F2.1 / EP-5; E11 instant-edit redesign 2026-06-14, EPICS §8 A):
+//   - UpdateMyProfile: INSTANT self apply of every editable profile field —
+//     {address, app_language, photo_object_key, phone, emergency_contact,
+//     bank_account}. No approval queue, no notification — audited. The profile
+//     change-request approval surface was hard-deleted (E11): there is no longer
+//     a FIELD_REQUIRES_APPROVAL tier. Phone, when changed, is normalized to
+//     E.164 and guarded for login-identifier uniqueness (409 CONFLICT); the
+//     login phone on the linked users row is updated in the same tx so the agent
+//     can keep signing in with the new number.
 //   - InitPhotoUpload: validates the content-type/size and returns a presigned
 //     PUT UploadTicket (server-built key in the caller's own namespace) via the
 //     storage client. The client PUTs the bytes, then applies the returned
@@ -11,7 +15,7 @@
 //
 // The employee is always the authenticated principal (scope:self, GuardSelf);
 // there is no path id. Separate struct in the same package — mirrors the
-// AgreementService / ChangeRequestService pattern.
+// AgreementService pattern.
 package people
 
 import (
@@ -32,27 +36,47 @@ import (
 // SelfProfileRepository is the data dependency for the self-profile service.
 type SelfProfileRepository interface {
 	GetEmployeeByID(ctx context.Context, id string) (domain.Employee, error)
-	// UpdateEmployeeSelfInstant applies the instant-tier fields (COALESCE keeps a
-	// column unchanged when the param is nil) and returns the updated employee
-	// (with the new emergency_contact/app_language/photo fields populated).
+	// UserPhoneTaken reports whether a (non-deleted) login user already uses this
+	// E.164 phone — the login-identifier uniqueness guard (mirrors EmployeeRepository).
+	UserPhoneTaken(ctx context.Context, phone string) (bool, error)
+	// UpdateEmployeeSelfInstant applies the instant self-edit fields (COALESCE keeps a
+	// column unchanged when the param is nil) and returns the updated employee. When
+	// Phone is non-nil it ALSO updates the linked users.phone login identifier in the
+	// same tx so login stays consistent.
 	UpdateEmployeeSelfInstant(ctx context.Context, tx pgx.Tx, p UpdateEmployeeSelfInstantParams) (domain.Employee, error)
 }
 
-// UpdateEmployeeSelfInstantParams carries the optional instant-tier fields for
-// the COALESCE patch. A nil pointer leaves the column unchanged.
+// UpdateEmployeeSelfInstantParams carries the optional instant self-edit fields for
+// the COALESCE patch. A nil pointer leaves the column unchanged. E11: phone,
+// emergency_contact, and bank_account joined the instant set (the change-request
+// approval queue was removed).
 type UpdateEmployeeSelfInstantParams struct {
-	ID             string
-	Address        *string
-	AppLanguage    *string
-	PhotoObjectKey *string
+	ID                    string
+	Address               *string
+	AppLanguage           *string
+	PhotoObjectKey        *string
+	Phone                 *string // normalized E.164; also propagated to users.phone
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	BankName              *string
+	BankAccountNumber     *string
+	BankAccountHolderName *string
 }
 
 // SelfProfileInput is the validated PATCH /me/profile body (SelfProfileUpdate).
-// At least one field must be present (handler/DTO enforces minProperties:1).
+// At least one field must be present (handler/DTO enforces minProperties:1). E11:
+// phone / emergency_contact / bank_account are now instant self-edits too.
 type SelfProfileInput struct {
 	Address        *string
 	AppLanguage    *string
 	PhotoObjectKey *string
+	Phone          *string
+	// EmergencyContact: a non-nil pointer means "update the emergency contact" —
+	// both name and phone are written (the FE always submits the full object).
+	EmergencyContact *domain.EmergencyContact
+	// BankAccount: a non-nil pointer means "update the bank account" — all three
+	// fields are written together (the FE always submits the full object).
+	BankAccount *domain.BankAccount
 }
 
 // SelfProfileService implements the agent self-service profile logic.
@@ -67,10 +91,13 @@ func NewSelfProfileService(repo SelfProfileRepository, store storage.Storage, tx
 	return &SelfProfileService{repo: repo, store: store, txm: txm}
 }
 
-// UpdateMyProfile instant-applies the caller's own instant-tier fields. The
-// employee is the authenticated principal (GuardSelf). app_language is validated
-// (id|en). A photo_object_key must belong to the caller's own profile-photo key
-// namespace (else 422 — no cross-employee key smuggling). Audited; no notify.
+// UpdateMyProfile INSTANTLY applies the caller's own editable profile fields
+// (E11). The employee is the authenticated principal (GuardSelf). app_language is
+// validated (id|en). A photo_object_key must belong to the caller's own
+// profile-photo key namespace (else 422 — no cross-employee key smuggling). When
+// phone changes it is normalized to E.164 and checked for login-identifier
+// uniqueness (409 CONFLICT); the linked users.phone is updated in the same tx.
+// emergency_contact and bank_account apply instantly too. Audited; no notify.
 func (s *SelfProfileService) UpdateMyProfile(ctx context.Context, in SelfProfileInput) (domain.Employee, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
@@ -125,14 +152,62 @@ func (s *SelfProfileService) UpdateMyProfile(ctx context.Context, in SelfProfile
 		return domain.Employee{}, apperr.Internal(err)
 	}
 
+	// Phone: normalize to E.164 and (if actually changed) guard login-identifier
+	// uniqueness. A blank phone is rejected — phone is the required login id.
+	var phoneParam *string
+	if in.Phone != nil {
+		normalized := normalizePhone(*in.Phone)
+		if normalized == "" {
+			return domain.Employee{}, apperr.Invalid(map[string]string{
+				"phone": "Wajib diisi (dipakai sebagai identitas login).",
+			})
+		}
+		currentPhone := ""
+		if before.Phone != nil {
+			currentPhone = *before.Phone
+		}
+		if normalized != currentPhone {
+			taken, terr := s.repo.UserPhoneTaken(ctx, normalized)
+			if terr != nil {
+				return domain.Employee{}, apperr.Internal(terr)
+			}
+			if taken {
+				return domain.Employee{}, loginPhoneConflictErr()
+			}
+			phoneParam = &normalized
+		}
+		// else: unchanged → leave phoneParam nil so we neither re-check nor rewrite.
+	}
+
+	// emergency_contact / bank_account: a non-nil object means "write all of it".
+	var ecName, ecPhone *string
+	if in.EmergencyContact != nil {
+		n := strings.TrimSpace(in.EmergencyContact.Name)
+		ph := strings.TrimSpace(in.EmergencyContact.Phone)
+		ecName, ecPhone = &n, &ph
+	}
+	var bankName, bankNo, bankHolder *string
+	if in.BankAccount != nil {
+		bn := strings.TrimSpace(in.BankAccount.BankName)
+		an := strings.TrimSpace(in.BankAccount.AccountNumber)
+		ah := strings.TrimSpace(in.BankAccount.AccountHolderName)
+		bankName, bankNo, bankHolder = &bn, &an, &ah
+	}
+
 	var updated domain.Employee
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		var inErr error
 		updated, inErr = s.repo.UpdateEmployeeSelfInstant(ctx, tx, UpdateEmployeeSelfInstantParams{
-			ID:             employeeID,
-			Address:        in.Address,
-			AppLanguage:    in.AppLanguage,
-			PhotoObjectKey: in.PhotoObjectKey,
+			ID:                    employeeID,
+			Address:               in.Address,
+			AppLanguage:           in.AppLanguage,
+			PhotoObjectKey:        in.PhotoObjectKey,
+			Phone:                 phoneParam,
+			EmergencyContactName:  ecName,
+			EmergencyContactPhone: ecPhone,
+			BankName:              bankName,
+			BankAccountNumber:     bankNo,
+			BankAccountHolderName: bankHolder,
 		})
 		if inErr != nil {
 			return inErr
@@ -145,7 +220,7 @@ func (s *SelfProfileService) UpdateMyProfile(ctx context.Context, in SelfProfile
 			After:      selfProfileSnap(updated),
 		})
 	}); err != nil {
-		return domain.Employee{}, apperr.Internal(err)
+		return domain.Employee{}, wrapTxErr(err)
 	}
 
 	return updated, nil
@@ -206,11 +281,30 @@ func (s *SelfProfileService) PhotoURL(ctx context.Context, objectKey *string) st
 	return url
 }
 
-// selfProfileSnap captures the instant-tier fields for the audit diff.
+// selfProfileSnap captures the instant self-edit fields for the audit diff (E11:
+// now includes phone / emergency_contact / bank_account alongside the originals).
 func selfProfileSnap(e domain.Employee) map[string]any {
 	return map[string]any{
 		"address":          derefPtrStr(e.Address),
 		"app_language":     e.AppLanguage,
 		"photo_object_key": derefPtrStr(e.PhotoObjectKey),
+		"phone":            derefPtrStr(e.Phone),
+		"emergency_contact": map[string]any{
+			"name":  e.EmergencyContact.Name,
+			"phone": e.EmergencyContact.Phone,
+		},
+		"bank_account": map[string]any{
+			"bank_name":           e.BankAccount.BankName,
+			"account_number":      e.BankAccount.AccountNumber,
+			"account_holder_name": e.BankAccount.AccountHolderName,
+		},
 	}
+}
+
+// derefPtrStr safely dereferences a *string (returns "" if nil).
+func derefPtrStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

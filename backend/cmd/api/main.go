@@ -14,6 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	approvaldom "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
+	approvalhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/approval"
+	approvalrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/approval"
+	approvalsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/approval"
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
@@ -180,12 +184,9 @@ func run() error {
 	agreementsSvc := peoplesvc.NewAgreementService(agreementsRepo, txm)
 	agreementsHandler := peoplehttp.NewAgreementHandler(agreementsSvc)
 
-	// People change-requests slice (04-04): HR approval queue for agent-submitted
-	// profile-change requests (E2 F2.1 EP-5 / PPL-03).
-	crRepo := peoplerepo.NewChangeRequestRepo(pool)
-	crSvc := peoplesvc.NewChangeRequestService(crRepo, txm)
-	crSvc.SetNotifier(jobsClient) // E10: real notify on change-request approve/reject
-	crHandler := peoplehttp.NewChangeRequestHandler(crSvc)
+	// E11 (decision A): the profile change-request approval queue is REMOVED — agent
+	// profile edits (phone/emergency/bank/address/photo/language) are now instant
+	// self-edit via PATCH /me/profile (selfProfileSvc below).
 
 	// People self-service profile (E2 F2.1): instant-tier edit + presigned photo
 	// upload. Reuses the storage client (private bucket, presigned PUT/GET).
@@ -276,6 +277,26 @@ func run() error {
 	holidaySvc := overtimesvc.NewHolidayService(holidayRepo, txm)
 	overtimeHandler := overtimehttp.NewHandler(overtimeSvc, holidaySvc)
 
+	// Approval slice (E11): the configurable per-company approval engine — single
+	// source of truth for leave/overtime approval. The engine creates an
+	// ApprovalInstance at leave :submit / overtime :create+:confirm (engine injected
+	// into those services), drives the OR-within / AND-across chain, and fires each
+	// request type's OnApproved/OnRejected side-effect hook on terminal transition.
+	approvalRepo := approvalrepo.NewApprovalRepo(pool)
+	approvalSvc := approvalsvc.NewApprovalService(approvalRepo, txm)
+	approvalSvc.SetNotifier(jobsClient) // E10: notify line members / requester
+	// Register the per-type side-effect hooks (run in the engine's terminal tx).
+	approvalSvc.RegisterHooks(approvaldom.RequestTypeLeave, approvaldom.Hooks{
+		OnApproved: leaveSvc.OnApproved, OnRejected: leaveSvc.OnRejected,
+	})
+	approvalSvc.RegisterHooks(approvaldom.RequestTypeOvertime, approvaldom.Hooks{
+		OnApproved: overtimeSvc.OnApproved, OnRejected: overtimeSvc.OnRejected,
+	})
+	// Inject the engine into leave/overtime so :submit / :confirm create the instance.
+	leaveSvc.SetApprovalEngine(approvalSvc)
+	overtimeSvc.SetApprovalEngine(approvalSvc)
+	approvalHandler := approvalhttp.NewHandler(approvalSvc)
+
 	// Payroll slice (10-02): E8 historical, read-only payslip archive + audit notes
 	// + async Excel export. The payslip service decrypts the *_enc money at the
 	// read boundary (payrollCipher); the export service enqueues a real River
@@ -316,7 +337,7 @@ func run() error {
 		OrgMasterData:        orgMasterDataHandler,
 		People:               peopleHandler,
 		PeopleAgreements:     agreementsHandler,
-		PeopleChangeRequests: crHandler,
+		Approval:             approvalHandler,
 		PeopleSelfProfile:    selfProfileHandler,
 		Placement:            placementHandler,
 		Scheduling:           schedulingHandler,

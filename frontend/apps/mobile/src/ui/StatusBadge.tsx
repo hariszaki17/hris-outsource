@@ -11,6 +11,7 @@ const statusTone: Record<string, Tone> = {
   INCOMPLETE: 'orange',
   ABSENT: 'bad',
   ON_LEAVE: 'info',
+  PENDING: 'warn',
 };
 
 const bgClass: Record<Tone, string> = {
@@ -32,7 +33,9 @@ export function StatusBadge({ status, label }: { status: string; label: string }
   const tone = statusTone[status] ?? 'info';
   return (
     <View className={`self-start rounded-pill px-2 py-1 ${bgClass[tone]}`}>
-      <Text className={`text-xs font-semibold ${textClass[tone]}`}>{label}</Text>
+      <Text variant="caption" weight="semibold" className={textClass[tone]}>
+        {label}
+      </Text>
     </View>
   );
 }

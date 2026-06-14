@@ -54,7 +54,7 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-LT` | Leave Type | E2 |
 | `SWP-AC` | Attendance Code | E2 |
 | `SWP-OTR` | Overtime Rule | E2 |
-| `SWP-CHG` | Change Request (HR approval queue for agent edits) | E2 |
+| ~~`SWP-CHG`~~ | ~~Change Request~~ — **removed 2026-06-14** (profile edits are instant self-edit; no approval queue) | E2 |
 | `SWP-PL` | Placement | E3 |
 | `SWP-SLA` | Shift Leader Assignment | E3 |
 | `SWP-SHF` | Shift Master | E4 |
@@ -70,6 +70,10 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-PS` | Payslip | E8 |
 | `SWP-NTF` | Notification | E10 |
 | `SWP-EXP` | Export job | E10 |
+| `SWP-APT` | Approval Template (one per client company) | E11 |
+| `SWP-APL` | Approval Template Line | E11 |
+| `SWP-APV` | Approval Instance (a running approval of one request) | E11 |
+| `SWP-APA` | Approval Action (one append-only approve/reject/bypass decision) | E11 |
 
 The numeric portion is monotonically allocated per-prefix; gaps are allowed (e.g., from soft-deletes).
 
@@ -351,9 +355,11 @@ These actions auto-dispatch notifications (created via the notification subsyste
 | Schedule published (E4) | Affected agents |
 | Leave approved/rejected (E6) | Request submitter |
 | OT approved/rejected/auto-detected (E7) | Request submitter |
+| Approval advanced to a new line (E11) | New current-line members |
+| Approval decided — approved/rejected/bypassed (E11) | Request submitter |
+| Approval template edited → pending reset (E11) | New line-1 members of reset instances |
 | Attendance verification needed (E5) | Shift leader of the company |
 | Attendance correction submitted (E5) | Shift leader (and HR if >7 days) |
-| HR change-request submitted (E2) | HR admins |
 | Agreement expiring within 30 days (E2) | HR admins (cron-driven) |
 | Placement expiring within 30 days (E3) | HR admins + assigned leader (cron-driven) |
 

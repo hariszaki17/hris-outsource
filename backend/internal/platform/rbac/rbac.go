@@ -68,24 +68,6 @@ func GuardCompany(ctx context.Context, resourceCompanyID string) error {
 	}
 }
 
-// CanApproveBank reports whether the caller holds the bank sub-permission
-// `change_requests.approve.bank` (CONVENTIONS §17). Modeled role-keyed: only
-// hr_admin / super_admin may finalize a bank_account change. A shift_leader
-// approving a mixed request applies the non-bank fields and escalates the bank
-// field to HR (PARTIALLY_APPROVED) instead of writing it.
-func CanApproveBank(ctx context.Context) bool {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return false
-	}
-	switch p.Role {
-	case auth.RoleSuperAdmin, auth.RoleHRAdmin:
-		return true
-	default:
-		return false
-	}
-}
-
 // GuardSelf enforces `scope: self`: an agent may only touch their own employee
 // record; staff roles (HR/super-admin) pass through.
 func GuardSelf(ctx context.Context, resourceEmployeeID string) error {

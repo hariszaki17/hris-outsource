@@ -1,5 +1,9 @@
 import '../global.css';
-import { IBMPlexMono_400Regular, IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono';
+import {
+  IBMPlexMono_400Regular,
+  IBMPlexMono_500Medium,
+  IBMPlexMono_700Bold,
+} from '@expo-google-fonts/ibm-plex-mono';
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -51,6 +55,7 @@ export default function RootLayout() {
     Inter_700Bold,
     IBMPlexMono_400Regular,
     IBMPlexMono_500Medium,
+    IBMPlexMono_700Bold,
     Poppins_700Bold,
   });
 

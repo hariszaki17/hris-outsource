@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	approvalhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/approval"
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
@@ -44,10 +45,11 @@ type Deps struct {
 	// PEOPLE slice (04-02): employees (E2 F2.1 / PPL-01).
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
-	People               *peoplehttp.Handler
-	PeopleAgreements     *peoplehttp.AgreementHandler     // 04-03: agreements + attachments + file download
-	PeopleChangeRequests *peoplehttp.ChangeRequestHandler // 04-04: change-request approval queue (HR + shift-leader)
-	PeopleSelfProfile    *peoplehttp.SelfProfileHandler   // E2 F2.1: agent self-service profile (instant edit + photo upload)
+	People           *peoplehttp.Handler
+	PeopleAgreements *peoplehttp.AgreementHandler   // 04-03: agreements + attachments + file download
+	// E11 (decision A): profile change-requests are HARD-DELETED — profile edits are
+	// now instant self-edit via PATCH /me/profile (PeopleSelfProfile below).
+	PeopleSelfProfile *peoplehttp.SelfProfileHandler // E2 F2.1: agent self-service profile (instant edit + photo upload)
 	// PLACEMENT slice (05-02): placements + lifecycle + shift-leader + roster (E3).
 	Placement *placementhttp.Handler
 	// SCHEDULING slice (06-02): shift masters + schedule grid + conflict engine (E4).
@@ -62,6 +64,9 @@ type Deps struct {
 	Overtime *overtimehttp.Handler
 	// PAYROLL slice (10-02): historical payslip archive + audit notes + async export (E8).
 	Payroll *payrollhttp.Handler
+	// APPROVAL slice (E11): configurable per-company approval engine — templates +
+	// instances/actions. Single source of truth for leave/overtime approval.
+	Approval *approvalhttp.Handler
 	// REPORTING slice (11-02): E10 notifications (list/mark-read/mark-all-read).
 	// 11-02b extends the SAME handler with dashboard/billable-report/export methods.
 	Reporting   *reportinghttp.Handler
@@ -280,33 +285,6 @@ func New(d Deps) http.Handler {
 			// PEOPLE agreements slice end (04-03). 04-04 change-requests: append here.
 
 			// ---------------------------------------------------------------
-			// PEOPLE change-requests slice (04-04): approval queue for
-			// agent-submitted profile-change requests (E2 F2.1 EP-5 / PPL-03).
-			// x-rbac: hr_admin, super_admin, shift_leader (company_or_global) —
-			// shift leaders approve their own company's requests; the bank field
-			// gates on change_requests.approve.bank (HR/super only) and escalates
-			// (PARTIALLY_APPROVED) when a leader lacks it. Service enforces the
-			// company scope (rbac.GuardCompany) + bank gate (rbac.CanApproveBank).
-			// ---------------------------------------------------------------
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
-				// List + detail reads.
-				r.Get("/change-requests", d.PeopleChangeRequests.ListPendingChangeRequests)
-				r.Get("/change-requests/{change_request_id}", d.PeopleChangeRequests.GetChangeRequest)
-				// Approve / reject actions.
-				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:approve", d.PeopleChangeRequests.ApproveChangeRequest)
-				r.With(d.Idempotency.Handler).Post("/change-requests/{change_request_id}:reject", d.PeopleChangeRequests.RejectChangeRequest)
-			})
-
-			// Agent self-service: file a profile-change request (E2 F2.1 EP-5,
-			// createChangeRequest). x-rbac scope:self — the service enforces that an
-			// agent files only for their own employee_id (else 404). hr_admin/
-			// super_admin admitted so staff can file on behalf. Idempotency-wrapped.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleHRAdmin, auth.RoleSuperAdmin))
-				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}/change-requests", d.PeopleChangeRequests.CreateChangeRequest)
-			})
-
 			// Agent self-service PROFILE (E2 F2.1): instant-tier edit of own
 			// {address, app_language, photo} + presigned photo-upload init.
 			// x-rbac roles:[agent] scope:self — the service resolves the employee
@@ -337,8 +315,17 @@ func New(d Deps) http.Handler {
 				// Dashboard stat cards (F3.1 / C2SSLA). Static segment — register
 				// BEFORE "/placements/{id}" so it is never shadowed by the param route.
 				r.Get("/placements/stats", d.Placement.GetPlacementStats)
-				r.Get("/placements/{id}", d.Placement.GetPlacement)
 				r.Get("/client-companies/{company_id}/roster", d.Placement.GetCompanyRoster)
+			})
+
+			// Placement DETAIL: super_admin, hr_admin, shift_leader, lead AND agent.
+			// OpenAPI x-rbac for GET /placements/{id} lists agent with scope:self;
+			// the service hides anyone but the agent's own placement as 404 (no leak).
+			// Split from the list group so the agent role applies to the detail only —
+			// powers the mobile "Penempatan Saya" + the Absen pre-clock geofence pill.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
+				r.Get("/placements/{id}", d.Placement.GetPlacement)
 			})
 
 			// Placement LIFECYCLE writes: super_admin, hr_admin (global) + lead
@@ -489,10 +476,11 @@ func New(d Deps) http.Handler {
 
 			// Staff-only reads (calendar / quota / grant ledger / aggregate balance):
 			// super_admin, hr_admin, shift_leader (company_or_global). Agent excluded.
+			// Leave approval decisions (approve/reject) now route through the E11
+			// engine (POST /approval-instances/{id}:approve|:reject) — the old
+			// :approve-l1/:approve-final/:approve-override/:reject endpoints are removed.
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-l1", d.Leave.ApproveLeaveRequestL1)
-				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:reject", d.Leave.RejectLeaveRequest)
 				r.Get("/leave-calendar", d.Leave.GetLeaveCalendar)
 				// Grant-lot endpoints retired 2026-06-12 (per-type ledger). Handlers
 				// kept until GrantService is deleted (Phase 8 code/table removal).
@@ -509,15 +497,6 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/leave-requests", d.Leave.CreateLeaveRequest)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:submit", d.Leave.SubmitLeaveRequest)
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel", d.Leave.CancelLeaveRequest)
-			})
-
-			// L2 final/override approval: super_admin, hr_admin (global) + lead
-			// (scoped to the agent's company via rbac.GuardCompany in-service).
-			// Lead is the L2/final approver for leave; HR/super stay global L2.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
-				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-final", d.Leave.ApproveLeaveRequestFinal)
-				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:approve-override", d.Leave.ApproveLeaveRequestOverride)
 			})
 
 			// Leave shorten + grant/quota writes: super_admin, hr_admin (global).
@@ -566,22 +545,9 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/overtime/{id}:withdraw", d.Overtime.Withdraw)
 			})
 
-			// Approval group: L1 approve + reject + bulk — super_admin, hr_admin,
-			// shift_leader (company_or_global). SELF_APPROVAL_FORBIDDEN + scope in-service.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-l1", d.Overtime.ApproveL1)
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:reject", d.Overtime.Reject)
-				r.With(d.Idempotency.Handler).Post("/overtime:bulk-approve", d.Overtime.BulkApprove)
-				r.With(d.Idempotency.Handler).Post("/overtime:bulk-reject", d.Overtime.BulkReject)
-			})
-
-			// L2 final approval: super_admin, hr_admin (global) + lead (scoped to the
-			// agent's company via rbac.GuardCompany in-service). Lead is the OT L2.
-			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:approve-final", d.Overtime.ApproveFinal)
-			})
+			// Overtime approval decisions (approve/reject/bulk) now route through the
+			// E11 engine (POST /approval-instances/{id}:approve|:reject) — the old
+			// :approve-l1/:approve-final/:reject/:bulk-* endpoints are removed.
 
 			// Holiday writes: super_admin, hr_admin (global). Lead excluded.
 			r.Group(func(r chi.Router) {
@@ -591,6 +557,40 @@ func New(d Deps) http.Handler {
 				r.Delete("/holidays/{id}", d.Overtime.DeleteHoliday)
 			})
 			// OVERTIME slice end (09-02). Phase 9+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// APPROVAL slice (E11): configurable per-company approval engine.
+			// Templates (hr_admin/super_admin); instances list/get + act
+			// (approve/reject — membership-routed, server-enforced); bypass
+			// (super_admin only). Action endpoints are Idempotency-wrapped.
+			// ---------------------------------------------------------------
+			// Template management: hr_admin, super_admin (approvals.template.manage).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Get("/client-companies/{companyId}/approval-template", d.Approval.GetApprovalTemplate)
+				r.With(d.Idempotency.Handler).Put("/client-companies/{companyId}/approval-template", d.Approval.UpsertApprovalTemplate)
+				r.Delete("/client-companies/{companyId}/approval-template", d.Approval.DeleteApprovalTemplate)
+			})
+			// Instance list: staff approvers (approvals.act). Membership + company
+			// scope enforced in the service (mine=true → caller's current-line items).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
+				r.Get("/approval-instances", d.Approval.ListApprovalInstances)
+			})
+			// Instance detail + act: + agent (an agent may READ + APPROVE/REJECT only
+			// where they are a current-line member; self-approval is blocked + acting
+			// is membership-gated, all server-enforced).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
+				r.Get("/approval-instances/{id}", d.Approval.GetApprovalInstance)
+				r.With(d.Idempotency.Handler).Post("/approval-instances/{id}:approve", d.Approval.ApproveApprovalInstance)
+				r.With(d.Idempotency.Handler).Post("/approval-instances/{id}:reject", d.Approval.RejectApprovalInstance)
+			})
+			// Bypass: super_admin ONLY (approvals.bypass).
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin))
+				r.With(d.Idempotency.Handler).Post("/approval-instances/{id}:bypass", d.Approval.BypassApprovalInstance)
+			})
 
 			// ---------------------------------------------------------------
 			// PAYROLL slice (10-02): E8 historical, read-only payslip archive

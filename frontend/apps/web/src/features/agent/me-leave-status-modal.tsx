@@ -1,19 +1,15 @@
 /**
  * Status Pengajuan — leave-request detail modal (opened by clicking a row in /me/leave).
  *
- * Shows the request summary (type, dates, duration, reason, status) + the approval timeline
- * (Diajukan → Pemimpin Shift → HR) rendered from `request.timeline` (E6 LeaveTimelineEntry[]).
- * A pending request can be withdrawn (useCancelLeaveRequest). Matches
- * docs/design/brainstorm.pen "Agen Web · Status Pengajuan (modal)".
+ * Shows the request summary (type, dates, duration, reason, status). Approval routing now lives
+ * in the E11 engine (the agent doesn't see the line-by-line chain — that's an approver surface);
+ * the modal shows the collapsed lifecycle status + a "Diajukan" step. A pending request can be
+ * withdrawn (useCancelLeaveRequest). Matches docs/design/brainstorm.pen
+ * "Agen Web · Status Pengajuan (modal)".
+ *
+ * Status is now DRAFT | PENDING | APPROVED | REJECTED | CANCELLED (E11, 2026-06-14).
  */
-import {
-  type LeaveRequest,
-  LeaveStage,
-  LeaveStatus,
-  type LeaveTimelineEntry,
-  LeaveTimelineEntryStatus,
-  useCancelLeaveRequest,
-} from '@swp/api-client/e6';
+import { type LeaveRequest, LeaveStatus, useCancelLeaveRequest } from '@swp/api-client/e6';
 import type { StatusTone } from '@swp/design-tokens';
 import { formatDate, formatInstant } from '@swp/shared';
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader, StatusBadge, useToast } from '@swp/ui';
@@ -31,8 +27,7 @@ function leaveStatusTone(status: LeaveStatus): StatusTone {
       return 'ok';
     case LeaveStatus.REJECTED:
       return 'bad';
-    case LeaveStatus.PENDING_L1:
-    case LeaveStatus.PENDING_HR:
+    case LeaveStatus.PENDING:
       return 'warn';
     default:
       return 'neutral';
@@ -40,7 +35,7 @@ function leaveStatusTone(status: LeaveStatus): StatusTone {
 }
 
 function isPending(status: LeaveStatus): boolean {
-  return status === LeaveStatus.PENDING_L1 || status === LeaveStatus.PENDING_HR;
+  return status === LeaveStatus.PENDING;
 }
 
 type StepTone = 'ok' | 'warn' | 'bad' | 'neutral';
@@ -95,7 +90,8 @@ export function AgentLeaveStatusModal({
     }
   }
 
-  // Build the timeline steps: implicit "Diajukan" + each stage decision entry.
+  // Build the lifecycle steps: implicit "Diajukan" + the collapsed approval outcome.
+  // The per-line chain lives in E11 and is shown only on the approver surfaces.
   const steps: Step[] = [
     {
       title: t('statusSubmitted'),
@@ -103,28 +99,37 @@ export function AgentLeaveStatusModal({
       tone: 'ok',
       icon: Check,
     },
-    ...request.timeline.map((e: LeaveTimelineEntry): Step => {
-      const title = e.stage === LeaveStage.L1 ? t('statusStageL1') : t('statusStageHR');
-      if (e.status === LeaveTimelineEntryStatus.PENDING) {
-        return { title, sub: t('statusPending'), tone: 'warn', icon: Loader };
-      }
-      if (e.status === LeaveTimelineEntryStatus.REJECTED) {
-        return {
-          title,
-          sub: e.reject_reason ?? formatInstant(e.occurred_at),
-          tone: 'bad',
-          icon: X,
-        };
-      }
-      // APPROVED | OVERRIDE_APPROVED
-      return {
-        title,
-        sub: [e.actor_name, formatInstant(e.occurred_at)].filter(Boolean).join(' · '),
-        tone: 'ok',
-        icon: Check,
-      };
-    }),
   ];
+  const status = request.status as LeaveStatus;
+  if (status === LeaveStatus.PENDING) {
+    steps.push({
+      title: t('statusStageApproval'),
+      sub: t('statusPending'),
+      tone: 'warn',
+      icon: Loader,
+    });
+  } else if (status === LeaveStatus.APPROVED) {
+    steps.push({
+      title: t('statusStageApproval'),
+      sub: formatInstant(request.updated_at ?? request.created_at),
+      tone: 'ok',
+      icon: Check,
+    });
+  } else if (status === LeaveStatus.REJECTED) {
+    steps.push({
+      title: t('statusStageApproval'),
+      sub: formatInstant(request.updated_at ?? request.created_at),
+      tone: 'bad',
+      icon: X,
+    });
+  } else if (status === LeaveStatus.CANCELLED) {
+    steps.push({
+      title: t('statusStageWithdrawn'),
+      sub: formatInstant(request.updated_at ?? request.created_at),
+      tone: 'neutral',
+      icon: X,
+    });
+  }
 
   return (
     <Modal open={open} onOpenChange={onOpenChange} size="lg" className="w-[540px]">

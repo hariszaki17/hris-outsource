@@ -9,6 +9,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image, Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
 import { Text } from '../../src/ui/Text';
@@ -41,8 +42,14 @@ function ErrorBox({
     <View className="flex-row items-start gap-2 rounded-input border border-bad-border bg-bad-bg px-3 py-2.5">
       {icon}
       <View className="shrink gap-0.5">
-        <Text className="text-[13px] font-bold leading-[1.4] text-bad-text">{title}</Text>
-        {subtitle ? <Text className="text-xs leading-[1.4] text-bad-text">{subtitle}</Text> : null}
+        <Text variant="caption" weight="bold" className="text-bad-text">
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text variant="badge" weight="regular" className="text-bad-text">
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -52,6 +59,7 @@ export default function Login() {
   const { t } = useTranslation();
   const { signIn } = useSession();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const login = useAuthLogin();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -136,9 +144,12 @@ export default function Login() {
 
   return (
     <ScrollView className="flex-1 bg-surface" contentContainerStyle={{ flexGrow: 1 }}>
-      <View className="flex-1 pb-7" style={{ paddingTop: 60 }}>
-        {/* Vertically-center the form block */}
-        <View className="flex-1 justify-center px-7">
+      <View
+        className="flex-1"
+        style={{ paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }}
+      >
+        {/* Top-aligned form block; footer pinned to the bottom (matches .pen space-between) */}
+        <View className="flex-1 px-7">
           <View className="gap-[22px]">
             {/* Brand: chip 64×64 r16 + wordmark (Poppins 22/700) + subtitle, 14px gaps */}
             <View className="items-center gap-3.5">
@@ -149,8 +160,10 @@ export default function Login() {
                   resizeMode="contain"
                 />
               </View>
-              <Text className="font-display text-[22px] font-bold text-text">SaranaWisesa</Text>
-              <Text className="text-[13px] text-text-3">HRIS Outsource</Text>
+              <Text variant="displayTitle">SaranaWisesa</Text>
+              <Text variant="secondary" className="text-text-3">
+                HRIS Outsource
+              </Text>
             </View>
 
             {/* Form */}
@@ -199,7 +212,7 @@ export default function Login() {
               ) : (
                 <>
                   <Pressable onPress={() => router.push('/forgot-password')}>
-                    <Text className="text-[13px] font-semibold text-primary">
+                    <Text variant="label" weight="semibold" className="text-primary">
                       {t('m:login.forgotPassword')}
                     </Text>
                   </Pressable>
@@ -216,7 +229,9 @@ export default function Login() {
         </View>
 
         {/* Footer */}
-        <Text className="text-center text-[12px] text-text-3">{t('m:login.footer')}</Text>
+        <Text variant="caption" className="text-center text-text-3">
+          {t('m:login.footer')}
+        </Text>
       </View>
     </ScrollView>
   );

@@ -3,9 +3,20 @@ info:
   title: hris-outsource · E7 Overtime Tracking API
   version: 1.0.0
   description: |
-    OpenAPI spec for **E7 — Overtime Tracking** (overtime requests, two-level approval,
-    auto-detection from verified attendance, and the HR-maintained public-holiday calendar
-    shared with E6).
+    OpenAPI spec for **E7 — Overtime Tracking** (overtime requests, auto-detection from
+    verified attendance, and the HR-maintained public-holiday calendar shared with E6).
+
+    > **Approval routes through the E11 engine (2026-06-14, EPICS §8 E11).**
+    > Overtime approval no longer runs a two-level `Shift Leader → HR` flow. It **routes through the
+    > E11 configurable approval engine** ([`docs/api/E11-approvals/openapi.yaml`](../E11-approvals/openapi.yaml)):
+    > confirming/requesting an OT record **creates an `ApprovalInstance`** (`request_type: OVERTIME`),
+    > and **all approval decisions — approve, reject, super-admin bypass, and bulk approve — happen
+    > only via E11** (`POST /approval-instances/{id}:approve | :reject | :bypass`, bulk per E11).
+    > `Overtime.status` collapses to `PENDING_AGENT_CONFIRM | PENDING | APPROVED | REJECTED | CANCELLED`
+    > and is kept in sync with the linked E11 instance (`approval_instance_id`). The
+    > count-by-`day_type` runs from OT's E11 `OnApproved` **hook**. This spec retains only OT-owned
+    > lifecycle actions (capture, agent confirm, agent withdraw); it carries **no** approval-decision
+    > operations.
 
     > **Inherits from** `docs/api/CONVENTIONS.md` (v1, 2026-06-03). Anything not stated
     > here defers to that doc (auth, pagination, error envelope, idempotency, RBAC, audit,
@@ -16,7 +27,7 @@ info:
 
     | Resource | Endpoints |
     |---|---|
-    | `/overtime` | Agent request, leader/HR approve, withdraw, bulk, auto-detect (internal). |
+    | `/overtime` | Agent request, agent confirm, agent withdraw, auto-detect (internal). Approval decisions route through E11. |
     | `/holidays` | HR-maintained public-holiday calendar (read also consumed by E6 working-day calc). |
 
     ## NOT in this spec
@@ -32,7 +43,7 @@ info:
     ## D4 decision (final 2026-06-02, EPICS.md §8 updated)
 
     - Minimum OT counted = **30 minutes** (PRD wins; §8 line is annotated "superseded").
-    - Auto-detected OT → agent confirms → leader approves → HR approves.
+    - Auto-detected OT → agent confirms → routes through the E11 approval chain.
     - Worked-without-request OT is still approvable after the fact, **flagged**.
     - **Tier precedence:** `HOLIDAY > RESTDAY > WORKDAY` — Holiday beats Rest-day.
     - Cross-midnight OT is attributed to the **start date** of the work span.
@@ -59,8 +70,9 @@ servers:
 tags:
   - name: overtime
     description: |
-      OT requests, agent confirmation, two-level approval, bulk actions.
-      Pre-approval flow per F7.2 OC-1; auto-detect per F7.2 OC-2; approval per F7.3.
+      OT requests, agent confirmation, agent withdrawal, auto-detect.
+      Pre-approval flow per F7.2 OC-1; auto-detect per F7.2 OC-2. Approval decisions are
+      owned by the E11 engine (F7.3) — not exposed here.
   - name: overtime-internal
     description: |
       Internal endpoints — invoked by cron/system, NOT by user clients. Documented for
@@ -110,7 +122,7 @@ paths:
         - name: status
           in: query
           description: |
-            Status filter. Multi-value via `status__in=PENDING_AGENT_CONFIRM,PENDING_L1`.
+            Status filter. Multi-value via `status__in=PENDING_AGENT_CONFIRM,PENDING`.
           schema:
             $ref: '#/components/schemas/OvertimeStatus'
         - name: status__in
@@ -118,7 +130,7 @@ paths:
           description: Comma-separated multi-status filter.
           schema:
             type: string
-            example: PENDING_AGENT_CONFIRM,PENDING_L1
+            example: PENDING_AGENT_CONFIRM,PENDING
         - name: work_date__gte
           in: query
           schema:
@@ -163,7 +175,7 @@ paths:
                 $ref: '#/components/schemas/OvertimePage'
               examples:
                 hr_pending_queue:
-                  summary: HR L2 pending queue (frame H1eBN)
+                  summary: HR pending queue (frame H1eBN)
                   value:
                     data:
                       - id: SWP-OT-30021
@@ -182,7 +194,8 @@ paths:
                         actual_end_time: '18:32'
                         cross_midnight: false
                         source: AUTO_DETECTED
-                        status: PENDING_L1
+                        status: PENDING
+                        approval_instance_id: SWP-APV-77120
                         tier_indicator: WORKDAY
                         flagged_no_preapproval: false
                         reason: null
@@ -218,8 +231,9 @@ paths:
       summary: Agent submits a pre-approval OT request
       description: |
         Agent (or shift leader on their behalf) pre-requests OT. Creates a record in
-        `PENDING_L1` (skipping `PENDING_AGENT_CONFIRM` since the agent IS the requester).
-        Per OC-1.
+        `PENDING` (skipping `PENDING_AGENT_CONFIRM` since the agent IS the requester) and
+        **creates the E11 `ApprovalInstance`** (`request_type: OVERTIME`) that routes the
+        record through the company's approval chain. Per OC-1, OA-1.
 
         **Business rules:**
         - `work_date` must fall within an active placement (OC-6) → else `INV_*_VIOLATION`
@@ -280,7 +294,8 @@ paths:
         Returns the full OT record, including the `calculation` block recomputed
         server-side (never stored stale — see schema description). The response is
         designed to feed the OT-detail modal/screen (audit gap f1) directly: includes
-        linked attendance, tier breakdown, approval timeline, and the flagged status.
+        linked attendance, tier breakdown, the linked `approval_instance_id` (whose chain
+        timeline is fetched from E11), and the flagged status.
       responses:
         '200':
           description: OT record.
@@ -376,8 +391,10 @@ paths:
       tags: [overtime]
       summary: Agent confirms an auto-detected OT
       description: |
-        Agent confirms an auto-detected OT candidate (per OC-2 / OA-6). Transitions
-        `PENDING_AGENT_CONFIRM → PENDING_L1`. The dismiss path ("Bukan Lembur") uses
+        Agent confirms an auto-detected OT candidate (per OC-2 / OA-2). Transitions
+        `PENDING_AGENT_CONFIRM → PENDING` and **creates the E11 `ApprovalInstance`**
+        (`request_type: OVERTIME`) that routes the record through the company's approval
+        chain (E11 INV-7 fallback if no template). The dismiss path ("Bukan Lembur") uses
         `:withdraw` instead — see frame mzCUA for the dual-footer pattern.
 
         Only the OT's own agent may call this; HR/leader cannot confirm on behalf.
@@ -397,7 +414,9 @@ paths:
                   example: 'Selesai bantuin renovasi ruang VIP.'
       responses:
         '200':
-          description: Confirmed; status now PENDING_L1.
+          description: |
+            Confirmed; status now `PENDING` and an E11 `ApprovalInstance` is created
+            (`approval_instance_id` populated on the returned record).
           content:
             application/json:
               schema:
@@ -424,9 +443,10 @@ paths:
       summary: Agent withdraws a pending OT
       description: |
         Agent withdraws their own pending OT request (per OA C-3). Allowed from
-        `PENDING_AGENT_CONFIRM` or `PENDING_L1` (i.e. before final HR approval).
-        Transitions to `WITHDRAWN`. **No reason required** — destructive-style Wave-3.4
-        per CONVENTIONS §13 (idempotency-keyed but no body).
+        `PENDING_AGENT_CONFIRM` or `PENDING` (i.e. before the chain reaches a terminal
+        decision). Transitions to `CANCELLED`; if an E11 `ApprovalInstance` exists it is
+        closed (E11 C-1). **No reason required** — destructive-style Wave-3.4 per
+        CONVENTIONS §13 (idempotency-keyed but no body).
 
         Doubles as the "Bukan Lembur" dismiss action on the auto-detect confirmation
         screen (mzCUA): the agent says it was not OT; the candidate is withdrawn and
@@ -435,13 +455,13 @@ paths:
         - $ref: '#/components/parameters/idempotencyKey'
       responses:
         '204':
-          description: Withdrawn.
+          description: Withdrawn (status now CANCELLED).
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
-            Not withdrawable — record is already APPROVED / REJECTED / WITHDRAWN.
+            Not withdrawable — record is already APPROVED / REJECTED / CANCELLED.
           $ref: '#/components/responses/Conflict'
       x-rbac:
         roles: [agent]
@@ -449,280 +469,6 @@ paths:
       x-design-screens:
         - nd3KT  # Mobile · Lembur Saya (history rows)
         - mzCUA  # Mobile · OT Terdeteksi ("Bukan Lembur" footer)
-
-  /overtime/{id}:approve-l1:
-    parameters:
-      - $ref: '#/components/parameters/overtimeId'
-    post:
-      operationId: approveOvertimeL1
-      tags: [overtime]
-      summary: Shift leader Level-1 approval
-      description: |
-        Shift leader approves an OT in `PENDING_L1`, transitioning to `PENDING_HR`. Per
-        OA-1, OA-2, OA-5 (no self-approval; if the OT belongs to the leader themselves,
-        it must escalate to HR per OA-2). Records an `OvertimeApproval` row at level 1.
-
-        The response includes the freshly computed `calculation` snapshot so the UI can
-        render the post-approval tier-breakdown card. Per audit f6, the client uses this
-        to drive the success toast + queue update.
-
-        **Out-of-scope guard:** if the leader's company does not match the OT's company,
-        respond `OUT_OF_SCOPE` (403).
-      parameters:
-        - $ref: '#/components/parameters/idempotencyKey'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note:
-                  type: string
-                  maxLength: 500
-                  description: Optional approval note.
-                  example: 'Konfirmasi: shift leader observed Budi on-site until 18:30.'
-      responses:
-        '200':
-          description: Approved at L1.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Overtime'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403':
-          description: |
-            Forbidden — leader not in scope OR attempting self-approval (`OUT_OF_SCOPE`
-            / `FORBIDDEN` with `error.code: SELF_APPROVAL_FORBIDDEN`).
-          $ref: '#/components/responses/Forbidden'
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Wrong-state transition (not in PENDING_L1).
-          $ref: '#/components/responses/Conflict'
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - Vh2P9  # SL · Persetujuan Lembur
-
-  /overtime/{id}:approve-final:
-    parameters:
-      - $ref: '#/components/parameters/overtimeId'
-    post:
-      operationId: approveOvertimeFinal
-      tags: [overtime]
-      summary: HR Level-2 final approval
-      description: |
-        HR final-approves an OT in `PENDING_HR`. Transitions to `APPROVED`. Per OA-1.
-        HR may also bypass L1 via `is_override: true` for the F7.3 OA-8 override path
-        (reason required when overriding).
-
-        On `APPROVED`, the record is counted in F7.4 aggregations (hours by tier).
-      parameters:
-        - $ref: '#/components/parameters/idempotencyKey'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note:
-                  type: string
-                  maxLength: 500
-                  example: 'Approved; aligns with monthly OT budget for Plaza Senayan.'
-                is_override:
-                  type: boolean
-                  default: false
-                  description: |
-                    Set true when HR is bypassing L1 (e.g. no leader, or escalation).
-                    Requires `note` to be non-empty (OA-8).
-              example:
-                note: 'Override: no leader assigned; HR-only escalation.'
-                is_override: true
-      responses:
-        '200':
-          description: Final-approved.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Overtime'
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422':
-          description: |
-            Override requested without a reason → 422 with
-            `error.code: OVERRIDE_REASON_REQUIRED`.
-          $ref: '#/components/responses/Unprocessable'
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - H1eBN  # HR · Persetujuan Lembur (L2)
-
-  /overtime/{id}:reject:
-    parameters:
-      - $ref: '#/components/parameters/overtimeId'
-    post:
-      operationId: rejectOvertime
-      tags: [overtime]
-      summary: Reject OT (leader or HR)
-      description: |
-        Reject an OT at whichever level the caller is currently authoritative for.
-        Wave-1 EnabP reject-with-reason modal — `reason` is **required** per OA-1 /
-        OA-7.
-
-        Transitions `PENDING_L1 → REJECTED` (leader rejects) or
-        `PENDING_HR → REJECTED` (HR rejects). Auto-detected candidates rejected at any
-        level leave the underlying E5 attendance record unchanged (F7.3 C-1).
-      parameters:
-        - $ref: '#/components/parameters/idempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason:
-                  type: string
-                  minLength: 5
-                  maxLength: 500
-                  description: |
-                    Audit-visible reason shown to the agent. Required (Wave-1 EnabP).
-                  example: 'Not justified — front-desk traffic was within capacity.'
-              example:
-                reason: 'Not justified — front-desk traffic was within capacity.'
-      responses:
-        '200':
-          description: Rejected.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Overtime'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - H1eBN
-        - Vh2P9
-
-  /overtime:bulk-approve:
-    post:
-      operationId: bulkApproveOvertime
-      tags: [overtime]
-      summary: Bulk approve OT records
-      description: |
-        Wave-1 r4KZl5 bulk approval (OA-9). Approves each record at whichever level the
-        caller is currently authoritative for (leader → L1, HR → L2 / override). Partial
-        success is normal: e.g. a leader's own OT in the selection is rejected with
-        `SELF_APPROVAL_FORBIDDEN` while the other rows succeed.
-
-        Bulk endpoints require `Idempotency-Key` per CONVENTIONS §14.
-      parameters:
-        - $ref: '#/components/parameters/idempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [ids]
-              properties:
-                ids:
-                  type: array
-                  minItems: 1
-                  maxItems: 200
-                  items:
-                    type: string
-                  example:
-                    - SWP-OT-30021
-                    - SWP-OT-30022
-                    - SWP-OT-30025
-                note:
-                  type: string
-                  maxLength: 500
-                  description: Optional audit note applied to every successful approval.
-                  example: 'Plaza Senayan · weekly OT review · approved.'
-      responses:
-        '200':
-          description: |
-            Bulk processed. At least one succeeded — partial-failure rows in `failed[]`
-            per CONVENTIONS §14.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkResult'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422':
-          description: All items failed → 422 with error envelope summarizing.
-          $ref: '#/components/responses/Unprocessable'
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - H1eBN
-        - Vh2P9
-
-  /overtime:bulk-reject:
-    post:
-      operationId: bulkRejectOvertime
-      tags: [overtime]
-      summary: Bulk reject OT records
-      description: |
-        Bulk reject. The `reason` applies to **every** rejected row (audit log writes one
-        entry per affected entity per CONVENTIONS §16.1).
-      parameters:
-        - $ref: '#/components/parameters/idempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [ids, reason]
-              properties:
-                ids:
-                  type: array
-                  minItems: 1
-                  maxItems: 200
-                  items:
-                    type: string
-                  example:
-                    - SWP-OT-30021
-                    - SWP-OT-30022
-                reason:
-                  type: string
-                  minLength: 5
-                  maxLength: 500
-                  example: 'Duplicate of approved OT batch in May.'
-      responses:
-        '200':
-          description: Bulk processed (≥1 succeeded).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BulkResult'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/Unprocessable' }
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - H1eBN
-        - Vh2P9
 
   # ─────────────────────────────────────────────────────────────────────────────
   # /holidays  — HR-maintained public holiday calendar (shared with E6)
@@ -1093,9 +839,9 @@ components:
               description: |
                 UPPER_SNAKE_CASE. E7 codes:
                 `OT_BELOW_MIN`, `OT_OVERLAPS_LEAVE`, `OT_NO_SCHEDULED_SHIFT`,
-                `HOLIDAY_DATE_CLASH`, `HOLIDAY_IN_USE`, `OUT_OF_SCOPE`,
-                `SELF_APPROVAL_FORBIDDEN`, `OVERRIDE_REASON_REQUIRED`,
+                `HOLIDAY_DATE_CLASH`, `HOLIDAY_IN_USE`,
                 `IDEMPOTENCY_KEY_REUSED`. Plus shared codes in CONVENTIONS §11.
+                Approval-decision codes (self-approval, bypass-reason, etc.) live in E11.
               example: OT_BELOW_MIN
             message:
               type: string
@@ -1107,27 +853,6 @@ components:
             request_id:
               type: string
               example: req_01J5XK...
-
-    BulkResult:
-      type: object
-      required: [succeeded, failed]
-      properties:
-        succeeded:
-          type: array
-          items:
-            type: string
-          example: [SWP-OT-30021, SWP-OT-30022]
-        failed:
-          type: array
-          items:
-            type: object
-            required: [id, error]
-            properties:
-              id:
-                type: string
-                example: SWP-OT-30025
-              error:
-                $ref: '#/components/schemas/ErrorEnvelope/properties/error'
 
     EmployeeRef:
       type: object
@@ -1147,20 +872,25 @@ components:
     OvertimeStatus:
       type: string
       description: |
-        OT lifecycle:
-        - `PENDING_AGENT_CONFIRM` — auto-detected; awaiting agent confirmation (OC-7).
-        - `PENDING_L1` — awaiting shift-leader approval.
-        - `PENDING_HR` — leader-approved; awaiting HR final.
-        - `APPROVED` — final; counts in F7.4 totals.
-        - `REJECTED` — rejected at L1 or L2 (reason recorded).
-        - `WITHDRAWN` — agent withdrew (OA C-3) or dismissed an auto-detect.
+        OT lifecycle. The approval sub-states are collapsed onto the E11 engine: while a
+        record is routing through the chain its status is the single `PENDING`; line
+        progress is tracked internally by the E11 `ApprovalInstance` (`approval_instance_id`).
+        - `PENDING_AGENT_CONFIRM` — auto-detected; awaiting the agent's confirmation
+          before it enters the approval chain (OC-7). Pre-approval lifecycle state, not an
+          approval sub-state; `approval_instance_id` is null here.
+        - `PENDING` — confirmed/requested and routing through the E11 approval chain
+          (replaces the former `PENDING_L1` + `PENDING_HR`).
+        - `APPROVED` — chain cleared (or super-admin bypass); the `OnApproved` hook counted
+          the hours; counts in F7.4 totals.
+        - `REJECTED` — a current-line member rejected via E11 (reason recorded); nothing
+          counts.
+        - `CANCELLED` — agent withdrew (OA C-3) or dismissed an auto-detect.
       enum:
         - PENDING_AGENT_CONFIRM
-        - PENDING_L1
-        - PENDING_HR
+        - PENDING
         - APPROVED
         - REJECTED
-        - WITHDRAWN
+        - CANCELLED
 
     OvertimeSource:
       type: string
@@ -1359,6 +1089,16 @@ components:
           $ref: '#/components/schemas/OvertimeSource'
         status:
           $ref: '#/components/schemas/OvertimeStatus'
+        approval_instance_id:
+          readOnly: true
+          description: |
+            ID of the E11 ApprovalInstance tracking this record's approval chain; null
+            before the instance is created (e.g. while PENDING_AGENT_CONFIRM).
+          oneOf:
+            - type: string
+              pattern: '^SWP-APV-[0-9]+$'
+            - type: 'null'
+          example: SWP-APV-77120
         tier_indicator:
           $ref: '#/components/schemas/OvertimeTier'
         flagged_no_preapproval:
@@ -1376,30 +1116,6 @@ components:
             - type: 'null'
         calculation:
           $ref: '#/components/schemas/OvertimeCalculation'
-        approvals:
-          type: array
-          description: |
-            Approval timeline (one entry per level decided). Omitted on list responses
-            for payload size; always present on `GET /overtime/{id}`.
-          items:
-            type: object
-            required: [level, decision, decided_at]
-            properties:
-              level:
-                type: integer
-                enum: [1, 2]
-              decision:
-                type: string
-                enum: [APPROVED, REJECTED, OVERRIDE_APPROVED]
-              approver:
-                $ref: '#/components/schemas/EmployeeRef'
-              reason:
-                oneOf:
-                  - type: string
-                  - type: 'null'
-              decided_at:
-                type: string
-                format: date-time
         created_at:
           type: string
           format: date-time

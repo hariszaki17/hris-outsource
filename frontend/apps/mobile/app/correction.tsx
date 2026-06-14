@@ -25,17 +25,14 @@ import {
   useCreateCorrection,
   useListAttendance,
 } from '@swp/api-client/e5';
+import { color } from '@swp/design-tokens';
 import { formatInstant } from '@swp/shared/datetime';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ChevronLeft } from 'lucide-react-native';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../src/ui/Button';
 import { Card } from '../src/ui/Card';
 import { StatusBadge } from '../src/ui/StatusBadge';
@@ -73,6 +70,7 @@ const TYPE_TABS: { value: VisibleType; label: string }[] = [
 export default function CorrectionForm() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { attendanceId, date } = useLocalSearchParams<{
     attendanceId: string;
     date: string;
@@ -110,8 +108,7 @@ export default function CorrectionForm() {
     }
 
     const iso = `${(date ?? '').slice(0, 10)}T${time.trim() || '00:00'}:00+07:00`;
-    const apiType: CorrectionType =
-      visibleType === 'STATUS' ? 'CODE' : visibleType;
+    const apiType: CorrectionType = visibleType === 'STATUS' ? 'CODE' : visibleType;
 
     const data: CorrectionWriteRequest = {
       attendance_id: attendanceId,
@@ -140,186 +137,197 @@ export default function CorrectionForm() {
     }
   }
 
-  const inputClass =
-    'rounded-input border border-border bg-surface px-4 py-3 text-text text-sm';
+  const inputClass = 'rounded-input border border-border bg-surface px-4 py-3 text-text text-sm';
 
   return (
-    <ScrollView
-      className="flex-1 bg-app-bg"
-      contentContainerStyle={{ padding: 16, paddingBottom: 80, gap: 16 }}
-    >
-      {/* Info banner: 7-day window */}
-      <View className="flex-row items-start gap-2 rounded-card border border-info-border bg-info-bg px-3 py-3">
-        <Text className="flex-1 text-sm text-info-text">
-          {t('m:koreksi.formInfo', { date: windowDate })}
+    <View className="flex-1 bg-app-bg">
+      {/* AppBar: ← Ajukan Koreksi (safe-area top — clears the status bar / Dynamic Island) */}
+      <View
+        className="flex-row items-center gap-2 px-4 pb-2"
+        style={{ paddingTop: insets.top + 8 }}
+      >
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <ChevronLeft size={24} color={color.text} />
+        </Pressable>
+        <Text variant="screenTitle" className="text-text">
+          {t('m:correction.title')}
         </Text>
       </View>
-
-      {/* Tanggal kehadiran */}
-      <View className="gap-1.5">
-        <Text variant="caption" className="font-semibold text-text-2">
-          {t('m:koreksi.formDateLabel')}
-        </Text>
-        <View className="flex-row items-center justify-between rounded-input border border-border bg-surface px-4 py-3">
-          <Text className="text-text text-sm">
-            {date
-              ? new Date(date).toLocaleDateString('id-ID', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                  timeZone: 'Asia/Jakarta',
-                })
-              : '—'}
+      <ScrollView
+        className="flex-1 bg-app-bg"
+        contentContainerStyle={{ padding: 16, paddingBottom: 80, gap: 16 }}
+      >
+        {/* Info banner: 7-day window */}
+        <View className="flex-row items-start gap-2 rounded-card border border-info-border bg-info-bg px-3 py-3">
+          <Text variant="body" className="flex-1 text-info-text">
+            {t('m:koreksi.formInfo', { date: windowDate })}
           </Text>
-          <Text className="text-text-3">📅</Text>
         </View>
-      </View>
 
-      {/* CATATAN ASLI panel */}
-      {record ? (
-        <Card>
-          <View className="flex-row items-center justify-between mb-2">
-            <Text variant="caption" className="font-semibold text-text-3 tracking-wide">
-              {t('m:koreksi.formCatatanAsli')}
+        {/* Tanggal kehadiran */}
+        <View className="gap-1.5">
+          <Text variant="caption" weight="semibold" className="text-text-2">
+            {t('m:koreksi.formDateLabel')}
+          </Text>
+          <View className="flex-row items-center justify-between rounded-input border border-border bg-surface px-4 py-3">
+            <Text variant="body" className="text-text">
+              {date
+                ? new Date(date).toLocaleDateString('id-ID', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                    timeZone: 'Asia/Jakarta',
+                  })
+                : '—'}
             </Text>
-            {record.auto_closed ? (
-              <StatusBadge status="INCOMPLETE" label="Auto clock-out" />
+            <Text className="text-text-3">📅</Text>
+          </View>
+        </View>
+
+        {/* CATATAN ASLI panel */}
+        {record ? (
+          <Card>
+            <View className="flex-row items-center justify-between mb-2">
+              <Text variant="caption" weight="semibold" className="text-text-3 tracking-wide">
+                {t('m:koreksi.formCatatanAsli')}
+              </Text>
+              {record.auto_closed ? (
+                <StatusBadge status="INCOMPLETE" label="Auto clock-out" />
+              ) : null}
+            </View>
+            <View className="flex-row gap-4">
+              <View>
+                <Text variant="caption" className="text-text-3">
+                  Masuk
+                </Text>
+                <Text variant="cardTitle" className="text-text">
+                  {timeOf(record.check_in_at)}
+                </Text>
+              </View>
+              <View>
+                <Text variant="caption" className="text-text-3">
+                  Pulang
+                </Text>
+                <Text
+                  variant="cardTitle"
+                  className={record.auto_closed ? 'text-bad-text' : 'text-text'}
+                >
+                  {timeOf(record.check_out_at)}
+                  {record.auto_closed ? '  (auto)' : ''}
+                </Text>
+              </View>
+            </View>
+            {record.shift_start_at ? (
+              <Text variant="caption" className="mt-2 text-text-3">
+                Shift Pagi · {timeOf(record.shift_start_at)}–{timeOf(record.shift_end_at)} ·{' '}
+                {record.site_name ?? record.company_name ?? ''}
+              </Text>
             ) : null}
-          </View>
-          <View className="flex-row gap-4">
-            <View>
-              <Text variant="caption" className="text-text-3">
-                Masuk
-              </Text>
-              <Text
-                className="font-bold text-text"
-                style={{ fontSize: 18 }}
-              >
-                {timeOf(record.check_in_at)}
-              </Text>
-            </View>
-            <View>
-              <Text variant="caption" className="text-text-3">
-                Pulang
-              </Text>
-              <Text
-                className={`font-bold ${record.auto_closed ? 'text-bad-text' : 'text-text'}`}
-                style={{ fontSize: 18 }}
-              >
-                {timeOf(record.check_out_at)}
-                {record.auto_closed ? '  (auto)' : ''}
-              </Text>
-            </View>
-          </View>
-          {record.shift_start_at ? (
-            <Text variant="caption" className="mt-2 text-text-3">
-              Shift Pagi · {timeOf(record.shift_start_at)}–{timeOf(record.shift_end_at)} ·{' '}
-              {record.site_name ?? record.company_name ?? ''}
-            </Text>
-          ) : null}
-        </Card>
-      ) : null}
+          </Card>
+        ) : null}
 
-      {/* Jenis koreksi toggle */}
-      <View className="gap-1.5">
-        <Text variant="caption" className="font-semibold text-text-2">
-          {t('m:koreksi.formJenis')}
-        </Text>
-        <View className="flex-row gap-2">
-          {TYPE_TABS.map((tab) => (
-            <Pressable
-              key={tab.value}
-              onPress={() => setVisibleType(tab.value)}
-              className={`flex-1 rounded-input border px-3 py-2.5 ${
-                visibleType === tab.value
-                  ? 'border-primary bg-primary-soft'
-                  : 'border-border bg-surface'
-              }`}
-            >
-              <Text
-                className={`text-center text-sm font-semibold ${
-                  visibleType === tab.value ? 'text-primary' : 'text-text-2'
+        {/* Jenis koreksi toggle */}
+        <View className="gap-1.5">
+          <Text variant="caption" weight="semibold" className="text-text-2">
+            {t('m:koreksi.formJenis')}
+          </Text>
+          <View className="flex-row gap-2">
+            {TYPE_TABS.map((tab) => (
+              <Pressable
+                key={tab.value}
+                onPress={() => setVisibleType(tab.value)}
+                className={`flex-1 rounded-input border px-3 py-2.5 ${
+                  visibleType === tab.value
+                    ? 'border-primary bg-primary-soft'
+                    : 'border-border bg-surface'
                 }`}
               >
-                {tab.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      </View>
-
-      {/* Time field (not shown for Status type) */}
-      {visibleType !== 'STATUS' ? (
-        <View className="gap-1.5">
-          <Text variant="caption" className="font-semibold text-text-2">
-            {visibleType === 'CHECK_IN'
-              ? t('m:koreksi.formWaktuCi')
-              : t('m:koreksi.formWaktuCo')}
-          </Text>
-          <View className="flex-row items-center rounded-input border border-primary bg-surface px-4 py-3">
-            <TextInput
-              value={time}
-              onChangeText={setTime}
-              placeholder="15:10"
-              keyboardType="numbers-and-punctuation"
-              className="flex-1 text-text text-sm"
-              style={{ outline: 'none' } as object}
-            />
-            <Text className="text-text-3">⏱</Text>
+                <Text
+                  variant="strong"
+                  className={`text-center ${
+                    visibleType === tab.value ? 'text-primary' : 'text-text-2'
+                  }`}
+                >
+                  {tab.label}
+                </Text>
+              </Pressable>
+            ))}
           </View>
         </View>
-      ) : null}
 
-      {/* Alasan */}
-      <View className="gap-1.5">
-        <Text variant="caption" className="font-semibold text-text-2">
-          {t('m:koreksi.formAlasan')}
-        </Text>
-        <TextInput
-          value={reason}
-          onChangeText={setReason}
-          multiline
-          numberOfLines={4}
-          placeholder={t('m:koreksi.formAlasan')}
-          className={`${inputClass} min-h-[80px]`}
-          style={{ textAlignVertical: 'top' }}
-        />
-      </View>
+        {/* Time field (not shown for Status type) */}
+        {visibleType !== 'STATUS' ? (
+          <View className="gap-1.5">
+            <Text variant="caption" weight="semibold" className="text-text-2">
+              {visibleType === 'CHECK_IN' ? t('m:koreksi.formWaktuCi') : t('m:koreksi.formWaktuCo')}
+            </Text>
+            <View className="flex-row items-center rounded-input border border-primary bg-surface px-4 py-3">
+              <TextInput
+                value={time}
+                onChangeText={setTime}
+                placeholder="15:10"
+                keyboardType="numbers-and-punctuation"
+                className="flex-1 text-text text-sm"
+                style={{ outline: 'none' } as object}
+              />
+              <Text className="text-text-3">⏱</Text>
+            </View>
+          </View>
+        ) : null}
 
-      {/* Bukti pendukung (opsional) — placeholder; file upload deferred */}
-      <View className="gap-1.5">
-        <Text variant="caption" className="font-semibold text-text-2">
-          {t('m:koreksi.formBukti')}
-        </Text>
-        <View className="flex-row items-center rounded-input border border-border bg-surface px-4 py-3">
-          <Text className="flex-1 text-text-3 text-sm">
-            📎 {t('m:koreksi.formBukti')}
+        {/* Alasan */}
+        <View className="gap-1.5">
+          <Text variant="caption" weight="semibold" className="text-text-2">
+            {t('m:koreksi.formAlasan')}
           </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            multiline
+            numberOfLines={4}
+            placeholder={t('m:koreksi.formAlasan')}
+            className={`${inputClass} min-h-[80px]`}
+            style={{ textAlignVertical: 'top' }}
+          />
         </View>
-      </View>
 
-      {/* Error */}
-      {err ? (
-        <Text className="text-danger text-sm">{err}</Text>
-      ) : null}
+        {/* Bukti pendukung (opsional) — placeholder; file upload deferred */}
+        <View className="gap-1.5">
+          <Text variant="caption" weight="semibold" className="text-text-2">
+            {t('m:koreksi.formBukti')}
+          </Text>
+          <View className="flex-row items-center rounded-input border border-border bg-surface px-4 py-3">
+            <Text variant="body" className="flex-1 text-text-3">
+              📎 {t('m:koreksi.formBukti')}
+            </Text>
+          </View>
+        </View>
 
-      {/* Footer buttons */}
-      <View className="flex-row gap-3 pt-2">
-        <Button
-          label={t('m:koreksi.formBatal')}
-          variant="secondary"
-          onPress={() => router.back()}
-          className="flex-1"
-        />
-        <Button
-          label={t('m:koreksi.formKirim')}
-          variant="primary"
-          onPress={() => void onSubmit()}
-          loading={create.isPending}
-          className="flex-1"
-        />
-      </View>
-    </ScrollView>
+        {/* Error */}
+        {err ? (
+          <Text variant="body" className="text-danger">
+            {err}
+          </Text>
+        ) : null}
+
+        {/* Footer buttons */}
+        <View className="flex-row gap-3 pt-2">
+          <Button
+            label={t('m:koreksi.formBatal')}
+            variant="secondary"
+            onPress={() => router.back()}
+            className="flex-1"
+          />
+          <Button
+            label={t('m:koreksi.formKirim')}
+            variant="primary"
+            onPress={() => void onSubmit()}
+            loading={create.isPending}
+            className="flex-1"
+          />
+        </View>
+      </ScrollView>
+    </View>
   );
 }

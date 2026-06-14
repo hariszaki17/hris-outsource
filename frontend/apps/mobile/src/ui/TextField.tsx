@@ -24,6 +24,8 @@ export function TextField({
   keyboardType,
   autoCapitalize,
   autoCorrect,
+  multiline,
+  testID,
   children,
 }: TextInputProps & {
   label?: string;
@@ -34,13 +36,18 @@ export function TextField({
 }) {
   return (
     <View className="gap-1.5">
-      {label ? <Text className="text-[13px] font-semibold text-text-2">{label}</Text> : null}
+      {label ? (
+        <Text variant="label" weight="semibold" className="text-text-2">
+          {label}
+        </Text>
+      ) : null}
       <View
         className={`flex-row items-center justify-between rounded-input border bg-surface px-3.5 py-[13px] ${
           invalid ? 'border-bad-text' : 'border-border'
         }`}
       >
         <TextInput
+          testID={testID}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -49,6 +56,7 @@ export function TextField({
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
           autoCorrect={autoCorrect}
+          multiline={multiline}
           className="flex-1 text-sm text-text"
         />
         {children ?? null}

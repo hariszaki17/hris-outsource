@@ -1,6 +1,7 @@
 import { type Href, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
@@ -17,10 +18,11 @@ const MENU: { key: 'leave' | 'overtime' | 'payslip' | 'profile'; href: Href }[] 
 export default function More() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, signOut } = useSession();
 
   return (
-    <View className="flex-1 gap-4 bg-app-bg p-6">
+    <View className="flex-1 gap-4 bg-app-bg p-6" style={{ paddingTop: insets.top + 8 }}>
       <Card>
         <Text variant="title">{user?.full_name ?? ''}</Text>
         <Text variant="caption" className="mt-1">
@@ -32,7 +34,7 @@ export default function More() {
         {MENU.map((m) => (
           <Pressable key={m.key} onPress={() => router.push(m.href)}>
             <Card>
-              <Text variant="body" className="font-semibold">
+              <Text variant="body" weight="semibold">
                 {t(`m:menu.${m.key}`)}
               </Text>
             </Card>

@@ -32,14 +32,10 @@ export default function PayslipScreen() {
           <View className="gap-3 px-6 pb-8">
             {items.map((p) => (
               <Card key={p.id}>
-                <Text variant="body" className="font-semibold">
-                  {p.period}
-                </Text>
+                <Text variant="strong">{p.period}</Text>
                 <View className="mt-2 flex-row justify-between">
                   <Text variant="caption">{t('m:payslip.takeHome')}</Text>
-                  <Text variant="body" className="font-semibold">
-                    {p.take_home_pay ?? '—'}
-                  </Text>
+                  <Text variant="strong">{p.take_home_pay ?? '—'}</Text>
                 </View>
                 <View className="flex-row justify-between">
                   <Text variant="caption">{t('m:payslip.gross')}</Text>

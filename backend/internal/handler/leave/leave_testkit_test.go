@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	leavehandler "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
@@ -242,16 +243,37 @@ func (b *bodyReader) Read(p []byte) (int, error) { return b.r.Read(p) }
 func (b *bodyReader) Close() error               { return nil }
 
 // ---------------------------------------------------------------------------
+// fakeEngine — in-memory approval.Engine (E11). CreateInstance returns a stub
+// instance id and records the call so a test can assert the leave submit routed
+// through the engine. Approval decisions themselves are an E11 concern (tested
+// there); here we exercise the leave service's submit-side wiring + the OnApproved /
+// OnRejected hooks invoked directly.
+// ---------------------------------------------------------------------------
+
+type fakeEngine struct {
+	instanceID string
+	calls      []approval.CreateInstanceInput
+}
+
+func newFakeEngine() *fakeEngine { return &fakeEngine{instanceID: "SWP-API-9001"} }
+
+func (e *fakeEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approval.CreateInstanceInput) (string, error) {
+	e.calls = append(e.calls, in)
+	return e.instanceID, nil
+}
+
+var _ approval.Engine = (*fakeEngine)(nil)
+
+// ---------------------------------------------------------------------------
 // fakeLeaveRepo — in-memory svc.LeaveRepository over shared maps.
 //
 // UpdateLeaveRequestStatus mutates the request map so the *ForUpdate re-read +
-// list/get observe the new state. Approval rows accumulate per request to drive
-// the timeline. Calendar entries are seeded directly (status-filtered on read).
+// list/get observe the new state. Calendar entries are seeded directly
+// (status-filtered on read).
 // ---------------------------------------------------------------------------
 
 type fakeLeaveRepo struct {
 	requests   map[string]dom.LeaveRequest
-	approvals  map[string][]dom.LeaveApproval
 	leaveTypes map[string]svc.LeaveTypeInfo
 	calendar   []dom.LeaveCalendarEntry
 	createSeq  int
@@ -260,7 +282,6 @@ type fakeLeaveRepo struct {
 func newFakeLeaveRepo() *fakeLeaveRepo {
 	return &fakeLeaveRepo{
 		requests:   map[string]dom.LeaveRequest{},
-		approvals:  map[string][]dom.LeaveApproval{},
 		leaveTypes: map[string]svc.LeaveTypeInfo{},
 	}
 }
@@ -335,9 +356,10 @@ func (r *fakeLeaveRepo) CreateLeaveRequest(_ context.Context, _ pgx.Tx, p svc.Cr
 		Status:         p.Status,
 		DelegateID:     p.DelegateID,
 		DocumentFileID: p.DocumentFileID,
-		Backdated:      p.Backdated,
-		Routing:        dom.LeaveRouting{NoLeader: p.NoLeader, AssignedLeaderID: p.AssignedLeaderID},
-		CreatedBy:      p.CreatedBy,
+		Backdated:        p.Backdated,
+		NoLeader:         p.NoLeader,
+		AssignedLeaderID: p.AssignedLeaderID,
+		CreatedBy:        p.CreatedBy,
 		CreatedAt:      fixedNow,
 		UpdatedAt:      fixedNow,
 		EmployeeName:   strp("Agent " + p.EmployeeID),
@@ -368,8 +390,8 @@ func (r *fakeLeaveRepo) UpdateLeaveRequestStatus(_ context.Context, _ pgx.Tx, p 
 		return dom.LeaveRequest{}, domain.ErrNotFound
 	}
 	req.Status = p.Status
-	req.Routing.NoLeader = p.NoLeader
-	req.Routing.AssignedLeaderID = p.AssignedLeaderID
+	req.NoLeader = p.NoLeader
+	req.AssignedLeaderID = p.AssignedLeaderID
 	req.ClockInConflict = p.ClockInConflict
 	req.BalanceCheck.RequestedDays = p.BalanceRequestedDays
 	req.BalanceCheck.RemainingDaysAtCheck = p.BalanceRemainingAtCheck
@@ -406,26 +428,14 @@ func (r *fakeLeaveRepo) SetBalanceSnapshot(_ context.Context, _ pgx.Tx, p svc.Ba
 	return nil
 }
 
-func (r *fakeLeaveRepo) InsertLeaveApproval(_ context.Context, _ pgx.Tx, p svc.ApprovalRow) (dom.LeaveApproval, error) {
-	a := dom.LeaveApproval{
-		ID:             int64(len(r.approvals[p.LeaveRequestID]) + 1),
-		LeaveRequestID: p.LeaveRequestID,
-		Stage:          p.Stage,
-		Decision:       p.Decision,
-		ActorID:        p.ActorID,
-		ActorRole:      p.ActorRole,
-		DecisionNote:   p.DecisionNote,
-		RejectReason:   p.RejectReason,
-		IsOverride:     p.IsOverride,
-		OverrideReason: p.OverrideReason,
-		OccurredAt:     fixedNow,
+func (r *fakeLeaveRepo) SetApprovalInstanceID(_ context.Context, _ pgx.Tx, id, instanceID string) error {
+	req, ok := r.requests[id]
+	if !ok {
+		return domain.ErrNotFound
 	}
-	r.approvals[p.LeaveRequestID] = append(r.approvals[p.LeaveRequestID], a)
-	return a, nil
-}
-
-func (r *fakeLeaveRepo) ListLeaveApprovalsForRequest(_ context.Context, id string) ([]dom.LeaveApproval, error) {
-	return r.approvals[id], nil
+	req.ApprovalInstanceID = &instanceID
+	r.requests[id] = req
+	return nil
 }
 
 func (r *fakeLeaveRepo) GetLeaveType(_ context.Context, id string) (svc.LeaveTypeInfo, error) {
@@ -536,6 +546,7 @@ type harness struct {
 	meterStore  *fakeMeterStore
 	meterReader *fakeMeterReader
 	schedule    *fakeScheduleRepo
+	engine      *fakeEngine
 	idem        *stubIdempotency
 	principal   auth.Principal
 }
@@ -554,6 +565,8 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	lsvc := svc.NewLeaveService(lrepo, srepo, &fakeTxRunner{})
 	lsvc.SetClock(func() time.Time { return fixedNow })
 	lsvc.SetMeter(svc.NewQuotaMeter(mstore, mreader)) // per-type ledger (2026-06-12)
+	eng := newFakeEngine()
+	lsvc.SetApprovalEngine(eng) // E11: submit creates the approval instance
 	qsvc := svc.NewQuotaService(qrepo, &fakeTxRunner{})
 	qsvc.SetClock(func() time.Time { return fixedNow })
 	csvc := svc.NewCalendarService(lrepo)
@@ -568,6 +581,7 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		meterStore:  mstore,
 		meterReader: mreader,
 		schedule:    srepo,
+		engine:      eng,
 		idem:        idem,
 		principal: auth.Principal{
 			UserID:     "SWP-USR-0001",
@@ -591,9 +605,9 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		})
 	})
 
-	// Mirror server.go: reads + L1 + reject + calendar + quota-list under
-	// RequireRole(super/hr/leader); final/override + quota-writes under
-	// RequireRole(super/hr); action routes wrap the idempotency middleware.
+	// Mirror server.go: approval moved to the E11 engine — the leave surface keeps
+	// only reads, calendar, the agent file/submit/cancel actions, cancel-approved,
+	// shorten, and the per-type quota read/adjust. Action routes wrap idempotency.
 	// Reads: super/hr/leader/AGENT (agent self-scoped in service).
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
@@ -601,13 +615,12 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Get("/leave-requests/{id}", handler.GetLeaveRequest)
 		r.Get("/leave-balances/by-employee/{employee_id}/types", handler.GetEmployeeTypeBalances)
 	})
-	// Staff-only reads + L1/reject/cancel-approved: super/hr/leader.
+	// Staff-only reads + cancel-approved + shorten: super/hr/leader.
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-		r.With(idem.Handler).Post("/leave-requests/{id}:approve-l1", handler.ApproveLeaveRequestL1)
-		r.With(idem.Handler).Post("/leave-requests/{id}:reject", handler.RejectLeaveRequest)
 		r.Get("/leave-calendar", handler.GetLeaveCalendar)
 		r.With(idem.Handler).Post("/leave-requests/{id}:cancel-approved", handler.CancelApprovedLeaveRequest)
+		r.With(idem.Handler).Post("/leave-requests/{id}:shorten", handler.ShortenLeaveRequest)
 	})
 	// Agent file-a-request + own-request actions: agent/hr/super.
 	r.Group(func(r chi.Router) {
@@ -615,12 +628,6 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/leave-requests", handler.CreateLeaveRequest)
 		r.With(idem.Handler).Post("/leave-requests/{id}:submit", handler.SubmitLeaveRequest)
 		r.With(idem.Handler).Post("/leave-requests/{id}:cancel", handler.CancelLeaveRequest)
-	})
-	// L2 final/override admits lead (scoped via GuardCompany in-service).
-	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
-		r.With(idem.Handler).Post("/leave-requests/{id}:approve-final", handler.ApproveLeaveRequestFinal)
-		r.With(idem.Handler).Post("/leave-requests/{id}:approve-override", handler.ApproveLeaveRequestOverride)
 	})
 	// HR per-type quota adjust (LQ-6).
 	r.Group(func(r chi.Router) {
@@ -671,7 +678,6 @@ func (h *harness) seedRequest(id, company, employee string, status dom.LeaveStat
 		DurationDays:  days,
 		Reason:        strp("Keperluan keluarga."),
 		Status:        status,
-		Routing:       dom.LeaveRouting{},
 		CreatedAt:     start.Add(-24 * time.Hour),
 		UpdatedAt:     start.Add(-24 * time.Hour),
 		EmployeeName:  strp("Agent " + employee),

@@ -23,10 +23,6 @@ import {
 } from '@/features/e2-identity/agreements-screen.tsx';
 import { AttendanceCodesScreen } from '@/features/e2-identity/attendance-codes-screen.tsx';
 import {
-  ChangeRequestsScreen,
-  type ChangeRequestsSearch,
-} from '@/features/e2-identity/change-requests-screen.tsx';
-import {
   ClientCompaniesScreen,
   type ClientCompaniesSearch,
 } from '@/features/e2-identity/client-companies-screen.tsx';
@@ -79,14 +75,15 @@ import { PayslipArchiveScreen } from '@/features/e8-payroll/payslip-archive-scre
 import { PayslipDetailRoute as PayslipDetailRouteView } from '@/features/e8-payroll/payslip-detail-route.tsx';
 import { BillableReportScreen } from '@/features/e10-reporting/billable-report-screen.tsx';
 import { DashboardScreen } from '@/features/e10-reporting/dashboard-screen.tsx';
-import { InboxScreen } from '@/features/e10-reporting/inbox-screen.tsx';
 import { NotificationsScreen } from '@/features/e10-reporting/notifications-screen.tsx';
+import ApprovalDetailScreen from '@/features/e11-approvals/approval-detail-screen.tsx';
+import ApprovalInboxScreen from '@/features/e11-approvals/approval-inbox-screen.tsx';
+import ApprovalTemplateEditorScreen from '@/features/e11-approvals/approval-template-editor-screen.tsx';
 import { auth } from '@/lib/auth.ts';
 import { Role, UserStatus } from '@swp/api-client/e1';
 import {
   AgreementStatus,
   AgreementType,
-  ChangeRequestRequestType,
   ClientCompanyStatus,
   EmployeeStatus,
 } from '@swp/api-client/e2';
@@ -242,28 +239,6 @@ const employeeDetailRoute = createRoute({
   component: EmployeeDetailScreen,
 });
 
-// E2 — Antrian Persetujuan Perubahan Data (HR change-request approval queue)
-const changeRequestsRoute = createRoute({
-  getParentRoute: () => authedRoute,
-  path: '/change-requests',
-  component: ChangeRequestsScreen,
-  validateSearch: (search: Record<string, unknown>): ChangeRequestsSearch => {
-    const out: ChangeRequestsSearch = {};
-    if (typeof search.q === 'string' && search.q) out.q = search.q;
-    if (
-      typeof search.request_type === 'string' &&
-      (Object.values(ChangeRequestRequestType) as string[]).includes(search.request_type)
-    ) {
-      out.request_type = search.request_type as ChangeRequestRequestType;
-    }
-    if (search.tab === 'all' || search.tab === 'profile' || search.tab === 'bank') {
-      out.tab = search.tab;
-    }
-    if (typeof search.cursor === 'string' && search.cursor) out.cursor = search.cursor;
-    return out;
-  },
-});
-
 // E2 — Perjanjian Kerja (employment agreements list, detail, create)
 const agreementsRoute = createRoute({
   getParentRoute: () => authedRoute,
@@ -371,6 +346,17 @@ const clientCompanyEditRoute = createRoute({
   component: function ClientCompanyEditRoute() {
     const { clientCompanyId } = clientCompanyEditRoute.useParams();
     return <EditClientCompanyScreen clientCompanyId={clientCompanyId} />;
+  },
+});
+// E11 — Template Persetujuan, homed under the client-company detail (F11.1). Gated
+// `approvals.template.manage` via routeRequirement (nav.ts). The tab lives inside the
+// detail screen; this is the deep-linkable child route.
+const clientCompanyApprovalTemplateRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/client-companies/$clientCompanyId/approval-template',
+  component: function ClientCompanyApprovalTemplateRoute() {
+    const { clientCompanyId } = clientCompanyApprovalTemplateRoute.useParams();
+    return <ApprovalTemplateEditorScreen companyId={clientCompanyId} />;
   },
 });
 
@@ -609,11 +595,33 @@ const payslipDetailRoute = createRoute({
   },
 });
 
-// E10 — Reporting & Notifications
+// E11 — Approvals: the /inbox now renders the E11 aggregated approval queue
+// (ApprovalInboxScreen). The old E10 placeholder InboxScreen (a read-only view over the
+// dashboard's pending_approvals_panel) is removed. Attendance verifiers reach /inbox via the
+// shared anyOf[approvals.act, attendance.verify] gate; their queue is the standalone
+// /attendance/verification screen (linked from the nav + from a banner here), so no
+// attendance content is lost. onOpenInstance deep-links into the approval-instance detail.
 const inboxRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/inbox',
-  component: InboxScreen,
+  component: function InboxRoute() {
+    const navigate = useNavigate();
+    return (
+      <ApprovalInboxScreen
+        onOpenInstance={(instanceId) =>
+          navigate({ to: '/approval-instances/$instanceId', params: { instanceId } })
+        }
+      />
+    );
+  },
+});
+const approvalInstanceDetailRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/approval-instances/$instanceId',
+  component: function ApprovalInstanceDetailRoute() {
+    const { instanceId } = approvalInstanceDetailRoute.useParams();
+    return <ApprovalDetailScreen instanceId={instanceId} />;
+  },
 });
 const reportsRoute = createRoute({
   getParentRoute: () => authedRoute,
@@ -760,7 +768,6 @@ const routeTree = rootRoute.addChildren([
     employeesRoute,
     employeeNewRoute,
     employeeDetailRoute,
-    changeRequestsRoute,
     agreementsRoute,
     agreementNewRoute,
     agreementDetailRoute,
@@ -772,6 +779,7 @@ const routeTree = rootRoute.addChildren([
     clientCompanyNewRoute,
     clientCompanyDetailRoute,
     clientCompanyEditRoute,
+    clientCompanyApprovalTemplateRoute,
     placementsRoute,
     placementNewRoute,
     placementDetailRoute,
@@ -794,6 +802,7 @@ const routeTree = rootRoute.addChildren([
     payslipDetailRoute,
     payrollRoute,
     inboxRoute,
+    approvalInstanceDetailRoute,
     reportsRoute,
     notificationsRoute,
     // Agent self-service (/me/*) — three merged homes + legacy redirects.

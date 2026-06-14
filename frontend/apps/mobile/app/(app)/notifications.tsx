@@ -9,6 +9,7 @@ import { formatInstant } from '@swp/shared/datetime';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
 
@@ -19,7 +20,7 @@ function Row({ item, onPress }: { item: Notification; onPress: () => void }) {
       <Card className={unread ? 'border-primary-soft' : ''}>
         <View className="flex-row items-center gap-2">
           {unread ? <View className="h-2 w-2 rounded-pill bg-primary" /> : null}
-          <Text variant="body" className="flex-1 font-semibold">
+          <Text variant="body" weight="semibold" className="flex-1">
             {item.title}
           </Text>
         </View>
@@ -36,6 +37,7 @@ function Row({ item, onPress }: { item: Notification; onPress: () => void }) {
 
 export default function Notifications() {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const list = useListNotifications();
   const markAll = useMarkAllNotificationsRead();
@@ -60,11 +62,16 @@ export default function Notifications() {
 
   return (
     <View className="flex-1 bg-app-bg">
-      <View className="flex-row items-center justify-between px-6 py-4">
+      <View
+        className="flex-row items-center justify-between px-6 py-4"
+        style={{ paddingTop: insets.top + 8 }}
+      >
         <Text variant="caption">{t('m:notifications.unread', { count: unread })}</Text>
         {unread > 0 ? (
           <Pressable onPress={onMarkAll} disabled={markAll.isPending}>
-            <Text className="text-primary font-semibold">{t('m:notifications.markAllRead')}</Text>
+            <Text variant="body" weight="semibold" className="text-primary">
+              {t('m:notifications.markAllRead')}
+            </Text>
           </Pressable>
         ) : null}
       </View>

@@ -2,11 +2,12 @@
 // replacing server codegen). This testkit mirrors the Phase-8 leave harness
 // (internal/handler/leave/leave_testkit_test.go) EXACTLY:
 //
-//   - fakeTx (Exec no-op so audit.Record + InsertOvertimeApproval work inside
-//     InTx) + fakeTxRunner,
-//   - in-memory fake repos implementing the 09-02 service ports
+//   - fakeTx (Exec no-op so audit.Record works inside InTx) + fakeTxRunner,
+//   - in-memory fake repos implementing the service ports
 //     (svc.OvertimeRepository + svc.RuleRepository + svc.HolidayRepository +
 //     svc.SchedulePort) over shared mutable maps so the state-machine transitions
+//   - a fakeEngine (approval.Engine) wired via SetApprovalEngine — create/confirm
+//     route their submit through it (the approval chain is OWNED BY the E11 engine),
 //   - ForUpdate locks observe each other,
 //   - newHarness(role, companyID, employeeID) that builds the REAL OvertimeService
 //   - HolidayService + the real overtime handler.Handler and mounts them on a
@@ -34,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
 	overtimehandler "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
@@ -246,23 +248,22 @@ func (b *bodyReader) Close() error               { return nil }
 // shared maps.
 //
 // UpdateOvertimeStatus mutates the request map so the *ForUpdate re-read +
-// list/get observe the new state. Approval rows accumulate per OT to drive the
-// timeline. FindOvertimeRule serves the OT_BELOW_MIN + reference-multiplier
-// read-through (line-scoped wins over the global default).
+// list/get observe the new state. SetApprovalInstanceID links the E11 instance
+// onto the OT (the approval chain itself is OWNED BY the E11 engine — no decision
+// rows live here anymore). FindOvertimeRule serves the OT_BELOW_MIN +
+// reference-multiplier read-through (single GLOBAL rule keyed by "").
 // ---------------------------------------------------------------------------
 
 type fakeOvertimeRepo struct {
-	records   map[string]dom.Overtime
-	approvals map[string][]dom.OvertimeApproval
-	rules     map[string]svc.OvertimeRule // "" = the single GLOBAL rule (service_line removed 2026-06-12)
-	seq       int                         // InsertOvertime id allocator
+	records map[string]dom.Overtime
+	rules   map[string]svc.OvertimeRule // "" = the single GLOBAL rule (service_line removed 2026-06-12)
+	seq     int                         // InsertOvertime id allocator
 }
 
 func newFakeOvertimeRepo() *fakeOvertimeRepo {
 	return &fakeOvertimeRepo{
-		records:   map[string]dom.Overtime{},
-		approvals: map[string][]dom.OvertimeApproval{},
-		rules:     map[string]svc.OvertimeRule{},
+		records: map[string]dom.Overtime{},
+		rules:   map[string]svc.OvertimeRule{},
 	}
 }
 
@@ -360,21 +361,16 @@ func (r *fakeOvertimeRepo) InsertOvertime(_ context.Context, _ pgx.Tx, p svc.Ove
 	return rec, nil
 }
 
-func (r *fakeOvertimeRepo) InsertOvertimeApproval(_ context.Context, _ pgx.Tx, p svc.ApprovalRow) (dom.OvertimeApproval, error) {
-	a := dom.OvertimeApproval{
-		Level:        p.Level,
-		Decision:     p.Decision,
-		ApproverID:   p.ApproverID,
-		ApproverName: p.ApproverName,
-		Reason:       p.Reason,
-		DecidedAt:    fixedNow,
+// SetApprovalInstanceID links the freshly-created E11 ApprovalInstance to the OT
+// record (called inside the create/confirm tx after engine.CreateInstance).
+func (r *fakeOvertimeRepo) SetApprovalInstanceID(_ context.Context, _ pgx.Tx, id, instanceID string) error {
+	rec, ok := r.records[id]
+	if !ok {
+		return domain.ErrNotFound
 	}
-	r.approvals[p.OvertimeID] = append(r.approvals[p.OvertimeID], a)
-	return a, nil
-}
-
-func (r *fakeOvertimeRepo) ListOvertimeApprovals(_ context.Context, overtimeID string) ([]dom.OvertimeApproval, error) {
-	return r.approvals[overtimeID], nil
+	rec.ApprovalInstanceID = &instanceID
+	r.records[id] = rec
+	return nil
 }
 
 // FindOvertimeRule serves svc.RuleRepository: the single GLOBAL rule (service_line
@@ -390,6 +386,31 @@ var (
 	_ svc.OvertimeRepository = (*fakeOvertimeRepo)(nil)
 	_ svc.RuleRepository     = (*fakeOvertimeRepo)(nil)
 )
+
+// ---------------------------------------------------------------------------
+// fakeEngine — in-memory approval.Engine. CreateInstance hands back a
+// deterministic instance id per request and records every call so the create/
+// confirm paths can assert the engine was driven on the submit tx (EX-1).
+// ---------------------------------------------------------------------------
+
+type fakeEngine struct {
+	calls   []approval.CreateInstanceInput
+	seq     int
+	failErr error // when set, CreateInstance returns it (rolls back the submit tx)
+}
+
+func newFakeEngine() *fakeEngine { return &fakeEngine{} }
+
+func (e *fakeEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approval.CreateInstanceInput) (string, error) {
+	if e.failErr != nil {
+		return "", e.failErr
+	}
+	e.calls = append(e.calls, in)
+	e.seq++
+	return fmt.Sprintf("SWP-API-%04d", e.seq), nil
+}
+
+var _ approval.Engine = (*fakeEngine)(nil)
 
 // ---------------------------------------------------------------------------
 // fakeHolidayRepo — in-memory svc.HolidayRepository over shared maps.
@@ -583,6 +604,7 @@ type harness struct {
 	overtime  *fakeOvertimeRepo
 	holiday   *fakeHolidayRepo
 	schedule  *fakeScheduleRepo
+	engine    *fakeEngine
 	idem      *stubIdempotency
 	otSvc     *svc.OvertimeService // the REAL service, exposed for the EnforceMinMinutes/ClassifyDayType seams
 	principal auth.Principal
@@ -597,8 +619,10 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	hrepo := newFakeHolidayRepo()
 	srepo := newFakeScheduleRepo()
 
+	engine := newFakeEngine()
 	osvc := svc.NewOvertimeService(orepo, orepo, hrepo, srepo, &fakeTxRunner{})
 	osvc.SetClock(func() time.Time { return fixedNow })
+	osvc.SetApprovalEngine(engine)
 	hsvc := svc.NewHolidayService(hrepo, &fakeTxRunner{})
 	hsvc.SetClock(func() time.Time { return fixedNow })
 
@@ -609,6 +633,7 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		overtime: orepo,
 		holiday:  hrepo,
 		schedule: srepo,
+		engine:   engine,
 		idem:     idem,
 		otSvc:    osvc,
 		principal: auth.Principal{
@@ -633,9 +658,10 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		})
 	})
 
-	// Mirror server.go: reads + L1 + reject + confirm + withdraw + bulk + holiday
-	// reads under RequireRole(super/hr/leader); final + holiday writes under
-	// RequireRole(super/hr); action routes wrap the idempotency middleware.
+	// Mirror server.go: reads + confirm + withdraw + create + holiday reads
+	// under RequireRole; holiday writes under RequireRole(super/hr). Approval
+	// routing (approve/reject/bulk) is OWNED BY the E11 engine — no longer mounted
+	// on the E7 router. Action routes wrap the idempotency middleware.
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/overtime", handler.ListOvertime)
@@ -650,18 +676,6 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.With(idem.Handler).Post("/overtime", handler.CreateOvertime)
 		r.With(idem.Handler).Post("/overtime/{id}:confirm", handler.Confirm)
 		r.With(idem.Handler).Post("/overtime/{id}:withdraw", handler.Withdraw)
-	})
-	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
-		r.With(idem.Handler).Post("/overtime/{id}:approve-l1", handler.ApproveL1)
-		r.With(idem.Handler).Post("/overtime/{id}:reject", handler.Reject)
-		r.With(idem.Handler).Post("/overtime:bulk-approve", handler.BulkApprove)
-		r.With(idem.Handler).Post("/overtime:bulk-reject", handler.BulkReject)
-	})
-	// L2 final approval admits lead (scoped via GuardCompany in-service).
-	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
-		r.With(idem.Handler).Post("/overtime/{id}:approve-final", handler.ApproveFinal)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))

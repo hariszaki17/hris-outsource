@@ -93,7 +93,7 @@ function monthLabel(year: number, month: number): string {
 // ---------------------------------------------------------------------------
 
 function leaveTypeTone(leaveTypeCode: string | undefined, status: LeaveStatus): StatusTone {
-  const isPending = status === LeaveStatus.PENDING_L1 || status === LeaveStatus.PENDING_HR;
+  const isPending = status === LeaveStatus.PENDING;
   if (isPending) return 'neutral';
   switch ((leaveTypeCode ?? '').toLowerCase()) {
     case 'tahunan':
@@ -125,15 +125,10 @@ function DayCell({ day, isToday, isOutsideMonth, entries, showPending }: DayCell
   const visibleEntries = entries.filter((e) => {
     if (isOutsideMonth) return false;
     if (!showPending) return e.status === LeaveStatus.APPROVED;
-    return (
-      e.status === LeaveStatus.APPROVED ||
-      e.status === LeaveStatus.PENDING_L1 ||
-      e.status === LeaveStatus.PENDING_HR
-    );
+    return e.status === LeaveStatus.APPROVED || e.status === LeaveStatus.PENDING;
   });
 
-  const isPending = (e: LeaveCalendarEntry) =>
-    e.status === LeaveStatus.PENDING_L1 || e.status === LeaveStatus.PENDING_HR;
+  const isPending = (e: LeaveCalendarEntry) => e.status === LeaveStatus.PENDING;
 
   return (
     <div

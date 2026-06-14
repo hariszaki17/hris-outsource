@@ -142,7 +142,6 @@ skipped (logged) and everything else still seeds. Use the same key for the API.
 | `employees` (agents)       | `SWP-EMP-20001` … `SWP-EMP-20120` |
 | `employment_agreements`    | `SWP-AG-20001` … `SWP-AG-20120`   |
 | `placements`               | `SWP-PL-20001` …                  |
-| `change_requests`          | `SWP-CHG-2201` …                  |
 | `shift_leader_assignments` | `SWP-SLA-2001` … `SWP-SLA-2008`   |
 | `shift_masters`            | `SWP-SHF-201` … `SWP-SHF-203`     |
 | `schedule_entries`         | `SWP-SCH-2xxxxx`                  |
@@ -173,9 +172,9 @@ the pattern `seed.go` already uses (e.g. `SWP-LR-44210`).
 | `attendance`               | 1 211     | 14 days back; ~70% AUTO_APPROVED, PENDING exceptions, some VERIFIED |
 | `attendance_corrections`   | 28        | PENDING CHECK_OUT corrections on auto-closed records |
 | `leave_quotas`             | 60        | realistic total/used/pending |
-| `leave_requests`           | 40        | PENDING_L1 / PENDING_HR / APPROVED / REJECTED + approval trail |
+| `leave_requests`           | 40        | PENDING / APPROVED / REJECTED (E11 single-level engine status) |
 | `holidays`                 | 4         | NATIONAL + CUSTOM |
-| `overtime`                 | 50        | all states × WORKDAY/RESTDAY/HOLIDAY tiers + approval trail |
+| `overtime`                 | 50        | all states (E11 single-level PENDING) × WORKDAY/RESTDAY/HOLIDAY tiers |
 | `payslips`                 | 80        | 2 periods (2026-04/05) × 40 agents, FINAL, money AES-256-GCM encrypted |
 | `payslip_components`       | 480       | 6 lines per payslip |
 | `payslip_benefits`         | 160       | 2 employer benefits per payslip |

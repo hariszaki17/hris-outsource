@@ -34,11 +34,13 @@ import (
 // ---------------------------------------------------------------------------
 
 type fakeSelfRepo struct {
-	employees map[string]domain.Employee
+	employees   map[string]domain.Employee
+	takenPhones map[string]bool // E.164 phones already used by some login (uniqueness guard)
+	lastPatch   *peoplesvc.UpdateEmployeeSelfInstantParams
 }
 
 func newFakeSelfRepo() *fakeSelfRepo {
-	return &fakeSelfRepo{employees: make(map[string]domain.Employee)}
+	return &fakeSelfRepo{employees: make(map[string]domain.Employee), takenPhones: map[string]bool{}}
 }
 
 func (r *fakeSelfRepo) GetEmployeeByID(_ context.Context, id string) (domain.Employee, error) {
@@ -49,7 +51,15 @@ func (r *fakeSelfRepo) GetEmployeeByID(_ context.Context, id string) (domain.Emp
 	return e, nil
 }
 
+// UserPhoneTaken is the login-identifier uniqueness guard the service invokes when
+// the phone actually changes; returns whether some other login already uses it.
+func (r *fakeSelfRepo) UserPhoneTaken(_ context.Context, phone string) (bool, error) {
+	return r.takenPhones[phone], nil
+}
+
 func (r *fakeSelfRepo) UpdateEmployeeSelfInstant(_ context.Context, _ pgx.Tx, p peoplesvc.UpdateEmployeeSelfInstantParams) (domain.Employee, error) {
+	cp := p
+	r.lastPatch = &cp
 	e := r.employees[p.ID]
 	if p.Address != nil {
 		e.Address = p.Address
@@ -59,6 +69,24 @@ func (r *fakeSelfRepo) UpdateEmployeeSelfInstant(_ context.Context, _ pgx.Tx, p 
 	}
 	if p.PhotoObjectKey != nil {
 		e.PhotoObjectKey = p.PhotoObjectKey
+	}
+	if p.Phone != nil {
+		e.Phone = p.Phone
+	}
+	if p.EmergencyContactName != nil {
+		e.EmergencyContact.Name = *p.EmergencyContactName
+	}
+	if p.EmergencyContactPhone != nil {
+		e.EmergencyContact.Phone = *p.EmergencyContactPhone
+	}
+	if p.BankName != nil {
+		e.BankAccount.BankName = *p.BankName
+	}
+	if p.BankAccountNumber != nil {
+		e.BankAccount.AccountNumber = *p.BankAccountNumber
+	}
+	if p.BankAccountHolderName != nil {
+		e.BankAccount.AccountHolderName = *p.BankAccountHolderName
 	}
 	e.UpdatedAt = time.Now().UTC()
 	r.employees[p.ID] = e
@@ -188,6 +216,92 @@ func TestUpdateMyProfile_InstantApply_200(t *testing.T) {
 	// Applied to the repo (instant, no approval queue).
 	if a := h.repo.employees["SWP-EMP-A1"].Address; a == nil || *a != "Jl. Mawar No. 7" {
 		t.Errorf("repo address = %v, want applied", a)
+	}
+}
+
+// E11: phone + emergency_contact + bank_account apply INSTANTLY through the same
+// PATCH /me/profile — no approval queue, no pending state. Asserts the repo write
+// carried every field and the response reflects the applied values.
+func TestUpdateMyProfile_PhoneEmergencyBank_InstantApply_200(t *testing.T) {
+	h := newSelfProfileHarness(t)
+	h.seedSelf("SWP-EMP-A1")
+
+	rr := h.doSelf("PATCH", "/me/profile", map[string]any{
+		"phone": "0812-3456-7890",
+		"emergency_contact": map[string]any{
+			"name":  "Budi",
+			"phone": "081299998888",
+		},
+		"bank_account": map[string]any{
+			"bank_name":           "BCA",
+			"account_number":      "1234567890",
+			"account_holder_name": "Agent A1",
+		},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Repo write carried every instant field — and NO approval/pending state exists.
+	p := h.repo.lastPatch
+	if p == nil {
+		t.Fatal("instant patch not applied to repo")
+	}
+	if p.Phone == nil || *p.Phone != "+6281234567890" {
+		t.Errorf("patch phone = %v, want normalized +6281234567890", p.Phone)
+	}
+	if p.EmergencyContactName == nil || *p.EmergencyContactName != "Budi" {
+		t.Errorf("patch emergency name = %v, want Budi", p.EmergencyContactName)
+	}
+	if p.EmergencyContactPhone == nil || *p.EmergencyContactPhone != "081299998888" {
+		t.Errorf("patch emergency phone = %v, want 081299998888", p.EmergencyContactPhone)
+	}
+	if p.BankName == nil || *p.BankName != "BCA" {
+		t.Errorf("patch bank_name = %v, want BCA", p.BankName)
+	}
+	if p.BankAccountNumber == nil || *p.BankAccountNumber != "1234567890" {
+		t.Errorf("patch account_number = %v, want 1234567890", p.BankAccountNumber)
+	}
+	if p.BankAccountHolderName == nil || *p.BankAccountHolderName != "Agent A1" {
+		t.Errorf("patch account_holder_name = %v, want Agent A1", p.BankAccountHolderName)
+	}
+
+	// Response reflects the applied values (instant — no FIELD_REQUIRES_APPROVAL).
+	body := decodeBody(t, rr)
+	if _, hasErr := body["error"]; hasErr {
+		t.Fatalf("instant edit returned an error envelope: %v", body["error"])
+	}
+	ec, _ := body["emergency_contact"].(map[string]any)
+	if ec["name"] != "Budi" {
+		t.Errorf("resp emergency_contact.name = %v, want Budi", ec["name"])
+	}
+	ba, _ := body["bank_account"].(map[string]any)
+	if ba["bank_name"] != "BCA" {
+		t.Errorf("resp bank_account.bank_name = %v, want BCA", ba["bank_name"])
+	}
+}
+
+// A phone already taken by another login → 409 CONFLICT (login-identifier
+// uniqueness), not an approval tier.
+func TestUpdateMyProfile_PhoneTaken_409(t *testing.T) {
+	h := newSelfProfileHarness(t)
+	h.seedSelf("SWP-EMP-A1")
+	h.repo.takenPhones["+6281234567890"] = true
+
+	rr := h.doSelf("PATCH", "/me/profile", map[string]any{
+		"phone": "081234567890",
+	})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("taken phone: expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "CONFLICT" {
+		t.Errorf("error.code = %v, want CONFLICT", errObj["code"])
+	}
+	// No write should have reached the repo on the conflict path.
+	if h.repo.lastPatch != nil {
+		t.Errorf("expected no repo write on phone conflict, got patch %+v", h.repo.lastPatch)
 	}
 }
 

@@ -38,6 +38,13 @@ const (
 	NotifPlacementLeaderChanged        NotificationKind = "PLACEMENT_LEADER_CHANGED"
 	NotifExportReady                   NotificationKind = "EXPORT_READY"
 	NotifExportFailed                  NotificationKind = "EXPORT_FAILED"
+
+	// E11 approvals engine (F11.2). NotifApprovalPending targets current-line
+	// members when an instance is created/advanced/reset; NotifApprovalApproved /
+	// NotifApprovalRejected target the requester on the terminal transition.
+	NotifApprovalPending  NotificationKind = "APPROVAL_PENDING"
+	NotifApprovalApproved NotificationKind = "APPROVAL_APPROVED"
+	NotifApprovalRejected NotificationKind = "APPROVAL_REJECTED"
 )
 
 // DeepLink references a target screen in another epic (openapi schemas.DeepLink).

@@ -12,7 +12,7 @@ import { formatDate } from '@swp/shared/datetime';
 import { useRouter } from 'expo-router';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
@@ -101,7 +101,7 @@ function BalanceRow({ item }: { item: LeaveTypeBalance }) {
     <Card>
       <View className="flex-row items-center justify-between gap-3">
         <View className="flex-1">
-          <Text variant="body" className="font-semibold">
+          <Text variant="body" weight="semibold">
             {item.name}
           </Text>
           <Text variant="caption" className="mt-0.5">
@@ -109,39 +109,43 @@ function BalanceRow({ item }: { item: LeaveTypeBalance }) {
           </Text>
         </View>
         <View className={`self-start rounded-pill px-2 py-1 ${toneBg[badge.tone]}`}>
-          <Text className={`text-xs font-semibold ${toneText[badge.tone]}`}>{badge.label}</Text>
+          <Text variant="caption" weight="semibold" className={toneText[badge.tone]}>
+            {badge.label}
+          </Text>
         </View>
       </View>
     </Card>
   );
 }
 
+// Collapsed LeaveStatus (E11): DRAFT | PENDING | APPROVED | REJECTED | CANCELLED.
 const requestTone: Record<string, Tone> = {
   APPROVED: 'ok',
-  PENDING_L1: 'warn',
-  PENDING_HR: 'warn',
+  PENDING: 'warn',
   REJECTED: 'bad',
   DRAFT: 'muted',
   CANCELLED: 'muted',
 };
 
-function RequestRow({ item }: { item: LeaveRequest }) {
+function RequestRow({ item, onPress }: { item: LeaveRequest; onPress: () => void }) {
   const { t } = useTranslation();
   const tone = requestTone[item.status] ?? 'muted';
   return (
-    <Card>
-      <View className="flex-row items-center justify-between">
-        <Text variant="body" className="font-semibold">
-          {item.leave_type_name ?? item.leave_type_id}
+    <Pressable onPress={onPress}>
+      <Card>
+        <View className="flex-row items-center justify-between">
+          <Text variant="body" weight="semibold">
+            {item.leave_type_name ?? item.leave_type_id}
+          </Text>
+          <Text variant="caption" weight="semibold" className={toneText[tone]}>
+            {t(`m:leave.status.${item.status}`)}
+          </Text>
+        </View>
+        <Text variant="caption" className="mt-1">
+          {item.start_date} → {item.end_date}
         </Text>
-        <Text className={`text-xs font-semibold ${toneText[tone]}`}>
-          {t(`m:leave.status.${item.status}`)}
-        </Text>
-      </View>
-      <Text variant="caption" className="mt-1">
-        {item.start_date} → {item.end_date}
-      </Text>
-    </Card>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -202,7 +206,21 @@ export default function LeaveScreen() {
           ) : (
             <View className="gap-3 px-6 pb-8">
               {requests.map((r) => (
-                <RequestRow key={r.id} item={r} />
+                <RequestRow
+                  key={r.id}
+                  item={r}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/approval-status',
+                      params: {
+                        approval_instance_id: r.approval_instance_id ?? undefined,
+                        request_type: 'LEAVE',
+                        request_label: r.id,
+                        request_title: r.leave_type_name ?? r.leave_type_id,
+                      },
+                    })
+                  }
+                />
               ))}
             </View>
           )}

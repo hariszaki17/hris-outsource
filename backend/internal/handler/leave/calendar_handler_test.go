@@ -5,7 +5,7 @@
 //
 //	GET /leave-calendar → 200 {period, month, show_pending, entries[]}
 //	  - show_pending=false → only APPROVED entries
-//	  - show_pending=true  → entries include PENDING_L1 / PENDING_HR
+//	  - show_pending=true  → entries include PENDING (collapsed; E11 owns the chain)
 //	  - shift_leader with a cross-company company_id → 403 OUT_OF_SCOPE
 package leave_test
 
@@ -25,7 +25,7 @@ import (
 func TestCalendar_ShapeAndApprovedOnly(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	h.seedCalendarEntry("SWP-LR-8005", cmpLed, empAgent, dom.LeaveStatusApproved, ymd(2026, time.June, 15), ymd(2026, time.June, 17))
-	h.seedCalendarEntry("SWP-LR-8002", cmpLed, empAgent, dom.LeaveStatusPendingHR, ymd(2026, time.June, 20), ymd(2026, time.June, 22))
+	h.seedCalendarEntry("SWP-LR-8002", cmpLed, empAgent, dom.LeaveStatusPending, ymd(2026, time.June, 20), ymd(2026, time.June, 22))
 
 	rr := h.do("GET", "/leave-calendar?period=2026&month=6", nil)
 	if rr.Code != http.StatusOK {
@@ -63,8 +63,8 @@ func TestCalendar_ShapeAndApprovedOnly(t *testing.T) {
 func TestCalendar_ShowPendingToggle(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	h.seedCalendarEntry("SWP-LR-8005", cmpLed, empAgent, dom.LeaveStatusApproved, ymd(2026, time.June, 15), ymd(2026, time.June, 17))
-	h.seedCalendarEntry("SWP-LR-8002", cmpLed, "SWP-EMP-3002", dom.LeaveStatusPendingHR, ymd(2026, time.June, 20), ymd(2026, time.June, 22))
-	h.seedCalendarEntry("SWP-LR-8001", cmpLed, "SWP-EMP-3003", dom.LeaveStatusPendingL1, ymd(2026, time.June, 25), ymd(2026, time.June, 26))
+	h.seedCalendarEntry("SWP-LR-8002", cmpLed, "SWP-EMP-3002", dom.LeaveStatusPending, ymd(2026, time.June, 20), ymd(2026, time.June, 22))
+	h.seedCalendarEntry("SWP-LR-8001", cmpLed, "SWP-EMP-3003", dom.LeaveStatusPending, ymd(2026, time.June, 25), ymd(2026, time.June, 26))
 
 	rr := h.do("GET", "/leave-calendar?period=2026&month=6&show_pending=true", nil)
 	if rr.Code != http.StatusOK {
@@ -75,15 +75,15 @@ func TestCalendar_ShowPendingToggle(t *testing.T) {
 		t.Errorf("show_pending = false, want true")
 	}
 	entries := body["entries"].([]any)
-	// APPROVED + PENDING_HR + PENDING_L1 all included.
+	// APPROVED + both PENDING entries included (statuses collapsed to PENDING).
 	if len(entries) != 3 {
-		t.Fatalf("entries = %d, want 3 (APPROVED + 2 pending)", len(entries))
+		t.Fatalf("entries = %d, want 3 (APPROVED + 2 PENDING)", len(entries))
 	}
 	seen := map[string]bool{}
 	for _, raw := range entries {
 		seen[raw.(map[string]any)["status"].(string)] = true
 	}
-	for _, want := range []string{"APPROVED", "PENDING_HR", "PENDING_L1"} {
+	for _, want := range []string{"APPROVED", "PENDING"} {
 		if !seen[want] {
 			t.Errorf("show_pending=true missing a %s entry", want)
 		}

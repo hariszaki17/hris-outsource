@@ -93,8 +93,9 @@ type LeaveRepository interface {
 	UpdateLeaveRequestStatus(ctx context.Context, tx pgx.Tx, p UpdateStatusParams) (dom.LeaveRequest, error)
 	UpdateLeaveRequestDates(ctx context.Context, tx pgx.Tx, id string, start, end time.Time, durationDays int) (dom.LeaveRequest, error)
 
-	InsertLeaveApproval(ctx context.Context, tx pgx.Tx, p ApprovalRow) (dom.LeaveApproval, error)
-	ListLeaveApprovalsForRequest(ctx context.Context, id string) ([]dom.LeaveApproval, error)
+	// SetApprovalInstanceID links the freshly-created E11 ApprovalInstance to the
+	// request (called inside the submit tx after engine.CreateInstance).
+	SetApprovalInstanceID(ctx context.Context, tx pgx.Tx, id, instanceID string) error
 
 	GetLeaveType(ctx context.Context, id string) (LeaveTypeInfo, error)
 
@@ -150,19 +151,6 @@ type CreateLeaveRequestParams struct {
 	NoLeader         bool
 	AssignedLeaderID *string
 	CreatedBy        *string
-}
-
-// ApprovalRow carries one leave_approvals decision-trail insert.
-type ApprovalRow struct {
-	LeaveRequestID string
-	Stage          dom.LeaveStage
-	Decision       dom.LeaveDecision
-	ActorID        *string
-	ActorRole      *string
-	DecisionNote   *string
-	RejectReason   *string
-	IsOverride     bool
-	OverrideReason *string
 }
 
 // --- quota repository port ---

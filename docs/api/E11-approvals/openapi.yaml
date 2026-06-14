@@ -1,0 +1,500 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource · E11 Approvals API
+  version: 1.0.0
+  description: |
+    OpenAPI spec for **E11 — Approvals** (configurable per-company multi-line approval
+    engine). Replaces the hardcoded `shift_leader → HR/lead` routing in E6/E7 and the
+    removed E2 profile change-request approval.
+
+    > **Inherits from** `docs/api/CONVENTIONS.md` (v1, 2026-06-03). Anything not stated
+    > here defers to that doc (auth, pagination, error envelope, idempotency, RBAC, audit,
+    > timestamps, rate limiting). If this spec contradicts CONVENTIONS.md, **CONVENTIONS.md
+    > wins**.
+
+    ## Scope
+
+    | Resource | Endpoints |
+    |---|---|
+    | `/client-companies/{companyId}/approval-template` | Per-company template upsert/read/delete (F11.1). |
+    | `/approval-instances` | List (incl. `?mine=true` inbox), detail (F11.3). |
+    | `/approval-instances/{id}:approve` / `:reject` / `:bypass` | Execution actions (F11.2). |
+
+    ## Model (EPICS §8 E11, 2026-06-14)
+
+    - **One template per company**, 2–3 ordered lines; line 3 optional. Each line is an
+      **OR-set** of users (any one approval clears it); lines clear **in sequence**.
+    - **Routing is by line membership**, not by a `*.approve` permission. `super_admin`
+      may **bypass** (force-approve) any instance; **no template → super-admin fallback**.
+    - **Self-approval blocked** (requester cannot clear a line they're on; sole-member line
+      → bypass only). **Reject is terminal.**
+    - **Live template + pending reset:** editing a template bumps `version` and resets all
+      non-terminal instances for that company to line 1 (no per-instance snapshot).
+    - On terminal approval the engine fires the request type's side-effect hook
+      (leave: commit quota + schedule integration; overtime: count by day-type) — those
+      side-effects live in E6/E7, not here.
+
+    ## NOT in this spec
+
+    - **Leave / overtime request CRUD** — E6 `/leave-requests`, E7 `/overtime`. Submitting
+      one of those *creates* an `ApprovalInstance`; the domain spec references this engine.
+    - **Notifications** (E10), **audit log** (E1).
+  contact:
+    name: hris-outsource product+engineering
+    email: hris-team@swp.example.com
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: approval-templates
+    description: Per-company approval template management (F11.1). HR/super-admin only.
+  - name: approval-instances
+    description: Running approvals — inbox listing, detail, and execution actions (F11.2/F11.3).
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────────────────────────────────────────────────────────
+  # /client-companies/{companyId}/approval-template  (F11.1)
+  # ───────────────────────────────────────────────────────────────────────────
+  /client-companies/{companyId}/approval-template:
+    parameters:
+      - $ref: '#/components/parameters/companyId'
+    get:
+      operationId: getApprovalTemplate
+      tags: [approval-templates]
+      summary: Get a company's approval template
+      description: |
+        Returns the company's template (lines + members). `404 NOT_FOUND` if none is
+        configured — the company then uses the super-admin fallback (TM-7 / INV-7).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # TODO Phase B: E11 web template-editor frame id
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalTemplate' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: upsertApprovalTemplate
+      tags: [approval-templates]
+      summary: Create or replace a company's approval template
+      description: |
+        Upsert the company's template. Full replacement of lines + members.
+        Validates ≥2 lines and each line ≥1 **active** member (TM-2/TM-3); bumps `version`
+        and **resets all non-terminal instances** for the company to line 1 (TM-6 / INV-6).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []  # TODO Phase B
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalTemplateUpsert' }
+            example:
+              lines:
+                - members: [SWP-USR-3001, SWP-USR-3002]   # Rudi OR Sari
+                - members: [SWP-USR-1001]                  # Sari Hadi (HR)
+      responses:
+        '200':
+          description: Template created/updated; returns the new version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalTemplate' }
+        '400':
+          description: Fewer than 2 lines, or malformed body.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: An empty line or an inactive/offboarded member (APPROVAL_LINE_INVALID).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: deleteApprovalTemplate
+      tags: [approval-templates]
+      summary: Delete a company's approval template
+      description: |
+        Removes the template; the company reverts to the super-admin fallback (TM-7).
+        Pending instances reset accordingly (INV-6).
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens: []
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # /approval-instances  (F11.3 inbox + F11.2 detail/actions)
+  # ───────────────────────────────────────────────────────────────────────────
+  /approval-instances:
+    get:
+      operationId: listApprovalInstances
+      tags: [approval-instances]
+      summary: List approval instances (inbox + per-domain)
+      description: |
+        Cursor-paginated. With `mine=true` returns the **inbox** (IB-1): non-terminal
+        instances whose **current line** includes the caller and where the caller is **not**
+        the requester (INV-3), within the caller's data scope. Without `mine`, returns
+        instances in scope (per-domain approval tabs use `request_type` + `status` filters).
+      x-rbac:
+        roles: [hr_admin, super_admin, lead, shift_leader]
+        scope: company_or_global
+      x-design-screens: []  # TODO Phase B: web Kotak Masuk + mobile inbox frame ids
+      parameters:
+        - $ref: '#/components/parameters/cursor'
+        - $ref: '#/components/parameters/limit'
+        - name: mine
+          in: query
+          description: Inbox mode — only current-line instances the caller can act on.
+          schema: { type: boolean, default: false }
+        - name: request_type
+          in: query
+          schema: { $ref: '#/components/schemas/RequestType' }
+        - name: company_id
+          in: query
+          schema: { type: string, example: SWP-CMP-014 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/InstanceStatus' }
+      responses:
+        '200':
+          description: Page of instances.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApprovalInstance' }
+                  next_cursor: { type: [string, 'null'] }
+                  has_more: { type: boolean }
+
+  /approval-instances/{id}:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    get:
+      operationId: getApprovalInstance
+      tags: [approval-instances]
+      summary: Get an instance with its chain timeline
+      description: |
+        Returns the instance, its resolved chain (lines + members), and the append-only
+        `actions` trail (approve/reject/bypass), for the request-detail timeline (IB-4).
+      x-rbac:
+        roles: [hr_admin, super_admin, lead, shift_leader, agent]
+        scope: company_or_global   # requester (self) may also read their own
+      x-design-screens: []
+      responses:
+        '200':
+          description: Instance with chain + actions.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalInstanceDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /approval-instances/{id}:approve:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    post:
+      operationId: approveApprovalInstance
+      tags: [approval-instances]
+      summary: Approve the current line
+      description: |
+        The caller must be a member of the instance's **current** line and **not** the
+        requester (EX-2/EX-4). Clears the line (OR) and advances; the last line clearing
+        finalizes the request and fires the type's `OnApproved` hook (EX-3/EX-7).
+      x-rbac:
+        roles: [hr_admin, super_admin, lead, shift_leader, agent]   # membership decides, not role
+        scope: company_or_global
+      x-design-screens: []
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, description: Optional approval note. }
+      responses:
+        '200':
+          description: Advanced or finalized; returns the updated instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalInstance' }
+        '403':
+          description: Caller is not a current-line member, or is the requester (self-approval, INV-3).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Line already cleared / instance terminal (LINE_ALREADY_CLEARED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /approval-instances/{id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    post:
+      operationId: rejectApprovalInstance
+      tags: [approval-instances]
+      summary: Reject (terminal) the current line
+      description: |
+        Any current-line member may reject; **reason required**. Moves the instance to
+        `REJECTED` and fires `OnRejected` (EX-5 / INV-4).
+      x-rbac:
+        roles: [hr_admin, super_admin, lead, shift_leader, agent]
+        scope: company_or_global
+      x-design-screens: []
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionReason' }
+      responses:
+        '200':
+          description: Rejected; returns the updated instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalInstance' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /approval-instances/{id}:bypass:
+    parameters:
+      - $ref: '#/components/parameters/instanceId'
+    post:
+      operationId: bypassApprovalInstance
+      tags: [approval-instances]
+      summary: Super-admin bypass (force-approve)
+      description: |
+        Force-approve the instance from any non-terminal state, skipping all remaining
+        lines even if the caller is not a member; **reason required**. Records a `BYPASS`
+        action and finalizes as approved, firing `OnApproved` (EX-6 / INV-5).
+      x-rbac:
+        roles: [super_admin]
+        scope: global
+      x-design-screens: []
+      parameters:
+        - $ref: '#/components/parameters/idempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionReason' }
+      responses:
+        '200':
+          description: Bypassed → approved; returns the updated instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalInstance' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 50, maximum: 200 }
+    idempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, format: uuid }
+    companyId:
+      name: companyId
+      in: path
+      required: true
+      schema: { type: string, example: SWP-CMP-014 }
+    instanceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: SWP-APV-7781 }
+
+  responses:
+    NotFound:
+      description: Not found (or no visibility).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Not a current-line member, or self-approval.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Instance terminal or line already cleared.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    RequestType:
+      type: string
+      enum: [LEAVE, OVERTIME]
+      description: Request types routed through the engine in v1. Generic — new types opt in.
+
+    InstanceStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+
+    ApprovalTemplate:
+      type: object
+      required: [id, company_id, version, lines]
+      properties:
+        id: { type: string, example: SWP-APT-014 }
+        company_id: { type: string, example: SWP-CMP-014 }
+        version: { type: integer, example: 3, description: Bumped on every edit (INV-6). }
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 3
+          items: { $ref: '#/components/schemas/ApprovalLine' }
+        created_by: { type: string, example: SWP-USR-1001 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ApprovalLine:
+      type: object
+      required: [id, line_no, members]
+      properties:
+        id: { type: string, example: SWP-APL-221 }
+        line_no: { type: integer, minimum: 1, maximum: 3, example: 1 }
+        members:
+          type: array
+          minItems: 1
+          description: OR-set — any one member's approval clears the line (INV-2).
+          items: { $ref: '#/components/schemas/LineMember' }
+
+    LineMember:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, example: SWP-USR-3001 }
+        display_name: { type: string, example: Rudi Wijaya, readOnly: true }
+        active: { type: boolean, readOnly: true, description: Employment not ended (TM-3). }
+
+    ApprovalTemplateUpsert:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 2
+          maxItems: 3
+          description: Ordered lines (index 0 = line 1). Each needs ≥1 active member.
+          items:
+            type: object
+            required: [members]
+            properties:
+              members:
+                type: array
+                minItems: 1
+                items: { type: string, description: User id (SWP-USR-*). }
+
+    ApprovalInstance:
+      type: object
+      required: [id, request_type, request_id, company_id, current_line, status]
+      properties:
+        id: { type: string, example: SWP-APV-7781 }
+        request_type: { $ref: '#/components/schemas/RequestType' }
+        request_id: { type: string, example: SWP-LR-1042, description: FK into the domain request. }
+        company_id: { type: string, example: SWP-CMP-014 }
+        template_id:
+          type: [string, 'null']
+          example: SWP-APT-014
+          description: Null when on the super-admin fallback (INV-7).
+        template_version: { type: integer, example: 3 }
+        current_line: { type: integer, example: 1, description: 1-based; line being decided. }
+        line_count: { type: integer, example: 2 }
+        status: { $ref: '#/components/schemas/InstanceStatus' }
+        requester_id: { type: string, example: SWP-EMP-1042 }
+        summary:
+          type: string
+          readOnly: true
+          example: "Cuti tahunan 3 hari · 12–14 Jul"
+          description: Domain request summary for inbox rendering.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ApprovalInstanceDetail:
+      allOf:
+        - $ref: '#/components/schemas/ApprovalInstance'
+        - type: object
+          properties:
+            lines:
+              type: array
+              description: Resolved chain for the timeline (current version).
+              items: { $ref: '#/components/schemas/ApprovalLine' }
+            actions:
+              type: array
+              description: Append-only decision trail (INV-9).
+              items: { $ref: '#/components/schemas/ApprovalAction' }
+
+    ApprovalAction:
+      type: object
+      required: [id, line_no, action, actor_user_id, created_at]
+      properties:
+        id: { type: string, example: SWP-APA-9920 }
+        line_no: { type: integer, example: 1 }
+        template_version: { type: integer, example: 3 }
+        actor_user_id: { type: string, example: SWP-USR-3001 }
+        actor_name: { type: string, readOnly: true, example: Rudi Wijaya }
+        action: { type: string, enum: [APPROVE, REJECT, BYPASS] }
+        reason:
+          type: [string, 'null']
+          description: Required for REJECT and BYPASS.
+        created_at: { type: string, format: date-time }
+
+    DecisionReason:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, example: "Coverage tidak mencukupi minggu ini." }
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: |
+                Cross-cutting (CONVENTIONS §11) + E11 codes:
+                `APPROVAL_LINE_INVALID` (422), `LINE_ALREADY_CLEARED` (409),
+                `SELF_APPROVAL_FORBIDDEN` (403), `NO_TEMPLATE` (informational; fallback used).
+              example: LINE_ALREADY_CLEARED
+            message: { type: string }
+            fields:
+              type: object
+              additionalProperties: { type: string }
+            request_id: { type: string }

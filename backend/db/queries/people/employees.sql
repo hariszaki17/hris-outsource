@@ -180,14 +180,23 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           status, created_by, created_at, updated_at;
 
 -- name: UpdateEmployeeSelfInstant :one
--- EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
--- fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
--- when the caller passes NULL, so partial patches don't clobber the other fields.
+-- EP-5 agent self-service instant apply (PATCH /me/profile). E11 removed the
+-- change-request approval queue: phone / emergency contact / bank fields are now
+-- instant self-edit too (alongside address, app_language, photo_object_key).
+-- COALESCE keeps a column unchanged when the caller passes NULL, so partial patches
+-- don't clobber the other fields. Phone uniqueness is enforced in the Go service
+-- layer, not here.
 UPDATE employees
-SET address          = COALESCE(sqlc.narg(address), address),
-    app_language     = COALESCE(sqlc.narg(app_language), app_language),
-    photo_object_key = COALESCE(sqlc.narg(photo_object_key), photo_object_key),
-    updated_at       = now()
+SET address                  = COALESCE(sqlc.narg(address), address),
+    app_language             = COALESCE(sqlc.narg(app_language), app_language),
+    photo_object_key         = COALESCE(sqlc.narg(photo_object_key), photo_object_key),
+    phone                    = COALESCE(sqlc.narg(phone), phone),
+    emergency_contact_name   = COALESCE(sqlc.narg(emergency_contact_name), emergency_contact_name),
+    emergency_contact_phone  = COALESCE(sqlc.narg(emergency_contact_phone), emergency_contact_phone),
+    bank_name                = COALESCE(sqlc.narg(bank_name), bank_name),
+    bank_account_number      = COALESCE(sqlc.narg(bank_account_number), bank_account_number),
+    bank_account_holder_name = COALESCE(sqlc.narg(bank_account_holder_name), bank_account_holder_name),
+    updated_at               = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,

@@ -19,6 +19,7 @@ SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
        ot.overtime_rule_id, ot.holiday_id, ot.flagged_no_preapproval, ot.reason,
+       ot.approval_instance_id,
        ot.created_by, ot.created_at, ot.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name
@@ -53,6 +54,7 @@ type GetOvertimeRow struct {
 	HolidayID            *string
 	FlaggedNoPreapproval bool
 	Reason               *string
+	ApprovalInstanceID   *string
 	CreatedBy            *string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -88,6 +90,7 @@ func (q *Queries) GetOvertime(ctx context.Context, id string) (GetOvertimeRow, e
 		&i.HolidayID,
 		&i.FlaggedNoPreapproval,
 		&i.Reason,
+		&i.ApprovalInstanceID,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -336,54 +339,6 @@ func (q *Queries) InsertOvertime(ctx context.Context, arg InsertOvertimeParams) 
 	return i, err
 }
 
-const insertOvertimeApproval = `-- name: InsertOvertimeApproval :one
-INSERT INTO overtime_approvals (
-    overtime_id, level, decision, approver_id, approver_name, reason
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6
-)
-RETURNING id, overtime_id, level, decision, approver_id, approver_name, reason, decided_at
-`
-
-type InsertOvertimeApprovalParams struct {
-	OvertimeID   string
-	Level        int32
-	Decision     string
-	ApproverID   *string
-	ApproverName *string
-	Reason       *string
-}
-
-// One immutable decision-trail row per approval action (L1/HR approve, override,
-// reject) — written in-tx with each transition.
-func (q *Queries) InsertOvertimeApproval(ctx context.Context, arg InsertOvertimeApprovalParams) (OvertimeApproval, error) {
-	row := q.db.QueryRow(ctx, insertOvertimeApproval,
-		arg.OvertimeID,
-		arg.Level,
-		arg.Decision,
-		arg.ApproverID,
-		arg.ApproverName,
-		arg.Reason,
-	)
-	var i OvertimeApproval
-	err := row.Scan(
-		&i.ID,
-		&i.OvertimeID,
-		&i.Level,
-		&i.Decision,
-		&i.ApproverID,
-		&i.ApproverName,
-		&i.Reason,
-		&i.DecidedAt,
-	)
-	return i, err
-}
-
 const listOvertime = `-- name: ListOvertime :many
 
 SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
@@ -392,6 +347,7 @@ SELECT ot.id, ot.employee_id, ot.company_id, ot.placement_id, ot.attendance_id,
        ot.status, ot.day_type, ot.worked_minutes, ot.counted_minutes,
        ot.min_minutes_threshold, ot.skipped_too_short, ot.reference_multiplier,
        ot.overtime_rule_id, ot.holiday_id, ot.flagged_no_preapproval, ot.reason,
+       ot.approval_instance_id,
        ot.created_by, ot.created_at, ot.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name
@@ -455,6 +411,7 @@ type ListOvertimeRow struct {
 	HolidayID            *string
 	FlaggedNoPreapproval bool
 	Reason               *string
+	ApprovalInstanceID   *string
 	CreatedBy            *string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -516,6 +473,7 @@ func (q *Queries) ListOvertime(ctx context.Context, arg ListOvertimeParams) ([]L
 			&i.HolidayID,
 			&i.FlaggedNoPreapproval,
 			&i.Reason,
+			&i.ApprovalInstanceID,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -532,42 +490,23 @@ func (q *Queries) ListOvertime(ctx context.Context, arg ListOvertimeParams) ([]L
 	return items, nil
 }
 
-const listOvertimeApprovals = `-- name: ListOvertimeApprovals :many
-SELECT oa.id, oa.overtime_id, oa.level, oa.decision, oa.approver_id, oa.approver_name,
-       oa.reason, oa.decided_at
-FROM overtime_approvals oa
-WHERE oa.overtime_id = $1
-ORDER BY oa.decided_at ASC, oa.id ASC
+const setOvertimeApprovalInstanceID = `-- name: SetOvertimeApprovalInstanceID :exec
+UPDATE overtime
+SET approval_instance_id = $1,
+    updated_at           = now()
+WHERE id = $2
+  AND deleted_at IS NULL
 `
 
-// The approval timeline for GET /overtime/{id} (Overtime.approvals[]), chronological.
-func (q *Queries) ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]OvertimeApproval, error) {
-	rows, err := q.db.Query(ctx, listOvertimeApprovals, overtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []OvertimeApproval{}
-	for rows.Next() {
-		var i OvertimeApproval
-		if err := rows.Scan(
-			&i.ID,
-			&i.OvertimeID,
-			&i.Level,
-			&i.Decision,
-			&i.ApproverID,
-			&i.ApproverName,
-			&i.Reason,
-			&i.DecidedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+type SetOvertimeApprovalInstanceIDParams struct {
+	ApprovalInstanceID *string
+	ID                 string
+}
+
+// E11 linkage: bind an OT record to its governing approval instance.
+func (q *Queries) SetOvertimeApprovalInstanceID(ctx context.Context, arg SetOvertimeApprovalInstanceIDParams) error {
+	_, err := q.db.Exec(ctx, setOvertimeApprovalInstanceID, arg.ApprovalInstanceID, arg.ID)
+	return err
 }
 
 const updateOvertimeStatus = `-- name: UpdateOvertimeStatus :one

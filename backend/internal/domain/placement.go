@@ -41,6 +41,12 @@ type Placement struct {
 	ClientCompanyName *string
 	SiteName          *string
 	AgreementType     *string
+	// Site geofence (E2 Site, F2.6), denormalized via the client_sites LEFT JOIN.
+	// Lets the agent mobile app compute live distance to the work point pre-clock.
+	// All nil when the site has no geofence configured (geo_lat/geo_lng NULL).
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
 	// Warnings are non-blocking soft warnings attached at write time (not persisted).
 	Warnings []string
 }

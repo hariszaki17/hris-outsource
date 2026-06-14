@@ -18,7 +18,6 @@ import { getAuthenticationMock } from './gen/e1/authentication/authentication.ms
 import { getPlatformMock } from './gen/e1/platform/platform.msw.ts';
 import { getUsersMock } from './gen/e1/users/users.msw.ts';
 import { getAgreementsMock } from './gen/e2/agreements/agreements.msw.ts';
-import { getChangeRequestsMock } from './gen/e2/change-requests/change-requests.msw.ts';
 import { getClientCompaniesMock } from './gen/e2/client-companies/client-companies.msw.ts';
 import { getEmployeesMock } from './gen/e2/employees/employees.msw.ts';
 import { getMasterDataMock } from './gen/e2/master-data/master-data.msw.ts';
@@ -45,9 +44,20 @@ import { getDashboardsMock } from './gen/e10/dashboards/dashboards.msw.ts';
 import { getExportsMock } from './gen/e10/exports/exports.msw.ts';
 import { getNotificationsMock } from './gen/e10/notifications/notifications.msw.ts';
 import { getReportsMock } from './gen/e10/reports/reports.msw.ts';
+// E11 Approvals: the generated handlers (getApprovalInstancesMock/getApprovalTemplatesMock)
+// are STATELESS faker fixtures — replaced by the hand-authored stateful layer below so e2e
+// can drive real approve/reject/bypass/template flows. The stateful module also OVERRIDES the
+// auth login + /me (email→role), GET /employees (line-member picker), and one seeded
+// GET /leave-requests/:id (E6→E11 linkage). It is placed FIRST so MSW (first match wins)
+// routes those paths to it; everything else still falls through to the generated handlers.
+import { getE11StatefulHandlers } from './e11-stateful-mocks.ts';
 
 // E6 handlers omitted: mocks deferred for E6 (WEB-STACK §4 caveat). Add here once wired.
 export const handlers: RequestHandler[] = [
+  // E11 stateful overrides — MUST be first (first match wins). Covers /auth/login, /auth/me,
+  // /employees, the per-company approval-template CRUD, the approval-instance lifecycle, and
+  // the one seeded leave-request linkage. See e11-stateful-mocks.ts.
+  ...getE11StatefulHandlers(),
   // E1 Foundations
   ...getAuthenticationMock(),
   ...getUsersMock(),
@@ -55,7 +65,6 @@ export const handlers: RequestHandler[] = [
   ...getPlatformMock(),
   // E2 Identity / Karyawan & Master Data
   ...getEmployeesMock(),
-  ...getChangeRequestsMock(),
   ...getAgreementsMock(),
   ...getClientCompaniesMock(),
   ...getPeopleMock(),
@@ -89,4 +98,7 @@ export const handlers: RequestHandler[] = [
   ...getNotificationsMock(),
   ...getReportsMock(),
   ...getExportsMock(),
+  // E11 Approvals: served by the stateful layer at the TOP of this array (the generated
+  // getApprovalTemplatesMock()/getApprovalInstancesMock() are intentionally NOT included —
+  // they are stateless faker fixtures superseded by e11-stateful-mocks.ts).
 ];

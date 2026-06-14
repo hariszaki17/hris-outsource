@@ -5,15 +5,58 @@ package people
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/storage"
 )
+
+// ---------------------------------------------------------------------------
+// Shared test helpers (previously in change_requests_service_test.go, removed in
+// E11 when the change-request approval surface was hard-deleted).
+// ---------------------------------------------------------------------------
+
+// errCode extracts the apperr.Error machine code ("" if not an *apperr.Error).
+func errCode(err error) string {
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		return ae.Code
+	}
+	return ""
+}
+
+// crTx is a minimal pgx.Tx whose Exec is a no-op (audit.Record calls Exec).
+type crTx struct{}
+
+func (crTx) Begin(context.Context) (pgx.Tx, error) { return crTx{}, nil }
+func (crTx) Commit(context.Context) error          { return nil }
+func (crTx) Rollback(context.Context) error        { return nil }
+func (crTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+func (crTx) Query(context.Context, string, ...any) (pgx.Rows, error) { panic("Query") }
+func (crTx) QueryRow(context.Context, string, ...any) pgx.Row        { panic("QueryRow") }
+func (crTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	panic("CopyFrom")
+}
+func (crTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { panic("SendBatch") }
+func (crTx) LargeObjects() pgx.LargeObjects                         { panic("LargeObjects") }
+func (crTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	panic("Prepare")
+}
+func (crTx) Conn() *pgx.Conn { return nil }
+
+// crTxRunner runs the body with a no-op tx (commit-on-success semantics implicit).
+type crTxRunner struct{}
+
+func (crTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error { return fn(crTx{}) }
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -22,10 +65,13 @@ import (
 // selfRepo is an in-memory SelfProfileRepository that records the instant patch.
 type selfRepo struct {
 	employees map[string]domain.Employee
+	takenPhones map[string]bool // E.164 phones already used by some login
 	lastPatch *UpdateEmployeeSelfInstantParams
 }
 
-func newSelfRepo() *selfRepo { return &selfRepo{employees: map[string]domain.Employee{}} }
+func newSelfRepo() *selfRepo {
+	return &selfRepo{employees: map[string]domain.Employee{}, takenPhones: map[string]bool{}}
+}
 
 func (r *selfRepo) GetEmployeeByID(_ context.Context, id string) (domain.Employee, error) {
 	e, ok := r.employees[id]
@@ -33,6 +79,10 @@ func (r *selfRepo) GetEmployeeByID(_ context.Context, id string) (domain.Employe
 		return domain.Employee{}, domain.ErrNotFound
 	}
 	return e, nil
+}
+
+func (r *selfRepo) UserPhoneTaken(_ context.Context, phone string) (bool, error) {
+	return r.takenPhones[phone], nil
 }
 
 func (r *selfRepo) UpdateEmployeeSelfInstant(_ context.Context, _ pgx.Tx, p UpdateEmployeeSelfInstantParams) (domain.Employee, error) {
@@ -47,6 +97,24 @@ func (r *selfRepo) UpdateEmployeeSelfInstant(_ context.Context, _ pgx.Tx, p Upda
 	}
 	if p.PhotoObjectKey != nil {
 		e.PhotoObjectKey = p.PhotoObjectKey
+	}
+	if p.Phone != nil {
+		e.Phone = p.Phone
+	}
+	if p.EmergencyContactName != nil {
+		e.EmergencyContact.Name = *p.EmergencyContactName
+	}
+	if p.EmergencyContactPhone != nil {
+		e.EmergencyContact.Phone = *p.EmergencyContactPhone
+	}
+	if p.BankName != nil {
+		e.BankAccount.BankName = *p.BankName
+	}
+	if p.BankAccountNumber != nil {
+		e.BankAccount.AccountNumber = *p.BankAccountNumber
+	}
+	if p.BankAccountHolderName != nil {
+		e.BankAccount.AccountHolderName = *p.BankAccountHolderName
 	}
 	e.UpdatedAt = time.Now().UTC()
 	r.employees[p.ID] = e
@@ -133,6 +201,94 @@ func TestUpdateMyProfile_InstantApply(t *testing.T) {
 	// The instant patch reached the repo (audited write path executed).
 	if repo.lastPatch == nil {
 		t.Fatal("instant patch not applied to repo")
+	}
+}
+
+// E11: phone + emergency_contact + bank_account apply INSTANTLY (no approval
+// queue / no pending state). Asserts the repo patch carried every field and the
+// phone was normalized to E.164.
+func TestUpdateMyProfile_PhoneEmergencyBank_Instant(t *testing.T) {
+	svc, repo, _ := newSelfService(t)
+	repo.employees["SWP-EMP-S5"] = domain.Employee{ID: "SWP-EMP-S5", AppLanguage: "id"}
+
+	phone := "0812-3456-7890"
+	updated, err := svc.UpdateMyProfile(agentCtx("SWP-EMP-S5"), SelfProfileInput{
+		Phone: &phone,
+		EmergencyContact: &domain.EmergencyContact{Name: "Budi", Phone: "081299998888"},
+		BankAccount: &domain.BankAccount{
+			BankName: "BCA", AccountNumber: "1234567890", AccountHolderName: "Agent S5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMyProfile err = %v", err)
+	}
+
+	p := repo.lastPatch
+	if p == nil {
+		t.Fatal("instant patch not applied to repo")
+	}
+	if p.Phone == nil || *p.Phone != "+6281234567890" {
+		t.Errorf("patch phone = %v, want normalized +6281234567890", p.Phone)
+	}
+	if p.EmergencyContactName == nil || *p.EmergencyContactName != "Budi" {
+		t.Errorf("patch emergency name = %v, want Budi", p.EmergencyContactName)
+	}
+	if p.EmergencyContactPhone == nil || *p.EmergencyContactPhone != "081299998888" {
+		t.Errorf("patch emergency phone = %v, want 081299998888", p.EmergencyContactPhone)
+	}
+	if p.BankName == nil || *p.BankName != "BCA" {
+		t.Errorf("patch bank_name = %v, want BCA", p.BankName)
+	}
+	if p.BankAccountNumber == nil || *p.BankAccountNumber != "1234567890" {
+		t.Errorf("patch account_number = %v, want 1234567890", p.BankAccountNumber)
+	}
+	if p.BankAccountHolderName == nil || *p.BankAccountHolderName != "Agent S5" {
+		t.Errorf("patch account_holder_name = %v, want Agent S5", p.BankAccountHolderName)
+	}
+	// Returned employee reflects the applied values immediately (instant).
+	if updated.Phone == nil || *updated.Phone != "+6281234567890" {
+		t.Errorf("updated phone = %v, want +6281234567890", updated.Phone)
+	}
+	if updated.EmergencyContact.Name != "Budi" {
+		t.Errorf("updated emergency name = %q, want Budi", updated.EmergencyContact.Name)
+	}
+	if updated.BankAccount.BankName != "BCA" {
+		t.Errorf("updated bank_name = %q, want BCA", updated.BankAccount.BankName)
+	}
+}
+
+// A phone already taken by another login → 409 CONFLICT, never an approval tier.
+func TestUpdateMyProfile_PhoneTaken_Conflict(t *testing.T) {
+	svc, repo, _ := newSelfService(t)
+	repo.employees["SWP-EMP-S6"] = domain.Employee{ID: "SWP-EMP-S6"}
+	repo.takenPhones["+6281234567890"] = true
+
+	phone := "081234567890"
+	_, err := svc.UpdateMyProfile(agentCtx("SWP-EMP-S6"), SelfProfileInput{Phone: &phone})
+	if code := errCode(err); code != "CONFLICT" {
+		t.Errorf("taken phone code = %q, want CONFLICT", code)
+	}
+	// No write reached the repo on the conflict path.
+	if repo.lastPatch != nil {
+		t.Errorf("expected no repo write on phone conflict, got %+v", repo.lastPatch)
+	}
+}
+
+// An unchanged phone (same E.164 as the current value) is neither re-checked for
+// uniqueness nor rewritten — confirms the guard only fires on an actual change.
+func TestUpdateMyProfile_PhoneUnchanged_NoConflictCheck(t *testing.T) {
+	svc, repo, _ := newSelfService(t)
+	cur := "+6281234567890"
+	repo.employees["SWP-EMP-S7"] = domain.Employee{ID: "SWP-EMP-S7", Phone: &cur}
+	repo.takenPhones["+6281234567890"] = true // would 409 if the guard ran
+
+	same := "081234567890" // normalizes to the current phone
+	_, err := svc.UpdateMyProfile(agentCtx("SWP-EMP-S7"), SelfProfileInput{Phone: &same})
+	if err != nil {
+		t.Fatalf("unchanged phone err = %v", err)
+	}
+	if repo.lastPatch == nil || repo.lastPatch.Phone != nil {
+		t.Errorf("patch phone = %v, want nil (unchanged → not rewritten)", repo.lastPatch)
 	}
 }
 

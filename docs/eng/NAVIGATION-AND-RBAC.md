@@ -32,9 +32,10 @@ role by **permission-keyed visibility**, plus one cross-cutting **Inbox** for th
    `Karyawan` is people (agents) only; `Klien & Perjanjian` is its own module; `Penempatan` stays
    first-class (the product differentiator); pure reference/config moves to **Settings → Master Data**.
 2. **Cross-cut = `Kotak Masuk` (Inbox)** — the aggregated "needs my decision" queue (leave +
-   overtime + attendance + change requests). It is a **view**, not a second queue: it reads the
-   same data the per-domain approval tabs show (**single source of truth**). Both surfaces exist
-   ("inbox + per-domain", decided 2026-06-03).
+   overtime approvals via the **E11 engine**, plus attendance verification). It is a **view**, not a
+   second queue: it reads the same data the per-domain approval tabs show (**single source of
+   truth**). Both surfaces exist ("inbox + per-domain", decided 2026-06-03). *(Profile change-requests
+   were removed 2026-06-14 — they no longer appear here; E11 approval items are membership-routed.)*
 3. **Visibility is permission-keyed, never role-keyed.** Nav items declare a capability
    `requires`; the shell filters against the user's effective `permissions`. Role is just a
    bundle of permissions. Adding/editing a role is a **data** change, not code.
@@ -57,7 +58,7 @@ Order matches `comp/Sidebar` `iCqTB` and `NAV_ITEMS`:
 | # | Module | Route | `requires` |
 |---|--------|-------|-----------|
 | 1 | Dashboard | `/` | `dashboard.view` |[^db7]
-| 2 | **Kotak Masuk** | `/inbox` | *any of* `leave.approve` · `overtime.approve` · `attendance.verify` · `change_requests.approve` |
+| 2 | **Kotak Masuk** | `/inbox` | *any of* `approvals.act` · `attendance.verify` |
 | 3 | Karyawan | `/employees` | `employees.read` |
 | 4 | Penempatan | `/placements` | `placements.read` |
 | 5 | **Klien & Perjanjian** | `/client-companies` | *any of* `clients.read` · `agreements.read` |
@@ -79,7 +80,7 @@ per-role *outcome* (a shift leader sees ~8; a future finance role would see ~3),
 Rendered only when a section has **>1 permitted tab** for the user. Detail/create routes inherit
 their section.
 
-- **Karyawan** → Employees · Change requests
+- **Karyawan** → Employees *(Change requests tab removed 2026-06-14 — profile edits are instant; single tab → plain page)*
 - **Klien & Perjanjian** → Client companies · Agreements
 - **Jadwal Shift** → Schedule · Shift masters *(→ Settings, see §3.4)*
 - **Kehadiran** → Attendance · Corrections
@@ -110,8 +111,11 @@ sidebar active-state). Follow-up: move these under `/settings/*` and relocate ov
 The catalog lives in `packages/shared/src/rbac.ts` (`PERMISSIONS`, type `Permission`). Granularity
 is **`module.action`** (decided 2026-06-03) so one vocabulary gates both nav items and in-screen
 buttons: `employees.read`/`.write`, `leave.read`/`.approve`, `payroll.read`/`.export`,
-`change_requests.read`/`.approve` (+ HR-only `change_requests.approve.bank`),
-`settings.roles.manage`, `masterdata.manage`, etc.
+`approvals.template.manage` (HR/super-admin — E11 template CRUD) · `approvals.act` (inbox
+visibility; **acting on a line is membership-gated server-side**, E11 INV-3) · `approvals.bypass`
+(super-admin force-approve), `settings.roles.manage`, `masterdata.manage`, etc.
+*(The `change_requests.*` keys, incl. `.approve.bank`, were removed 2026-06-14 — profile edits are
+instant; configurable approval lives in E11.)*
 
 A **role is a named bundle** of permissions (`ROLE_PERMISSIONS`). The UI checks
 `hasPermission(user.permissions, requires)` — never `role === '…'`. Requirements may be a single
@@ -123,21 +127,24 @@ is replaced by it with **no consumer changes**.
 
 Interim role bundles:
 
-- **super_admin** — all permissions (incl. `settings.roles.manage`).
-- **hr_admin** — all except `settings.roles.manage` (super admin owns the access model).
+- **super_admin** — all permissions (incl. `settings.roles.manage`, `approvals.template.manage`,
+  `approvals.bypass`).
+- **hr_admin** — all except `settings.roles.manage` (super admin owns the access model); includes
+  `approvals.template.manage` (not `approvals.bypass` — bypass is super-admin only).
 - **shift_leader** — `dashboard.view`, `employees.read`, `placements.read`, `schedule.read/.write`,
-  `attendance.read/.verify`, `leave.read/.approve`, `overtime.read/.approve`,
-  `change_requests.read/.approve` (**not** `.approve.bank`). No clients,
+  `attendance.read/.verify`, `leave.read`, `overtime.read`, `approvals.act` (sees the inbox; can
+  approve only requests where they're on the current E11 line). No clients,
   contracts, payroll, reports, master data, or settings.
 - **lead** *(2026-06-12)* — company-scoped operational approver over a set of assigned client companies:
   `dashboard.view`, `employees.read`, `placements.read/.write` (placement lifecycle:
   create/transfer/end/renew — **not** shift-leader-assignment, **not** placement master edits),
-  `schedule.read/.write`, `attendance.read/.verify`, `leave.read/.approve` (final/L2),
-  `overtime.read/.approve` (final/L2), `change_requests.read/.approve` (**not** `.approve.bank` —
-  bank-account changes escalate to HR). No clients, contracts, payroll, reports, master data, or
-  settings. Note: lead does **not** do L1 leave/overtime approval (that stays `shift_leader`; lead is
-  the L2/final approver scoped to the agent's company) and **cannot** add employees (tambah karyawan),
-  run payroll, write master data, or assign shift-leaders (SLA).
+  `schedule.read/.write`, `attendance.read/.verify`, `leave.read`, `overtime.read`, `approvals.act`
+  (sees the inbox; approves only requests where they're on the current E11 line). No clients,
+  contracts, payroll, reports, master data, or settings. **Cannot** add employees (tambah karyawan),
+  run payroll, write master data, or assign shift-leaders (SLA). *(2026-06-14: lead/shift_leader
+  approval is no longer role-derived L1/L2 — both are routed by E11 line membership; either may be
+  placed on a company's template lines. Supersedes the 2026-06-12 lead-as-L2 / shift_leader-as-L1
+  model.)*
 - **agent** — the `self.*` self-service bundle: `self.dashboard`, `self.attendance`, `self.schedule`,
   `self.leave`, `self.overtime`, `self.profile`, `self.payslip`. *(Updated 2026-06-10: agents now
   have a **web self-service console** under `/me/*` — reverses the prior "none (mobile-only)". The
@@ -145,13 +152,14 @@ Interim role bundles:
   the two surfaces stay cleanly separated. Ratified EPICS §8; full spec:
   [AGENT-WEB-ACCESS.md](./AGENT-WEB-ACCESS.md).)*
 
-**Change-request approval is split by sensitivity** *(2026-06-11).* `change_requests.approve` covers
-non-sensitive fields (phone, emergency contact); **bank-account** changes need the HR-only
-`change_requests.approve.bank` (fraud/payroll risk). A request mixing both is **partially actionable**:
-a shift leader approves the non-bank fields, and the **bank field escalates to HR** (stays pending
-until an `change_requests.approve.bank` holder acts) — it never silently applies. The Inbox review UI
-disables the bank-field action and shows "Perlu HR" for approvers without the sub-permission. (F2.1
-EP-5c/EP-5d.)
+**Profile change-request approval removed; approval is now the E11 engine** *(2026-06-14).* The
+`change_requests.*` keys (incl. `.approve.bank`) and the profile-edit approval queue are **deleted** —
+agent edits to phone, emergency contact, and bank account are **instant self-edit** (F2.1 EP-5). The
+only configurable approval is **E11**: leave/overtime route through a **per-company template** of
+ordered lines (any-one-of OR within a line, sequential across lines). **Eligibility to approve a
+specific request is line membership**, server-enforced — *not* a `*.approve` permission. `approvals.act`
+gates only inbox **visibility**; `approvals.template.manage` (HR/super-admin) gates template CRUD;
+`approvals.bypass` (super-admin) force-approves with a reason. (E11 F11.1/F11.2/F11.3.)
 
 ### 4.2 Scope axis — data rows (server-only) ✅
 

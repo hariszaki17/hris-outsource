@@ -326,7 +326,7 @@ flowchart TD
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **Login provisioning** = opt-in at create (provisionable later).
 - ✅ **Geofence** = per-site `geofence_radius_m` (default 100m) — *(superseded 2026-06-03: relocated from ClientCompany onto the new `Site` entity, see below).*
-- ✅ **Agent self-editable fields** *(tiers resolved 2026-06-11, F2.1)* — **instant (no approval):** photo, address, app language; **approval-required:** phone, emergency contact, bank; **read-only:** statutory/terms (NIK, name, NPWP, BPJS, placement, contract, comp). Approval-tier edits become **change requests** routed to the unified **Inbox** via `change_requests.approve` (shift leader default, HR fallback — same model as leave/OT). **Bank** changes are split to the HR-only sub-permission `change_requests.approve.bank` — SL approves non-bank fields, bank escalates to HR. EP-5/EP-5c/EP-5d.
+- ✅ **Agent self-editable fields — all instant, no approval** *(reworked 2026-06-14, EPICS §8 E11 — supersedes the 2026-06-11 two-tier model)* — **instant (no approval):** photo, address, app language, **phone, emergency contact, bank account** (phone keeps its uniqueness check); **read-only:** statutory/terms (NIK, name, NPWP, BPJS, placement, contract, comp). The **profile change-request feature is removed** — no `SWP-CHG`, no `change_requests.*` (incl. `.approve.bank`), no Inbox profile-review, no bank-escalation split. The only configurable approval engine is **E11** (leave/overtime). EP-5/EP-5b.
 
 **Resolved (2026-06-03) — Client Sites (EPICS §8):**
 - ✅ **Sites are first-class** (reverses "flat, no sub-sites"): ClientCompany 1→N `Site`; geofence (address, lat/lng, radius) **moves off ClientCompany onto Site** (INV-5, F2.6).

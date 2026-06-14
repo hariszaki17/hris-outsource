@@ -186,7 +186,7 @@ Remaining masters → components:
 - [x] Daftar Karyawan — list + stat cards + tabs + filters + row-kebab + **SL scoped** · `→ employees-screen.tsx` · frames `WElYh`,`n3wi1w`
 - [x] Karyawan Detail — Profil + cross-epic tabs (Penempatan/Kehadiran/Cuti&Lembur deep-links) + SL read-only · `→ employee-detail-screen.tsx` · frames `JBjBb`,`rtKzk`
 - [x] Tambah/Edit Karyawan — form (RHF + hand-zod) + overlays · `→ employee-form.tsx`,`employee-overlays.tsx` · frame `h6bDz`,`tNMfN`
-- [x] HR change-request queue + detail drawer + reject modal · `→ change-requests-screen.tsx`,`change-request-overlays.tsx` · frame `Ckteo`
+- [~] ~~HR change-request queue + detail drawer + reject modal~~ — **REMOVED 2026-06-14 (EPICS §8 E11):** profile edits are instant self-edit; no approval queue. Delete `change-requests-screen.tsx` + `change-request-overlays.tsx` + frame `Ckteo`. Replaced by **E11 approval-template + inbox screens** (new — see E11 design pass below).
 - [x] **F2.2 Employment Agreement** — list · detail · create (PKWT/PKWTT) · renew · close · `→ agreements-screen.tsx`,`agreement-detail-screen.tsx`,`agreement-form.tsx` · frames `mS8rP`,`Cu0qg`,`gxqjg`
 - [x] **F2.3 Client Company** — list (row action = Aktifkan/Nonaktifkan only, **no row kebab**) · detail (**Profil** tab = statutory/billing + `leader_scope`; **Lokasi & Site** tab owns geofence_radius_m editor + map placeholder + geofence-disabled banner D11 — Profil no longer duplicates sites/geofence) · create + **full-page edit from detail** (`/client-companies/$id/edit`; **no edit drawer**) · `→ client-companies-screen.tsx`,`client-company-detail-screen.tsx`,`client-company-form.tsx` · frames `qIpsj`,`OmuQT`,`ZmJnZ`,`oYgYe` *(EditClientCompanyDrawer removed 2026-06-07, EPICS §8)*
 - [x] **F2.5 Operational Master Data** — hub + Leave Types · Attendance Codes (color+flags) · Overtime Rules (30-min min) CRUD + modals · `→ master-data-hub-screen.tsx`,`leave-types-screen.tsx`,`attendance-codes-screen.tsx`,`overtime-rules-screen.tsx` · frames `f8mBr`,`HII8C`,`R5xoi`,`SnXpE`,`rMNJT`,`u8eXaW`,`JYmgi`
@@ -262,13 +262,31 @@ Remaining masters → components:
 > lost. Roles: agent (all), shift_leader (D7 — leader mobile surfaces are designed and in-scope).
 
 - [ ] E1 mobile: Login (`Y09E0`) + Gagal (`XouNm`) + Terkunci (`PiWlc`) + Akun nonaktif (`YG9jg`) · forgot/reset · profile/Pengaturan
-- [ ] E2 mobile: agent profile view/edit (phone/address/bank → change request)
+- [~] E2 mobile: agent profile view/edit — **instant self-edit done** (phone/address/bank/emergency/language via `PATCH /me/profile`, no approval/change-request) · `→ app/profile-edit.tsx` (replaces deleted `profile-change-request.tsx`); `profile-status.tsx` deleted. *(photo upload control still pending — no `.pen` frame; `photo_object_key` path exists)*
 - [ ] E4 mobile: agent week schedule (F4.3) + shift reminders
 - [ ] E5 mobile: clock-in/out (F5.1) + variants (clock-out · out-of-geofence · unscheduled · GPS-unavailable) · agent attendance history/detail · **SL verification queue + detail**
 - [ ] E6 mobile: agent leave request + status (F6.2) · **SL leave queue + detail**
 - [ ] E7 mobile: agent OT request/confirm (F7.2) + OT detail bottom-sheet · **SL OT approval**
 - [ ] E8 mobile: agent payslip history + summary (F8.1)
 - [ ] E10 mobile: agent Beranda/dashboard + empty · **SL Beranda** (`UMzuO`, DB-8 — reuses `LeaderDashboard` from `useGetMyDashboard`, no new endpoint) + notifications + combined inbox · SLMobileNav (`fdVo7`)
+
+### E11 Approvals (NEW — 2026-06-14, replaces the removed change-request screens) · build web first, then mobile
+
+**Web:** *(all built 2026-06-14, contract-first off `docs/api/E11-approvals/openapi.yaml`)*
+- [x] F11.1 Approval Template editor (per client company) — ordered lines (2–3, line 3 optional) + per-line OR-set member multi-select (reuses `EmployeePicker`) + save → pending-reset confirm · homed as "Template Persetujuan" tab in `client-company-detail-screen.tsx`, route `/client-companies/$clientCompanyId/approval-template`, gated `approvals.template.manage` · `→ features/e11-approvals/approval-template-editor-screen.tsx` + `approval-template-line-card.tsx` · frames `d7tFAM` + `uoTwN`
+- [x] F11.3 Approval Inbox (Kotak Masuk) — `listApprovalInstances({mine:true})`, "Baris N/M", row Setujui/Tolak, empty+filtered-zero · mounted at `/inbox` · `→ features/e11-approvals/approval-inbox-screen.tsx` + `approval-inbox-overlays.tsx` · frame `yv7Gs` (reject reuses `comp/ModalReject` `EnabP`)
+- [x] F11.2 Request-detail **chain-progress timeline** (lines · members · actions · OR-clearer · current-line highlight) + approve/reject (reason) + **super-admin bypass** modal (reason) · route `/approval-instances/$instanceId` · `→ features/e11-approvals/approval-detail-screen.tsx` + `approval-chain-timeline.tsx` + `bypass-modal.tsx` · frames `OHseV` + `KT3Jz` + `EnabP`
+- [x] Removed web `change-requests-screen.tsx` + `change-request-overlays.tsx` (frame `Ckteo`) + Karyawan "Change requests" subnav tab + `change_requests.*` RBAC keys (added `approvals.template.manage`/`approvals.act`/`approvals.bypass`; `lead` role added to frontend union)
+- [x] Wired E6/E7 approval onto the engine — leave/OT detail+approval screens read `approval_instance_id` → E11 `:approve/:reject/:bypass`; old L1/Final/Override/bulk hooks removed; status collapsed (E6 `PENDING|APPROVED|REJECTED|CANCELLED`, E7 `+PENDING_AGENT_CONFIRM`). ⚠️ **bulk-OT approve/reject dropped** (no E11 bulk op in v1 — flagged for product)
+
+**Mobile:** *(built 2026-06-14)*
+- [x] F11.3 Approver inbox (on-site line members) + approve/reject bottom sheet (mini chain progress) — reworked `sl-verifikasi.tsx` to membership-routed E11 `listApprovalInstances({mine:true})`; **E5 attendance-verification queue preserved** as a "Kehadiran" segment toggle · `→ app/(app)/sl-verifikasi.tsx` + `src/ui/ApprovalActionSheet.tsx` · frames `DxK66` + `viUFF`
+- [x] Leave/OT **status timeline** shows the line chain (not L1/L2) — agent read-only chain screen, navigated from `leave.tsx`/`overtime.tsx` rows via `approval_instance_id` · `→ app/approval-status.tsx` + `src/ui/ApprovalChain.tsx` · frame `PGrLa`
+- [x] Agent profile edit instant (removed "menunggu persetujuan"/change-request states) · `→ app/profile-edit.tsx`
+
+> **G0:** built from `brainstorm.pen` E11 frames via Pencil MCP (frame ids cited above per screen).
+> **Pending:** mobile visual-QA of the 3 new screens on the iOS sim per `frontend/apps/mobile/VISUAL-QA.md` (not yet run).
+> **Contract gaps surfaced to product (2026-06-14):** (1) E11 v1 has no bulk-approve op — E7 PRD OA-7 still asserts bulk; reconcile. (2) `ApprovalInstance` carries only `requester_id`/`company_id` (no name/label) — inbox cards render ids until a name resolver / `requester_name` lands.
 
 ---
 

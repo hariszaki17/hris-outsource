@@ -47,8 +47,12 @@ function StatTile({
 }: { value: number; label: string; textClass: string }) {
   return (
     <View className="flex-1 items-center gap-0.5 rounded-[10px] bg-surface-2 p-2">
-      <Text className={`text-[19px] font-sans-bold ${textClass}`}>{String(value)}</Text>
-      <Text className="text-xs font-sans-medium text-text-2">{label}</Text>
+      <Text variant="cardTitle" className={textClass}>
+        {String(value)}
+      </Text>
+      <Text variant="caption" weight="medium" className="text-text-2">
+        {label}
+      </Text>
     </View>
   );
 }
@@ -59,10 +63,10 @@ function HariIniCard({ today }: { today: LeaderDashboardToday }) {
   return (
     <SectionCard>
       <View className="flex-row items-center justify-between">
-        <Text className="text-sm font-sans-semibold text-text">
-          {t('m:leaderBeranda.sectionToday')}
+        <Text variant="strong">{t('m:leaderBeranda.sectionToday')}</Text>
+        <Text variant="caption" weight="medium" className="text-text-2">
+          {formatDate(today.date)}
         </Text>
-        <Text className="text-xs font-sans-medium text-text-2">{formatDate(today.date)}</Text>
       </View>
 
       <View className="flex-row gap-2">
@@ -90,10 +94,10 @@ function HariIniCard({ today }: { today: LeaderDashboardToday }) {
 
       {today.pending_verifications > 0 ? (
         <View className="flex-row items-center justify-between rounded-input bg-warn-bg px-2.5 py-2">
-          <Text className="text-xs font-sans-medium text-warn-text">
+          <Text variant="caption" weight="medium" className="text-warn-text">
             {t('m:leaderBeranda.pendingVerif')}
           </Text>
-          <Text className="text-xs font-sans-bold text-warn-text">
+          <Text variant="caption" weight="bold" className="text-warn-text">
             {String(today.pending_verifications)}
           </Text>
         </View>
@@ -108,7 +112,9 @@ function CountChip({ count, tone }: { count: number; tone: 'warn' | 'bad' | 'inf
   const textClass = { warn: 'text-warn-text', bad: 'text-bad-text', info: 'text-info-text' }[tone];
   return (
     <View className={`rounded-pill px-2 py-0.5 ${bgClass}`}>
-      <Text className={`text-xs font-sans-semibold ${textClass}`}>{String(count)}</Text>
+      <Text variant="caption" weight="semibold" className={textClass}>
+        {String(count)}
+      </Text>
     </View>
   );
 }
@@ -132,7 +138,9 @@ function ActionRow({
       onPress={onPress}
       className={`flex-row items-center justify-between py-2 ${divider ? 'border-t border-border-soft' : ''}`}
     >
-      <Text className="text-[13px] font-sans-medium text-text">{label}</Text>
+      <Text variant="secondary" weight="medium" className="text-text">
+        {label}
+      </Text>
       <View className="flex-row items-center gap-2">
         <CountChip count={count} tone={tone} />
         <ChevronRight size={16} color={color.text2} />
@@ -168,21 +176,19 @@ function PerluTindakanCard({ pending }: { pending: LeaderDashboardPendingCounts 
 
   return (
     <SectionCard>
-      <Text className="text-sm font-sans-semibold text-text">
-        {t('m:leaderBeranda.sectionAction')}
-      </Text>
+      <Text variant="strong">{t('m:leaderBeranda.sectionAction')}</Text>
       <View>
-          {rows.map((r, i) => (
-            <ActionRow
-              key={r.route}
-              label={r.label}
-              count={r.count}
-              tone={r.tone}
-              divider={i > 0}
-              onPress={() => router.push(r.route)}
-            />
-          ))}
-        </View>
+        {rows.map((r, i) => (
+          <ActionRow
+            key={r.route}
+            label={r.label}
+            count={r.count}
+            tone={r.tone}
+            divider={i > 0}
+            onPress={() => router.push(r.route)}
+          />
+        ))}
+      </View>
     </SectionCard>
   );
 }
@@ -214,9 +220,13 @@ function AlertRow({
     >
       <TriangleAlert size={16} color={iconColor} />
       <View className="flex-1 gap-px">
-        <Text className={`text-xs font-sans-semibold ${textClass}`}>{alert.label}</Text>
+        <Text variant="caption" weight="semibold" className={textClass}>
+          {alert.label}
+        </Text>
         {alert.date ? (
-          <Text className={`text-[11px] font-sans-medium ${textClass}`}>{formatDate(alert.date)}</Text>
+          <Text variant="badge" weight="medium" className={textClass}>
+            {formatDate(alert.date)}
+          </Text>
         ) : null}
       </View>
     </Pressable>
@@ -230,9 +240,7 @@ function PeringatanJadwalCard({ alerts }: { alerts: LeaderDashboardScheduleAlert
 
   return (
     <SectionCard>
-      <Text className="text-sm font-sans-semibold text-text">
-        {t('m:leaderBeranda.sectionAlerts')}
-      </Text>
+      <Text variant="strong">{t('m:leaderBeranda.sectionAlerts')}</Text>
       {alerts.length === 0 ? (
         <Text variant="caption" className="text-text-3">
           {t('m:leaderBeranda.alertsEmpty')}
@@ -277,13 +285,15 @@ export default function LeaderBerandaScreen() {
         style={{ paddingTop: insets.top + 8 }}
       >
         <View className="flex-row items-center justify-between">
-          <Text className="text-[22px] font-sans-bold text-text">{t('m:leaderBeranda.title')}</Text>
+          <Text variant="section">{t('m:leaderBeranda.title')}</Text>
           <Pressable onPress={() => router.push('/notifications')} hitSlop={8}>
             <Bell size={24} color={color.text2} />
           </Pressable>
         </View>
         {leaderData ? (
-          <Text className="text-[13px] font-sans-medium text-text-2">{leaderData.company.name}</Text>
+          <Text variant="secondary" weight="medium" className="text-text-2">
+            {leaderData.company.name}
+          </Text>
         ) : null}
       </View>
 

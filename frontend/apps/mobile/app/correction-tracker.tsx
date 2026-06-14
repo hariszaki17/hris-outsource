@@ -7,15 +7,12 @@
  *   [Semua 5][Pending 2][Disetujui 2][Ditolak 1]   — filter tabs
  *   List of correction cards: type, date, time arrow, id, status badge, Detail >
  */
-import {
-  type Correction,
-  type CorrectionPage,
-  useListCorrections,
-} from '@swp/api-client/e5';
+import { type Correction, type CorrectionPage, useListCorrections } from '@swp/api-client/e5';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../src/ui/Card';
 import { StatusBadge } from '../src/ui/StatusBadge';
 import { Text } from '../src/ui/Text';
@@ -72,14 +69,14 @@ function dateLabel(iso: string): string {
 function corrStatusBadge(status: string): { bStatus: string; label: string } {
   switch (status) {
     case 'PENDING':
-      return { bStatus: 'LATE', label: 'Pending' };       // warn tone
+      return { bStatus: 'LATE', label: 'Pending' }; // warn tone
     case 'APPROVED':
     case 'APPLIED':
-      return { bStatus: 'PRESENT', label: 'Disetujui' };  // ok/teal tone
+      return { bStatus: 'PRESENT', label: 'Disetujui' }; // ok/teal tone
     case 'REJECTED':
-      return { bStatus: 'ABSENT', label: 'Ditolak' };     // bad tone
+      return { bStatus: 'ABSENT', label: 'Ditolak' }; // bad tone
     case 'CANCELLED':
-      return { bStatus: 'ABSENT', label: 'Dibatalkan' };  // bad tone
+      return { bStatus: 'ABSENT', label: 'Dibatalkan' }; // bad tone
     default:
       return { bStatus: 'INCOMPLETE', label: status };
   }
@@ -132,9 +129,11 @@ function CorrectionRow({ item }: { item: Correction }) {
       {/* Top row: icon + type label + date + status badge */}
       <View className="flex-row items-start justify-between">
         <View className="flex-row items-center gap-2 flex-1">
-          <Text className="text-text-3 font-bold">{icon}</Text>
+          <Text variant="body" weight="bold" className="text-text-3">
+            {icon}
+          </Text>
           <View className="flex-1">
-            <Text variant="body" className="font-semibold text-text">
+            <Text variant="strong" className="text-text">
               {typeLabel}
             </Text>
             <Text variant="caption" className="text-text-3">
@@ -146,21 +145,25 @@ function CorrectionRow({ item }: { item: Correction }) {
       </View>
 
       {/* Time arrow */}
-      <Text className="mt-1.5 text-text-2 text-sm">{timeArrow}</Text>
+      <Text variant="body" className="mt-1.5 text-text-2">
+        {timeArrow}
+      </Text>
 
       {/* ID + detail link */}
       <View className="mt-2 flex-row items-center justify-between border-t border-border pt-2">
-        <Text variant="caption" className="font-mono text-text-3 text-xs">
+        <Text variant="caption" mono className="text-text-3">
           {item.id}
         </Text>
         <Pressable
-          onPress={() =>
-            router.push({ pathname: '/correction-detail', params: { id: item.id } })
-          }
+          onPress={() => router.push({ pathname: '/correction-detail', params: { id: item.id } })}
           className="flex-row items-center gap-1"
         >
-          <Text className="text-primary text-sm font-semibold">Detail</Text>
-          <Text className="text-primary text-sm">›</Text>
+          <Text variant="strong" className="text-primary">
+            Detail
+          </Text>
+          <Text variant="body" className="text-primary">
+            ›
+          </Text>
         </Pressable>
       </View>
     </Card>
@@ -172,6 +175,7 @@ function CorrectionRow({ item }: { item: Correction }) {
 export default function CorrectionTrackerScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<FilterKey>('ALL');
 
   const list = useListCorrections(undefined);
@@ -189,73 +193,80 @@ export default function CorrectionTrackerScreen() {
   };
 
   return (
-    <ScrollView className="flex-1 bg-app-bg" contentContainerStyle={{ padding: 16, gap: 12 }}>
-      {/* Filter tabs */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 8 }}
-        className="-mx-4 px-4"
-      >
-        {FILTERS.map((f) => {
-          const active = activeFilter === f.key;
-          return (
-            <Pressable
-              key={f.key}
-              onPress={() => setActiveFilter(f.key)}
-              className={`flex-row items-center gap-1.5 rounded-pill border px-3 py-1.5 ${
-                active ? 'border-text bg-text' : 'border-border bg-surface'
-              }`}
-            >
-              <Text
-                className={`text-sm font-semibold ${active ? 'text-surface' : 'text-text-2'}`}
-              >
-                {f.label}
-              </Text>
-              <Text
-                className={`text-xs font-bold ${active ? 'text-surface' : 'text-text-3'}`}
-              >
-                {counts[f.key]}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      {/* List */}
-      {list.isLoading ? (
-        <View className="items-center py-10">
-          <ActivityIndicator />
-        </View>
-      ) : list.isError ? (
-        <Card>
-          <Text className="text-danger">{t('m:common.errorGeneric')}</Text>
-        </Card>
-      ) : filtered.length === 0 ? (
-        <Card>
-          <Text variant="caption" className="text-text-3">
-            {t('m:koreksi.empty')}
-          </Text>
-        </Card>
-      ) : (
-        <View className="gap-3">
-          {filtered.map((item) => (
-            <CorrectionRow key={item.id} item={item} />
-          ))}
-        </View>
-      )}
-
-      {/* New correction CTA */}
-      <Pressable
-        className="items-center py-3"
-        onPress={() =>
-          router.push({ pathname: '/correction' })
-        }
-      >
-        <Text className="text-primary font-semibold">
-          {t('m:koreksi.ajukan')}
+    <View className="flex-1 bg-app-bg">
+      {/* Header */}
+      <View className="px-4 pb-2" style={{ paddingTop: insets.top + 8 }}>
+        <Text variant="screenTitle" className="text-text">
+          {t('m:koreksi.trackerTitle')}
         </Text>
-      </Pressable>
-    </ScrollView>
+      </View>
+
+      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }}>
+        {/* Filter tabs */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8 }}
+          className="-mx-4 px-4"
+        >
+          {FILTERS.map((f) => {
+            const active = activeFilter === f.key;
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => setActiveFilter(f.key)}
+                className={`flex-row items-center gap-1.5 rounded-pill border px-3 py-1.5 ${
+                  active ? 'border-text bg-text' : 'border-border bg-surface'
+                }`}
+              >
+                <Text variant="strong" className={active ? 'text-surface' : 'text-text-2'}>
+                  {f.label}
+                </Text>
+                <Text
+                  variant="caption"
+                  weight="bold"
+                  className={active ? 'text-surface' : 'text-text-3'}
+                >
+                  {counts[f.key]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* List */}
+        {list.isLoading ? (
+          <View className="items-center py-10">
+            <ActivityIndicator />
+          </View>
+        ) : list.isError ? (
+          <Card>
+            <Text className="text-danger">{t('m:common.errorGeneric')}</Text>
+          </Card>
+        ) : filtered.length === 0 ? (
+          <Card>
+            <Text variant="caption" className="text-text-3">
+              {t('m:koreksi.empty')}
+            </Text>
+          </Card>
+        ) : (
+          <View className="gap-3">
+            {filtered.map((item) => (
+              <CorrectionRow key={item.id} item={item} />
+            ))}
+          </View>
+        )}
+
+        {/* New correction CTA */}
+        <Pressable
+          className="items-center py-3"
+          onPress={() => router.push({ pathname: '/correction' })}
+        >
+          <Text variant="strong" className="text-primary">
+            {t('m:koreksi.ajukan')}
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </View>
   );
 }

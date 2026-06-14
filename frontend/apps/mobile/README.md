@@ -36,3 +36,12 @@ pnpm --filter @swp/mobile start      # Expo dev server
 pnpm --filter @swp/mobile typecheck  # tsc --noEmit (also via turbo run typecheck)
 pnpm --filter @swp/mobile doctor     # expo-doctor
 ```
+
+## Visual QA / screenshots (design audits)
+
+To run the app on an iOS simulator and screenshot screens for comparison against
+`docs/design/brainstorm.pen`, follow **[VISUAL-QA.md](./VISUAL-QA.md)** — a copy-paste runbook.
+Short version: **web is broken (use the iOS Simulator)**, boot the sim, `expo start --go --ios`,
+install Expo Go, open screens via `exp://127.0.0.1:<port>/--/<route>` deep links, capture with
+`xcrun simctl io booted screenshot`. The runbook also covers the dev-menu overlay dismissal and
+the param-state-sticks gotcha.

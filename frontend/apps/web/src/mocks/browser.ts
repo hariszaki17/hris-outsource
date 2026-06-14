@@ -1,3 +1,4 @@
+import { resetE11Store } from '@swp/api-client/e11-stateful-mocks';
 import { handlers } from '@swp/api-client/mocks';
 import { setupWorker } from 'msw/browser';
 
@@ -7,3 +8,9 @@ import { setupWorker } from 'msw/browser';
  * Requires the service worker file: `pnpm dlx msw init public/ --save`.
  */
 export const worker = setupWorker(...handlers);
+
+// E2E test helper: let Playwright reset the stateful E11 approval store between specs so each
+// scenario starts from the deterministic seed without a full page reload. No-op in prod.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __resetE11?: () => void }).__resetE11 = resetE11Store;
+}

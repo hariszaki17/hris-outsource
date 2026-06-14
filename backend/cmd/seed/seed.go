@@ -238,19 +238,6 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	}
 
 	// -----------------------------------------------------------------------
-	// Phase 4 (04-04) + EP-5 redesign (2026-06-11): Seed pending change-requests.
-	// FK: change_requests → employees (must run AFTER seedEmployees); the SL
-	// company-scope routing also relies on seedPlacements (run later) placing the
-	// submitter at a client company. Three PENDING CRs:
-	//   SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone+bank)  → SL out-of-company 403
-	//   SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone+bank)  → SL bank-split → HR finalize
-	//   SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only → SL/HR full approve / reject
-	// -----------------------------------------------------------------------
-	if err := seedChangeRequests(ctx, pool); err != nil {
-		return fmt.Errorf("seed change_requests: %w", err)
-	}
-
-	// -----------------------------------------------------------------------
 	// Phase 5 (05-02): Seed placements + shift-leader assignment (E3).
 	// FK: placements → employees / agreements / client_companies / client_sites
 	// (must run AFTER seedAgreements + seedClientCompanies). Position is now
@@ -290,8 +277,10 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	// (web/HR/leader APPROVAL targets; agent CREATE is mobile-only / out of web
 	// scope). Runs AFTER seedScheduling so SWP-SCH-6002 exists to overlap for the
 	// INV-3 loop-closer E2E. FK: leave_requests → employees/placements/companies/
-	// leave_types; leave_quotas → employees/leave_types; leave_approvals →
-	// leave_requests. Idempotent (ON CONFLICT (id) DO NOTHING / NOT EXISTS guard).
+	// leave_types; leave_quotas → employees/leave_types. The E11 approval engine
+	// (templates/lines/members/instances) is seeded later in seedApprovals once
+	// both leave_requests + overtime exist. Idempotent (ON CONFLICT (id) DO
+	// NOTHING / NOT EXISTS guard).
 	// -----------------------------------------------------------------------
 	if err := seedLeave(ctx, pool); err != nil {
 		return fmt.Errorf("seed leave: %w", err)
@@ -311,6 +300,20 @@ func Seed(ctx context.Context, pool *db.Pool) error {
 	}
 	if err := seedOvertime(ctx, pool); err != nil {
 		return fmt.Errorf("seed overtime: %w", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// Phase 11 (E11 Approvals engine): Seed the configurable approval template for
+	// SWP-CMP-0021 (Plaza Senayan) + its 2 lines + members, then an approval
+	// instance per PENDING leave_request / overtime row at that company, and link
+	// the request rows back via approval_instance_id. Replaces the retired
+	// leave_approvals / overtime_approvals / change_requests decision-trail seeds.
+	// FK: approval_templates → client_companies (seeded earlier); members →
+	// users (seeded in the persona loop); instances reference leave_requests +
+	// overtime (must run AFTER seedLeave + seedOvertime). Idempotent.
+	// -----------------------------------------------------------------------
+	if err := seedApprovals(ctx, pool); err != nil {
+		return fmt.Errorf("seed approvals: %w", err)
 	}
 
 	// -----------------------------------------------------------------------
@@ -453,16 +456,18 @@ func seedHolidays(ctx context.Context, pool *db.Pool) error {
 // safe). Placements: Dewi=SWP-PL-5004 @ CMP-0021, Rudi=SWP-PL-5001 @ CMP-0021 (his
 // OWN → SELF_APPROVAL_FORBIDDEN), Budi=SWP-PL-5002 @ CMP-0022 (OUT_OF_SCOPE for Rudi).
 //
-// Rows:
+// Rows (E11 collapsed the OT two-level approval levels into a single
+// engine-driven PENDING; WITHDRAWN folded into CANCELLED; the line being decided
+// is carried by the seeded approval_instance, not the status):
 //   - SWP-OT-30001 PENDING_AGENT_CONFIRM AUTO_DETECTED @ CMP-0021 (confirm target)
-//   - SWP-OT-30002 PENDING_L1 WORKDAY @ CMP-0021 (Rudi L1 target)
-//   - SWP-OT-30003 PENDING_HR @ CMP-0021 (HR final target)
-//   - SWP-OT-30004 PENDING_L1 Rudi's OWN record (SELF_APPROVAL_FORBIDDEN)
-//   - SWP-OT-30005 PENDING_L1 @ CMP-0022 (OUT_OF_SCOPE for Rudi)
-//   - SWP-OT-30006 PENDING_L1 counted<30 skipped_too_short (OT_BELOW_MIN target)
+//   - SWP-OT-30002 PENDING WORKDAY @ CMP-0021 (SL inbox target)
+//   - SWP-OT-30003 PENDING @ CMP-0021 (engine line-2 / HR target)
+//   - SWP-OT-30004 PENDING Rudi's OWN record (SELF_APPROVAL_FORBIDDEN)
+//   - SWP-OT-30005 PENDING @ CMP-0022 (OUT_OF_SCOPE for Rudi)
+//   - SWP-OT-30006 PENDING counted<30 skipped_too_short (OT_BELOW_MIN target)
 //   - SWP-OT-30007 APPROVED + SWP-OT-30008 REJECTED (terminal list-filter rows)
 //   - SWP-OT-30009 HOLIDAY APPROVED referencing SWP-HOL-9001 (HOLIDAY_IN_USE source)
-//   - SWP-OT-30010 RESTDAY PENDING_L1 @ CMP-0021
+//   - SWP-OT-30010 RESTDAY PENDING @ CMP-0021
 func seedOvertime(ctx context.Context, pool *db.Pool) error {
 	monday := mondayOfCurrentWeek(time.Now())
 	d := func(off int) string { return monday.AddDate(0, 0, off).Format("2006-01-02") }
@@ -502,23 +507,23 @@ func seedOvertime(ctx context.Context, pool *db.Pool) error {
 		// NULL (no seeded SWP-ATT row to satisfy the FK; the web confirm flow does
 		// not depend on the linked attendance record).
 		{"SWP-OT-30001", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-1), s("17:00"), s("19:30"), "AUTO_DETECTED", "PENDING_AGENT_CONFIRM", "WORKDAY", 150, 150, false, 1.5, nil, false, nil},
-		// L1 target (Rudi approves Dewi).
-		{"SWP-OT-30002", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-1), s("17:00"), s("20:32"), "REQUESTED", "PENDING_L1", "WORKDAY", 212, 210, false, 1.5, nil, false, s("Cover rekan absen.")},
-		// HR final target.
-		{"SWP-OT-30003", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-2), s("17:00"), s("19:00"), "REQUESTED", "PENDING_HR", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur rutin.")},
+		// SL inbox target (Rudi decides line 1 on Dewi's OT).
+		{"SWP-OT-30002", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-1), s("17:00"), s("20:32"), "REQUESTED", "PENDING", "WORKDAY", 212, 210, false, 1.5, nil, false, s("Cover rekan absen.")},
+		// Engine line-2 / HR target.
+		{"SWP-OT-30003", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-2), s("17:00"), s("19:00"), "REQUESTED", "PENDING", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur rutin.")},
 		// SELF_APPROVAL_FORBIDDEN target: Rudi's OWN OT.
-		{"SWP-OT-30004", "SWP-EMP-1108", "SWP-CMP-0021", "SWP-PL-5001", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING_L1", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur leader sendiri.")},
+		{"SWP-OT-30004", "SWP-EMP-1108", "SWP-CMP-0021", "SWP-PL-5001", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur leader sendiri.")},
 		// OUT_OF_SCOPE target for Rudi: CMP-0022.
-		{"SWP-OT-30005", "SWP-EMP-2891", "SWP-CMP-0022", "SWP-PL-5002", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING_L1", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur di perusahaan lain.")},
+		{"SWP-OT-30005", "SWP-EMP-2891", "SWP-CMP-0022", "SWP-PL-5002", nil, d(-1), s("17:00"), s("19:00"), "REQUESTED", "PENDING", "WORKDAY", 120, 120, false, 1.5, nil, false, s("Lembur di perusahaan lain.")},
 		// OT_BELOW_MIN target: counted < 30, skipped_too_short.
-		{"SWP-OT-30006", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-3), s("17:00"), s("17:20"), "REQUESTED", "PENDING_L1", "WORKDAY", 20, 0, true, 1.5, nil, false, s("Lembur singkat.")},
+		{"SWP-OT-30006", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-3), s("17:00"), s("17:20"), "REQUESTED", "PENDING", "WORKDAY", 20, 0, true, 1.5, nil, false, s("Lembur singkat.")},
 		// Terminal rows for list filters.
 		{"SWP-OT-30007", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-5), s("17:00"), s("19:30"), "REQUESTED", "APPROVED", "WORKDAY", 150, 150, false, 1.5, nil, false, s("Lembur disetujui.")},
 		{"SWP-OT-30008", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-6), s("17:00"), s("18:00"), "REQUESTED", "REJECTED", "WORKDAY", 60, 60, false, 1.5, nil, false, s("Lembur ditolak.")},
 		// HOLIDAY APPROVED referencing SWP-HOL-9001 (HOLIDAY_IN_USE source).
 		{"SWP-OT-30009", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-14), s("09:00"), s("12:00"), "WORKED_WITHOUT_REQUEST", "APPROVED", "HOLIDAY", 180, 180, false, 3.0, &hol1, true, s("Kerja saat hari libur.")},
 		// RESTDAY pending row.
-		{"SWP-OT-30010", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-7), s("09:00"), s("11:00"), "REQUESTED", "PENDING_L1", "RESTDAY", 120, 120, false, 2.0, nil, false, s("Lembur hari istirahat.")},
+		{"SWP-OT-30010", "SWP-EMP-3001", "SWP-CMP-0021", "SWP-PL-5004", nil, d(-7), s("09:00"), s("11:00"), "REQUESTED", "PENDING", "RESTDAY", 120, 120, false, 2.0, nil, false, s("Lembur hari istirahat.")},
 	}
 	for _, r := range rows {
 		if _, err := pool.Pool.Exec(ctx, otQ,
@@ -533,32 +538,9 @@ func seedOvertime(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: upserted overtime", "id", r.id, "status", r.status, "day_type", r.dayType)
 	}
 
-	// SWP-OT-30009 carries an L1+HR approval trail so the FE detail timeline renders
-	// (it is APPROVED). Idempotent via NOT EXISTS (bigserial has no id to ON CONFLICT).
-	const oaQ = `
-		INSERT INTO overtime_approvals (overtime_id, level, decision, approver_id, approver_name, reason)
-		SELECT $1, $2, $3, $4, $5, $6
-		WHERE NOT EXISTS (
-			SELECT 1 FROM overtime_approvals WHERE overtime_id = $1 AND level = $2)`
-	trails := []struct {
-		otID         string
-		level        int
-		decision     string
-		approverID   string
-		approverName string
-	}{
-		{"SWP-OT-30009", 1, "APPROVED", "SWP-EMP-1108", "Rudi Wijaya"},
-		{"SWP-OT-30009", 2, "APPROVED", "SWP-USR-00002", "HR Admin"},
-		{"SWP-OT-30007", 1, "APPROVED", "SWP-EMP-1108", "Rudi Wijaya"},
-		{"SWP-OT-30007", 2, "APPROVED", "SWP-USR-00002", "HR Admin"},
-		{"SWP-OT-30008", 1, "REJECTED", "SWP-EMP-1108", "Rudi Wijaya"},
-	}
-	for _, t := range trails {
-		if _, err := pool.Pool.Exec(ctx, oaQ, t.otID, t.level, t.decision, t.approverID, t.approverName, nil); err != nil {
-			return fmt.Errorf("seed overtime_approval for %q L%d: %w", t.otID, t.level, err)
-		}
-	}
-	slog.Info("seed: upserted overtime approvals", "count", len(trails))
+	// The OT decision trail now lives in the E11 approval engine
+	// (approval_instances + approval_actions, seeded in seedApprovals); the legacy
+	// overtime_approvals table was dropped (migration 00061).
 	return nil
 }
 
@@ -744,17 +726,19 @@ func seedPayslipBreakdown(ctx context.Context, pool *db.Pool, enc func(string) (
 //   - Budi (SWP-EMP-2891): total 12, used 11 → remaining 1 (near-exhausted →
 //     BALANCE_RECHECK_FAILED / override target)
 //
-// leave_requests (all seeded Pending/terminal — web/mobile CREATE out of scope):
-//   - SWP-LR-8001  Dewi @ CMP-0021, PENDING_L1, monday+4 (Fri) → Rudi L1 target
-//   - SWP-LR-8002  Dewi @ CMP-0021, PENDING_HR (leader-approved; +leave_approvals
-//     {L1,APPROVED}) → HR final target
-//   - SWP-LR-8003  Budi @ CMP-0022, PENDING_HR, 3 days vs remaining 1 →
+// leave_requests (all seeded PENDING/terminal — web/mobile CREATE out of scope;
+// the legacy PENDING_L1/PENDING_HR levels collapsed to a single engine-driven
+// PENDING in E11, so every pending row is just PENDING and the approval line it is
+// on is carried by the seeded approval_instance, not the status):
+//   - SWP-LR-8001  Dewi @ CMP-0021, PENDING, monday+4 (Fri) → SL inbox target
+//   - SWP-LR-8002  Dewi @ CMP-0021, PENDING → engine line-2 (HR) target
+//   - SWP-LR-8003  Budi @ CMP-0022, PENDING, 3 days vs remaining 1 →
 //     BALANCE_RECHECK/override target (no leader at CMP-0022 → no_leader=true)
-//   - SWP-LR-8004  Budi @ CMP-0022, PENDING_L1 → leader OUT_OF_SCOPE target (Rudi
-//     leads CMP-0021, gets 403 on :approve-l1)
+//   - SWP-LR-8004  Budi @ CMP-0022, PENDING → leader OUT_OF_SCOPE target (Rudi
+//     leads CMP-0021)
 //   - SWP-LR-8005  Dewi @ CMP-0021, APPROVED terminal (list filter + calendar)
 //   - SWP-LR-8006  Dewi @ CMP-0021, REJECTED terminal (list filter)
-//   - SWP-LR-8007  Dewi @ CMP-0021, PENDING_HR, start=end=monday+2 (Wed) OVERLAPPING
+//   - SWP-LR-8007  Dewi @ CMP-0021, PENDING, start=end=monday+2 (Wed) OVERLAPPING
 //     SWP-SCH-6002 → HR :approve-final fires INV-3 (schedule → CANCELLED_BY_LEAVE /
 //     DTO LEAVE + approved_leave_days insert), the production over-leave source.
 func seedLeave(ctx context.Context, pool *db.Pool) error {
@@ -813,13 +797,13 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		assignedLeader                         *string
 	}
 	requests := []lr{
-		{"SWP-LR-8001", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", fri, fri, 1, "Keperluan keluarga.", "PENDING_L1", false, &rudi},
-		{"SWP-LR-8002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", thu, thu, 1, "Kontrol rumah sakit.", "PENDING_HR", false, &rudi},
-		{"SWP-LR-8003", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", fri, budiEnd, 3, "Acara keluarga 3 hari.", "PENDING_HR", true, nil},
-		{"SWP-LR-8004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", thu, thu, 1, "Izin pribadi.", "PENDING_L1", false, nil},
+		{"SWP-LR-8001", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", fri, fri, 1, "Keperluan keluarga.", "PENDING", false, &rudi},
+		{"SWP-LR-8002", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", thu, thu, 1, "Kontrol rumah sakit.", "PENDING", false, &rudi},
+		{"SWP-LR-8003", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", fri, budiEnd, 3, "Acara keluarga 3 hari.", "PENDING", true, nil},
+		{"SWP-LR-8004", "SWP-EMP-2891", "SWP-PL-5002", "SWP-CMP-0022", thu, thu, 1, "Izin pribadi.", "PENDING", false, nil},
 		{"SWP-LR-8005", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", priorApproved, priorApproved, 1, "Cuti yang sudah disetujui.", "APPROVED", false, &rudi},
 		{"SWP-LR-8006", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", priorRejected, priorRejected, 1, "Pengajuan yang ditolak.", "REJECTED", false, &rudi},
-		{"SWP-LR-8007", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", wed, wed, 1, "Cuti yang menimpa jadwal (INV-3).", "PENDING_HR", false, &rudi},
+		{"SWP-LR-8007", "SWP-EMP-3001", "SWP-PL-5004", "SWP-CMP-0021", wed, wed, 1, "Cuti yang menimpa jadwal (INV-3).", "PENDING", false, &rudi},
 	}
 	for _, r := range requests {
 		if _, err := pool.Pool.Exec(ctx, lrQ,
@@ -831,19 +815,9 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: upserted leave request", "id", r.id, "employee_id", r.employeeID, "status", r.status)
 	}
 
-	// --- leave_approvals: SWP-LR-8002 carries an L1-APPROVED decision row so the
-	// FE timeline renders the two-stage path + the PENDING_HR marker. Idempotent
-	// via NOT EXISTS (bigserial has no deterministic id to ON CONFLICT on).
-	const laQ = `
-		INSERT INTO leave_approvals
-			(leave_request_id, stage, decision, actor_id, actor_role, decision_note, is_override)
-		SELECT 'SWP-LR-8002', 'L1', 'APPROVED', 'SWP-EMP-1108', 'shift_leader', 'Coverage aman.', false
-		WHERE NOT EXISTS (
-			SELECT 1 FROM leave_approvals WHERE leave_request_id = 'SWP-LR-8002' AND stage = 'L1')`
-	if _, err := pool.Pool.Exec(ctx, laQ); err != nil {
-		return fmt.Errorf("seed leave_approval for SWP-LR-8002: %w", err)
-	}
-	slog.Info("seed: upserted leave approval", "leave_request_id", "SWP-LR-8002", "stage", "L1")
+	// The leave decision trail now lives in the E11 approval engine
+	// (approval_instances + approval_actions, seeded in seedApprovals); the legacy
+	// leave_approvals table was dropped (migration 00061).
 
 	// Per-type ledger note: the demo agents' used_days (Dewi 4, Budi 11) are seeded
 	// directly on the leave_quotas windows above — the grant-lot consumption rows and
@@ -1444,81 +1418,141 @@ func seedMasterData(ctx context.Context, pool *db.Pool) error {
 	return nil
 }
 
-// seedChangeRequests inserts the EP-5 pending change-request fixtures (redesigned
-// 2026-06-11). All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
+// seedApprovals seeds the E11 approval engine (FEATURE §4) so the demo surface has
+// real data — this replaces the retired leave_approvals / overtime_approvals /
+// change_requests decision-trail fixtures.
 //
-// Budi Santoso (SWP-EMP-2891) has phone "+62-812-3344-5566" and BCA bank account
-// "1234567890"; Dewi Lestari (SWP-EMP-3001) has empty profile fields — both seeded
-// in seedEmployees, so the approval detail renders a meaningful old→new diff.
+// One configurable template for SWP-CMP-0021 (Plaza Senayan, where shift leader
+// Rudi is assigned and Dewi is placed):
+//   - SWP-APT-9001  template @ CMP-0021, version 1
+//   - SWP-APL-9001  line 1 — OR-set {Rudi (shift_leader user), Sari (hr_admin user)}
+//   - SWP-APL-9002  line 2 — {Sari (hr_admin user)}
 //
-// Change requests (status: pending):
+// Line member user_ids are resolved by email subquery (users.id is allocated by the
+// swp_next_id('USR') sequence, so the concrete SWP-USR-* value is not a stable
+// literal). Rudi = rudi.wijaya@swp.test, Sari = sari.hadi@swp.test.
 //
-//	SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone+bank)  — SL out-of-company 403 target
-//	SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone+bank)  — SL bank-split → HR finalize
-//	SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only — SL/HR full approve / reject
-func seedChangeRequests(ctx context.Context, pool *db.Pool) error {
-	// Change-request fixtures aligned with the 2026-06-11 redesign (E2 EP-5):
-	// tiers shifted (address → instant, emergency-contact → approval) and approval
-	// now routes to the on-site shift leader (company scope) with HR bank-split.
-	//
-	// The shift leader Rudi (SWP-EMP-1108) leads SWP-CMP-0021 (Plaza Senayan), where
-	// Dewi (SWP-EMP-3001) is placed. Budi (SWP-EMP-2891) is placed at SWP-CMP-0022
-	// (Mall Kelapa Gading) — OUT of Rudi's company scope. These placements are seeded
-	// later in seedPlacements; both demo agents carry an active placement company so
-	// the SL company-scope resolution (GetEmployeeCompanyID → GuardCompany) works.
-	//
-	//   SWP-CHG-2117  Budi @ CMP-0022  MULTIPLE (phone + bank)  → SL Rudi OUT_OF_SCOPE (403)
-	//   SWP-CHG-2119  Dewi @ CMP-0021  MULTIPLE (phone + bank)  → SL applies phone, bank
-	//                                                              escalates to HR (partial)
-	//   SWP-CHG-2120  Dewi @ CMP-0021  EMERGENCY_CONTACT only   → SL fully approves
-	const crQ = `
-		INSERT INTO change_requests
-			(id, employee_id, changes, request_type, note, submitted_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5, $6::timestamptz)
+// Then one approval_instance per seeded PENDING leave_request / overtime row at
+// CMP-0021 (current_line=1, line_count=2, status PENDING), and the request row's
+// approval_instance_id is set to the created instance (RETURNING → UPDATE):
+//   - LEAVE  SWP-LR-8001 / SWP-LR-8002 / SWP-LR-8007  (requester Dewi SWP-EMP-3001)
+//   - OVERTIME SWP-OT-30002 / SWP-OT-30003 / SWP-OT-30006 / SWP-OT-30010  (Dewi)
+//   - OVERTIME SWP-OT-30004  (requester Rudi SWP-EMP-1108 — SELF_APPROVAL_FORBIDDEN:
+//     line 1 includes Rudi AND he is the requester, so the self-approval-forbidden
+//     demo holds)
+//
+// CMP-0022 rows (SWP-LR-8003/8004, SWP-OT-30005) have NO template at their company,
+// so they keep approval_instance_id NULL (the super-admin fallback path) — kept
+// simple + correct per the fallback design (INV-7).
+//
+// Instances on current_line=1 include Rudi in the OR-set, so the SL inbox demo
+// shows items. Idempotent: template/line/member inserts use ON CONFLICT DO NOTHING;
+// instances use ON CONFLICT (request_type, request_id) DO NOTHING and the linkage
+// UPDATE backfills from whatever instance id exists.
+func seedApprovals(ctx context.Context, pool *db.Pool) error {
+	const company = "SWP-CMP-0021"
+	const templateID = "SWP-APT-9001"
+	const line1ID = "SWP-APL-9001"
+	const line2ID = "SWP-APL-9002"
+	const templateVersion = 1
+	const lineCount = 2
+
+	// --- template (INV-1: UNIQUE company_id) ---
+	if _, err := pool.Pool.Exec(ctx, `
+		INSERT INTO approval_templates (id, company_id, version, created_by)
+		VALUES ($1, $2, $3, 'system-seed')
+		ON CONFLICT (id) DO NOTHING`,
+		templateID, company, templateVersion,
+	); err != nil {
+		return fmt.Errorf("seed approval_template %q: %w", templateID, err)
+	}
+	slog.Info("seed: upserted approval template", "id", templateID, "company_id", company)
+
+	// --- lines (UNIQUE (template_id, line_no)) ---
+	const lineQ = `
+		INSERT INTO approval_lines (id, template_id, line_no)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (id) DO NOTHING`
-
-	// SWP-CHG-2117: MULTIPLE (phone + bank) for Budi @ CMP-0022 — the cross-company
-	// 403 target for shift leader Rudi (who leads CMP-0021).
-	if _, err := pool.Pool.Exec(ctx, crQ,
-		"SWP-CHG-2117",
-		"SWP-EMP-2891",
-		`{"phone":"+62-812-9988-7766","bank_account":{"bank_name":"BCA","account_number":"9999000011","account_holder_name":"Budi Santoso"}}`,
-		"MULTIPLE",
-		"Ganti nomor & rekening baru",
-		"2026-06-03T08:00:00Z",
-	); err != nil {
-		return fmt.Errorf("seed change_request SWP-CHG-2117: %w", err)
+	lines := []struct {
+		id     string
+		lineNo int
+	}{
+		{line1ID, 1},
+		{line2ID, 2},
 	}
-	slog.Info("seed: upserted change request", "id", "SWP-CHG-2117", "type", "MULTIPLE")
-
-	// SWP-CHG-2119: MULTIPLE (phone + bank) for Dewi @ CMP-0021 — the in-company
-	// bank-split target. SL Rudi approves → phone applied + bank escalated to HR
-	// (status=partially_approved, bank_pending=true); HR finalizes the bank field.
-	if _, err := pool.Pool.Exec(ctx, crQ,
-		"SWP-CHG-2119",
-		"SWP-EMP-3001",
-		`{"phone":"+62-813-5566-7788","bank_account":{"bank_name":"Mandiri","account_number":"1440011223344","account_holder_name":"Dewi Lestari"}}`,
-		"MULTIPLE",
-		"Pindah nomor & rekening gaji",
-		"2026-06-04T07:15:00Z",
-	); err != nil {
-		return fmt.Errorf("seed change_request SWP-CHG-2119: %w", err)
+	for _, l := range lines {
+		if _, err := pool.Pool.Exec(ctx, lineQ, l.id, templateID, l.lineNo); err != nil {
+			return fmt.Errorf("seed approval_line %q: %w", l.id, err)
+		}
 	}
-	slog.Info("seed: upserted change request", "id", "SWP-CHG-2119", "type", "MULTIPLE")
 
-	// SWP-CHG-2120: EMERGENCY_CONTACT only for Dewi @ CMP-0021 — a non-bank request
-	// the shift leader can fully approve (no escalation).
-	if _, err := pool.Pool.Exec(ctx, crQ,
-		"SWP-CHG-2120",
-		"SWP-EMP-3001",
-		`{"emergency_contact":{"name":"Siti Lestari","phone":"+62-877-1234-9000"}}`,
-		"EMERGENCY_CONTACT",
-		"Perbarui kontak darurat",
-		"2026-06-04T09:30:00Z",
-	); err != nil {
-		return fmt.Errorf("seed change_request SWP-CHG-2120: %w", err)
+	// --- line members (OR-set; user_id resolved by email) ---
+	// line 1: Rudi (shift_leader) OR Sari (hr_admin); line 2: Sari (hr_admin).
+	const memberQ = `
+		INSERT INTO approval_line_members (line_id, user_id)
+		SELECT $1, u.id FROM users u WHERE u.email = $2
+		ON CONFLICT (line_id, user_id) DO NOTHING`
+	members := []struct{ lineID, email string }{
+		{line1ID, "rudi.wijaya@swp.test"},
+		{line1ID, "sari.hadi@swp.test"},
+		{line2ID, "sari.hadi@swp.test"},
 	}
-	slog.Info("seed: upserted change request", "id", "SWP-CHG-2120", "type", "EMERGENCY_CONTACT")
+	for _, m := range members {
+		if _, err := pool.Pool.Exec(ctx, memberQ, m.lineID, m.email); err != nil {
+			return fmt.Errorf("seed approval_line_member (%s, %s): %w", m.lineID, m.email, err)
+		}
+	}
+	slog.Info("seed: upserted approval lines + members", "lines", len(lines), "members", len(members))
+
+	// --- instances + request linkage ---
+	// One instance per PENDING request at CMP-0021. requester_id = the request
+	// row's employee_id. The instance id is explicit (SWP-APV-9xxx) so the linkage
+	// UPDATE is deterministic + idempotent regardless of the swp_next_id cursor.
+	const instanceQ = `
+		INSERT INTO approval_instances
+			(id, request_type, request_id, company_id, template_id, template_version,
+			 current_line, line_count, status, requester_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 1, $7, 'PENDING', $8)
+		ON CONFLICT (request_type, request_id) DO NOTHING`
+
+	type inst struct {
+		id          string
+		requestType string // LEAVE | OVERTIME
+		requestID   string
+		requesterID string // SWP-EMP-*
+		linkTable   string // leave_requests | overtime
+	}
+	instances := []inst{
+		{"SWP-APV-9001", "LEAVE", "SWP-LR-8001", "SWP-EMP-3001", "leave_requests"},
+		{"SWP-APV-9002", "LEAVE", "SWP-LR-8002", "SWP-EMP-3001", "leave_requests"},
+		{"SWP-APV-9003", "LEAVE", "SWP-LR-8007", "SWP-EMP-3001", "leave_requests"},
+		{"SWP-APV-9004", "OVERTIME", "SWP-OT-30002", "SWP-EMP-3001", "overtime"},
+		{"SWP-APV-9005", "OVERTIME", "SWP-OT-30003", "SWP-EMP-3001", "overtime"},
+		// SELF_APPROVAL_FORBIDDEN: Rudi's own OT — requester is the line-1 leader.
+		{"SWP-APV-9006", "OVERTIME", "SWP-OT-30004", "SWP-EMP-1108", "overtime"},
+		{"SWP-APV-9007", "OVERTIME", "SWP-OT-30006", "SWP-EMP-3001", "overtime"},
+		{"SWP-APV-9008", "OVERTIME", "SWP-OT-30010", "SWP-EMP-3001", "overtime"},
+	}
+	for _, in := range instances {
+		if _, err := pool.Pool.Exec(ctx, instanceQ,
+			in.id, in.requestType, in.requestID, company, templateID, templateVersion,
+			lineCount, in.requesterID,
+		); err != nil {
+			return fmt.Errorf("seed approval_instance %q: %w", in.id, err)
+		}
+		// Backfill the request row's approval_instance_id from whatever instance
+		// governs this (request_type, request_id) — robust on re-run even if the
+		// instance pre-existed (ON CONFLICT DID NOTHING above).
+		linkQ := fmt.Sprintf(`
+			UPDATE %s SET approval_instance_id = (
+				SELECT ai.id FROM approval_instances ai
+				WHERE ai.request_type = $1 AND ai.request_id = $2)
+			WHERE id = $2 AND approval_instance_id IS NULL`, in.linkTable)
+		if _, err := pool.Pool.Exec(ctx, linkQ, in.requestType, in.requestID); err != nil {
+			return fmt.Errorf("link %s %q to approval instance: %w", in.linkTable, in.requestID, err)
+		}
+		slog.Info("seed: upserted approval instance", "id", in.id, "request", in.requestID, "type", in.requestType)
+	}
 
 	return nil
 }

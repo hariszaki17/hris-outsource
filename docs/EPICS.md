@@ -117,8 +117,14 @@ Each epic below becomes a **feature document**; each listed feature becomes a **
 
 ### E10 — Reporting, Exports & Notifications (cross-cutting)
 **Goal:** operational reports + notifications across modules.
-**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending, attendance anomalies, **profile change-request approved/rejected** — reject carries the reason, F2.1 EP-5c) · **shift-leader compliance notifications** (agent assigned a holiday shift; agent with no weekly rest / >6 consecutive workdays — §8 D3) · Approval inboxes.
-**Depends on:** spans E2–E8.
+**Features:** Role-based dashboards · Exports (Excel/PDF) · Notifications (in-app/email: schedule published, approvals pending/advanced/decided, attendance anomalies) · **shift-leader compliance notifications** (agent assigned a holiday shift; agent with no weekly rest / >6 consecutive workdays — §8 D3) · Approval inboxes.
+**Depends on:** spans E2–E8, E11.
+
+### E11 — Approvals (configurable multi-line engine, cross-cutting) *(added 2026-06-14)*
+**Goal:** a generic, per-company approval engine that routes any request type (leave, overtime, …) through an HR-configured chain, replacing the hardcoded `shift_leader → HR/lead` routing.
+**Features:** Approval template management (per company; 2–3 ordered lines, each a multi-user **OR**-set, line 3 optional) · Approval execution engine (instance per request, sequential line advance, self-block, terminal reject, **super-admin bypass**, per-type side-effect hooks) · Approval inbox (line-member "needs my decision" queue, web + mobile).
+**Entities:** ApprovalTemplate, ApprovalLine, ApprovalLineMember, ApprovalInstance, ApprovalAction.
+**Depends on:** E1 (auth/RBAC/audit), E2 (companies), E3 (company scope); consumed by E6, E7. **Removes:** E2 profile change-request approval (profile edits become instant self-edit).
 
 ---
 
@@ -130,14 +136,15 @@ E1 Foundations
        └─ E3 Placement ⭐
             └─ E4 Shift & Scheduling
                  └─ E5 Attendance
-                      ├─ E6 Leave        (parallel after E3/E2)
-                      └─ E7 Overtime     (after E5)
+                      ├─ E11 Approvals  (engine; before E6/E7 routing)
+                      ├─ E6 Leave        (parallel after E3/E2; routes via E11)
+                      └─ E7 Overtime     (after E5; routes via E11)
 E8 Payroll-data  ─┐
 E9 Migration     ─┼─ continuous; E9 lands at cutover, E8/E10 follow data
 E10 Reporting    ─┘
 ```
 
-## 7. Documentation index — all 10 epics drafted ✅
+## 7. Documentation index — all 11 epics drafted ✅
 
 Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-feature `prds/*.md` (user story + Gherkin AC + cases). E2–E8 also have a `DATA-MAPPING.md` (legacy `lumen_swp` → new model); E9 orchestrates those mappings; E10 & E1 read across modules.
 
@@ -153,8 +160,9 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 | **E8** Payroll (history + compute-assist) | [FEATURE](epics/E8-payroll/FEATURE.md) | payslip-history · payroll-archive · payroll-run · payroll-payment | [✓](epics/E8-payroll/DATA-MAPPING.md) |
 | **E9** Data Migration *(script-only, no UI v1)* | [FEATURE](epics/E9-migration/FEATURE.md) | extraction-staging · transform-crosswalks · reconciliation-review · load-idempotent · cutover-validation | (orchestrates E2–E8) |
 | **E10** Reporting & Notifications | [FEATURE](epics/E10-reporting/FEATURE.md) | notifications · dashboards · attendance-billable-report · export-framework | — (reads modules) |
+| **E11** Approvals *(engine, cross-cutting)* | [FEATURE](epics/E11-approvals/FEATURE.md) | approval-template-management · approval-execution · approval-inbox | — (config, no legacy) |
 
-**Totals:** 10 epics · 44 PRDs · 10 feature docs · 7 data-mapping docs.
+**Totals:** 11 epics · 47 PRDs · 11 feature docs · 7 data-mapping docs.
 
 > Folder layout: `docs/epics/<E#-name>/FEATURE.md` + `prds/<feature>.md` (+ `DATA-MAPPING.md` for E2–E8).
 
@@ -300,7 +308,23 @@ Each epic has a `FEATURE.md` (features + BPMN-style Mermaid workflows) and per-f
 **E10 — Reporting & Notifications**
 - ✅ Billable = **verified-only** (consistent with E5)
 - Notifications all-on in v1 (mute non-critical later); billing math = **hours only** (rates applied outside the system) *(default)*
-- ✅ **Super Admin dashboard = HR cockpit + admin-only widgets (extends the dashboard D1 "same body, distinct label")** *(resolved 2026-06-11)* — the `super_admin` dashboard now **adds** an admin-only section to the shared `HrDashboard` payload, making it a **superset** rather than a relabel. Four widgets, all `super_admin`-scoped, each deep-linking into its owning epic: **(a) User & access** (active users · accounts pending provisioning · offboarded/disabled ≤30d — E2/F2.7); **(b) Recent audit feed** (last sensitive actions — E1 audit); **(c) Org rollups by position** (headcount + active placements grouped by the free-text position — E3); **(d) Pending grants** (bank-account approval escalations + role-change requests awaiting super-admin action). Carried on `HrDashboard.admin` (present **only** for `super_admin`); the `hr_admin` payload is unchanged. See [F10.2 PRD DB-7], [E10 `openapi` `HrDashboard.admin`].
+- ✅ **Super Admin dashboard = HR cockpit + admin-only widgets (extends the dashboard D1 "same body, distinct label")** *(resolved 2026-06-11)* — the `super_admin` dashboard now **adds** an admin-only section to the shared `HrDashboard` payload, making it a **superset** rather than a relabel. Four widgets, all `super_admin`-scoped, each deep-linking into its owning epic: **(a) User & access** (active users · accounts pending provisioning · offboarded/disabled ≤30d — E2/F2.7); **(b) Recent audit feed** (last sensitive actions — E1 audit); **(c) Org rollups by position** (headcount + active placements grouped by the free-text position — E3); **(d) Pending grants** (role-change requests awaiting super-admin action; bank-account approval escalations removed 2026-06-14 — profile edits are instant). Carried on `HrDashboard.admin` (present **only** for `super_admin`); the `hr_admin` payload is unchanged. See [F10.2 PRD DB-7], [E10 `openapi` `HrDashboard.admin`].
 - ✅ **Shift-leader dashboard is dual-surface (web + mobile)** *(resolved 2026-06-11)* — the existing `LeaderDashboard` payload now also backs a **mobile Beranda** (the shift leader is on-site, phone-first), at parity with the web team dashboard. **No new endpoint** — `GET /dashboards/me` already returns `LeaderDashboard` for `shift_leader`; this adds the mobile surface only. See [F10.2 PRD DB-8], [`.pen` frame `UMzuO`].
+
+**E11 — Approvals (configurable multi-line engine, cross-cutting)**
+- ✅ **Approval becomes a per-company configurable engine; profile change-requests are removed** *(resolved 2026-06-14 — new epic E11)* — replaces the three hardcoded approval flows with one data-driven engine. Cross-cutting (E2 profile · E6 leave · E7 overtime · E1 RBAC · E10 inbox/notifications).
+  - **A — profile change-request approval is removed entirely.** The E2 change-request feature (F2.1 EP-5/EP-5b/EP-5c/EP-5d, `SWP-CHG`, `change_requests.*` incl. `.approve.bank`) is **hard-deleted**. Agent profile edits to **phone, emergency contact, and bank account become instant self-edit** (apply immediately, still audited) — joining photo/address/language in the instant tier. There is no approval queue for profile edits. Supersedes the 2026-06-11 agent-editable-field-tiers decision (the approval tier collapses to instant).
+  - **B — one approval template per company.** HR admin + super admin configure a single **ApprovalTemplate** per client company (`approvals.template.manage`). A template has **2 or 3 ordered lines**; **line 3 is optional to configure** (typically a super-admin sign-off), so the minimum is **2 lines**. Each line holds **one or more users** as an **OR-set**: any one member approving satisfies that line; the others need not act. Lines are **sequential** — line 1 must clear before line 2, etc.
+  - **C — line membership decides routing, not static roles.** Eligibility to approve a *specific* request is **line membership on that request's chain** (data, server-enforced), **not** a `*.approve` permission. This **supersedes** the 2026-06-12 lead-role point C ("lead is L2/final approver") and the `shift_leader` "L1 approver" model for leave/overtime: those roles still exist for their other duties and may be **placed on lines**, but approval no longer auto-derives from role/placement. Supersedes leave **LA-1/LA-2/LA-3** and overtime **OA-1/OA-2/OA-3**.
+  - **D — super-admin bypass.** A super admin may **force-approve an entire request from any state** (`approvals.bypass`), skipping all remaining lines even if not assigned to any line; a **reason is required** and recorded as a `BYPASS` action. (Replaces the prior HR override, LA-8/OA-8.)
+  - **E — sequential advance + terminal reject.** Any current-line member **approves** → advance to the next line; clearing the **last configured line** → request `APPROVED`, which fires the request type's **side-effect hook** (leave: commit per-type quota reservation + INV-3 schedule integration, F6.1/F6.4; overtime: count hours by `day_type`, F7.4). Any current-line member **rejects** → request `REJECTED` (terminal, reason required).
+  - **F — self-approval is blocked, no auto-skip.** If the requester is a member of a line in their own request's chain, they **cannot** approve it; **another member of that line must act**. If the requester is the line's **sole** member, the line can only be cleared by **super-admin bypass** (D).
+  - **G — no template ⇒ super-admin fallback.** If a company has **no** template configured, a submitted request routes to a **single implicit super-admin line** (never blocks the agent, never auto-approves). When a template is later created, pending fallback instances are pulled onto it by the live-reset rule (H).
+  - **H — live template, with pending reset.** Editing a template **bumps its version** and **resets all non-terminal instances** for that company to **line 1** on the new chain (prior actions kept as audit, stamped with the old version, no longer counted) and re-notifies the new line-1 members. (No per-instance snapshot.)
+  - **I — generic engine, per-type hooks.** The engine is request-type-agnostic; **leave and overtime opt in** in v1, future types register an `OnApproved`/`OnRejected` side-effect hook. Replaces the `leave_approvals` + `overtime_approvals` decision trails with one **`approval_actions`** append-only trail.
+  - **J — line members = any active SWP staff user**; template save validates members are active (employment not ended). An offboarded mid-flight member is handled by super-admin bypass (D) + HR re-editing the template (H).
+  - See [E11 FEATURE](epics/E11-approvals/FEATURE.md), [E11 PRDs](epics/E11-approvals/), [E11 openapi](api/E11-approvals/openapi.yaml), [E6 leave-approval], [E7 overtime-approval], [E2 employee-profile EP-5], [NAVIGATION-AND-RBAC §4].
+
+---
 
 **Deferred to the build/tech phase (not product):** auth session model (JWT vs server sessions) + token lifetimes + password policy; API pagination style; push provider (FCM/APNs); migration batch sizes/parallelism; audit & export storage/retention infrastructure; dashboard caching/freshness thresholds.

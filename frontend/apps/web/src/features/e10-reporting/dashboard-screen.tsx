@@ -261,26 +261,12 @@ function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
           )}
         </div>
 
-        {/* Widget 4 — Persetujuan Tertunda (pending_grants) */}
+        {/* Widget 4 — Persetujuan Tertunda (pending_grants).
+            Bank/profile change-request approvals removed (E11, 2026-06-14) — agent self-edits are
+            now instant. Only role-change requests remain; leave/overtime approvals live in /inbox. */}
         <div className="flex flex-col gap-[14px] rounded-xl border border-border bg-surface p-[18px]">
           <span className="text-[15px] font-bold text-text">{t('admin.pendingGrants.title')}</span>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-3">
-              <StatCard
-                label={t('admin.pendingGrants.bankApprovals')}
-                value={String(admin.pending_grants.bank_approvals)}
-                sub={t('admin.pendingGrants.bankApprovalsSub')}
-                icon={AlertTriangle}
-                tone={admin.pending_grants.bank_approvals > 0 ? 'warn' : 'neutral'}
-              />
-              {/* TODO: deep-link to bank-approval queue when dedicated route is available */}
-              <Link
-                to="/change-requests"
-                className="text-[12px] font-semibold text-primary hover:underline"
-              >
-                {t('admin.pendingGrants.ctaBank')} →
-              </Link>
-            </div>
+          <div className="grid grid-cols-1 gap-3">
             <div className="flex flex-col gap-3">
               <StatCard
                 label={t('admin.pendingGrants.roleRequests')}
@@ -289,7 +275,6 @@ function AdminWidgetsSection({ admin }: { admin: SuperAdminWidgets }) {
                 icon={Users}
                 tone={admin.pending_grants.role_requests > 0 ? 'info' : 'neutral'}
               />
-              {/* TODO: deep-link to role-request queue when dedicated route is available */}
               <Link
                 to="/settings/users"
                 className="text-[12px] font-semibold text-primary hover:underline"

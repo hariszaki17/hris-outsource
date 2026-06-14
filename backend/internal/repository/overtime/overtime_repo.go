@@ -120,33 +120,15 @@ func (r *OvertimeRepo) InsertOvertime(ctx context.Context, tx pgx.Tx, p svc.Over
 	return mapOvertimeFromInsert(row), nil
 }
 
-// --- approvals (decision trail) ---
+// --- E11 approval linkage ---
 
-func (r *OvertimeRepo) InsertOvertimeApproval(ctx context.Context, tx pgx.Tx, p svc.ApprovalRow) (dom.OvertimeApproval, error) {
-	row, err := r.q.WithTx(tx).InsertOvertimeApproval(ctx, sqlcgen.InsertOvertimeApprovalParams{
-		OvertimeID:   p.OvertimeID,
-		Level:        i32(p.Level),
-		Decision:     p.Decision,
-		ApproverID:   p.ApproverID,
-		ApproverName: p.ApproverName,
-		Reason:       p.Reason,
+// SetApprovalInstanceID links the freshly-created E11 ApprovalInstance to the OT record
+// (called inside the create/confirm tx after engine.CreateInstance).
+func (r *OvertimeRepo) SetApprovalInstanceID(ctx context.Context, tx pgx.Tx, id, instanceID string) error {
+	return r.q.WithTx(tx).SetOvertimeApprovalInstanceID(ctx, sqlcgen.SetOvertimeApprovalInstanceIDParams{
+		ApprovalInstanceID: &instanceID,
+		ID:                 id,
 	})
-	if err != nil {
-		return dom.OvertimeApproval{}, mapErr(err)
-	}
-	return mapApproval(row), nil
-}
-
-func (r *OvertimeRepo) ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]dom.OvertimeApproval, error) {
-	rows, err := r.q.ListOvertimeApprovals(ctx, overtimeID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]dom.OvertimeApproval, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, mapApproval(row))
-	}
-	return out, nil
 }
 
 // --- rule lookup (reused E2/Phase-3 overtime_rules) ---

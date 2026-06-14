@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
@@ -22,10 +23,11 @@ func NewSelfProfileHandler(s *svc.SelfProfileService) *SelfProfileHandler {
 	return &SelfProfileHandler{svc: s}
 }
 
-// UpdateMyProfile handles PATCH /me/profile — instant-tier self apply of
-// {address?, app_language?, photo_object_key?}. Approval-tier fields are not in
-// the schema and are rejected by the service. Returns 200 with the updated
-// employee (incl. presigned photo_url).
+// UpdateMyProfile handles PATCH /me/profile — INSTANT self apply of every
+// editable profile field {address?, app_language?, photo_object_key?, phone?,
+// emergency_contact?, bank_account?}. E11 (2026-06-14): there is no approval tier
+// anymore; phone/emergency/bank apply instantly (phone uniqueness guarded in the
+// service). Returns 200 with the updated employee (incl. presigned photo_url).
 func (h *SelfProfileHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
 	var body selfProfileUpdateBody
 	dec := json.NewDecoder(r.Body)
@@ -34,19 +36,36 @@ func (h *SelfProfileHandler) UpdateMyProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// minProperties:1 — at least one instant-tier field must be present.
-	if body.Address == nil && body.AppLanguage == nil && body.PhotoObjectKey == nil {
+	// minProperties:1 — at least one editable field must be present.
+	if body.Address == nil && body.AppLanguage == nil && body.PhotoObjectKey == nil &&
+		body.Phone == nil && body.EmergencyContact == nil && body.BankAccount == nil {
 		httpx.WriteError(w, r, apperr.Invalid(map[string]string{
 			"changes": "Minimal satu field perubahan wajib diisi.",
 		}))
 		return
 	}
 
-	updated, err := h.svc.UpdateMyProfile(r.Context(), svc.SelfProfileInput{
+	in := svc.SelfProfileInput{
 		Address:        body.Address,
 		AppLanguage:    body.AppLanguage,
 		PhotoObjectKey: body.PhotoObjectKey,
-	})
+		Phone:          body.Phone,
+	}
+	if body.EmergencyContact != nil {
+		in.EmergencyContact = &domain.EmergencyContact{
+			Name:  body.EmergencyContact.Name,
+			Phone: body.EmergencyContact.Phone,
+		}
+	}
+	if body.BankAccount != nil {
+		in.BankAccount = &domain.BankAccount{
+			BankName:          body.BankAccount.BankName,
+			AccountNumber:     body.BankAccount.AccountNumber,
+			AccountHolderName: body.BankAccount.AccountHolderName,
+		}
+	}
+
+	updated, err := h.svc.UpdateMyProfile(r.Context(), in)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

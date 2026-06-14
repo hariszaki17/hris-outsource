@@ -102,10 +102,10 @@ type leaveRequestResponse struct {
 	Backdated           bool    `json:"backdated"`
 	ClockInConflict     bool    `json:"clock_in_conflict"`
 
-	Routing        routingResponse          `json:"routing"`
-	BalanceCheck   balanceCheckResponse     `json:"balance_check"`
-	Timeline       []timelineEntryResponse  `json:"timeline"`
-	ScheduleImpact []scheduleImpactResponse `json:"schedule_impact"`
+	// ApprovalInstanceID links the E11 ApprovalInstance; the chain is read from E11.
+	ApprovalInstanceID *string                  `json:"approval_instance_id"`
+	BalanceCheck       balanceCheckResponse     `json:"balance_check"`
+	ScheduleImpact     []scheduleImpactResponse `json:"schedule_impact"`
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -217,36 +217,11 @@ func toLeaveRequestResponse(r dom.LeaveRequest) leaveRequestResponse {
 		DocumentFileID:      r.DocumentFileID,
 		Backdated:           r.Backdated,
 		ClockInConflict:     r.ClockInConflict,
-		Routing: routingResponse{
-			NoLeader:           r.Routing.NoLeader,
-			AssignedLeaderID:   r.Routing.AssignedLeaderID,
-			AssignedLeaderName: r.Routing.AssignedLeader,
-		},
-		BalanceCheck:   toBalanceCheckResponse(r.BalanceCheck),
-		Timeline:       make([]timelineEntryResponse, 0, len(r.Timeline)),
-		ScheduleImpact: make([]scheduleImpactResponse, 0, len(r.ScheduleImpact)),
-		CreatedAt:      rfc3339(r.CreatedAt),
-		UpdatedAt:      rfc3339(r.UpdatedAt),
-	}
-	for _, t := range r.Timeline {
-		var dec *string
-		if t.Decision != nil {
-			d := string(*t.Decision)
-			dec = &d
-		}
-		out.Timeline = append(out.Timeline, timelineEntryResponse{
-			Stage:          string(t.Stage),
-			Status:         string(t.Status),
-			ActorID:        t.ActorID,
-			ActorName:      t.ActorName,
-			ActorRole:      t.ActorRole,
-			Decision:       dec,
-			DecisionNote:   t.DecisionNote,
-			RejectReason:   t.RejectReason,
-			Override:       t.Override,
-			OverrideReason: t.OverrideReason,
-			OccurredAt:     rfc3339(t.OccurredAt),
-		})
+		ApprovalInstanceID:  r.ApprovalInstanceID,
+		BalanceCheck:        toBalanceCheckResponse(r.BalanceCheck),
+		ScheduleImpact:      make([]scheduleImpactResponse, 0, len(r.ScheduleImpact)),
+		CreatedAt:           rfc3339(r.CreatedAt),
+		UpdatedAt:           rfc3339(r.UpdatedAt),
 	}
 	for _, si := range r.ScheduleImpact {
 		out.ScheduleImpact = append(out.ScheduleImpact, scheduleImpactResponse{

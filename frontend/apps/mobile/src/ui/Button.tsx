@@ -39,11 +39,6 @@ export function Button({
   className?: string;
 }) {
   const isDisabled = disabled || loading;
-  const labelStyle = {
-    color: labelColor[variant],
-    fontSize: 14,
-    fontWeight: '600' as const,
-  };
   return (
     <Pressable
       disabled={isDisabled}
@@ -56,7 +51,9 @@ export function Button({
       ) : (
         <>
           {icon ?? null}
-          <Text style={labelStyle}>{label}</Text>
+          <Text variant="strong" style={{ color: labelColor[variant] }}>
+            {label}
+          </Text>
         </>
       )}
     </Pressable>

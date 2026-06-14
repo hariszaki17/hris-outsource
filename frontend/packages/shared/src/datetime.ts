@@ -69,3 +69,116 @@ export function todayJakartaIso(): string {
 export function daysBetween(startIsoDate: string, endIsoDate: string): number {
   return Temporal.PlainDate.from(startIsoDate).until(Temporal.PlainDate.from(endIsoDate)).days;
 }
+
+/**
+ * An inclusive calendar-date range, both ends "YYYY-MM-DD". `from <= to` always.
+ * The canonical shape for E5 attendance `date_from` / `date_to` query params.
+ */
+export interface DateRange {
+  from: string;
+  to: string;
+}
+
+/** First→last day of the calendar month containing `anchorIsoDate` (default: today WIB). */
+export function monthRange(anchorIsoDate: string = todayJakartaIso()): DateRange {
+  const pd = Temporal.PlainDate.from(anchorIsoDate);
+  const first = pd.with({ day: 1 });
+  const last = pd.with({ day: pd.daysInMonth });
+  return { from: first.toString(), to: last.toString() };
+}
+
+/** First→last day of the month *before* the one containing `anchorIsoDate` (default: today WIB). */
+export function prevMonthRange(anchorIsoDate: string = todayJakartaIso()): DateRange {
+  return monthRange(Temporal.PlainDate.from(anchorIsoDate).subtract({ months: 1 }).toString());
+}
+
+/** Trailing `count` days ending on `anchorIsoDate` inclusive (default: 30 days ending today WIB). */
+export function lastNDaysRange(count = 30, anchorIsoDate: string = todayJakartaIso()): DateRange {
+  const end = Temporal.PlainDate.from(anchorIsoDate);
+  const start = end.subtract({ days: count - 1 });
+  return { from: start.toString(), to: end.toString() };
+}
+
+/** True when `isoDate` ("YYYY-MM-DD") falls within `range` inclusive. */
+export function isWithinRange(isoDate: string, range: DateRange): boolean {
+  return isoDate >= range.from && isoDate <= range.to;
+}
+
+/**
+ * The Asia/Jakarta calendar date ("YYYY-MM-DD") of an RFC 3339 instant OR a plain date.
+ * Pass-through for plain dates; for instants, resolves the WIB day (handles the UTC↔WIB
+ * midnight boundary). Useful to bucket attendance records by their WIB shift day.
+ */
+export function jakartaDateOf(iso: string): string {
+  return iso.includes('T')
+    ? Temporal.Instant.from(iso).toZonedDateTimeISO(TZ).toPlainDate().toString()
+    : Temporal.PlainDate.from(iso).toString();
+}
+
+/**
+ * Human range label, e.g. "1 – 30 Mei 2026" (same month/year collapsed) or
+ * "28 Mei – 3 Jun 2026" (cross-month) or "30 Des 2025 – 2 Jan 2026" (cross-year).
+ * Bahasa month names via `id-ID`. Matches the .pen DateRange chip + Terapkan button copy.
+ */
+export function formatRange(range: DateRange): string {
+  const a = Temporal.PlainDate.from(range.from);
+  const b = Temporal.PlainDate.from(range.to);
+  const day = (p: Temporal.PlainDate) => String(p.day);
+  const monShort = (p: Temporal.PlainDate) =>
+    new Intl.DateTimeFormat(LOCALE_ID, { month: 'short', timeZone: 'UTC' }).format(
+      new Date(Date.UTC(p.year, p.month - 1, p.day)),
+    );
+  if (a.year === b.year && a.month === b.month) {
+    return `${day(a)} – ${day(b)} ${monShort(b)} ${b.year}`;
+  }
+  if (a.year === b.year) {
+    return `${day(a)} ${monShort(a)} – ${day(b)} ${monShort(b)} ${b.year}`;
+  }
+  return `${day(a)} ${monShort(a)} ${a.year} – ${day(b)} ${monShort(b)} ${b.year}`;
+}
+
+/** Short range label without year, e.g. "5 – 18 Mei" — for the calendar Terapkan button. */
+export function formatRangeShort(range: DateRange): string {
+  const a = Temporal.PlainDate.from(range.from);
+  const b = Temporal.PlainDate.from(range.to);
+  const monShort = (p: Temporal.PlainDate) =>
+    new Intl.DateTimeFormat(LOCALE_ID, { month: 'short', timeZone: 'UTC' }).format(
+      new Date(Date.UTC(p.year, p.month - 1, p.day)),
+    );
+  if (a.month === b.month && a.year === b.year) {
+    return `${a.day} – ${b.day} ${monShort(b)}`;
+  }
+  return `${a.day} ${monShort(a)} – ${b.day} ${monShort(b)}`;
+}
+
+/** "Mei 2026" month-year title for the calendar nav header. */
+export function formatMonthYear(anchorIsoDate: string): string {
+  const pd = Temporal.PlainDate.from(anchorIsoDate);
+  return new Intl.DateTimeFormat(LOCALE_ID, { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(pd.year, pd.month - 1, pd.day)))
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+/**
+ * Monday-start calendar grid for the month containing `anchorIsoDate`, as weeks of 7 cells.
+ * Each cell is the "YYYY-MM-DD" date, or `null` for leading/trailing blanks. Matches the
+ * .pen calendar (Sen-start, equal-width cells, blanks before day 1).
+ */
+export function monthGrid(anchorIsoDate: string): (string | null)[][] {
+  const pd = Temporal.PlainDate.from(anchorIsoDate);
+  const first = pd.with({ day: 1 });
+  // Temporal dayOfWeek: Mon=1 … Sun=7 → leading blanks before Monday.
+  const lead = first.dayOfWeek - 1;
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= pd.daysInMonth; d++) cells.push(first.with({ day: d }).toString());
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+/** Add `months` to the month anchor (clamped to day 1), as "YYYY-MM-DD". For calendar nav. */
+export function shiftMonth(anchorIsoDate: string, months: number): string {
+  return Temporal.PlainDate.from(anchorIsoDate).with({ day: 1 }).add({ months }).toString();
+}

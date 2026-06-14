@@ -12,7 +12,7 @@ Everyone needs to *see* attendance: agents review their own history, shift leade
 ## 2. Goals & non-goals
 
 **Goals**
-- Agent self-history (mobile); leader/HR team views with exception highlighting.
+- Agent self-history (mobile) with on-screen **date-range** + **status** quick-filters; leader/HR team views with exception highlighting.
 - Filters (company, site, position, date, status, exception) + billable/payable rollups.
 - Export feeding E10.
 
@@ -37,13 +37,17 @@ Agent (self), Shift Leader (own company), HR/Super Admin (all), System (query, s
 |-----|------|
 | AR-1 | **Scope:** agent sees only own; leader sees own company; HR/Super Admin see all. |
 | AR-2 | Records show: date, scheduled shift, check-in/out times, geofence result, status, verification status, attendance code, corrections. |
-| AR-3 | Filters: **company, site, position**, date range, status (Present/Late/Incomplete/Absent), verification status, exception-only. (`company`/`site`/`position` map 1:1 to the denormalized columns on `Attendance`; `position` is free-text.) |
+| AR-3 | Filters: **company, site, position**, date range, status (Present/Late/Incomplete/Absent/On-Leave), verification status, exception-only. (`company`/`site`/`position` map 1:1 to the denormalized columns on `Attendance`; `position` is free-text.) |
 | AR-4 | **Billable rollup:** sum worked records whose attendance code `is_billable` (E2), grouped by company/position/period — feeds client billing reports (E10). |
 | AR-5 | **Payable rollup:** records whose code `is_payable`, for payroll context (E8). |
 | AR-6 | Exports (Excel/PDF/CSV) reflect applied filters and are **audited** (who exported what). |
 | AR-7 | Read-only; row actions deep-link to verify (F5.3) or correct (F5.4). |
 | AR-8 | Times render in Asia/Jakarta; cross-midnight records display spanning two days. |
 | AR-9 | **Leader scope is locked to the led company:** for `shift_leader` the `company` filter is server-pinned to their E3 assignment; `site`/`position` only narrow *within* that company. A cross-company `company`/`site` value → `403 OUT_OF_SCOPE` (defense-in-depth; the UI never offers out-of-scope options). |
+| AR-10 | **Agent riwayat date-range filter (mobile):** the agent's own history is scoped by a date range, chosen via a range chip → bottom sheet of presets (**Bulan ini**, **30 hari terakhir**, **Bulan lalu**) or **Custom…** → a calendar range picker (tap start, then end, **Terapkan**). Default range = current month. Maps to `date_from`/`date_to` (`GET /attendance:`, inclusive, shift-start-date basis) on the self-scoped list (AR-1); no extra scope — the agent already only sees own records. |
+| AR-11 | **Status quick-filter (mobile):** the summary count chips double as filters — **single-select** with **Semua** as the reset (= all). Chips cover the statuses present in range (at minimum **Hadir**/**Terlambat**/**Tidak lengkap**; **Absen**/**Cuti** when present). Tapping a status chip filters the list to that `status` and shows that chip in the active (filled) state; **Semua** (or re-tapping the active chip) clears it. Each chip's **count reflects the current date range** (AR-10). Maps to the `status` query param (a multi-value array on `GET /attendance:`; the mobile single-select sends one value, omitted when Semua). |
+
+> **Design (mobile riwayat):** `brainstorm.pen` (agent lane) — *Agen · Riwayat Kehadiran*: default filter bar (`GJI1a`), status-filtered example (`l6UYy`), date-range presets sheet (`txgoB`), custom calendar range picker (`x2rDk`). Filter chips are status-colored; `Semua` active = `primary-soft`. No dead-flow: chip tap → filtered list / `EmptyFilteredZero` (C-6); range chip → sheet → calendar.
 
 ## 6. Data model
 
@@ -59,6 +63,21 @@ Feature: Attendance records & dashboard
     When I open "My attendance"
     Then I see my records with status and any corrections
     And I cannot see other agents' attendance
+
+  Scenario: Agent filters own history by status
+    Given I am the agent "Budi" viewing "Riwayat Kehadiran"
+    And the active range is "Bulan ini"
+    When I tap the "Terlambat" summary chip
+    Then the list shows only my Late records in that range
+    And the "Terlambat" chip is shown active
+    When I tap "Semua"
+    Then the filter resets and all statuses are shown
+
+  Scenario: Agent picks a custom date range
+    Given I am viewing "Riwayat Kehadiran"
+    When I open the date-range chip and choose "Custom…"
+    And I pick 5 Mei as the start and 18 Mei as the end and tap "Terapkan"
+    Then the list and the summary-chip counts reflect 5–18 Mei
 
   Scenario: Leader views team attendance with exceptions
     Given I am the shift leader of "Plaza Senayan"
@@ -90,6 +109,7 @@ Feature: Attendance records & dashboard
 | C-3 | Pending (unverified) records in a billable rollup | Flag/exclude unverified from billing until verified (confirm policy). |
 | C-4 | Cross-midnight record | Displays spanning two days; counted once to the start date. |
 | C-5 | Corrected record | Shows current values + indicator that a correction was applied. |
+| C-6 | Agent filter (range/status) with zero results | `EmptyFilteredZero` state with a reset-to-Semua / widen-range CTA (no dead-flow). |
 
 ## 9. Dependencies
 

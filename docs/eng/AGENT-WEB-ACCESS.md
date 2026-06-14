@@ -36,7 +36,7 @@ unratified concern.
 | `/me/leave/new` | `leave-new` | Create leave request |
 | `/me/overtime` | `overtime` | Own overtime requests (list) + confirm / withdraw + "Ajukan Lembur" |
 | `/me/overtime/new` | `overtime-new` | Create overtime request |
-| `/me/profile` | `profile` | View profile; submit phone/address change request |
+| `/me/profile` | `profile` | View profile; **instant-edit** phone/address/emergency/bank/photo/language (no approval, 2026-06-14) |
 | `/me/payslip` | `payslip` | Own payslips (list) |
 | `/me/notifications` | `(app)/notifications` | Notification inbox; mark read / mark all read |
 | `/me/correction` (route w/ `attendanceId`,`date` search params) | `correction` | File attendance correction (7-day window) |
@@ -67,7 +67,7 @@ New permission keys (capability axis, added to `packages/shared/src/rbac.ts`):
 | `self.schedule` | `/me/schedule` | `GET /schedule?employee_id={self}` |
 | `self.leave` | `/me/leave`, `/me/leave/new` | `GET/POST /leave-requests`, `GET /leave-types`, `GET /leave-balances/by-employee/{self}` |
 | `self.overtime` | `/me/overtime`, `/me/overtime/new` | `GET/POST /overtime`, `POST /overtime/{id}:confirm`, `:withdraw` |
-| `self.profile` | `/me/profile` | `GET /employees/{self}`, `POST /employees/{self}/change-requests` |
+| `self.profile` | `/me/profile` | `GET /employees/{self}`, `PATCH /me/profile` *(instant self-edit; change-requests removed 2026-06-14)* |
 | `self.payslip` | `/me/payslip` | `GET /payslips` (self) |
 
 `agent` role bundle = **all seven** `self.*` keys. `/me/notifications` is auth-only (no key), like

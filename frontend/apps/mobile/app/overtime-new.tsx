@@ -57,7 +57,9 @@ export default function OvertimeNew() {
       <View className="mb-6 flex-row items-center justify-between">
         <Text variant="title">{t('m:overtime.newBtn')}</Text>
         <Pressable onPress={() => router.back()}>
-          <Text className="text-primary font-semibold">{t('m:clock.cancel')}</Text>
+          <Text variant="strong" className="text-primary">
+            {t('m:clock.cancel')}
+          </Text>
         </Pressable>
       </View>
 

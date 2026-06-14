@@ -344,6 +344,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
        lr.balance_requires_override,
+       lr.approval_instance_id,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -379,6 +380,7 @@ type GetLeaveRequestRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
+	ApprovalInstanceID      *string
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -414,6 +416,7 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, id string) (GetLeaveReque
 		&i.BalanceRequestedDays,
 		&i.BalanceRemainingAtCheck,
 		&i.BalanceRequiresOverride,
+		&i.ApprovalInstanceID,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -508,6 +511,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
        lr.balance_requires_override,
+       lr.approval_instance_id,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -572,6 +576,7 @@ type ListLeaveRequestsRow struct {
 	BalanceRequestedDays    *int32
 	BalanceRemainingAtCheck *int32
 	BalanceRequiresOverride *bool
+	ApprovalInstanceID      *string
 	CreatedBy               *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
@@ -631,6 +636,7 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, arg ListLeaveRequestsPa
 			&i.BalanceRequestedDays,
 			&i.BalanceRemainingAtCheck,
 			&i.BalanceRequiresOverride,
+			&i.ApprovalInstanceID,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -676,6 +682,25 @@ func (q *Queries) SetLeaveBalanceSnapshot(ctx context.Context, arg SetLeaveBalan
 		arg.RequiresOverride,
 		arg.ID,
 	)
+	return err
+}
+
+const setLeaveRequestApprovalInstanceID = `-- name: SetLeaveRequestApprovalInstanceID :exec
+UPDATE leave_requests
+SET approval_instance_id = $1,
+    updated_at           = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+`
+
+type SetLeaveRequestApprovalInstanceIDParams struct {
+	ApprovalInstanceID *string
+	ID                 string
+}
+
+// E11 linkage: bind a leave request to its governing approval instance.
+func (q *Queries) SetLeaveRequestApprovalInstanceID(ctx context.Context, arg SetLeaveRequestApprovalInstanceIDParams) error {
+	_, err := q.db.Exec(ctx, setLeaveRequestApprovalInstanceID, arg.ApprovalInstanceID, arg.ID)
 	return err
 }
 

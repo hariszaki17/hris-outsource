@@ -1657,6 +1657,36 @@ components:
         - RETIRED        # agent retired (F2.7, employment-end)
         - ABSCONDED      # agent mangkir / absconded (F2.7, employment-end)
 
+    SiteGeofence:
+      type: object
+      nullable: true
+      description: |
+        Site centroid + radius for the placement's `site_id` (E2 Site, F2.6).
+        Server-authoritative, denormalized onto the placement so the agent
+        mobile app can compute live distance to the work point against the
+        device GPS *before* clock-in (the E5 clock-in geofence check is
+        server-side; this only powers the pre-clock "Dalam radius" pill).
+        `null` when the site has no geofence configured.
+      required:
+        - geo_lat
+        - geo_lng
+        - radius_m
+      properties:
+        geo_lat:
+          type: number
+          format: double
+          description: Site centroid latitude (WGS84).
+          example: -6.225014
+        geo_lng:
+          type: number
+          format: double
+          description: Site centroid longitude (WGS84).
+          example: 106.799424
+        radius_m:
+          type: integer
+          description: Geofence radius in meters (INV-5; 25–1000).
+          example: 100
+
     Placement:
       type: object
       required:
@@ -1733,6 +1763,8 @@ components:
         site_name:
           type: string
           example: 'Plaza Senayan'
+        site_geofence:
+          $ref: '#/components/schemas/SiteGeofence'
         position:
           type: string
           description: |

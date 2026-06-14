@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
@@ -55,8 +56,15 @@ func TestCreateOvertime_AgentSelf_201(t *testing.T) {
 	if !ok {
 		t.Fatalf("data missing/not an object: %T", out["data"])
 	}
-	if data["status"] != "PENDING_L1" {
-		t.Errorf("status = %v, want PENDING_L1", data["status"])
+	if data["status"] != "PENDING" {
+		t.Errorf("status = %v, want PENDING", data["status"])
+	}
+	// create enters the E11 chain: the engine was driven on the submit tx + linked.
+	if len(h.engine.calls) != 1 {
+		t.Fatalf("engine.CreateInstance calls = %d, want 1", len(h.engine.calls))
+	}
+	if data["approval_instance_id"] == nil || data["approval_instance_id"] == "" {
+		t.Errorf("approval_instance_id not linked on create: %v", data["approval_instance_id"])
 	}
 	if data["source"] != "REQUESTED" {
 		t.Errorf("source = %v, want REQUESTED", data["source"])
@@ -134,7 +142,7 @@ func TestCreateOvertime_OverlapsLeave_409(t *testing.T) {
 
 func TestGetOvertime_AgentCrossEmployee_404(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, "", empAgent)
-	h.seedOvertime("SWP-OT-40001", cmpLed, "SWP-EMP-OTHER", "PENDING_L1", "WORKDAY")
+	h.seedOvertime("SWP-OT-40001", cmpLed, "SWP-EMP-OTHER", dom.OvertimeStatusPending, dom.OvertimeTierWorkday)
 
 	rr := h.do("GET", "/overtime/SWP-OT-40001", nil)
 	if rr.Code != http.StatusNotFound {
@@ -145,7 +153,7 @@ func TestGetOvertime_AgentCrossEmployee_404(t *testing.T) {
 // GET own OT as the agent → 200 (self-scope allows the read).
 func TestGetOvertime_AgentOwn_200(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, "", empAgent)
-	h.seedOvertime("SWP-OT-40002", cmpLed, empAgent, "PENDING_L1", "WORKDAY")
+	h.seedOvertime("SWP-OT-40002", cmpLed, empAgent, dom.OvertimeStatusPending, dom.OvertimeTierWorkday)
 
 	rr := h.do("GET", "/overtime/SWP-OT-40002", nil)
 	if rr.Code != http.StatusOK {

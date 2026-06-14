@@ -1830,15 +1830,12 @@ components:
                 example: 298
         pending_grants:
           type: object
-          description: Items awaiting super-admin action (deep-link, DB-5).
-          required: [bank_approvals, role_requests]
+          description: |
+            Items awaiting super-admin action (deep-link, DB-5).
+            *(Bank-account approval escalations removed 2026-06-14 — profile edits are
+            instant self-edit; no bank approval queue. Only role-change requests remain.)*
+          required: [role_requests]
           properties:
-            bank_approvals:
-              type: integer
-              description: |
-                Bank-account approval escalations (`PARTIALLY_APPROVED` →
-                HR/super-admin, see E1 rbac `CanApproveBank`).
-              example: 3
             role_requests:
               type: integer
               description: Role-change requests awaiting grant.

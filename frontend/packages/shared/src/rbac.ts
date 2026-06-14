@@ -7,7 +7,7 @@
  * Until that lands, coarse module/nav visibility is hand-authored in the web app
  * (`apps/web/src/app/nav.ts`) against this type, and will be superseded by the generated map.
  */
-export const ROLES = ['super_admin', 'hr_admin', 'shift_leader', 'agent'] as const;
+export const ROLES = ['super_admin', 'hr_admin', 'lead', 'shift_leader', 'agent'] as const;
 export type Role = (typeof ROLES)[number];
 
 /**
@@ -18,6 +18,7 @@ export type Role = (typeof ROLES)[number];
 export const WEB_ROLES = [
   'super_admin',
   'hr_admin',
+  'lead',
   'shift_leader',
   'agent',
 ] as const satisfies readonly Role[];
@@ -48,12 +49,6 @@ export const PERMISSIONS = [
   // E2 — Identity & reference
   'employees.read',
   'employees.write',
-  'change_requests.read',
-  'change_requests.approve',
-  // Bank-account changes are HR-only even when a shift leader approves the rest of a request:
-  // the SL applies the non-bank fields and the bank field escalates to HR. This sub-permission
-  // gates that final bank approval (held by hr_admin/super_admin only). See E2 employee-profile.md.
-  'change_requests.approve.bank',
   'clients.read',
   'clients.write',
   'agreements.read',
@@ -84,6 +79,14 @@ export const PERMISSIONS = [
   'payroll.export',
   // E10 — Reporting
   'reports.read',
+  // E11 — Approvals (configurable multi-line engine; supersedes change_requests.*).
+  // `approvals.template.manage` gates per-company approval-template CRUD (HR/super-admin).
+  // `approvals.act` gates only INBOX VISIBILITY — eligibility to act on a specific request
+  // line is E11 line-membership, enforced server-side (E11 INV-3), never a permission.
+  // `approvals.bypass` is super-admin force-approve (with a reason).
+  'approvals.template.manage',
+  'approvals.act',
+  'approvals.bypass',
   // E1 — System / Settings
   'masterdata.manage',
   'settings.access',
@@ -114,19 +117,39 @@ export type Permission = (typeof PERMISSIONS)[number];
  * read-only, hard-scoped bundle, and would surface in `apps/client-portal`, not this console.
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  // Full access, including defining custom roles.
+  // Full access, including defining custom roles. Via the all-permissions spread this includes
+  // every E11 key: approvals.template.manage, approvals.act AND approvals.bypass (super-admin only).
   super_admin: [...PERMISSIONS],
-  // Everything except authoring roles/permissions (super-admin owns the access model).
-  hr_admin: PERMISSIONS.filter((p) => p !== 'settings.roles.manage'),
+  // Everything except authoring roles/permissions (super-admin owns the access model) AND
+  // except approvals.bypass (force-approve is super-admin only). hr_admin keeps
+  // approvals.template.manage + approvals.act.
+  hr_admin: PERMISSIONS.filter(
+    (p) => p !== 'settings.roles.manage' && p !== 'approvals.bypass',
+  ),
+  // Company-scoped operational approver over a set of assigned client companies (2026-06-12).
+  // Placement lifecycle (create/transfer/end/renew — not SLA, not master edits), schedule, and
+  // attendance verification; sees the E11 inbox via approvals.act (acting is line-membership-gated
+  // server-side). No clients, contracts, payroll, reports, master data, or settings. Its company
+  // set is resolved read-time from lead_assignments into Principal.CompanyIDs.
+  lead: [
+    'dashboard.view',
+    'employees.read',
+    'placements.read',
+    'placements.write',
+    'schedule.read',
+    'schedule.write',
+    'shifts.read',
+    'attendance.read',
+    'attendance.verify',
+    'leave.read',
+    'overtime.read',
+    'approvals.act',
+  ],
   // On-site supervisor: their site's daily operation only. No clients, contracts, payroll,
   // reports, master data, or settings. Scope (their one company) is enforced server-side.
   shift_leader: [
     'dashboard.view',
     'employees.read',
-    // Profile change requests route to the on-site shift leader (company scope) with HR fallback;
-    // the SL reviews/approves the non-bank fields, bank escalates to HR (no .approve.bank here).
-    'change_requests.read',
-    'change_requests.approve',
     'placements.read',
     'schedule.read',
     'schedule.write',
@@ -138,9 +161,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'attendance.read',
     'attendance.verify',
     'leave.read',
-    'leave.approve',
     'overtime.read',
-    'overtime.approve',
+    // E11 inbox visibility. The SL approves only requests where they're on the current E11
+    // line (membership-gated server-side) — not a *.approve permission. (Replaces the removed
+    // change_requests.read/.approve; profile edits are now instant self-edit, E11 removes them.)
+    'approvals.act',
   ],
   // Agent self-service (mobile + web console under /me/*). These `self.*` keys gate the agent's
   // OWN records; data scope is server-enforced (scope: self). See docs/eng/AGENT-WEB-ACCESS.md.

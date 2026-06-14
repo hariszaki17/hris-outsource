@@ -25,6 +25,11 @@ export interface EmployeePickerProps {
   disabled?: boolean;
   error?: boolean;
   placeholder?: string;
+  /**
+   * Which id the picker emits/binds. Default `employee_id` (the Employee FK — most callers).
+   * Approval-line membership stores `SWP-USR-…` ids, so the E11 line card passes `user_id`.
+   */
+  valueField?: 'employee_id' | 'user_id';
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +42,7 @@ export function EmployeePicker({
   disabled,
   error,
   placeholder,
+  valueField = 'employee_id',
 }: EmployeePickerProps) {
   const { t } = useTranslation('pickers');
   const [query, setQuery] = useState('');
@@ -65,6 +71,7 @@ export function EmployeePicker({
         | {
             data?: {
               id: string;
+              user_id?: string;
               full_name: string;
               nip?: string;
               nik: string;
@@ -75,7 +82,8 @@ export function EmployeePicker({
     )?.data ?? [];
 
   const options = employees.map((emp) => ({
-    value: emp.id,
+    // Approval-line callers bind `user_id`; default callers bind the Employee FK (`id`).
+    value: valueField === 'user_id' ? (emp.user_id ?? emp.id) : emp.id,
     label: emp.full_name,
     sublabel: emp.nip ?? emp.nik,
     meta: emp.current_position?.name,

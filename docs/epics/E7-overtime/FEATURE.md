@@ -14,9 +14,9 @@ Track overtime hours for placed agents: agents/leaders can **pre-request** OT, a
 | Actor | Involvement |
 |---|---|
 | **Agent** | Requests OT, confirms auto-detected OT, views own OT (mobile). |
-| **Shift Leader** | First-level approver for their company's OT. |
-| **HR / Super Admin** | Second-level approver; manages OT rules + holiday calendar; reporting. |
-| **System** | Auto-detects OT from attendance, classifies day type, runs the two-level flow, records hours, audits. |
+| **Approval line members** | Approve/reject OT where they sit on the agent company's **E11 approval line** (routing by membership, not role — may be the on-site shift leader, lead, HR, …). |
+| **HR / Super Admin** | Manage OT rules + holiday calendar; configure the E11 template; super admin may **bypass**; reporting. |
+| **System** | Auto-detects OT from attendance, classifies day type, **creates an E11 approval instance**, fires the count-by-day-type hook on approval, audits. |
 
 ## 3. Scope
 
@@ -30,7 +30,7 @@ erDiagram
     EMPLOYEE ||--o{ OVERTIME_RECORD : "works"
     PLACEMENT ||--o{ OVERTIME_RECORD : "under"
     ATTENDANCE ||--o| OVERTIME_RECORD : "auto-detected from"
-    OVERTIME_RECORD ||--o{ OVERTIME_APPROVAL : "decided via"
+    OVERTIME_RECORD ||--o| APPROVAL_INSTANCE : "decided via (E11)"
 
     OVERTIME_RULE {
         bigint id PK
@@ -52,25 +52,22 @@ erDiagram
         int duration_minutes
         string day_type "Workday|RestDay|Holiday"
         string source "Requested|AutoDetected"
-        string status "Pending|LeaderApproved|Approved|Rejected|Cancelled"
+        string status "Pending|Approved|Rejected|Cancelled (synced to E11 instance)"
         text notes
         bigint created_by FK
     }
-    OVERTIME_APPROVAL {
-        bigint id PK
-        bigint overtime_record_id FK
-        int level "1=leader, 2=HR"
-        bigint approver_id FK
-        string decision
-        text reason
-        datetime decided_at
+    APPROVAL_INSTANCE {
+        string id PK "SWP-APV-* (owned by E11)"
+        string request_type "OVERTIME"
+        int current_line
+        string status "PENDING|APPROVED|REJECTED"
     }
 ```
 
 **Invariants:**
 - **INV-1:** every OT record is classified into a **day_type** (Workday / RestDay / Holiday), derived from the schedule (E4) + the public-holiday calendar (§6b).
 - **INV-2:** OT is recorded as **hours/minutes only**; the rule `multiplier` is stored as reference, **not applied to pay** in v1.
-- **INV-3:** **two-level approval** — `Pending → LeaderApproved → Approved`; reject at either level ends it.
+- **INV-3:** approval is **routed through the E11 engine** (per-company configurable chain) *(reworked 2026-06-14)* — `OvertimeRecord.status` tracks the E11 instance (`Pending → Approved | Rejected`); OT contributes only the `OnApproved` (count-by-day-type) side-effect. *(Supersedes the old fixed two-level `Pending → LeaderApproved → Approved`.)*
 - **INV-4:** auto-detected OT is a **candidate** requiring confirmation/approval; it never counts until approved.
 - **INV-5:** OT below a rule's `min_minutes` is **not counted** (ignored or flagged).
 
@@ -148,31 +145,23 @@ flowchart TD
 
 ---
 
-### F7.3 — Two-Level Approval Workflow
+### F7.3 — Approval Workflow (via the E11 engine)
 
-Shift leader approves first, then HR confirms (same pattern as leave). Auto-detected candidates may require the agent to confirm before/at level 1. Only approved OT counts in reporting.
+*(Reworked 2026-06-14.)* OT routes through the **E11 configurable approval engine** (per-company chain), not a fixed two-level flow. Auto-detected candidates are confirmed by the agent first (F7.2 OC-7), then an E11 instance is created. Only approved OT counts in reporting; the count-by-day-type runs as OT's `OnApproved` hook.
 
 ```mermaid
 flowchart TD
-    subgraph SL[Shift Leader]
-        L1([Pending OT]) --> L2{Approve?}
-        L2 -- Reject --> R1[Rejected + reason]
-        L2 -- Approve --> L3[LeaderApproved]
-    end
-    subgraph HR[HR Admin]
-        L3 --> H1{Approve?}
-        H1 -- Reject --> R1
-        H1 -- Approve --> H2[Approved]
-    end
-    subgraph SYS[System]
-        H2 --> S1[Count hours by day_type tier]
-        S1 --> S2[(Persist approvals + audit)]
-        S2 --> S3[Notify agent]
-        R1 --> S3
-    end
+    C0([Pending OT - requested or confirmed]) --> E0[Create E11 ApprovalInstance request_type=OVERTIME]
+    E0 --> E1{E11 chain - per-company lines}
+    E1 -- "Any current-line member rejects" --> R1[Rejected + reason]
+    E1 -- "Lines cleared in sequence OR super-admin bypass" --> A1[Approved]
+    A1 --> S1[OnApproved hook: count hours by day_type tier - F7.4]
+    S1 --> S2[(append approval_actions + audit)]
+    S2 --> S3[Notify agent]
+    R1 --> S3
 ```
 
-**Entities:** `OvertimeApproval`, `OvertimeRecord`. **Depends on:** F3.4 (leader scope / HR escalation).
+**Entities:** `OvertimeRecord` (status synced to the E11 instance). Approval routing/trail = **E11** (`ApprovalInstance`, `ApprovalAction`); the old `OvertimeApproval` table is removed. **Depends on:** E11 (engine), F7.4 (count hook).
 
 ---
 
@@ -201,7 +190,7 @@ flowchart LR
 **Resolved (2026-05-29):**
 - ✅ **Capture = request + auto-detect** (from verified attendance beyond shift end).
 - ✅ **Hours only** — record OT hours; multipliers stored as reference, **no pay calc** in v1.
-- ✅ **Two-level approval** (shift leader → HR).
+- ~~✅ **Two-level approval** (shift leader → HR).~~ — **superseded 2026-06-14**: OT routes through the **E11 configurable approval engine** (per-company chain); see F7.3 + [overtime-approval PRD](prds/overtime-approval.md).
 - ✅ **Day-type tiers** (workday / rest day / holiday), **global only** (one rule per day type). *(Service-line scoping + precedence dropped 2026-06-12 — service line removed project-wide.)*
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**

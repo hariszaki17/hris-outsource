@@ -1,5 +1,7 @@
 # E2 Identity — Design Audit
 
+> ⚠️ **Superseded findings (2026-06-14, EPICS §8 E11):** the profile **change-request** feature is **removed** — agent edits (phone/emergency/bank/address/photo/language) are now **instant self-edit, no approval**. All findings below about a missing/required *HR change-request approval queue/review screen* (the BLOCKER in §2, items 1/18, and the agent "Status Pengajuan" `SXqA5` flow) are **void** — do not action them. Approval now lives only in **E11** (leave/overtime), with its own screens (see SCREEN-GENERATION-PLAN E11 block).
+
 **Date:** 2026-06-02
 **.pen frame:** Z3cS3 ("▦ FEATURE GROUP · E2 Karyawan")
 **Specs:** FEATURE.md + 5 PRDs (employee-profile, employment-agreement, client-company-directory, service-lines-positions, operational-master-data)

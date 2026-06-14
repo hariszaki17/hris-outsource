@@ -5,9 +5,8 @@ package domain
 import "time"
 
 // BankAccount holds the flat bank_account fields stored on an employee.
-// JSON tags are required so that when BankAccount is embedded as `any` in the
-// diff response (changeRequestFieldDiffResp.New / .Old), the serialized keys
-// match what the FE formatDiffValue() expects (snake_case).
+// JSON tags are snake_case to match the wire contract (employee + self-profile
+// responses) the FE expects.
 type BankAccount struct {
 	BankName          string `json:"bank_name"`
 	AccountNumber     string `json:"account_number"`
@@ -15,10 +14,8 @@ type BankAccount struct {
 }
 
 // EmergencyContact holds the emergency-contact fields stored on an employee.
-// JSON tags mirror BankAccount's rationale: when embedded as `any` in the change
-// request diff (changeRequestFieldDiffResp.New / .Old) the serialized keys must
-// match what the FE formatDiffValue() expects (snake_case). Editing emergency
-// contact is approval-tier (routed via a change request).
+// JSON tags are snake_case to match the wire contract. Editing emergency contact
+// is instant self-apply via PATCH /me/profile (E11, 2026-06-14).
 type EmergencyContact struct {
 	Name  string `json:"name"`
 	Phone string `json:"phone"`
@@ -47,7 +44,7 @@ type Employee struct {
 	BPJSKetenagakerjaan *string
 	BankAccount         BankAccount // flat columns; empty strings = not set
 	// EmergencyContact holds the flat emergency_contact_{name,phone} columns
-	// (empty strings = not set). Edited via an approval-tier change request.
+	// (empty strings = not set). Instant self-edit via PATCH /me/profile (E11).
 	EmergencyContact EmergencyContact
 	// AppLanguage is the agent's UI language preference ("id" default | "en");
 	// instant-tier self edit (PATCH /me/profile).
@@ -157,81 +154,8 @@ type Attachment struct {
 	CreatedAt   time.Time
 }
 
-// --- Change Requests (EP-5 HR approval queue) ---
-
-// ChangeRequestChanges holds the whitelisted fields that can be proposed via
-// a change request: phone, emergency_contact, bank_account. All are optional.
-// (address moved to instant-tier self apply; emergency_contact is the new
-// approval-tier field — 2026-06-11 redesign.)
-type ChangeRequestChanges struct {
-	Phone            *string           `json:"phone,omitempty"`
-	EmergencyContact *EmergencyContact `json:"emergency_contact,omitempty"`
-	BankAccount      *BankAccount      `json:"bank_account,omitempty"`
-}
-
-// FieldResolution records how one field of a change request was resolved during
-// the shift-leader bank-split flow: who applied it (or escalated it) and when.
-// Stored per field in change_requests.field_resolutions (jsonb).
-type FieldResolution struct {
-	Status     string     `json:"status"`                // "applied" | "escalated_to_hr" | "rejected"
-	ResolvedBy string     `json:"resolved_by,omitempty"` // SWP-EMP-<N> of the resolver
-	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
-}
-
-// ChangeRequest is the domain entity for a change_requests row.
-// Status is the DB lowercase value ("pending"|"approved"|"rejected"|"partially_approved")
-// — uppercased only at DTO boundary.
-// RequestType is stored uppercase as a DB CHECK: PHONE|EMERGENCY_CONTACT|BANK_ACCOUNT|MULTIPLE.
-type ChangeRequest struct {
-	ID              string
-	EmployeeID      string
-	Status          string // "pending" | "approved" | "rejected" | "partially_approved" (DB lowercase)
-	SubmittedAt     time.Time
-	ResolvedAt      *time.Time
-	ResolvedBy      *string // SWP-EMP-<N> of resolving HR user
-	RejectionReason *string
-	Note            *string
-	Changes         ChangeRequestChanges // deserialized from jsonb
-	RequestType     string               // PHONE | EMERGENCY_CONTACT | BANK_ACCOUNT | MULTIPLE
-	// FieldResolutions records per-field resolution in the SL bank-split flow,
-	// keyed by field name ("phone","emergency_contact","bank_account").
-	// Empty until a shift leader partially applies a mixed request.
-	FieldResolutions map[string]FieldResolution
-	// BankPending is the denormalized flag (DB column) backing the HR
-	// bank-escalation queue: true when an SL applied the non-bank fields and a
-	// bank change still awaits HR (status = partially_approved).
-	BankPending bool
-}
-
-// ChangeRequestDetail is a value object combining a ChangeRequest with the employee
-// summary and a per-field old→new diff (for the GET /change-requests/{id} detail view).
-type ChangeRequestDetail struct {
-	ChangeRequest
-	Employee EmployeeRef
-	Diff     map[string]ChangeRequestFieldDiff // keyed by field name: "phone", "emergency_contact", "bank_account"
-}
-
-// EmployeeRef is the compact employee reference embedded in ChangeRequestDetail.
-type EmployeeRef struct {
-	ID       string
-	FullName string
-	NIP      string
-}
-
-// ChangeRequestFieldDiff holds the before and after value for one changed field.
-type ChangeRequestFieldDiff struct {
-	Old any `json:"old"`
-	New any `json:"new"`
-}
-
-// ChangeRequestFilter holds the decoded query parameters for GET /change-requests.
-// All fields optional; cursor fields are set when paginating past the first page.
-type ChangeRequestFilter struct {
-	Status            *string
-	EmployeeID        *string
-	RequestType       *string
-	Q                 *string // reserved for FTS (currently unused in query, passed through)
-	Limit             int
-	CursorSubmittedAt *time.Time
-	CursorID          *string
-}
+// E11 (2026-06-14, EPICS §8 decision A): the profile change-request approval
+// queue was hard-deleted. Agent profile edits (phone / emergency_contact /
+// bank_account, alongside address / app_language / photo) are now INSTANT
+// self-apply via PATCH /me/profile. The ChangeRequest* domain types,
+// change_requests table, and approval surface no longer exist.

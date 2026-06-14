@@ -124,9 +124,10 @@ type Querier interface {
 	// non-terminal-rejected requests of this type the employee already has in the
 	// window [from,to]. Counts PENDING_*/APPROVED (reserved or committed).
 	CountApprovedRequestsForType(ctx context.Context, arg CountApprovedRequestsForTypeParams) (int64, error)
-	// pending_grants.bank_approvals: change-requests with a bank change escalated to
-	// HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
-	// rbac.CanApproveBank / PARTIALLY_APPROVED).
+	// pending_grants.bank_approvals: DEPRECATED by E11 (2026-06-14). The profile
+	// change-request queue (incl. bank-change escalation) was removed — bank edits are
+	// now instant self-edit (E2). The symbol is retained for the SuperAdminWidgets DTO
+	// but always returns 0; downstream E10 should drop or repurpose this widget.
 	CountBankApprovalsPending(ctx context.Context) (int64, error)
 	// Employment agreements ending within the next 30 days (HrDashboard).
 	CountExpiringAgreements30d(ctx context.Context, today pgtype.Date) (int64, error)
@@ -171,11 +172,12 @@ type Querier interface {
 	//     LeaderTodayStatus joins schedule_entries -> placements for company scope.
 	// Attendance awaiting leader verification (PENDING or ESCALATED).
 	CountPendingAttendanceVerify(ctx context.Context, companyID *string) (int64, error)
-	// Leave requests pending either approval level.
+	// Leave requests pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 	CountPendingLeaveApprove(ctx context.Context, companyID *string) (int64, error)
-	// HR-level-only pending leave (HrDashboard.kpis.leave_pending = PENDING_HR).
+	// HR-pending leave (E11 collapsed the two levels into a single PENDING; kept as a
+	// distinct symbol for the HrDashboard KPI, now equal to CountPendingLeaveApprove).
 	CountPendingLeaveApproveHR(ctx context.Context, companyID *string) (int64, error)
-	// Overtime pending either approval level.
+	// Overtime pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 	CountPendingOtApprove(ctx context.Context, companyID *string) (int64, error)
 	// AgentDashboard.pending_requests: this agent's own pending leave + OT.
 	CountPendingRequestsForEmployee(ctx context.Context, employeeID string) (CountPendingRequestsForEmployeeRow, error)
@@ -197,8 +199,6 @@ type Querier interface {
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (CreateAttachmentRow, error)
 	// Allocates the SWP-AC id inline from the per-prefix sequence.
 	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
-	// Allocates the SWP-CHG id inline from the per-prefix sequence.
-	CreateChangeRequest(ctx context.Context, arg CreateChangeRequestParams) (CreateChangeRequestRow, error)
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
 	// Insert a new agent/leader-filed correction in PENDING. company_id +
@@ -238,6 +238,10 @@ type Querier interface {
 	// Allocates the SWP-USR id inline from the per-prefix sequence. Phone is the
 	// required login identifier (D2); email is optional.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// Clears a template's lines (members cascade) before re-inserting on edit.
+	DeleteApprovalLinesByTemplate(ctx context.Context, templateID string) error
+	// Drops the template; lines + members cascade.
+	DeleteApprovalTemplate(ctx context.Context, id string) error
 	// INV-3 reverse (cancel/shorten restore — used by later cancel paths; added now).
 	DeleteApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) (int64, error)
 	// Clears is_primary on all other sites of the company when a new primary is set.
@@ -291,6 +295,18 @@ type Querier interface {
 	// ANNUAL_POOL entitlement source: the employee's active employment agreement
 	// (annual_leave_entitlement_days, migr. 00040). NULL when unset.
 	GetAnnualEntitlementForEmployee(ctx context.Context, employeeID string) (*int32, error)
+	GetApprovalInstance(ctx context.Context, id string) (ApprovalInstance, error)
+	// Resolve the instance governing a given domain request (leave/OT read linkage).
+	GetApprovalInstanceByRequest(ctx context.Context, arg GetApprovalInstanceByRequestParams) (ApprovalInstance, error)
+	// Row-lock for the act/bypass transition (advance line / terminate). The service
+	// guards the legal transition before writing.
+	GetApprovalInstanceForUpdate(ctx context.Context, id string) (ApprovalInstance, error)
+	// E11 approval-template queries (F11.1 / SWP-APT-*, SWP-APL-*). One template per
+	// company (INV-1). Lines are ordered 2..3 (INV-2); members are an OR-set per line.
+	// IDs allocated by the column DEFAULT ('SWP-APT-' / 'SWP-APL-' || swp_next_id(...)).
+	// The company's single template (INV-1). The service then loads lines + members.
+	GetApprovalTemplateByCompany(ctx context.Context, companyID string) (ApprovalTemplate, error)
+	GetApprovalTemplateByID(ctx context.Context, id string) (ApprovalTemplate, error)
 	// Returns file metadata + blob for the authenticated file-download handler.
 	GetAttachmentByID(ctx context.Context, id string) (GetAttachmentByIDRow, error)
 	// Single record with denormalized names.
@@ -300,13 +316,15 @@ type Querier interface {
 	// verification_status for scope + state guards (omits joins; service re-reads for DTO).
 	GetAttendanceForUpdate(ctx context.Context, id string) (GetAttendanceForUpdateRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
-	GetChangeRequestByID(ctx context.Context, id string) (GetChangeRequestByIDRow, error)
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
 	// Single correction with denormalized requester/company names.
 	GetCorrection(ctx context.Context, id string) (GetCorrectionRow, error)
 	// Row-lock for approve/reject: reads status/company_id/proposed_* for scope + state
 	// guards + apply (omits joins; service re-reads for DTO).
 	GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error)
+	// Members of an instance's CURRENT line — for the membership / self-approval check
+	// (INV-2 OR-set, INV-3). Resolves the live template's line at line_no = current_line.
+	GetCurrentLineMembers(ctx context.Context, instanceID string) ([]string, error)
 	// current_* come from the employee's single non-terminal placement (INV-1 → at most
 	// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
 	// employee still resolves (current_* null). current_position is the free-text
@@ -397,6 +415,25 @@ type Querier interface {
 	// Login lookup (D2): active, non-deleted user by phone OR case-insensitive
 	// email. Phone is matched exactly (stored normalized E.164); email lowercased.
 	GetUserByIdentifier(ctx context.Context, identifier string) (GetUserByIdentifierRow, error)
+	// E11 approval-action queries (F11.2 / SWP-APA-*). Append-only decision trail
+	// (INV-9): one row per decision (APPROVE/REJECT/BYPASS), stamped with the
+	// template_version in force. id from the column DEFAULT ('SWP-APA-' ||
+	// swp_next_id('APA')).
+	// One immutable decision row; written in-tx with the instance progress update.
+	InsertApprovalAction(ctx context.Context, arg InsertApprovalActionParams) (ApprovalAction, error)
+	// E11 approval-instance queries (F11.2 / SWP-APV-*). One live run of the engine per
+	// domain request (unique request_type+request_id). Keyset cursor on (created_at,id)
+	// DESC, mirroring ListLeaveRequests (CONVENTIONS §11). id from the column DEFAULT
+	// ('SWP-APV-' || swp_next_id('APV')).
+	// Build an instance from the company's template (template_id null = super-admin
+	// fallback, INV-7). line_count = configured lines (1 for fallback). id from DEFAULT.
+	InsertApprovalInstance(ctx context.Context, arg InsertApprovalInstanceParams) (ApprovalInstance, error)
+	// One line of a template (line_no 1..3, unique within template). id from DEFAULT.
+	InsertApprovalLine(ctx context.Context, arg InsertApprovalLineParams) (ApprovalLine, error)
+	// Adds a user to a line's OR-set (composite PK line_id+user_id).
+	InsertApprovalLineMember(ctx context.Context, arg InsertApprovalLineMemberParams) error
+	// Create a company's template (INV-1 unique company_id). id from column DEFAULT.
+	InsertApprovalTemplate(ctx context.Context, arg InsertApprovalTemplateParams) (ApprovalTemplate, error)
 	// INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
 	// leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
 	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
@@ -428,19 +465,12 @@ type Querier interface {
 	// ('SWP-HOL-' || swp_next_id('HOL')) when omitted, OR supplied explicitly
 	// (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
 	InsertHoliday(ctx context.Context, arg InsertHolidayParams) (InsertHolidayRow, error)
-	// E6 leave-approval decision-trail queries. Append-only; drives the
-	// LeaveRequest.timeline[] the FE renders (ordered by occurred_at).
-	// One immutable decision row per approval action (L1/HR approve, override, reject).
-	InsertLeaveApproval(ctx context.Context, arg InsertLeaveApprovalParams) (LeaveApproval, error)
 	// The worker / dispatch-helper write path. id via the column DEFAULT.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	// Seed / HR-on-behalf path (FE/web does not create OT — mobile/agent does). id
 	// allocated by the column DEFAULT ('SWP-OT-' || swp_next_id('OT')) when omitted,
 	// OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
 	InsertOvertime(ctx context.Context, arg InsertOvertimeParams) (InsertOvertimeRow, error)
-	// One immutable decision-trail row per approval action (L1/HR approve, override,
-	// reject) — written in-tx with each transition.
-	InsertOvertimeApproval(ctx context.Context, arg InsertOvertimeApprovalParams) (OvertimeApproval, error)
 	// Seed path (10-02 inserts ciphertext produced by the crypto helper). id
 	// allocated by the column DEFAULT ('SWP-PS-' || swp_next_id('PS')) when omitted,
 	// OR supplied explicitly (deterministic E2E targets) via ON CONFLICT (id) DO NOTHING.
@@ -468,6 +498,25 @@ type Querier interface {
 	// q (free-text ILIKE over employee full_name / employee_id / agreement_no).
 	// LEFT JOIN employees to surface the employee full name on each row.
 	ListAgreements(ctx context.Context, arg ListAgreementsParams) ([]ListAgreementsRow, error)
+	// The decision timeline for an instance (chronological), joined to users + the
+	// linked employee to expose actor_name (employee full_name, falling back to email).
+	ListApprovalActionsByInstance(ctx context.Context, instanceID string) ([]ListApprovalActionsByInstanceRow, error)
+	// Queue / list load. Keyset cursor (created_at,id) DESC. Filters (all optional via
+	// narg): company_id, request_type, status.
+	ListApprovalInstances(ctx context.Context, arg ListApprovalInstancesParams) ([]ApprovalInstance, error)
+	// The `mine` inbox (F11.3): PENDING instances whose CURRENT line includes the given
+	// member (member_user_id), excluding the member's own requests (INV-3 self-approval
+	// block — requester_id != member). Same optional filters (company_id, request_type)
+	// + keyset cursor (created_at,id) DESC. The current line is resolved by joining the
+	// live template's line at line_no = current_line.
+	ListApprovalInstancesForMember(ctx context.Context, arg ListApprovalInstancesForMemberParams) ([]ApprovalInstance, error)
+	// All members across a template's lines, joined to users + the linked employee for
+	// the LineMember readOnly fields: display_name (employee full_name) and active
+	// (an active employment_agreement exists, i.e. employment not ended — TM-3).
+	// Ordered by line_no then user_id for deterministic chain rendering.
+	ListApprovalLineMembersByTemplate(ctx context.Context, templateID string) ([]ListApprovalLineMembersByTemplateRow, error)
+	// Ordered chain (line_no asc) for a template.
+	ListApprovalLinesByTemplate(ctx context.Context, templateID string) ([]ApprovalLine, error)
 	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
 	// employee_name, client_companies for company_name, and client_sites for site_name.
 	// position is FREE-TEXT (stored directly on the row; no positions JOIN, no service_line).
@@ -480,7 +529,11 @@ type Querier interface {
 	//   verification_status_in / status_in: text[] = ANY membership.
 	//   site_id / position: narrow within the (leader-pinned) company scope (position is
 	//     a free-text exact-match on the stored label).
-	//   date_from/date_to: bound on the shift-date basis (check_in_at::date).
+	//   date_from/date_to: bound on the shift-date basis — COALESCE(shift_start_at,
+	//     check_in_at) rendered in Asia/Jakarta (the agent riwayat AR-10 basis). Using
+	//     shift_start_at first keeps a record on its scheduled day (so auto-created ABSENT
+	//     rows, which have a NULL check_in_at, are still range-filtered) and only falls back
+	//     to check_in_at for unscheduled/manual rows. Both bounds are INCLUSIVE.
 	//   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 	ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
@@ -488,18 +541,11 @@ type Querier interface {
 	ListAttendanceCodes(ctx context.Context, arg ListAttendanceCodesParams) ([]ListAttendanceCodesRow, error)
 	// Cursor page ordered by (created_at desc, id desc), fetch limit+1. All filters optional.
 	ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error)
-	// HR bank-escalation queue: rows whose bank change a shift leader partially
-	// applied and escalated. Backed by the change_requests_bank_pending_idx partial
-	// index; cursor page ordered by (submitted_at desc, id desc), fetch limit+1.
-	ListBankPendingChangeRequests(ctx context.Context, arg ListBankPendingChangeRequestsParams) ([]ListBankPendingChangeRequestsRow, error)
 	// E6 leave-calendar query (GET /leave-calendar). Returns leave entries overlapping
 	// a [from,to] date range, scoped by company / leave-type. The status filter is a
 	// text[] the service builds: APPROVED only when show_pending=false, else
 	// APPROVED + PENDING_L1 + PENDING_HR. Denormalized names via LEFT JOINs.
 	ListCalendarEntries(ctx context.Context, arg ListCalendarEntriesParams) ([]ListCalendarEntriesRow, error)
-	// Cursor page ordered by (submitted_at desc, id desc). Fetch limit+1 for has_more.
-	// Filters: status, employee_id, request_type.
-	ListChangeRequests(ctx context.Context, arg ListChangeRequestsParams) ([]ListChangeRequestsRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
@@ -537,8 +583,6 @@ type Querier interface {
 	// active rows here at request time (mirror of shift_leader_assignments derivation).
 	// Filters: employee_id, company_id, active (unassigned_at IS NULL).
 	ListLeadAssignments(ctx context.Context, arg ListLeadAssignmentsParams) ([]ListLeadAssignmentsRow, error)
-	// Timeline source: all decisions for a request, chronological.
-	ListLeaveApprovalsForRequest(ctx context.Context, leaveRequestID string) ([]LeaveApproval, error)
 	// E6 leave-request queries (F6.1/F6.2 / SWP-LR-*). Reads LEFT JOIN employees for
 	// employee_name, client_companies for company_name, leave_types for
 	// leave_type_name. Dates come back as pgtype.Date (08-02 repo converts <-> time.Time
@@ -567,8 +611,6 @@ type Querier interface {
 	// narg): employee_id, company_id, status (single), status__in (text[] → status =
 	// ANY), work_date >= / <=, day_type (tier), source, flagged_no_preapproval.
 	ListOvertime(ctx context.Context, arg ListOvertimeParams) ([]ListOvertimeRow, error)
-	// The approval timeline for GET /overtime/{id} (Overtime.approvals[]), chronological.
-	ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]OvertimeApproval, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Overtime rules are GLOBAL ONLY (decision 2026-06-12 — the service_line scope axis
 	// + line-vs-global precedence were dropped). Filter: status.
@@ -700,12 +742,10 @@ type Querier interface {
 	ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysParams) (LeaveQuota, error)
 	// Submit: hold pending_days on the window (remaining must cover it — service guards).
 	ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysParams) (LeaveQuota, error)
-	// Drives :approve (status='approved'), :reject (status='rejected'), and the
-	// SL bank-split partial apply (status='partially_approved' + bank_pending=true,
-	// field_resolutions recording which non-bank fields the SL applied + who). For
-	// terminal resolutions resolved_at/resolved_by/rejection_reason are set; for a
-	// partial apply field_resolutions/bank_pending carry the in-between state.
-	ResolveChangeRequest(ctx context.Context, arg ResolveChangeRequestParams) (ResolveChangeRequestRow, error)
+	// INV-6 live-template reset: on a template edit, every non-terminal instance for the
+	// company restarts at line 1 on the new version (prior actions retained for audit
+	// but no longer count).
+	ResetPendingInstancesForCompany(ctx context.Context, arg ResetPendingInstancesForCompanyParams) error
 	// E6 per-type leave-quota window queries (F6.1 LQ-13 / SWP-LQ-*). The cap_basis
 	// ledger meters per (employee, leave_type, period_key) window: reserve at submit,
 	// commit at approve, release at reject/cancel; remaining = entitled-used-pending is a
@@ -753,8 +793,12 @@ type Querier interface {
 	// Per-type ledger: requested/remaining/requires_override only (no per-lot split).
 	// Clearing (release/reverse) passes nulls.
 	SetLeaveBalanceSnapshot(ctx context.Context, arg SetLeaveBalanceSnapshotParams) error
+	// E11 linkage: bind a leave request to its governing approval instance.
+	SetLeaveRequestApprovalInstanceID(ctx context.Context, arg SetLeaveRequestApprovalInstanceIDParams) error
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatusParams) (SetLeaveTypeStatusRow, error)
+	// E11 linkage: bind an OT record to its governing approval instance.
+	SetOvertimeApprovalInstanceID(ctx context.Context, arg SetOvertimeApprovalInstanceIDParams) error
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetOvertimeRuleStatus(ctx context.Context, arg SetOvertimeRuleStatusParams) (SetOvertimeRuleStatusRow, error)
 	// Backfill: attach an agreement to a previously pending placement (awaiting_agreement).
@@ -787,12 +831,21 @@ type Querier interface {
 	// touched (the start is frozen at clock-in). Computed shift_end_at (work_date +
 	// new end, +1 day when cross) is passed in from Go.
 	SyncOpenAttendanceShiftEnd(ctx context.Context, arg SyncOpenAttendanceShiftEndParams) (int64, error)
+	// Advance the chain: set current_line + status after a line clears / terminal
+	// reject / bypass.
+	UpdateApprovalInstanceProgress(ctx context.Context, arg UpdateApprovalInstanceProgressParams) error
+	// Bump version on every edit (INV-6); the service then re-inserts lines/members and
+	// resets pending instances.
+	UpdateApprovalTemplateVersion(ctx context.Context, id string) (ApprovalTemplate, error)
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
-	// EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
-	// fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
-	// when the caller passes NULL, so partial patches don't clobber the other fields.
+	// EP-5 agent self-service instant apply (PATCH /me/profile). E11 removed the
+	// change-request approval queue: phone / emergency contact / bank fields are now
+	// instant self-edit too (alongside address, app_language, photo_object_key).
+	// COALESCE keeps a column unchanged when the caller passes NULL, so partial patches
+	// don't clobber the other fields. Phone uniqueness is enforced in the Go service
+	// layer, not here.
 	UpdateEmployeeSelfInstant(ctx context.Context, arg UpdateEmployeeSelfInstantParams) (UpdateEmployeeSelfInstantRow, error)
 	// The worker's lifecycle writer. Sets status + result fields; stamps started_at
 	// on RUNNING (once) and completed_at on the terminal states (DONE/FAILED).

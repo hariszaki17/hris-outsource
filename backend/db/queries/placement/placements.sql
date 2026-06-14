@@ -20,6 +20,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -66,6 +69,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -109,6 +115,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -140,6 +149,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -161,6 +173,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -317,6 +332,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p

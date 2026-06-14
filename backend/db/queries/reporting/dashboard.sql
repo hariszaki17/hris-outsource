@@ -24,27 +24,28 @@ WHERE deleted_at IS NULL
   AND (sqlc.narg(company_id)::text IS NULL OR company_id = sqlc.narg(company_id)::text);
 
 -- name: CountPendingLeaveApprove :one
--- Leave requests pending either approval level.
+-- Leave requests pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 SELECT count(*)::bigint AS pending
 FROM leave_requests
 WHERE deleted_at IS NULL
-  AND status IN ('PENDING_L1','PENDING_HR')
+  AND status = 'PENDING'
   AND (sqlc.narg(company_id)::text IS NULL OR company_id = sqlc.narg(company_id)::text);
 
 -- name: CountPendingLeaveApproveHR :one
--- HR-level-only pending leave (HrDashboard.kpis.leave_pending = PENDING_HR).
+-- HR-pending leave (E11 collapsed the two levels into a single PENDING; kept as a
+-- distinct symbol for the HrDashboard KPI, now equal to CountPendingLeaveApprove).
 SELECT count(*)::bigint AS pending
 FROM leave_requests
 WHERE deleted_at IS NULL
-  AND status = 'PENDING_HR'
+  AND status = 'PENDING'
   AND (sqlc.narg(company_id)::text IS NULL OR company_id = sqlc.narg(company_id)::text);
 
 -- name: CountPendingOtApprove :one
--- Overtime pending either approval level.
+-- Overtime pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 SELECT count(*)::bigint AS pending
 FROM overtime
 WHERE deleted_at IS NULL
-  AND status IN ('PENDING_L1','PENDING_HR')
+  AND status = 'PENDING'
   AND (sqlc.narg(company_id)::text IS NULL OR company_id = sqlc.narg(company_id)::text);
 
 -- name: CountExpiringPlacements30d :one
@@ -131,10 +132,10 @@ WHERE deleted_at IS NULL
 SELECT
     (SELECT count(*) FROM leave_requests lr
        WHERE lr.deleted_at IS NULL AND lr.employee_id = sqlc.arg(employee_id)
-         AND lr.status IN ('PENDING_L1','PENDING_HR'))::bigint AS leave_pending,
+         AND lr.status = 'PENDING')::bigint AS leave_pending,
     (SELECT count(*) FROM overtime o
        WHERE o.deleted_at IS NULL AND o.employee_id = sqlc.arg(employee_id)
-         AND o.status IN ('PENDING_AGENT_CONFIRM','PENDING_L1','PENDING_HR'))::bigint AS ot_pending;
+         AND o.status IN ('PENDING_AGENT_CONFIRM','PENDING'))::bigint AS ot_pending;
 
 -- =====================================================================
 -- SuperAdminWidgets (DB-7) — admin-only dashboard block. Present ONLY when
@@ -176,12 +177,11 @@ GROUP BY p.position
 ORDER BY p.position;
 
 -- name: CountBankApprovalsPending :one
--- pending_grants.bank_approvals: change-requests with a bank change escalated to
--- HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
--- rbac.CanApproveBank / PARTIALLY_APPROVED).
-SELECT count(*)::bigint AS total
-FROM change_requests
-WHERE bank_pending;
+-- pending_grants.bank_approvals: DEPRECATED by E11 (2026-06-14). The profile
+-- change-request queue (incl. bank-change escalation) was removed — bank edits are
+-- now instant self-edit (E2). The symbol is retained for the SuperAdminWidgets DTO
+-- but always returns 0; downstream E10 should drop or repurpose this widget.
+SELECT 0::bigint AS total;
 
 -- name: RecentAuditEntries :many
 -- recent_audit: last sensitive admin actions, newest first (capped by row_limit ~8).

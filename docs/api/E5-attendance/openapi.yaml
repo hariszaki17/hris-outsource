@@ -478,7 +478,10 @@ paths:
       x-design-screens:
         - sZCLW  # Kehadiran — Dashboard (HR)
         - V2QL7  # E5 SL · Team Attendance — Plaza Senayan
-        - PAOwr  # Agen · Riwayat Kehadiran
+        - GJI1a  # Agen · Riwayat Kehadiran (filter bar: date-range + status chips)
+        - l6UYy  # Agen · Riwayat Kehadiran — status-filtered (Terlambat)
+        - txgoB  # Agen · Riwayat Kehadiran — date-range presets sheet
+        - x2rDk  # Agen · Riwayat Kehadiran — custom calendar range picker
         - UEG2J  # Verifikasi Kehadiran (HR) — list-with-status-filter
         - MsXnm  # E5 SL · Verifikasi — Plaza Senayan
       parameters:

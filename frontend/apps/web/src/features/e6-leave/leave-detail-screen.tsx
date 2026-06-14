@@ -1,35 +1,36 @@
 /**
- * E6 · Detail Pengajuan Cuti — Request detail + approval actions.
+ * E6 · Detail Pengajuan Cuti — Request detail + E11 approval chain + actions.
  *
- * .pen frames implemented:
- *   DJrBn  E6 · Detail Pengajuan Cuti                        (HR final approve, standard 2-level)
- *   eHXWF  E6 · Detail Pengajuan Cuti — No-leader            (HR sole approver, routing.no_leader)
- *   ZlnfW  E6 · Detail Pengajuan Cuti — Saldo berubah (LA-5) (balance_check.requires_override)
- *   Hzbbv  E6 SL · Detail Pengajuan Cuti (L1)                (SL L1 approve/reject)
+ * Approval routing moved to the E11 engine (EPICS §8 E11, 2026-06-14): leave no longer runs
+ * its own L1/HR state machine. This screen reads `approval_instance_id` off the request and:
+ *   - renders the E11 chain (ApprovalChainTimeline, reused from features/e11-approvals),
+ *   - performs approve / reject via useApproveApprovalInstance / useRejectApprovalInstance.
+ * Self-approval and line membership are server-enforced (INV-3, ENGINEERING C1); the UI handles
+ * 403 SELF_APPROVAL_FORBIDDEN + 409 LINE_ALREADY_CLEARED gracefully (toast + refetch).
+ *
+ * `LeaveRequest.status` is now DRAFT | PENDING | APPROVED | REJECTED | CANCELLED.
  *
  * Route: /leave/$leaveRequestId
  */
 
 import { classifyError } from '@/lib/api-error.ts';
-import { useCurrentUser } from '@/lib/use-auth.ts';
 import { ApiError } from '@swp/api-client';
+import { type LeaveRequest, LeaveStatus, useGetLeaveRequest } from '@swp/api-client/e6';
 import {
-  LeaveDecision,
-  type LeaveRequest,
-  LeaveStatus,
-  type LeaveTimelineEntry,
-  useApproveLeaveRequestFinal,
-  useApproveLeaveRequestL1,
-  useApproveLeaveRequestOverride,
-  useGetLeaveRequest,
-  useRejectLeaveRequest,
-} from '@swp/api-client/e6';
+  type ApprovalInstanceDetail,
+  useApproveApprovalInstance,
+  useGetApprovalInstance,
+  useRejectApprovalInstance,
+} from '@swp/api-client/e11';
 import { Button, DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
-import { CheckCircle2, Clock, FileText, ShieldAlert, XCircle } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link as RouterLink } from '@tanstack/react-router';
+import { ArrowUpRight, FileText, ShieldAlert } from 'lucide-react';
 import type * as React from 'react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BalanceChangedModal, RejectLeaveModal, leaveStatusTone } from './leave-overlays.tsx';
+import { ApprovalChainTimeline } from '../e11-approvals/approval-chain-timeline.tsx';
+import { RejectLeaveModal, leaveStatusTone } from './leave-overlays.tsx';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -45,142 +46,106 @@ interface LeaveDetailScreenProps {
 
 export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   const { t } = useTranslation('leave');
+  const { t: ta } = useTranslation('approvals');
   const { toast } = useToast();
-  const user = useCurrentUser();
-
-  const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
-  const isSL = user?.role === 'shift_leader';
+  const queryClient = useQueryClient();
 
   // ---------------------------------------------------------------------------
-  // Query
+  // Query — leave request
   // ---------------------------------------------------------------------------
 
   const query = useGetLeaveRequest(leaveRequestId);
-  // The real Go BE wraps the detail (and the approve/reject action results) in the
-  // standard `{ data: <LeaveRequest> }` envelope — the same envelope every other
-  // epic's detail screen unwraps (e.g. attendance-detail reads query.data.data.data).
-  // The E6 openapi declares the bare LeaveRequest (no envelope), so the generated
-  // type narrows `query.data.data` to LeaveRequest; we unwrap the BE's extra `data`
-  // layer when present and fall back to the bare shape so both contracts work.
+  // The Go BE wraps detail in the standard `{ data: <LeaveRequest> }` envelope; the E6 openapi
+  // declares the bare object, so unwrap the extra `data` layer when present.
   const outer = query.data?.data as (LeaveRequest & { data?: LeaveRequest }) | undefined;
   const raw: unknown =
     outer && typeof outer === 'object' && 'data' in outer && outer.data ? outer.data : outer;
-  // The Orval response union includes error types; narrow to LeaveRequest.
   const lr: LeaveRequest | undefined =
     raw && typeof raw === 'object' && 'id' in raw && 'status' in raw
       ? (raw as LeaveRequest)
       : undefined;
 
+  const instanceId = lr?.approval_instance_id ?? undefined;
+
   // ---------------------------------------------------------------------------
-  // Overlay state
+  // Query — E11 approval instance (the chain)
+  // ---------------------------------------------------------------------------
+
+  const instanceQuery = useGetApprovalInstance(instanceId ?? '', {
+    query: { enabled: Boolean(instanceId) },
+  });
+  const instance = instanceQuery.data?.data as ApprovalInstanceDetail | undefined;
+
+  // ---------------------------------------------------------------------------
+  // Overlay state + mutations (E11 instance hooks)
   // ---------------------------------------------------------------------------
 
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [overrideOpen, setOverrideOpen] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // Mutations
-  // ---------------------------------------------------------------------------
+  const approve = useApproveApprovalInstance();
+  const reject = useRejectApprovalInstance();
 
-  const approveL1 = useApproveLeaveRequestL1({
-    mutation: {
-      onSuccess: () => {
-        toast({
-          tone: 'success',
-          title: t('detail.toastForwardedTitle'),
-          description: t('detail.toastForwardedBody'),
-        });
-        void query.refetch();
-      },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+  /** Invalidate the leave detail + every approval-instance list so cleared rows drop out. */
+  function invalidateAll() {
+    void query.refetch();
+    void instanceQuery.refetch();
+    queryClient.invalidateQueries({
+      predicate: (q) =>
+        q.queryKey.some((k) => typeof k === 'string' && k.includes('/approval-instances')),
+    });
+  }
 
-  const approveFinal = useApproveLeaveRequestFinal({
-    mutation: {
-      onSuccess: () => {
-        toast({
-          tone: 'success',
-          title: t('detail.toastApprovedTitle'),
-          description: t('detail.toastApprovedBody'),
-        });
-        void query.refetch();
-      },
-      onError: (err) => {
-        const { kind, message } = classifyError(err);
-        // Balance re-check failed at final approval: BE returns 422
-        // BALANCE_RECHECK_FAILED (code) — its Bahasa message does NOT contain
-        // "BALANCE" and the presence of error.fields classifies it as 'validation'
-        // (not 'rule'). Test the actual error CODE (mirrors the Phase-6 error.details
-        // precedent) so the override modal opens against the real BE.
-        const code = err instanceof ApiError ? err.code : '';
-        const isBalanceRecheck =
-          code === 'BALANCE_RECHECK_FAILED' ||
-          code.toUpperCase().includes('BALANCE') ||
-          (kind === 'rule' && message.toUpperCase().includes('BALANCE'));
-        if (isBalanceRecheck) {
-          setOverrideOpen(true);
-          return;
-        }
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+  function handleActionError(err: unknown) {
+    const code = err instanceof ApiError ? err.code : '';
+    if (code === 'SELF_APPROVAL_FORBIDDEN') {
+      toast({ tone: 'error', title: ta('detail.toastSelfApprovalTitle') });
+      invalidateAll();
+      return;
+    }
+    if (code === 'LINE_ALREADY_CLEARED') {
+      toast({ tone: 'info', title: ta('detail.toastAlreadyClearedTitle') });
+      invalidateAll();
+      return;
+    }
+    const { kind } = classifyError(err);
+    toast({
+      tone: 'error',
+      title: t('errors.processFailed'),
+      description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
+    });
+  }
 
-  const approveOverride = useApproveLeaveRequestOverride({
-    mutation: {
-      onSuccess: () => {
-        setOverrideOpen(false);
-        toast({
-          tone: 'success',
-          title: t('detail.toastApprovedTitle'),
-          description: t('detail.toastApprovedBody'),
-        });
-        void query.refetch();
+  function handleApprove() {
+    if (!instanceId) return;
+    approve.mutate(
+      { id: instanceId, data: {} },
+      {
+        onSuccess: () => {
+          invalidateAll();
+          toast({ tone: 'success', title: t('detail.toastApprovedTitle') });
+        },
+        onError: handleActionError,
       },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+    );
+  }
 
-  const rejectMutation = useRejectLeaveRequest({
-    mutation: {
-      onSuccess: () => {
-        setRejectOpen(false);
-        toast({
-          tone: 'success',
-          title: t('detail.toastRejectedTitle'),
-          description: t('detail.toastRejectedBody'),
-        });
-        void query.refetch();
+  function handleRejectConfirm(reason: string) {
+    if (!instanceId) return;
+    reject.mutate(
+      { id: instanceId, data: { reason } },
+      {
+        onSuccess: () => {
+          setRejectOpen(false);
+          invalidateAll();
+          toast({ tone: 'success', title: t('detail.toastRejectedTitle') });
+        },
+        onError: (err) => {
+          setRejectOpen(false);
+          handleActionError(err);
+        },
       },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Loading / error / not-found states
@@ -233,47 +198,13 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const noLeader = Boolean(lr.routing?.no_leader);
-  const balanceRequiresOverride = Boolean(lr.balance_check?.requires_override);
+  const isPending = lr.status === LeaveStatus.PENDING;
+  // Approve/reject are only meaningful while the instance is on its current line. Membership is
+  // server-enforced; the UI offers the action whenever the request is PENDING and has an instance.
+  const canAct = isPending && Boolean(instanceId);
 
-  const canApproveL1 = isSL && lr.status === LeaveStatus.PENDING_L1;
-  const canApproveFinal = isHR && lr.status === LeaveStatus.PENDING_HR;
-  const canReject =
-    (isSL && lr.status === LeaveStatus.PENDING_L1) ||
-    (isHR && lr.status === LeaveStatus.PENDING_HR);
-
-  const isTerminal =
-    lr.status === LeaveStatus.APPROVED ||
-    lr.status === LeaveStatus.REJECTED ||
-    lr.status === LeaveStatus.CANCELLED;
-
-  const approvingL1 = approveL1.isPending;
-  const approvingFinal = approveFinal.isPending || approveOverride.isPending;
-  const rejecting = rejectMutation.isPending;
-
-  // ---------------------------------------------------------------------------
-  // Action handlers
-  // ---------------------------------------------------------------------------
-
-  function handleApproveL1() {
-    approveL1.mutate({ id: leaveRequestId, data: {} });
-  }
-
-  function handleApproveFinal() {
-    if (balanceRequiresOverride) {
-      setOverrideOpen(true);
-      return;
-    }
-    approveFinal.mutate({ id: leaveRequestId, data: {} });
-  }
-
-  function handleOverrideConfirm(overrideReason: string) {
-    approveOverride.mutate({ id: leaveRequestId, data: { override_reason: overrideReason } });
-  }
-
-  function handleRejectConfirm(reason: string) {
-    rejectMutation.mutate({ id: leaveRequestId, data: { reason } });
-  }
+  const approving = approve.isPending;
+  const rejecting = reject.isPending;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -296,11 +227,6 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
           <StatusBadge dot tone={leaveStatusTone(lr.status)}>
             {t(`status.${lr.status}`)}
           </StatusBadge>
-          {noLeader && (
-            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-text-3">
-              {t('detail.noLeaderBadge')}
-            </span>
-          )}
           {lr.backdated && (
             <span className="rounded-full bg-warn-bg px-2.5 py-0.5 text-xs text-warn-tx">
               {t('detail.backdatedBadge')}
@@ -308,44 +234,25 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
           )}
         </div>
 
-        {/* Action buttons */}
-        {!isTerminal && (
+        {/* Action buttons — approve/reject via the E11 instance */}
+        {canAct && (
           <div className="flex items-center gap-2.5">
-            {canReject && (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setRejectOpen(true)}
-                disabled={rejecting || approvingL1 || approvingFinal}
-              >
-                {rejecting ? t('common.processing') : t('detail.actionReject')}
-              </Button>
-            )}
-            {canApproveL1 && (
-              <Button
-                type="button"
-                variant="primary"
-                onClick={handleApproveL1}
-                disabled={approvingL1 || rejecting}
-              >
-                {approvingL1 ? t('common.processing') : t('detail.actionForward')}
-              </Button>
-            )}
-            {canApproveFinal && (
-              <Button
-                type="button"
-                variant={balanceRequiresOverride ? 'destructive' : 'primary'}
-                onClick={handleApproveFinal}
-                disabled={approvingFinal || rejecting}
-              >
-                {balanceRequiresOverride && <ShieldAlert aria-hidden className="size-3.5" />}
-                {approvingFinal
-                  ? t('common.processing')
-                  : balanceRequiresOverride
-                    ? t('detail.actionOverride')
-                    : t('detail.actionApprove')}
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setRejectOpen(true)}
+              disabled={rejecting || approving}
+            >
+              {rejecting ? t('common.processing') : t('detail.actionReject')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleApprove}
+              disabled={approving || rejecting}
+            >
+              {approving ? t('common.processing') : t('detail.actionApprove')}
+            </Button>
           </div>
         )}
       </div>
@@ -412,9 +319,9 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
           )}
         </div>
 
-        {/* Right col — quota + timeline */}
+        {/* Right col — quota + approval chain */}
         <div className="flex flex-1 flex-col gap-4">
-          {/* Balance check — grant-lot pool (2026-06-08) */}
+          {/* Balance check */}
           {lr.balance_check && (
             <Section title={t('detail.sectionBalance')}>
               <div className="flex flex-col gap-1.5">
@@ -423,7 +330,6 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
                   value={lr.balance_check.requested_days ?? 0}
                   t={t}
                 />
-                {/* Per-type window remaining at the last check. */}
                 <BalanceStat
                   label={t('detail.balancePool')}
                   value={lr.balance_check.remaining_days_at_check ?? 0}
@@ -454,31 +360,50 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
             </Section>
           )}
 
-          {/* Approval timeline */}
-          <Section title={t('detail.sectionTimeline')}>
-            <ApprovalTimeline timeline={lr.timeline} noLeader={noLeader} t={t} />
+          {/* E11 approval chain (reuses the e11-approvals timeline organism) */}
+          <Section
+            title={t('detail.sectionTimeline')}
+            action={
+              instanceId ? (
+                <RouterLink
+                  to="/approval-instances/$instanceId"
+                  params={{ instanceId }}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                >
+                  {t('detail.viewChain')}
+                  <ArrowUpRight aria-hidden className="size-3.5" />
+                </RouterLink>
+              ) : undefined
+            }
+          >
+            {!instanceId ? (
+              <p className="text-sm text-text-3">{t('detail.chainPending')}</p>
+            ) : instanceQuery.isLoading ? (
+              <div className="h-24 w-full animate-pulse rounded-lg bg-surface-2" />
+            ) : instance ? (
+              <ApprovalChainTimeline
+                lines={instance.lines ?? []}
+                actions={instance.actions ?? []}
+                currentLine={instance.current_line}
+                status={instance.status}
+                requesterName={lr.employee_name ?? lr.employee_id}
+                t={ta}
+              />
+            ) : (
+              <p className="text-sm text-text-3">{ta('detail.chainEmpty')}</p>
+            )}
           </Section>
         </div>
       </div>
 
-      {/* Overlays */}
-      {canReject && (
+      {/* Reject overlay */}
+      {canAct && (
         <RejectLeaveModal
           open={rejectOpen}
           leaveRequest={lr}
           onOpenChange={setRejectOpen}
           onConfirm={handleRejectConfirm}
           isPending={rejecting}
-        />
-      )}
-
-      {canApproveFinal && (
-        <BalanceChangedModal
-          open={overrideOpen}
-          leaveRequest={lr}
-          onOpenChange={setOverrideOpen}
-          onConfirm={handleOverrideConfirm}
-          isPending={approveOverride.isPending}
         />
       )}
     </div>
@@ -489,10 +414,21 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
 // Section wrapper
 // ---------------------------------------------------------------------------
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
-      <h2 className="mb-4 font-semibold text-sm text-text-2 uppercase tracking-wide">{title}</h2>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-semibold text-sm text-text-2 uppercase tracking-wide">{title}</h2>
+        {action}
+      </div>
       <div className="flex flex-col gap-3">{children}</div>
     </div>
   );
@@ -533,89 +469,5 @@ function BalanceStat({
         {value} {t('common.days')}
       </span>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ApprovalTimeline
-// ---------------------------------------------------------------------------
-
-function ApprovalTimeline({
-  timeline,
-  noLeader,
-  t,
-}: {
-  timeline: LeaveTimelineEntry[];
-  noLeader: boolean;
-  t: (key: string, opts?: Record<string, unknown>) => string;
-}) {
-  return (
-    <ol className="flex flex-col gap-4">
-      {timeline.map((entry, idx) => {
-        const isApproved =
-          entry.decision === LeaveDecision.APPROVED ||
-          entry.decision === LeaveDecision.OVERRIDE_APPROVED;
-        const isRejected = entry.decision === LeaveDecision.REJECTED;
-        const isPending = entry.status === 'PENDING';
-
-        return (
-          <li key={`${entry.stage}-${idx}`} className="flex gap-3">
-            <div className="flex flex-col items-center">
-              <div
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium ${
-                  isApproved
-                    ? 'bg-teal-50 text-teal-700'
-                    : isRejected
-                      ? 'bg-red-50 text-red-700'
-                      : 'bg-surface-2 text-text-3'
-                }`}
-              >
-                {isApproved ? (
-                  <CheckCircle2 aria-hidden className="size-4" />
-                ) : isRejected ? (
-                  <XCircle aria-hidden className="size-4" />
-                ) : (
-                  <Clock aria-hidden className="size-4" />
-                )}
-              </div>
-              {idx < timeline.length - 1 && (
-                <div className="mt-1 h-full min-h-[16px] w-px bg-border" />
-              )}
-            </div>
-            <div className="flex flex-1 flex-col gap-0.5 pb-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-text">
-                  {noLeader && entry.stage === 'HR'
-                    ? t('detail.stageSoleApprover')
-                    : t(`detail.stage${entry.stage}`)}
-                </span>
-                {!isPending && entry.occurred_at && (
-                  <DateText
-                    kind="instant"
-                    value={entry.occurred_at}
-                    className="text-xs text-text-3"
-                  />
-                )}
-              </div>
-              {entry.actor_name && <span className="text-xs text-text-3">{entry.actor_name}</span>}
-              {entry.reject_reason && (
-                <p className="mt-1 rounded-lg bg-red-50 px-2.5 py-2 text-xs leading-relaxed text-red-800">
-                  {t('detail.rejectionReason')}: {entry.reject_reason}
-                </p>
-              )}
-              {entry.override && entry.override_reason && (
-                <p className="mt-1 rounded-lg bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-800">
-                  <ShieldAlert aria-hidden className="mr-1 inline size-3" />
-                  {t('detail.overrideReason')}: {entry.override_reason}
-                </p>
-              )}
-              {entry.decision_note && (
-                <p className="mt-1 text-xs italic text-text-3">{entry.decision_note}</p>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
   );
 }

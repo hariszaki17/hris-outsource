@@ -72,8 +72,9 @@ type OvertimeRepository interface {
 	// InsertOvertime persists a new OT record (F7.2 agent/leader request path).
 	InsertOvertime(ctx context.Context, tx pgx.Tx, p OvertimeInsertParams) (dom.Overtime, error)
 
-	InsertOvertimeApproval(ctx context.Context, tx pgx.Tx, p ApprovalRow) (dom.OvertimeApproval, error)
-	ListOvertimeApprovals(ctx context.Context, overtimeID string) ([]dom.OvertimeApproval, error)
+	// SetApprovalInstanceID links the freshly-created E11 ApprovalInstance to the OT
+	// record (called inside the create/confirm tx after engine.CreateInstance).
+	SetApprovalInstanceID(ctx context.Context, tx pgx.Tx, id, instanceID string) error
 }
 
 // OvertimeInsertParams carries one overtime INSERT for the F7.2 request path. The
@@ -93,16 +94,6 @@ type OvertimeInsertParams struct {
 	HolidayID        *string
 	Reason           *string
 	CreatedBy        *string
-}
-
-// ApprovalRow carries one overtime_approvals decision-trail insert.
-type ApprovalRow struct {
-	OvertimeID   string
-	Level        int    // 1 = leader/L1, 2 = HR final
-	Decision     string // APPROVED | REJECTED | OVERRIDE_APPROVED
-	ApproverID   *string
-	ApproverName *string
-	Reason       *string
 }
 
 // --- holiday repository port ---

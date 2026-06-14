@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
@@ -31,7 +32,9 @@ import (
 	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 )
 
-// OvertimeService implements the OT approval business logic.
+// OvertimeService implements the OT lifecycle. Approval routing is OWNED BY the E11
+// engine: Confirm/Create set status=PENDING and create an ApprovalInstance; the engine
+// drives the chain and calls OnApproved/OnRejected on terminal transition.
 type OvertimeService struct {
 	repo     OvertimeRepository
 	rules    RuleRepository
@@ -39,6 +42,7 @@ type OvertimeService struct {
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
+	engine   approval.Engine // E11: creates the approval instance at :create / :confirm
 	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
 }
 
@@ -50,6 +54,9 @@ func NewOvertimeService(repo OvertimeRepository, rules RuleRepository, holidays 
 
 // SetClock overrides the time source (tests only).
 func (s *OvertimeService) SetClock(c Clock) { s.now = c }
+
+// SetApprovalEngine wires the E11 approval engine. REQUIRED for Create/Confirm.
+func (s *OvertimeService) SetApprovalEngine(e approval.Engine) { s.engine = e }
 
 // SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe.
 func (s *OvertimeService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
@@ -217,8 +224,14 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 	pet := in.PlannedEndTime
 	reason := in.Reason
 
+	if s.engine == nil {
+		return dom.Overtime{}, Calculation{}, apperr.Rule("RULE_VIOLATION", map[string]string{"approval": "Approval engine tidak aktif."})
+	}
 	var created dom.Overtime
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		// A directly-requested OT (the requester IS the agent) skips
+		// PENDING_AGENT_CONFIRM and enters the approval chain immediately: status
+		// PENDING + an E11 ApprovalInstance.
 		rec, ierr := s.repo.InsertOvertime(ctx, tx, OvertimeInsertParams{
 			EmployeeID:       employeeID,
 			CompanyID:        companyID,
@@ -228,7 +241,7 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 			PlannedEndTime:   &pet,
 			CrossMidnight:    crossMidnight,
 			Source:           dom.OvertimeSourceRequested,
-			Status:           dom.OvertimeStatusPendingL1,
+			Status:           dom.OvertimeStatusPending,
 			DayType:          tier,
 			HolidayID:        holidayID,
 			Reason:           &reason,
@@ -238,6 +251,19 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 			return ierr
 		}
 		created = rec
+		instanceID, cerr := s.engine.CreateInstance(ctx, tx, approval.CreateInstanceInput{
+			RequestType: approval.RequestTypeOvertime,
+			RequestID:   rec.ID,
+			CompanyID:   deref(companyID),
+			RequesterID: employeeID,
+		})
+		if cerr != nil {
+			return cerr
+		}
+		if lerr := s.repo.SetApprovalInstanceID(ctx, tx, rec.ID, instanceID); lerr != nil {
+			return lerr
+		}
+		created.ApprovalInstanceID = &instanceID
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionCreate,
 			EntityType: "overtime",
@@ -324,18 +350,18 @@ func (s *OvertimeService) Get(ctx context.Context, id string) (dom.Overtime, Cal
 	} else if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 		return dom.Overtime{}, Calculation{}, apperr.NotFound()
 	}
-	if approvals, aerr := s.repo.ListOvertimeApprovals(ctx, id); aerr == nil {
-		rec.Approvals = approvals
-	}
+	// The approval chain is OWNED BY E11 — the client reads it via ApprovalInstanceID.
 	return rec, s.computeCalculation(ctx, rec), nil
 }
 
 // --- transitions ---
 
-// Confirm forwards PENDING_AGENT_CONFIRM → PENDING_L1 (OC-2 / OA-6). Only the OT's
-// own agent may confirm (openapi x-rbac agent/self); HR/leader cannot confirm on
-// behalf → 403 SELF/scope. Wrong-state → 409.
+// Confirm forwards PENDING_AGENT_CONFIRM → PENDING (OC-2 / OA-6): the agent confirms
+// an auto-detected OT, which enters the E11 approval chain (creates the ApprovalInstance
+// + links it). Only the OT's own agent may confirm (openapi x-rbac agent/self); HR/
+// leader cannot confirm on behalf → 403. Wrong-state → 409.
 func (s *OvertimeService) Confirm(ctx context.Context, id, note string) (dom.Overtime, Calculation, error) {
+	_ = note // the agent-confirm marker note is no longer persisted to a decision trail (chain owned by E11)
 	actor := actorEmployeeID(ctx)
 	var out dom.Overtime
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -346,30 +372,32 @@ func (s *OvertimeService) Confirm(ctx context.Context, id, note string) (dom.Ove
 		if rec.Status != dom.OvertimeStatusPendingAgentConfirm {
 			return stateConflict(rec.Status)
 		}
-		// Agent-scope: only the OT's own agent may confirm (openapi x-rbac: agent).
-		// The web confirm flow is HR/leader-triggered on seeded candidates per
-		// CONTEXT; honor the contract by checking actor == employee when the actor
-		// IS an agent. Staff roles (HR/super/leader) pass for the web seam.
 		if serr := s.guardConfirmActor(ctx, rec); serr != nil {
 			return serr
 		}
-		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusPendingL1)
+		if s.engine == nil {
+			return apperr.Rule("RULE_VIOLATION", map[string]string{"approval": "Approval engine tidak aktif."})
+		}
+		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusPending)
 		if uerr != nil {
 			return uerr
 		}
 		out = updated
-		// note is appended to the decision trail (level 0 / agent confirm marker).
-		if _, aerr := s.repo.InsertOvertimeApproval(ctx, tx, ApprovalRow{
-			OvertimeID: id, Level: 1, Decision: "APPROVED",
-			ApproverID: actor, ApproverName: actorName(ctx), Reason: strOrNil(note),
-		}); aerr != nil {
-			return aerr
+		// Confirming enters the E11 chain: create the ApprovalInstance + link it.
+		instanceID, cerr := s.engine.CreateInstance(ctx, tx, approval.CreateInstanceInput{
+			RequestType: approval.RequestTypeOvertime,
+			RequestID:   id,
+			CompanyID:   deref(rec.CompanyID),
+			RequesterID: rec.EmployeeID,
+		})
+		if cerr != nil {
+			return cerr
 		}
-		// Phase-11 stub (documented): "OT confirmed → leader queue" targets the
-		// leader APPROVAL queue, not a single recipient — left as a stub per the
-		// plan's OPTIONAL coverage. The submitter-facing approve-final/reject points
-		// ARE wired. See 11-02-SUMMARY.
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING_L1", actor, "CONFIRM"))
+		if lerr := s.repo.SetApprovalInstanceID(ctx, tx, id, instanceID); lerr != nil {
+			return lerr
+		}
+		out.ApprovalInstanceID = &instanceID
+		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING", actor, "CONFIRM"))
 	})
 	if err != nil {
 		return dom.Overtime{}, Calculation{}, asAppErr(err)
@@ -377,169 +405,79 @@ func (s *OvertimeService) Confirm(ctx context.Context, id, note string) (dom.Ove
 	return s.reread(ctx, out)
 }
 
-// ApproveL1 forwards PENDING_L1 → PENDING_HR (leader / OA-1/2/5). Guards: state (409),
-// scope (403 OUT_OF_SCOPE), self-approve (403 SELF_APPROVAL_FORBIDDEN). Records an
-// OvertimeApproval at level 1.
-func (s *OvertimeService) ApproveL1(ctx context.Context, id, note string) (dom.Overtime, Calculation, error) {
-	actor := actorEmployeeID(ctx)
-	var out dom.Overtime
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lock(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.OvertimeStatusPendingL1 {
-			return stateConflict(rec.Status)
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-		if serr := guardSelf(ctx, rec); serr != nil {
-			return serr
-		}
-		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusPendingHR)
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		if _, aerr := s.repo.InsertOvertimeApproval(ctx, tx, ApprovalRow{
-			OvertimeID: id, Level: 1, Decision: "APPROVED",
-			ApproverID: actor, ApproverName: actorName(ctx), Reason: strOrNil(note),
-		}); aerr != nil {
-			return aerr
-		}
-		// Phase-11 stub (documented): "OT L1-approved → HR queue" targets the HR
-		// queue, not a single recipient — left as a stub per the plan's OPTIONAL
-		// coverage. See 11-02-SUMMARY.
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING_HR", actor, "APPROVE_L1"))
-	})
-	if err != nil {
-		return dom.Overtime{}, Calculation{}, asAppErr(err)
+// --- E11 hooks (called by the approval engine on terminal transition, in its tx) ---
+
+// OnApproved finalizes the OT record when its E11 ApprovalInstance reaches a terminal
+// APPROVED/BYPASS decision. Runs INSIDE the engine's tx: sets status=APPROVED and
+// notifies the submitter. (V1 records HOURS ONLY — INV-2: the reference multiplier is
+// never applied; PP35/2021 hour-counting for payroll is deferred to E8, matching the
+// prior behavior where day_type/multiplier are stored at create and never recomputed.)
+func (s *OvertimeService) OnApproved(ctx context.Context, tx pgx.Tx, requestID string) error {
+	rec, lerr := s.repo.GetOvertimeForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
 	}
-	return s.reread(ctx, out)
+	if lerr != nil {
+		return lerr
+	}
+	if rec.Status == dom.OvertimeStatusApproved {
+		return nil // idempotent
+	}
+	if rec.Status != dom.OvertimeStatusPending {
+		return stateConflict(rec.Status)
+	}
+	if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, requestID, dom.OvertimeStatusApproved); uerr != nil {
+		return uerr
+	}
+	if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+		NotifKind:        string(reportingdom.NotifOTApproved),
+		RecipientID:      rec.EmployeeID,
+		Title:            "Lembur disetujui",
+		Body:             "Pengajuan lembur Anda (" + rec.WorkDate.Format("2006-01-02") + ") disetujui.",
+		DeepLinkEpic:     "E7",
+		DeepLinkEntityID: requestID,
+		DeepLinkPath:     "/overtime/" + requestID,
+		ActorID:          actorUserID(ctx),
+		IsCritical:       true,
+	}); derr != nil {
+		return derr
+	}
+	return audit.Record(ctx, tx, otAudit(requestID, string(rec.Status), "APPROVED", actorEmployeeID(ctx), "APPROVE"))
 }
 
-// ApproveFinal moves PENDING_HR → APPROVED (HR / OA-1). With isOverride, HR may
-// bypass L1 from PENDING_L1 (OA-8) — note required, else 422 OVERRIDE_REASON_REQUIRED.
-func (s *OvertimeService) ApproveFinal(ctx context.Context, id, note string, isOverride bool) (dom.Overtime, Calculation, error) {
-	if isOverride && note == "" {
-		return dom.Overtime{}, Calculation{}, apperr.Rule("OVERRIDE_REASON_REQUIRED", map[string]string{"note": "Wajib diisi saat override."})
+// OnRejected finalizes the OT record when its E11 ApprovalInstance reaches a terminal
+// REJECTED decision. Runs INSIDE the engine's tx: sets status=REJECTED and notifies.
+func (s *OvertimeService) OnRejected(ctx context.Context, tx pgx.Tx, requestID string) error {
+	rec, lerr := s.repo.GetOvertimeForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
 	}
-	actor := actorEmployeeID(ctx)
-	var out dom.Overtime
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lock(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		legal := rec.Status == dom.OvertimeStatusPendingHR ||
-			(isOverride && rec.Status == dom.OvertimeStatusPendingL1)
-		if !legal {
-			return stateConflict(rec.Status)
-		}
-		// L2 approvers: HR/super (global) or lead (scoped). RequireRole gates the
-		// route; defense-in-depth here. guardSelf blocks self-approval (OA-5);
-		// GuardCompany scopes a lead to the agent's company (no-op for super/hr).
-		if serr := guardSelf(ctx, rec); serr != nil {
-			return serr
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusApproved)
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		decision := "APPROVED"
-		action := "APPROVE_FINAL"
-		if isOverride {
-			decision = "OVERRIDE_APPROVED"
-			action = "APPROVE_OVERRIDE"
-		}
-		if _, aerr := s.repo.InsertOvertimeApproval(ctx, tx, ApprovalRow{
-			OvertimeID: id, Level: 2, Decision: decision,
-			ApproverID: actor, ApproverName: actorName(ctx), Reason: strOrNil(note),
-		}); aerr != nil {
-			return aerr
-		}
-		// E10 (11-02): notify the submitter their OT is approved (transactional outbox).
-		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
-			NotifKind:        string(reportingdom.NotifOTApproved),
-			RecipientID:      rec.EmployeeID,
-			Title:            "Lembur disetujui",
-			Body:             "Pengajuan lembur Anda (" + rec.WorkDate.Format("2006-01-02") + ") disetujui.",
-			DeepLinkEpic:     "E7",
-			DeepLinkEntityID: id,
-			DeepLinkPath:     "/overtime/" + id,
-			ActorID:          actorUserID(ctx),
-			IsCritical:       true,
-		}); derr != nil {
-			return derr
-		}
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "APPROVED", actor, action))
-	})
-	if err != nil {
-		return dom.Overtime{}, Calculation{}, asAppErr(err)
+	if lerr != nil {
+		return lerr
 	}
-	return s.reread(ctx, out)
-}
-
-// Reject moves PENDING_L1 / PENDING_HR → REJECTED (reason required, min 5). Records
-// the rejecting level. Terminal → 409; out-of-scope → 403.
-func (s *OvertimeService) Reject(ctx context.Context, id, reason string) (dom.Overtime, Calculation, error) {
-	if len([]rune(reason)) < 5 {
-		return dom.Overtime{}, Calculation{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
+	if rec.Status == dom.OvertimeStatusRejected {
+		return nil // idempotent
 	}
-	actor := actorEmployeeID(ctx)
-	var out dom.Overtime
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lock(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.OvertimeStatusPendingL1 && rec.Status != dom.OvertimeStatusPendingHR {
-			return stateConflict(rec.Status)
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-		level := 2
-		if rec.Status == dom.OvertimeStatusPendingL1 {
-			level = 1
-		}
-		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusRejected)
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		rsn := reason
-		if _, aerr := s.repo.InsertOvertimeApproval(ctx, tx, ApprovalRow{
-			OvertimeID: id, Level: level, Decision: "REJECTED",
-			ApproverID: actor, ApproverName: actorName(ctx), Reason: &rsn,
-		}); aerr != nil {
-			return aerr
-		}
-		// E10 (11-02): notify the submitter their OT is rejected.
-		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
-			NotifKind:        string(reportingdom.NotifOTRejected),
-			RecipientID:      rec.EmployeeID,
-			Title:            "Lembur ditolak",
-			Body:             "Pengajuan lembur Anda ditolak: " + reason,
-			DeepLinkEpic:     "E7",
-			DeepLinkEntityID: id,
-			DeepLinkPath:     "/overtime/" + id,
-			ActorID:          actorUserID(ctx),
-			IsCritical:       true,
-		}); derr != nil {
-			return derr
-		}
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "REJECTED", actor, "REJECT"))
-	})
-	if err != nil {
-		return dom.Overtime{}, Calculation{}, asAppErr(err)
+	if rec.Status != dom.OvertimeStatusPending {
+		return stateConflict(rec.Status)
 	}
-	return s.reread(ctx, out)
+	if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, requestID, dom.OvertimeStatusRejected); uerr != nil {
+		return uerr
+	}
+	if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+		NotifKind:        string(reportingdom.NotifOTRejected),
+		RecipientID:      rec.EmployeeID,
+		Title:            "Lembur ditolak",
+		Body:             "Pengajuan lembur Anda ditolak.",
+		DeepLinkEpic:     "E7",
+		DeepLinkEntityID: requestID,
+		DeepLinkPath:     "/overtime/" + requestID,
+		ActorID:          actorUserID(ctx),
+		IsCritical:       true,
+	}); derr != nil {
+		return derr
+	}
+	return audit.Record(ctx, tx, otAudit(requestID, string(rec.Status), "REJECTED", actorEmployeeID(ctx), "REJECT"))
 }
 
 // Withdraw moves PENDING_AGENT_CONFIRM / PENDING_L1 → WITHDRAWN (OA C-3). Not
@@ -551,80 +489,21 @@ func (s *OvertimeService) Withdraw(ctx context.Context, id string) error {
 		if lerr != nil {
 			return lerr
 		}
-		if rec.Status != dom.OvertimeStatusPendingAgentConfirm && rec.Status != dom.OvertimeStatusPendingL1 {
+		if rec.Status != dom.OvertimeStatusPendingAgentConfirm && rec.Status != dom.OvertimeStatusPending {
 			return stateConflict(rec.Status)
 		}
-		if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusWithdrawn); uerr != nil {
+		if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusCancelled); uerr != nil {
 			return uerr
 		}
-		// Phase-11 stub (documented): "OT withdrawn" is an agent self-action — the
-		// actor IS the recipient, so a self-notification adds no value. Left as a
-		// stub. See 11-02-SUMMARY.
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "WITHDRAWN", actor, "WITHDRAW"))
+		// Agent self-action — actor IS the recipient, so no notification. The E11
+		// ApprovalInstance (if one exists for a confirmed OT) is left as-is; a CANCELLED
+		// request is terminal on the domain side.
+		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "CANCELLED", actor, "WITHDRAW"))
 	})
 	if err != nil {
 		return asAppErr(err)
 	}
 	return nil
-}
-
-// --- bulk approve / reject (per-item own-tx partial success) ---
-
-// FailedItem is one failed row in the bulk envelope.
-type FailedItem struct {
-	ID      string
-	Code    string
-	Message string
-}
-
-// BulkResult is the partial-success aggregate (openapi BulkResult {succeeded,failed}).
-type BulkResult struct {
-	Succeeded []string
-	Failed    []FailedItem
-}
-
-// BulkApprove approves each id at whichever level the caller is authoritative for
-// (leader → L1, HR → final). Each id runs in its OWN tx (Phase-7 atomicity); per-id
-// failures (SELF_APPROVAL_FORBIDDEN / OUT_OF_SCOPE / state-409) land in failed[].
-func (s *OvertimeService) BulkApprove(ctx context.Context, ids []string, note string) (BulkResult, error) {
-	isHR := actorIsHR(ctx)
-	var out BulkResult
-	for _, id := range ids {
-		var err error
-		if isHR {
-			_, _, err = s.ApproveFinal(ctx, id, note, false)
-		} else {
-			_, _, err = s.ApproveL1(ctx, id, note)
-		}
-		if err == nil {
-			out.Succeeded = append(out.Succeeded, id)
-			continue
-		}
-		if ae, ok := apperr.As(err); ok {
-			out.Failed = append(out.Failed, FailedItem{ID: id, Code: ae.Code, Message: bulkMessage(ae)})
-			continue
-		}
-		return BulkResult{}, err
-	}
-	return out, nil
-}
-
-// BulkReject rejects each id with the shared reason. Same partial-success shape.
-func (s *OvertimeService) BulkReject(ctx context.Context, ids []string, reason string) (BulkResult, error) {
-	var out BulkResult
-	for _, id := range ids {
-		_, _, err := s.Reject(ctx, id, reason)
-		if err == nil {
-			out.Succeeded = append(out.Succeeded, id)
-			continue
-		}
-		if ae, ok := apperr.As(err); ok {
-			out.Failed = append(out.Failed, FailedItem{ID: id, Code: ae.Code, Message: bulkMessage(ae)})
-			continue
-		}
-		return BulkResult{}, err
-	}
-	return out, nil
 }
 
 // --- day_type classification + OT_BELOW_MIN (exported seams for 09-03 + seed) ---
@@ -685,29 +564,14 @@ func (s *OvertimeService) lock(ctx context.Context, tx pgx.Tx, id string) (dom.O
 	return rec, nil
 }
 
-// reread re-loads the OT with denormalized names, approvals, and a fresh calculation.
+// reread re-loads the OT with denormalized names + a fresh calculation. The approval
+// chain is OWNED BY E11 (read via ApprovalInstanceID), not assembled here.
 func (s *OvertimeService) reread(ctx context.Context, fallback dom.Overtime) (dom.Overtime, Calculation, error) {
 	rec := fallback
 	if full, err := s.repo.GetOvertime(ctx, fallback.ID); err == nil {
 		rec = full
 	}
-	if approvals, aerr := s.repo.ListOvertimeApprovals(ctx, rec.ID); aerr == nil {
-		rec.Approvals = approvals
-	}
 	return rec, s.computeCalculation(ctx, rec), nil
-}
-
-// guardSelf enforces OA-5: an approver cannot decide their own OT →
-// 403 SELF_APPROVAL_FORBIDDEN (struct literal bypasses statusForCode).
-func guardSelf(ctx context.Context, rec dom.Overtime) error {
-	if p, ok := auth.PrincipalFrom(ctx); ok && p.EmployeeID != "" && p.EmployeeID == rec.EmployeeID {
-		return &apperr.Error{
-			HTTPStatus: 403,
-			Code:       "SELF_APPROVAL_FORBIDDEN",
-			Message:    "Tidak dapat menyetujui lembur sendiri.",
-		}
-	}
-	return nil
 }
 
 // guardConfirmActor enforces the openapi x-rbac (agent/self) on :confirm: when the
@@ -724,14 +588,6 @@ func (s *OvertimeService) guardConfirmActor(ctx context.Context, rec dom.Overtim
 		}
 	}
 	return nil
-}
-
-// actorIsHR reports whether the principal is HR/super (final/override authority).
-func actorIsHR(ctx context.Context) bool {
-	if p, ok := auth.PrincipalFrom(ctx); ok {
-		return p.Role == auth.RoleHRAdmin || p.Role == auth.RoleSuperAdmin
-	}
-	return false
 }
 
 func otAudit(id, before, after string, actor *string, action string) audit.Entry {
@@ -751,22 +607,3 @@ func strOrNil(s string) *string {
 	return &s
 }
 
-// bulkMessage returns the Bahasa message for a failed bulk row, preferring the
-// apperr's own message.
-func bulkMessage(ae *apperr.Error) string {
-	if ae.Message != "" {
-		return ae.Message
-	}
-	switch ae.Code {
-	case "SELF_APPROVAL_FORBIDDEN":
-		return "Tidak dapat menyetujui lembur sendiri."
-	case "OUT_OF_SCOPE":
-		return "Lembur berada di luar perusahaan binaan Anda."
-	case "CONFLICT":
-		return "Lembur sudah pada status lain."
-	case "NOT_FOUND":
-		return "Lembur tidak ditemukan."
-	default:
-		return "Tindakan gagal untuk lembur ini."
-	}
-}

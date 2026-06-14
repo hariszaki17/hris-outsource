@@ -1,42 +1,41 @@
 /**
- * E7 · Detail Lembur (HR Review) — full OT detail + decision UI.
+ * E7 · Detail Lembur (HR Review) — full OT detail + decision UI (E11 engine).
  *
- * .pen frames implemented:
- *   uG6mQ   E7 · Detail Lembur (HR Review)           — main layout with all sections
- *   YGLK3   E7 · Overlays & States Showcase           — overlay variants
- *   STI8j   E7 · Wave 3.4 — Tarik kembali OT (agent) — withdraw modal pattern
+ * Approval routing moved to the E11 configurable engine (EPICS §8 E11, 2026-06-14). This screen
+ * reads `approval_instance_id` off the overtime record and:
+ *   - renders the E11 approval chain (ApprovalChainTimeline, reused from features/e11-approvals),
+ *   - performs approve / reject via useApproveApprovalInstance / useRejectApprovalInstance.
+ * Self-approval + line membership are server-enforced (INV-3, ENGINEERING C1); the UI handles
+ * 403 SELF_APPROVAL_FORBIDDEN + 409 LINE_ALREADY_CLEARED gracefully.
+ *
+ * Agent lifecycle actions (confirm / withdraw) are KEPT — those E7 hooks still exist.
+ *
+ * Status machine (E11): PENDING_AGENT_CONFIRM | PENDING | APPROVED | REJECTED | CANCELLED.
  *
  * Route: /overtime/$overtimeId
- *
- * Status machine (D4 final 2026-06-02):
- *   PENDING_AGENT_CONFIRM → agent can confirm or withdraw
- *   PENDING_L1            → SL or HR can approve-L1 or reject
- *   PENDING_HR            → HR can approve-final or reject
- *   APPROVED | REJECTED | WITHDRAWN → terminal / read-only
- *
- * Calculation block (OvertimeCalculation) is server-computed at GET time —
- * this component renders it verbatim; NO client-side arithmetic.
- *
- * F7-refs: F7.1 (OT rules/tiers), F7.2 (auto-detect), F7.3 (OA agent actions),
- *          F7.4 (aggregations). Business rules: BR-OA-1..8, EPICS §8 D4.
  */
 
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
+import { ApiError } from '@swp/api-client';
 import {
   type Overtime,
   OvertimeSource,
   OvertimeStatus,
   OvertimeTier,
-  useApproveOvertimeFinal,
-  useApproveOvertimeL1,
   useConfirmOvertime,
   useGetOvertime,
-  useRejectOvertime,
   useWithdrawOvertime,
 } from '@swp/api-client/e7';
-import type { StatusTone } from '@swp/design-tokens';
+import {
+  type ApprovalInstanceDetail,
+  useApproveApprovalInstance,
+  useGetApprovalInstance,
+  useRejectApprovalInstance,
+} from '@swp/api-client/e11';
 import { Button, DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link as RouterLink } from '@tanstack/react-router';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -54,6 +53,7 @@ import {
 import type * as React from 'react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ApprovalChainTimeline } from '../e11-approvals/approval-chain-timeline.tsx';
 import {
   ConfirmOvertimeModal,
   RejectOvertimeModal,
@@ -82,22 +82,18 @@ export interface OvertimeDetailScreenProps {
 
 export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) {
   const { t } = useTranslation('overtime');
+  const { t: ta } = useTranslation('approvals');
   const { toast } = useToast();
   const user = useCurrentUser();
+  const queryClient = useQueryClient();
 
-  const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
-  const isSL = user?.role === 'shift_leader';
   const isAgent = user?.role === 'agent';
 
   // ---------------------------------------------------------------------------
-  // Query
+  // Query — overtime record
   // ---------------------------------------------------------------------------
 
   const query = useGetOvertime(overtimeId);
-  // The handler wraps the detail in a {data:<Overtime>} envelope even though the E7
-  // openapi declares the bare object (so Orval narrows query.data.data to Overtime).
-  // Unwrap with a bare fallback (the recurring Phase-8 detail-GET fix): prefer the
-  // nested .data when present, else treat the response body as the bare Overtime.
   const raw = query.data?.data as { data?: Overtime } | Overtime | undefined;
   const unwrapped =
     raw && typeof raw === 'object' && 'data' in raw && raw.data
@@ -105,6 +101,17 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
       : (raw as Overtime | undefined);
   const ot: Overtime | undefined =
     unwrapped && 'id' in unwrapped && 'status' in unwrapped ? (unwrapped as Overtime) : undefined;
+
+  const instanceId = (ot?.approval_instance_id as string | null | undefined) ?? undefined;
+
+  // ---------------------------------------------------------------------------
+  // Query — E11 approval instance (the chain)
+  // ---------------------------------------------------------------------------
+
+  const instanceQuery = useGetApprovalInstance(instanceId ?? '', {
+    query: { enabled: Boolean(instanceId) },
+  });
+  const instance = instanceQuery.data?.data as ApprovalInstanceDetail | undefined;
 
   // ---------------------------------------------------------------------------
   // Overlay state
@@ -118,66 +125,37 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
   // Mutations
   // ---------------------------------------------------------------------------
 
-  const approveL1 = useApproveOvertimeL1({
-    mutation: {
-      onSuccess: () => {
-        toast({
-          tone: 'success',
-          title: t('detail.toastForwardedTitle'),
-          description: t('detail.toastForwardedBody'),
-        });
-      },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+  function invalidateAll() {
+    void query.refetch();
+    void instanceQuery.refetch();
+    queryClient.invalidateQueries({
+      predicate: (q) =>
+        q.queryKey.some((k) => typeof k === 'string' && k.includes('/approval-instances')),
+    });
+  }
 
-  const approveFinal = useApproveOvertimeFinal({
-    mutation: {
-      onSuccess: () => {
-        toast({
-          tone: 'success',
-          title: t('detail.toastApprovedTitle'),
-          description: t('detail.toastApprovedBody'),
-        });
-      },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+  function handleActionError(err: unknown) {
+    const code = err instanceof ApiError ? err.code : '';
+    if (code === 'SELF_APPROVAL_FORBIDDEN') {
+      toast({ tone: 'error', title: ta('detail.toastSelfApprovalTitle') });
+      invalidateAll();
+      return;
+    }
+    if (code === 'LINE_ALREADY_CLEARED') {
+      toast({ tone: 'info', title: ta('detail.toastAlreadyClearedTitle') });
+      invalidateAll();
+      return;
+    }
+    const { kind } = classifyError(err);
+    toast({
+      tone: 'error',
+      title: t('errors.processFailed'),
+      description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
+    });
+  }
 
-  const rejectMutation = useRejectOvertime({
-    mutation: {
-      onSuccess: () => {
-        setRejectOpen(false);
-        toast({
-          tone: 'success',
-          title: t('detail.toastRejectedTitle'),
-          description: t('detail.toastRejectedBody'),
-        });
-      },
-      onError: (err) => {
-        const { kind } = classifyError(err);
-        toast({
-          tone: 'error',
-          title: t('errors.processFailed'),
-          description: kind === 'network' ? t('errors.network') : t('errors.tryAgain'),
-        });
-      },
-    },
-  });
+  const approve = useApproveApprovalInstance();
+  const reject = useRejectApprovalInstance();
 
   const withdrawMutation = useWithdrawOvertime({
     mutation: {
@@ -281,46 +259,60 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
   const isAutoDetected = ot.source === OvertimeSource.AUTO_DETECTED;
   const isCrossMidnight = Boolean(ot.cross_midnight);
 
-  // Action gating by status + role
-  const canApproveL1 = (isSL || isHR) && ot.status === OvertimeStatus.PENDING_L1;
-  const canApproveFinal = isHR && ot.status === OvertimeStatus.PENDING_HR;
-  const canReject =
-    ((isSL || isHR) && ot.status === OvertimeStatus.PENDING_L1) ||
-    (isHR && ot.status === OvertimeStatus.PENDING_HR);
-  // Agent can confirm or withdraw from PENDING_AGENT_CONFIRM
+  // Approve/reject (any line member) — server-enforced membership. Offered while PENDING with an
+  // instance. Agent confirm/withdraw use the dedicated E7 lifecycle hooks.
+  const canAct = ot.status === OvertimeStatus.PENDING && Boolean(instanceId) && !isAgent;
   const canConfirm = isAgent && ot.status === OvertimeStatus.PENDING_AGENT_CONFIRM;
-  // Agent can withdraw from PENDING_L1 (before SL acts) — OA C-3
   const canWithdraw =
     isAgent &&
-    (ot.status === OvertimeStatus.PENDING_AGENT_CONFIRM || ot.status === OvertimeStatus.PENDING_L1);
+    (ot.status === OvertimeStatus.PENDING_AGENT_CONFIRM || ot.status === OvertimeStatus.PENDING);
 
   const isTerminal =
     ot.status === OvertimeStatus.APPROVED ||
     ot.status === OvertimeStatus.REJECTED ||
-    ot.status === OvertimeStatus.WITHDRAWN;
+    ot.status === OvertimeStatus.CANCELLED;
 
-  const approvingL1 = approveL1.isPending;
-  const approvingFinal = approveFinal.isPending;
-  const rejecting = rejectMutation.isPending;
+  const approving = approve.isPending;
+  const rejecting = reject.isPending;
   const withdrawing = withdrawMutation.isPending;
   const confirming = confirmMutation.isPending;
 
-  const anySaving = approvingL1 || approvingFinal || rejecting || withdrawing || confirming;
+  const anySaving = approving || rejecting || withdrawing || confirming;
 
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
-  function handleApproveL1() {
-    approveL1.mutate({ id: overtimeId, data: {} });
-  }
-
-  function handleApproveFinal() {
-    approveFinal.mutate({ id: overtimeId, data: {} });
+  function handleApprove() {
+    if (!instanceId) return;
+    approve.mutate(
+      { id: instanceId, data: {} },
+      {
+        onSuccess: () => {
+          invalidateAll();
+          toast({ tone: 'success', title: t('detail.toastApprovedTitle') });
+        },
+        onError: handleActionError,
+      },
+    );
   }
 
   function handleRejectConfirm(reason: string) {
-    rejectMutation.mutate({ id: overtimeId, data: { reason } });
+    if (!instanceId) return;
+    reject.mutate(
+      { id: instanceId, data: { reason } },
+      {
+        onSuccess: () => {
+          setRejectOpen(false);
+          invalidateAll();
+          toast({ tone: 'success', title: t('detail.toastRejectedTitle') });
+        },
+        onError: (err) => {
+          setRejectOpen(false);
+          handleActionError(err);
+        },
+      },
+    );
   }
 
   function handleWithdrawConfirm() {
@@ -356,13 +348,12 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
         <span className="text-sm font-semibold text-text-2">{t('detail.breadcrumb')}</span>
       </div>
 
-      {/* ── Header card (uG6mQ › sd2Om) ── */}
+      {/* ── Header card ── */}
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-6">
         {/* Top row: employee + status */}
         <div className="flex items-start justify-between gap-6">
           {/* Left: employee info */}
           <div className="flex flex-col gap-2.5">
-            {/* Employee row */}
             <div className="flex items-center gap-3.5">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary-soft text-base font-bold text-primary">
                 {(ot.employee.name ?? ot.employee.id)
@@ -410,19 +401,17 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
 
           {/* Right: tier badge + status pill */}
           <div className="flex flex-col items-end gap-2.5">
-            {/* Tier indicator badge */}
             <div className="flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs font-bold text-text">
               <TierIcon tier={ot.tier_indicator} />
               {t(overtimeTierKey(ot.tier_indicator))}
             </div>
-            {/* Status badge */}
             <StatusBadge dot tone={overtimeStatusTone(ot.status)}>
               {t(`status.${ot.status}`)}
             </StatusBadge>
           </div>
         </div>
 
-        {/* Worked-without-request flag banner (uG6mQ › Nz1Fg) */}
+        {/* Worked-without-request flag banner */}
         {isWorkedWithoutRequest && (
           <div className="flex items-start gap-2.5 rounded-xl border border-warn-bd bg-warn-bg px-3.5 py-3">
             <Flag aria-hidden className="mt-0.5 size-4 shrink-0 text-warn-tx" />
@@ -437,9 +426,8 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
           </div>
         )}
 
-        {/* Meta grid: Pre-approval card + Source card + Duration card (uG6mQ › NIDHJ) */}
+        {/* Meta grid: Pre-approval card + Source card + Duration card */}
         <div className="grid grid-cols-3 gap-3.5">
-          {/* Pre-approval */}
           <MetaCard
             icon={<ShieldCheck aria-hidden className="size-3.5 text-text-3" />}
             label={t('detail.metaPreApproval')}
@@ -454,7 +442,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
             )}
           </MetaCard>
 
-          {/* Source */}
           <MetaCard
             icon={<Sparkles aria-hidden className="size-3.5 text-text-3" />}
             label={t('detail.metaSource')}
@@ -472,7 +459,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
             )}
           </MetaCard>
 
-          {/* Duration counted */}
           <MetaCard
             icon={<Timer aria-hidden className="size-3.5 text-text-3" />}
             label={t('detail.metaDuration')}
@@ -517,7 +503,7 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
       <div className="flex gap-[18px]">
         {/* ── Left column ── */}
         <div className="flex flex-1 flex-col gap-[18px]">
-          {/* Tier breakdown card (uG6mQ › dm6w3) */}
+          {/* Tier breakdown card */}
           <Section
             title={t('detail.sectionTierBreakdown')}
             badge={
@@ -572,12 +558,11 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
                   </div>
                 );
               })}
-              {/* Footnote */}
               <p className="text-xs leading-relaxed text-text-3">{t('detail.tierFootnote')}</p>
             </div>
           </Section>
 
-          {/* Attendance source card (uG6mQ › Ra0Hz) — only when AUTO_DETECTED */}
+          {/* Attendance source card — only when AUTO_DETECTED */}
           {isAutoDetected && ot.attendance_id && (
             <Section title={t('detail.sectionAttendanceSource')}>
               <div className="flex items-center justify-between gap-3">
@@ -611,7 +596,7 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
             </Section>
           )}
 
-          {/* Notes / reason card (uG6mQ › S6CeO) */}
+          {/* Notes / reason card */}
           {ot.reason && (
             <Section title={t('detail.sectionNotes')}>
               <blockquote className="rounded-lg bg-surface-2 px-4 py-3 text-sm italic leading-relaxed text-text-2">
@@ -623,45 +608,59 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
 
         {/* ── Right column ── */}
         <div className="flex w-[420px] flex-col gap-[18px]">
-          {/* Approval timeline card (uG6mQ › F7PO5S) */}
-          <Section title={t('detail.sectionTimeline')}>
-            <OvertimeTimeline ot={ot} t={t} />
+          {/* E11 approval chain */}
+          <Section
+            title={t('detail.sectionTimeline')}
+            badge={
+              instanceId ? (
+                <RouterLink
+                  to="/approval-instances/$instanceId"
+                  params={{ instanceId }}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                >
+                  {t('detail.viewChain')}
+                  <ArrowUpRight aria-hidden className="size-3.5" />
+                </RouterLink>
+              ) : undefined
+            }
+          >
+            {!instanceId ? (
+              <p className="text-sm text-text-3">{t('detail.chainPending')}</p>
+            ) : instanceQuery.isLoading ? (
+              <div className="h-24 w-full animate-pulse rounded-lg bg-surface-2" />
+            ) : instance ? (
+              <ApprovalChainTimeline
+                lines={instance.lines ?? []}
+                actions={instance.actions ?? []}
+                currentLine={instance.current_line}
+                status={instance.status}
+                requesterName={ot.employee.name ?? ot.employee.id}
+                t={ta}
+              />
+            ) : (
+              <p className="text-sm text-text-3">{ta('detail.chainEmpty')}</p>
+            )}
           </Section>
 
-          {/* Action card (uG6mQ › qTCEX) — hidden when terminal */}
-          {!isTerminal && (
+          {/* Action card — hidden when terminal */}
+          {!isTerminal && (canAct || canConfirm || canWithdraw) && (
             <div className="flex flex-col rounded-xl border border-border bg-surface">
-              {/* Header */}
               <div className="border-b border-border px-[18px] py-3.5">
                 <h2 className="text-sm font-bold text-text">
-                  {isHR && ot.status === OvertimeStatus.PENDING_HR
-                    ? t('detail.actionCardTitleHR')
-                    : isSL && ot.status === OvertimeStatus.PENDING_L1
-                      ? t('detail.actionCardTitleSL')
-                      : isAgent
-                        ? t('detail.actionCardTitleAgent')
-                        : t('detail.actionCardTitle')}
+                  {isAgent ? t('detail.actionCardTitleAgent') : t('detail.actionCardTitle')}
                 </h2>
               </div>
 
-              {/* Body */}
               <div className="flex flex-col gap-3.5 px-[18px] py-3.5">
-                {/* Decision lead text */}
-                {(canApproveL1 || canApproveFinal) && (
-                  <p className="text-xs leading-relaxed text-text-2">
-                    {canApproveFinal ? t('detail.actionLeadHR') : t('detail.actionLeadSL')}
-                  </p>
+                {canAct && (
+                  <p className="text-xs leading-relaxed text-text-2">{t('detail.actionLeadHR')}</p>
                 )}
-
-                {/* Agent confirmation hint */}
                 {canConfirm && (
                   <p className="text-xs leading-relaxed text-text-2">
                     {t('detail.actionLeadAgent')}
                   </p>
                 )}
-
-                {/* Audit notice */}
-                {(canApproveL1 || canApproveFinal || canReject) && (
+                {canAct && (
                   <div className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5">
                     <ShieldCheck aria-hidden className="mt-0.5 size-3.5 shrink-0 text-text-3" />
                     <p className="text-[11px] leading-relaxed text-text-3">
@@ -671,10 +670,8 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
                 )}
               </div>
 
-              {/* Footer with action buttons (uG6mQ › z736oS) */}
               <div className="flex items-center gap-2.5 border-t border-border bg-surface-2 px-[18px] py-3.5">
-                {/* Reject */}
-                {canReject && (
+                {canAct && (
                   <Button
                     type="button"
                     variant="secondary"
@@ -685,34 +682,19 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
                   </Button>
                 )}
 
-                {/* Spacer */}
                 <div className="flex-1" />
 
-                {/* SL approve-L1 */}
-                {canApproveL1 && (
+                {canAct && (
                   <Button
                     type="button"
                     variant="primary"
-                    onClick={handleApproveL1}
+                    onClick={handleApprove}
                     disabled={anySaving}
                   >
-                    {approvingL1 ? t('common.processing') : t('detail.actionApproveL1')}
+                    {approving ? t('common.processing') : t('detail.actionApprove')}
                   </Button>
                 )}
 
-                {/* HR final approve */}
-                {canApproveFinal && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={handleApproveFinal}
-                    disabled={anySaving}
-                  >
-                    {approvingFinal ? t('common.processing') : t('detail.actionApproveFinal')}
-                  </Button>
-                )}
-
-                {/* Agent confirm auto-detected */}
                 {canConfirm && (
                   <Button
                     type="button"
@@ -724,7 +706,6 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
                   </Button>
                 )}
 
-                {/* Agent withdraw */}
                 {canWithdraw && (
                   <Button
                     type="button"
@@ -745,14 +726,14 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
         </div>
       </div>
 
-      {/* Audit footer (uG6mQ › CnDG3) */}
+      {/* Audit footer */}
       <div className="flex items-center gap-2 py-2">
         <ShieldCheck aria-hidden className="size-3 text-text-3" />
         <span className="text-[11px] text-text-3">{t('detail.auditFooter', { id: ot.id })}</span>
       </div>
 
       {/* ── Overlays ── */}
-      {canReject && (
+      {canAct && (
         <RejectOvertimeModal
           open={rejectOpen}
           overtime={ot}
@@ -786,7 +767,7 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
 }
 
 // ---------------------------------------------------------------------------
-// Section wrapper (matches uG6mQ card style with optional badge in header)
+// Section wrapper
 // ---------------------------------------------------------------------------
 
 function Section({
@@ -810,7 +791,7 @@ function Section({
 }
 
 // ---------------------------------------------------------------------------
-// MetaCard — small stat card used in the header grid (uG6mQ › NIDHJ)
+// MetaCard
 // ---------------------------------------------------------------------------
 
 function MetaCard({
@@ -834,7 +815,7 @@ function MetaCard({
 }
 
 // ---------------------------------------------------------------------------
-// TierIcon — decorative icon per tier (design-system: not emoji, real icons)
+// TierIcon
 // ---------------------------------------------------------------------------
 
 function TierIcon({ tier }: { tier: OvertimeTier }) {
@@ -848,159 +829,15 @@ function TierIcon({ tier }: { tier: OvertimeTier }) {
 }
 
 // ---------------------------------------------------------------------------
-// OvertimeTimeline (uG6mQ › F7PO5S › ZmvjV)
+// TerminalCard — read-only summary shown in terminal states
 // ---------------------------------------------------------------------------
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
-function OvertimeTimeline({ ot, t }: { ot: Overtime; t: TFunc }) {
-  const approvals = ot.approvals ?? [];
-
-  // Build steps: synthetic "auto-detected" + agent confirm step (if applicable) + approvals
-  type Step =
-    | { kind: 'system'; label: string; sub: string; tone: StatusTone }
-    | {
-        kind: 'approval';
-        level: number;
-        decision: string;
-        actorName?: string;
-        at: string;
-        reason?: string;
-        tone: StatusTone;
-      }
-    | { kind: 'pending'; label: string };
-
-  const steps: Step[] = [];
-
-  // Step 0: system created / auto-detected
-  steps.push({
-    kind: 'system',
-    label:
-      ot.source === OvertimeSource.AUTO_DETECTED
-        ? t('detail.timelineAutoDetected')
-        : ot.source === OvertimeSource.WORKED_WITHOUT_REQUEST
-          ? t('detail.timelineWorkedWithoutRequest')
-          : t('detail.timelineRequested'),
-    sub: ot.created_at,
-    tone: 'info',
-  });
-
-  // Recorded approvals
-  for (const ap of approvals) {
-    const isApproved = ap.decision === 'APPROVED' || ap.decision === 'OVERRIDE_APPROVED';
-    const isRejected = ap.decision === 'REJECTED';
-    steps.push({
-      kind: 'approval',
-      level: ap.level,
-      decision: ap.decision,
-      actorName: ap.approver?.name ?? ap.approver?.id,
-      at: ap.decided_at,
-      reason: ap.reason != null ? String(ap.reason) : undefined,
-      tone: isApproved ? 'ok' : isRejected ? 'bad' : 'neutral',
-    });
-  }
-
-  // Pending next step (if not terminal)
-  if (ot.status === OvertimeStatus.PENDING_AGENT_CONFIRM) {
-    steps.push({ kind: 'pending', label: t('detail.timelinePendingAgentConfirm') });
-  } else if (ot.status === OvertimeStatus.PENDING_L1) {
-    steps.push({ kind: 'pending', label: t('detail.timelinePendingL1') });
-  } else if (ot.status === OvertimeStatus.PENDING_HR) {
-    steps.push({ kind: 'pending', label: t('detail.timelinePendingHR') });
-  }
-
-  const toneCircle: Record<StatusTone, string> = {
-    ok: 'bg-ok-bg border-ok-bd',
-    bad: 'bg-bad-bg border-bad-bd',
-    warn: 'bg-warn-bg border-warn-bd',
-    info: 'bg-info-bg border-info-bd',
-    onprogress: 'bg-warn-bg border-warn-bd',
-    neutral: 'bg-surface-2 border-border',
-  };
-
-  const toneIcon: Record<StatusTone, React.ReactNode> = {
-    ok: <CheckCircle2 aria-hidden className="size-3 text-ok-tx" />,
-    bad: <XCircle aria-hidden className="size-3 text-bad-tx" />,
-    warn: <AlertTriangle aria-hidden className="size-3 text-warn-tx" />,
-    info: <Sparkles aria-hidden className="size-3 text-info-tx" />,
-    onprogress: <Clock aria-hidden className="size-3 text-warn-tx" />,
-    neutral: <Clock aria-hidden className="size-3 text-text-3" />,
-  };
-
-  return (
-    <ol className="flex flex-col gap-3.5">
-      {steps.map((step, idx) => {
-        const tone: StatusTone = step.kind === 'pending' ? 'warn' : step.tone;
-        const isLast = idx === steps.length - 1;
-        const stepKey =
-          step.kind === 'approval'
-            ? `approval-${step.level}-${step.at}`
-            : step.kind === 'system'
-              ? `system-${step.sub}`
-              : `pending-${step.label}`;
-
-        return (
-          <li key={stepKey} className="flex gap-3">
-            {/* Dot + connector line */}
-            <div className="flex flex-col items-center">
-              <div
-                className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border ${toneCircle[tone]}`}
-              >
-                {step.kind === 'pending' ? (
-                  <Clock aria-hidden className="size-3 text-warn-tx" />
-                ) : (
-                  toneIcon[tone]
-                )}
-              </div>
-              {!isLast && <div className="mt-1 h-full min-h-[16px] w-0.5 bg-border-soft" />}
-            </div>
-
-            {/* Text content */}
-            <div className="flex flex-1 flex-col gap-0.5 pb-1">
-              {step.kind === 'system' && (
-                <>
-                  <span className="text-sm font-semibold text-text">{step.label}</span>
-                  <DateText kind="instant" value={step.sub} className="text-xs text-text-2" />
-                </>
-              )}
-              {step.kind === 'approval' && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold text-text">
-                      {step.level === 1 ? t('detail.timelineL1Label') : t('detail.timelineL2Label')}{' '}
-                      <span
-                        className={`text-xs font-semibold ${step.tone === 'ok' ? 'text-ok-tx' : step.tone === 'bad' ? 'text-bad-tx' : 'text-text-3'}`}
-                      >
-                        {t(`approvalDecision.${step.decision}`)}
-                      </span>
-                    </span>
-                    <DateText kind="instant" value={step.at} className="text-xs text-text-3" />
-                  </div>
-                  {step.actorName && <span className="text-xs text-text-2">{step.actorName}</span>}
-                  {step.reason && (
-                    <p className="mt-1 rounded-lg bg-bad-bg px-2.5 py-2 text-xs leading-relaxed text-bad-tx">
-                      {t('detail.rejectionReason')}: {step.reason}
-                    </p>
-                  )}
-                </>
-              )}
-              {step.kind === 'pending' && <span className="text-sm text-text-2">{step.label}</span>}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// TerminalCard — read-only summary shown in terminal states
-// ---------------------------------------------------------------------------
-
 function TerminalCard({ ot, t }: { ot: Overtime; t: TFunc }) {
   const isApproved = ot.status === OvertimeStatus.APPROVED;
   const isRejected = ot.status === OvertimeStatus.REJECTED;
-  const isWithdrawn = ot.status === OvertimeStatus.WITHDRAWN;
+  const isCancelled = ot.status === OvertimeStatus.CANCELLED;
 
   if (isApproved) {
     return (
@@ -1026,18 +863,12 @@ function TerminalCard({ ot, t }: { ot: Overtime; t: TFunc }) {
           <XCircle aria-hidden className="size-4 text-bad-tx" />
           <span className="text-sm font-bold text-bad-tx">{t('detail.terminalRejectedTitle')}</span>
         </div>
-        {ot.approvals
-          ?.filter((a) => a.decision === 'REJECTED')
-          .map((a) => (
-            <p key={`rej-${a.level}`} className="text-xs leading-relaxed text-bad-tx">
-              {a.reason != null ? String(a.reason) : t('detail.noReasonGiven')}
-            </p>
-          ))}
+        <p className="text-xs leading-relaxed text-bad-tx">{t('detail.terminalRejectedBody')}</p>
       </div>
     );
   }
 
-  if (isWithdrawn) {
+  if (isCancelled) {
     return (
       <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface-2 px-4 py-4 opacity-75">
         <div className="flex items-center gap-2">

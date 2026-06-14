@@ -95,7 +95,9 @@ export default function LeaveNew() {
       <View className="mb-6 flex-row items-center justify-between">
         <Text variant="title">{t('m:leave.newBtn')}</Text>
         <Pressable onPress={() => router.back()}>
-          <Text className="text-primary font-semibold">{t('m:clock.cancel')}</Text>
+          <Text variant="strong" className="text-primary">
+            {t('m:clock.cancel')}
+          </Text>
         </Pressable>
       </View>
 
@@ -113,7 +115,10 @@ export default function LeaveNew() {
                   typeId === lt.id ? 'border-primary bg-primary-soft' : 'border-border bg-surface'
                 }`}
               >
-                <Text className={typeId === lt.id ? 'text-primary font-semibold' : 'text-text-2'}>
+                <Text
+                  weight={typeId === lt.id ? 'semibold' : 'regular'}
+                  className={typeId === lt.id ? 'text-primary' : 'text-text-2'}
+                >
                   {lt.name}
                 </Text>
               </Pressable>
@@ -123,14 +128,14 @@ export default function LeaveNew() {
 
         {showHint && selectedBal ? (
           <View className="rounded-input border border-ok-border bg-ok-bg px-4 py-3">
-            <Text className="text-ok-text font-semibold">
+            <Text variant="strong" className="text-ok-text">
               {t('m:leave.balHint', {
                 name: selectedBal.name,
                 code: selectedBal.code,
                 remaining: selectedBal.remaining_days,
               })}
             </Text>
-            <Text className="text-ok-text mt-0.5 text-xs">
+            <Text variant="caption" className="text-ok-text mt-0.5">
               {t('m:leave.balHintSub', { entitled: selectedBal.entitled_days, desc: hintDesc })}
             </Text>
           </View>
@@ -178,7 +183,9 @@ export default function LeaveNew() {
         </View>
 
         <View className="rounded-input border border-warn-border bg-warn-bg px-4 py-3">
-          <Text className="text-warn-text text-xs">{t('m:leave.quotaWarn')}</Text>
+          <Text variant="caption" className="text-warn-text">
+            {t('m:leave.quotaWarn')}
+          </Text>
         </View>
 
         {err ? <Text className="text-danger">{err}</Text> : null}

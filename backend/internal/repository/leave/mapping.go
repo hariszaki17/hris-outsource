@@ -110,7 +110,9 @@ func mapRequestFromList(r sqlcgen.ListLeaveRequestsRow) dom.LeaveRequest {
 		LeaveTypeName:   r.LeaveTypeName,
 		LeaveTypeCode:   r.LeaveTypeCode,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
+	lr.ApprovalInstanceID = r.ApprovalInstanceID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -140,7 +142,9 @@ func mapRequestFromGet(r sqlcgen.GetLeaveRequestRow) dom.LeaveRequest {
 		LeaveTypeName:   r.LeaveTypeName,
 		LeaveTypeCode:   r.LeaveTypeCode,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
+	lr.ApprovalInstanceID = r.ApprovalInstanceID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -166,7 +170,8 @@ func mapRequestFromForUpdate(r sqlcgen.GetLeaveRequestForUpdateRow) dom.LeaveReq
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -192,7 +197,8 @@ func mapRequestFromCreate(r sqlcgen.CreateLeaveRequestRow) dom.LeaveRequest {
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -218,7 +224,8 @@ func mapRequestFromUpdate(r sqlcgen.UpdateLeaveRequestStatusRow) dom.LeaveReques
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -244,7 +251,8 @@ func mapRequestFromDates(r sqlcgen.UpdateLeaveRequestDatesRow) dom.LeaveRequest 
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
 	}
-	lr.Routing = dom.LeaveRouting{NoLeader: r.NoLeader, AssignedLeaderID: r.AssignedLeaderID}
+	lr.NoLeader = r.NoLeader
+	lr.AssignedLeaderID = r.AssignedLeaderID
 	lr.BalanceCheck = mapBalanceCheck(r.BalanceRequestedDays, r.BalanceRemainingAtCheck, r.BalanceRequiresOverride)
 	return lr
 }
@@ -263,24 +271,6 @@ func mapBalanceCheck(requested, remaining *int32, requiresOverride *bool) dom.Ba
 		bc.RequiresOverride = *requiresOverride
 	}
 	return bc
-}
-
-// --- leave-approval mappers ---
-
-func mapApproval(r sqlcgen.LeaveApproval) dom.LeaveApproval {
-	return dom.LeaveApproval{
-		ID:             r.ID,
-		LeaveRequestID: r.LeaveRequestID,
-		Stage:          dom.LeaveStage(r.Stage),
-		Decision:       dom.LeaveDecision(r.Decision),
-		ActorID:        r.ActorID,
-		ActorRole:      r.ActorRole,
-		DecisionNote:   r.DecisionNote,
-		RejectReason:   r.RejectReason,
-		IsOverride:     r.IsOverride,
-		OverrideReason: r.OverrideReason,
-		OccurredAt:     r.OccurredAt,
-	}
 }
 
 // --- leave-quota mappers ---

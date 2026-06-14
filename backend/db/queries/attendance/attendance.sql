@@ -12,7 +12,11 @@
 --   verification_status_in / status_in: text[] = ANY membership.
 --   site_id / position: narrow within the (leader-pinned) company scope (position is
 --     a free-text exact-match on the stored label).
---   date_from/date_to: bound on the shift-date basis (check_in_at::date).
+--   date_from/date_to: bound on the shift-date basis — COALESCE(shift_start_at,
+--     check_in_at) rendered in Asia/Jakarta (the agent riwayat AR-10 basis). Using
+--     shift_start_at first keeps a record on its scheduled day (so auto-created ABSENT
+--     rows, which have a NULL check_in_at, are still range-filtered) and only falls back
+--     to check_in_at for unscheduled/manual rows. Both bounds are INCLUSIVE.
 --   exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.site_id, a.position, a.attendance_code_id,
@@ -38,8 +42,8 @@ WHERE a.deleted_at IS NULL
   AND (sqlc.narg(position)::text IS NULL OR a.position = sqlc.narg(position)::text)
   AND (sqlc.narg(verification_status_in)::text[] IS NULL OR a.verification_status = ANY(sqlc.narg(verification_status_in)::text[]))
   AND (sqlc.narg(status_in)::text[] IS NULL OR a.status = ANY(sqlc.narg(status_in)::text[]))
-  AND (sqlc.narg(date_from)::date IS NULL OR a.check_in_at::date >= sqlc.narg(date_from)::date)
-  AND (sqlc.narg(date_to)::date IS NULL OR a.check_in_at::date <= sqlc.narg(date_to)::date)
+  AND (sqlc.narg(date_from)::date IS NULL OR (COALESCE(a.shift_start_at, a.check_in_at) AT TIME ZONE 'Asia/Jakarta')::date >= sqlc.narg(date_from)::date)
+  AND (sqlc.narg(date_to)::date IS NULL OR (COALESCE(a.shift_start_at, a.check_in_at) AT TIME ZONE 'Asia/Jakarta')::date <= sqlc.narg(date_to)::date)
   AND (sqlc.narg(exceptions)::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
   AND (
         sqlc.narg(cursor_check_in_at)::timestamptz IS NULL

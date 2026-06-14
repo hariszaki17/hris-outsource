@@ -693,8 +693,8 @@ WHERE a.deleted_at IS NULL
   AND ($4::text IS NULL OR a.position = $4::text)
   AND ($5::text[] IS NULL OR a.verification_status = ANY($5::text[]))
   AND ($6::text[] IS NULL OR a.status = ANY($6::text[]))
-  AND ($7::date IS NULL OR a.check_in_at::date >= $7::date)
-  AND ($8::date IS NULL OR a.check_in_at::date <= $8::date)
+  AND ($7::date IS NULL OR (COALESCE(a.shift_start_at, a.check_in_at) AT TIME ZONE 'Asia/Jakarta')::date >= $7::date)
+  AND ($8::date IS NULL OR (COALESCE(a.shift_start_at, a.check_in_at) AT TIME ZONE 'Asia/Jakarta')::date <= $8::date)
   AND ($9::boolean IS NOT TRUE OR a.verification_status IN ('PENDING','ESCALATED'))
   AND (
         $10::timestamptz IS NULL
@@ -778,7 +778,11 @@ type ListAttendanceRow struct {
 //	verification_status_in / status_in: text[] = ANY membership.
 //	site_id / position: narrow within the (leader-pinned) company scope (position is
 //	  a free-text exact-match on the stored label).
-//	date_from/date_to: bound on the shift-date basis (check_in_at::date).
+//	date_from/date_to: bound on the shift-date basis — COALESCE(shift_start_at,
+//	  check_in_at) rendered in Asia/Jakarta (the agent riwayat AR-10 basis). Using
+//	  shift_start_at first keeps a record on its scheduled day (so auto-created ABSENT
+//	  rows, which have a NULL check_in_at, are still range-filtered) and only falls back
+//	  to check_in_at for unscheduled/manual rows. Both bounds are INCLUSIVE.
 //	exceptions: when true, only rows with verification_status IN ('PENDING','ESCALATED').
 func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) ([]ListAttendanceRow, error) {
 	rows, err := q.db.Query(ctx, listAttendance,

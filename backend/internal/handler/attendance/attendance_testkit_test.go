@@ -275,6 +275,26 @@ func (r *fakeAttendanceRepo) ListAttendance(_ context.Context, f svc.AttendanceF
 		if len(f.VerificationStatus) > 0 && !contains(f.VerificationStatus, string(a.VerificationStatus)) {
 			continue
 		}
+		// status IN (...) — mirrors a.status = ANY(status_in::text[]).
+		if len(f.Status) > 0 && !contains(f.Status, string(a.Status)) {
+			continue
+		}
+		// date_from/date_to inclusive bounds on the shift-date basis —
+		// mirrors (COALESCE(shift_start_at, check_in_at) AT TIME ZONE 'Asia/Jakarta')::date.
+		if f.DateFrom != nil || f.DateTo != nil {
+			d, ok := shiftDateJakarta(a)
+			if !ok {
+				// No basis at all (NULL shift_start AND NULL check_in) → excluded once a
+				// date bound is present (matches the SQL: NULL >= date is UNKNOWN → filtered).
+				continue
+			}
+			if f.DateFrom != nil && d.Before(dayOf(*f.DateFrom)) {
+				continue
+			}
+			if f.DateTo != nil && d.After(dayOf(*f.DateTo)) {
+				continue
+			}
+		}
 		out = append(out, a)
 	}
 	// (check_in_at DESC, id) keyset — newest first. check_in_at is nullable (ABSENT).
@@ -689,10 +709,15 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 
 	// Mirror server.go: reads + all actions under RequireRole(super/hr/leader);
 	// the 6 action routes wrap the idempotency middleware.
+	// Attendance reads include RoleAgent (mirrors server.go:439 — agent riwayat
+	// self-scope; the service forces employee_id to the caller).
 	r.Group(func(r chi.Router) {
-		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/attendance", handler.ListAttendance)
 		r.Get("/attendance/{id}", handler.GetAttendance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
 		r.Get("/corrections", handler.ListCorrections)
 		r.Get("/corrections/{id}", handler.GetCorrection)
 		r.With(idem.Handler).Post("/attendance/{id}:verify", handler.VerifyAttendance)
@@ -772,6 +797,55 @@ func ciOf(a att.Attendance) time.Time {
 		return time.Time{}
 	}
 	return *a.CheckInAt
+}
+
+// jakarta is the Asia/Jakarta location used to mirror the SQL date-basis (AR-10).
+var jakarta = mustLoadJakarta()
+
+func mustLoadJakarta() *time.Location {
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		// Fixed UTC+7 fallback when the tzdata is unavailable on the test host.
+		return time.FixedZone("WIB", 7*3600)
+	}
+	return loc
+}
+
+// shiftDateJakarta returns the record's filter basis day (midnight, Jakarta-local):
+// COALESCE(shift_start_at, check_in_at) rendered in Asia/Jakarta. ok=false when neither
+// is set (mirrors a row with NULL shift_start AND NULL check_in → no basis).
+func shiftDateJakarta(a att.Attendance) (time.Time, bool) {
+	var basis time.Time
+	switch {
+	case a.ShiftStartAt != nil:
+		basis = *a.ShiftStartAt
+	case a.CheckInAt != nil:
+		basis = *a.CheckInAt
+	default:
+		return time.Time{}, false
+	}
+	local := basis.In(jakarta)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, jakarta), true
+}
+
+// dayOf truncates a date-param (parsed as midnight UTC) to a Jakarta-local day for
+// inclusive comparison against shiftDateJakarta.
+func dayOf(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, jakarta)
+}
+
+// seedAttendanceFull plants a record with explicit status + shift_start_at so the
+// date-basis and status filters can be exercised. shiftStart may be the zero time
+// (treated as NULL → falls back to checkIn for the date basis).
+func (h *harness) seedAttendanceFull(id, company, employee string, status att.AttendanceStatus, vstatus att.VerificationStatus, shiftStart, checkIn time.Time) att.Attendance {
+	a := h.seedAttendance(id, company, employee, vstatus, checkIn)
+	a.Status = status
+	if !shiftStart.IsZero() {
+		ss := shiftStart
+		a.ShiftStartAt = &ss
+	}
+	h.attendance.records[id] = a
+	return a
 }
 
 // seedCorrection plants a correction record directly. shiftDate is the

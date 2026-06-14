@@ -13,12 +13,11 @@ export function overtimeStatusTone(status: OvertimeStatus): StatusTone {
     case OvertimeStatus.APPROVED:
       return 'ok';
     case OvertimeStatus.PENDING_AGENT_CONFIRM:
-    case OvertimeStatus.PENDING_L1:
-    case OvertimeStatus.PENDING_HR:
+    case OvertimeStatus.PENDING:
       return 'onprogress';
     case OvertimeStatus.REJECTED:
       return 'bad';
-    case OvertimeStatus.WITHDRAWN:
+    case OvertimeStatus.CANCELLED:
       return 'neutral';
     default:
       return 'neutral';

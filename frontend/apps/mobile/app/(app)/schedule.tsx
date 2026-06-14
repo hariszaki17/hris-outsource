@@ -6,6 +6,7 @@ import {
 import { LOCALE_ID } from '@swp/shared/datetime';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
@@ -50,7 +51,7 @@ function DayCard({ date, entry }: { date: Date; entry?: ScheduleEntry }) {
       <View className="flex-row items-center justify-between">
         <View>
           <Text variant="caption">{weekdayFmt.format(date)}</Text>
-          <Text variant="body" className="font-semibold">
+          <Text variant="body" weight="semibold">
             {date.getDate()}
           </Text>
         </View>
@@ -71,6 +72,7 @@ function DayCard({ date, entry }: { date: Date; entry?: ScheduleEntry }) {
 
 export default function ScheduleScreen() {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   const { user } = useSession();
   const employeeId = user?.employee_id ?? '';
   const days = currentWeek();
@@ -86,7 +88,7 @@ export default function ScheduleScreen() {
 
   return (
     <ScrollView className="flex-1 bg-app-bg">
-      <View className="gap-3 p-6">
+      <View className="gap-3 p-6" style={{ paddingTop: insets.top + 8 }}>
         <Text variant="title">{t('m:schedule.title')}</Text>
         {q.isLoading ? (
           <View className="items-center py-10">

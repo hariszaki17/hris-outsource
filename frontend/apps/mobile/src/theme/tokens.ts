@@ -72,6 +72,7 @@ export const theme = {
     'sans-bold': ['Inter_700Bold'],
     mono: ['IBMPlexMono_400Regular'],
     'mono-medium': ['IBMPlexMono_500Medium'],
+    'mono-bold': ['IBMPlexMono_700Bold'],
     display: ['Poppins_700Bold'],
   },
 } as const;

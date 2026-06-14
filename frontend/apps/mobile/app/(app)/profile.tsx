@@ -8,7 +8,7 @@
 import { type Employee, useGetEmployee } from '@swp/api-client/e2';
 import { color } from '@swp/design-tokens';
 import { useRouter } from 'expo-router';
-import { Bell, ChevronRight, Clock, FileText } from 'lucide-react-native';
+import { Bell, ChevronRight, Clock, FileText, Lock, Pencil } from 'lucide-react-native';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
@@ -72,12 +72,9 @@ function FieldRow({
         <Text variant="caption" className="text-text-3">
           {label}
         </Text>
-        {locked ? (
-          // lock icon — inline SVG-less fallback using a unicode lock glyph styled small
-          <Text className="text-xs text-text-3">{'🔒' /* 🔒 */}</Text>
-        ) : null}
+        {locked ? <Lock size={13} color={color.text3} /> : null}
       </View>
-      <Text variant="body" className={`text-text font-semibold ${mono ? 'font-mono' : ''}`}>
+      <Text variant="body" weight="semibold" mono={mono} className="text-text">
         {value || '—'}
       </Text>
     </View>
@@ -103,10 +100,11 @@ function SectionHeader({
 /** "Dapat diajukan" pill badge (info tone). */
 function CanRequestBadge({ label }: { label: string }) {
   return (
-    <View className="flex-row items-center gap-1 rounded-pill border border-info-border bg-info-bg px-2 py-0.5">
-      {/* pencil icon — unicode fallback */}
-      <Text className="text-xs text-info-text">{'✏'}</Text>
-      <Text className="text-xs font-semibold text-info-text">{label}</Text>
+    <View className="flex-row items-center gap-1.5 rounded-pill border border-info-border bg-info-bg px-3 py-1">
+      <Pencil size={12} color={color.info.text} />
+      <Text variant="caption" weight="semibold" className="text-info-text">
+        {label}
+      </Text>
     </View>
   );
 }
@@ -140,10 +138,10 @@ export default function ProfileScreen() {
   }
 
   return (
-    <Screen>
+    <Screen edges={['top', 'right', 'left']}>
       {/* ── Page header ── */}
       <View className="mb-4 flex-row items-center justify-between">
-        <Text variant="pageTitle">{t('m:profile.title')}</Text>
+        <Text variant="screenTitle">{t('m:profile.title')}</Text>
         <Pressable
           accessibilityLabel={t('m:tabs.notifications')}
           hitSlop={12}
@@ -160,8 +158,10 @@ export default function ProfileScreen() {
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center gap-3">
               {/* Avatar chip */}
-              <View className="h-11 w-11 items-center justify-center rounded-card bg-avatar-neutral">
-                <Text className="text-sm font-semibold text-text-2">{avatarText}</Text>
+              <View className="h-11 w-11 items-center justify-center rounded-input bg-avatar-neutral">
+                <Text variant="strong" className="text-text-2">
+                  {avatarText}
+                </Text>
               </View>
               {/* Name + role + NIP */}
               <View>
@@ -173,7 +173,7 @@ export default function ProfileScreen() {
                       <Text variant="secondary" className="text-text-3">
                         {'·'}
                       </Text>
-                      <Text variant="secondary" className="font-mono text-text-2">
+                      <Text variant="secondary" mono className="text-text-2">
                         {nipDisplay}
                       </Text>
                     </>
@@ -189,7 +189,9 @@ export default function ProfileScreen() {
             >
               <View className={`h-2 w-2 rounded-full ${isActive ? 'bg-ok-text' : 'bg-bad-text'}`} />
               <Text
-                className={`text-xs font-semibold ${isActive ? 'text-ok-text' : 'text-bad-text'}`}
+                variant="caption"
+                weight="semibold"
+                className={isActive ? 'text-ok-text' : 'text-bad-text'}
               >
                 {isActive ? t('m:profile.statusActive') : t('m:profile.statusInactive')}
               </Text>
@@ -239,10 +241,7 @@ export default function ProfileScreen() {
         </Card>
 
         {/* ── CTA ── */}
-        <Button
-          label={t('m:profile.ajukanPerubahanData')}
-          onPress={() => router.push('/profile-change-request')}
-        />
+        <Button label={t('m:profile.ubahProfil')} onPress={() => router.push('/profile-edit')} />
 
         {/* ── Lainnya (overflow: payslip / lembur / settings) ── */}
         <Card>
@@ -262,9 +261,6 @@ export default function ProfileScreen() {
         </Card>
 
         <Button variant="secondary" label={t('m:more.signOut')} onPress={() => void signOut()} />
-
-        {/* bottom padding for scroll */}
-        <View className="h-4" />
       </ScrollView>
     </Screen>
   );

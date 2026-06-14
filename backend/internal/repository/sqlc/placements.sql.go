@@ -192,6 +192,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -205,32 +208,35 @@ WHERE p.employee_id = $1
 `
 
 type GetActivePlacementForEmployeeRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 // INV-1 service pre-check (friendly 409 before hitting the partial unique index).
@@ -262,6 +268,9 @@ func (q *Queries) GetActivePlacementForEmployee(ctx context.Context, employeeID 
 		&i.EmployeeName,
 		&i.ClientCompanyName,
 		&i.SiteName,
+		&i.SiteGeoLat,
+		&i.SiteGeoLng,
+		&i.SiteGeofenceRadiusM,
 		&i.AgreementType,
 		&i.AwaitingAgreement,
 	)
@@ -355,6 +364,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -367,32 +379,35 @@ WHERE p.id = $1
 `
 
 type GetPlacementByIDRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error) {
@@ -423,6 +438,9 @@ func (q *Queries) GetPlacementByID(ctx context.Context, id string) (GetPlacement
 		&i.EmployeeName,
 		&i.ClientCompanyName,
 		&i.SiteName,
+		&i.SiteGeoLat,
+		&i.SiteGeoLng,
+		&i.SiteGeofenceRadiusM,
 		&i.AgreementType,
 		&i.AwaitingAgreement,
 	)
@@ -448,6 +466,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -460,32 +481,35 @@ ORDER BY p.start_date ASC, p.id ASC
 `
 
 type GetPlacementChainRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 // All placements sharing a predecessor/successor chain with the given placement
@@ -524,6 +548,9 @@ func (q *Queries) GetPlacementChain(ctx context.Context, id string) ([]GetPlacem
 			&i.EmployeeName,
 			&i.ClientCompanyName,
 			&i.SiteName,
+			&i.SiteGeoLat,
+			&i.SiteGeoLng,
+			&i.SiteGeofenceRadiusM,
 			&i.AgreementType,
 			&i.AwaitingAgreement,
 		); err != nil {
@@ -547,6 +574,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -576,32 +606,35 @@ type ListExpiringPlacementsParams struct {
 }
 
 type ListExpiringPlacementsRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 // Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
@@ -646,6 +679,9 @@ func (q *Queries) ListExpiringPlacements(ctx context.Context, arg ListExpiringPl
 			&i.EmployeeName,
 			&i.ClientCompanyName,
 			&i.SiteName,
+			&i.SiteGeoLat,
+			&i.SiteGeoLng,
+			&i.SiteGeofenceRadiusM,
 			&i.AgreementType,
 			&i.AwaitingAgreement,
 		); err != nil {
@@ -670,6 +706,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -722,32 +761,35 @@ type ListPlacementsParams struct {
 }
 
 type ListPlacementsRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 // E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
@@ -810,6 +852,9 @@ func (q *Queries) ListPlacements(ctx context.Context, arg ListPlacementsParams) 
 			&i.EmployeeName,
 			&i.ClientCompanyName,
 			&i.SiteName,
+			&i.SiteGeoLat,
+			&i.SiteGeoLng,
+			&i.SiteGeofenceRadiusM,
 			&i.AgreementType,
 			&i.AwaitingAgreement,
 		); err != nil {
@@ -950,6 +995,9 @@ SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
        e.full_name      AS employee_name,
        c.name           AS client_company_name,
        s.name           AS site_name,
+       s.geo_lat           AS site_geo_lat,
+       s.geo_lng           AS site_geo_lng,
+       s.geofence_radius_m AS site_geofence_radius_m,
        a.type           AS agreement_type,
        (p.agreement_id IS NULL)::boolean AS awaiting_agreement
 FROM placements p
@@ -988,32 +1036,35 @@ type RosterForCompanyParams struct {
 }
 
 type RosterForCompanyRow struct {
-	ID                string
-	EmployeeID        string
-	AgreementID       *string
-	ClientCompanyID   string
-	SiteID            string
-	Position          string
-	StartDate         pgtype.Date
-	EndDate           pgtype.Date
-	Notes             *string
-	LifecycleStatus   string
-	StatusChangedAt   time.Time
-	EndedReason       *string
-	EndedAt           pgtype.Date
-	TerminationReason *string
-	ResignAt          pgtype.Date
-	PredecessorID     *string
-	SuccessorID       *string
-	BackdateReason    *string
-	CreatedBy         *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	EmployeeName      *string
-	ClientCompanyName *string
-	SiteName          *string
-	AgreementType     *string
-	AwaitingAgreement bool
+	ID                  string
+	EmployeeID          string
+	AgreementID         *string
+	ClientCompanyID     string
+	SiteID              string
+	Position            string
+	StartDate           pgtype.Date
+	EndDate             pgtype.Date
+	Notes               *string
+	LifecycleStatus     string
+	StatusChangedAt     time.Time
+	EndedReason         *string
+	EndedAt             pgtype.Date
+	TerminationReason   *string
+	ResignAt            pgtype.Date
+	PredecessorID       *string
+	SuccessorID         *string
+	BackdateReason      *string
+	CreatedBy           *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmployeeName        *string
+	ClientCompanyName   *string
+	SiteName            *string
+	SiteGeoLat          *float64
+	SiteGeoLng          *float64
+	SiteGeofenceRadiusM *int32
+	AgreementType       *string
+	AwaitingAgreement   bool
 }
 
 // Company roster (RO-*). Filters: status (single), status__in (CSV),
@@ -1062,6 +1113,9 @@ func (q *Queries) RosterForCompany(ctx context.Context, arg RosterForCompanyPara
 			&i.EmployeeName,
 			&i.ClientCompanyName,
 			&i.SiteName,
+			&i.SiteGeoLat,
+			&i.SiteGeoLng,
+			&i.SiteGeofenceRadiusM,
 			&i.AgreementType,
 			&i.AwaitingAgreement,
 		); err != nil {

@@ -10,12 +10,30 @@ import (
 // --- request structs ---
 
 // selfProfileUpdateBody is the PATCH /me/profile body (SelfProfileUpdate schema).
-// All fields optional (minProperties:1 enforced in the handler); approval-tier
-// fields are NOT part of this schema and are rejected upstream.
+// All fields optional (minProperties:1 enforced in the handler). E11
+// (2026-06-14): phone / emergency_contact / bank_account are now INSTANT
+// self-edits too — the change-request approval queue was removed, so there are no
+// longer any approval-tier fields.
 type selfProfileUpdateBody struct {
-	Address        *string `json:"address"`
-	AppLanguage    *string `json:"app_language"`
-	PhotoObjectKey *string `json:"photo_object_key"`
+	Address          *string                     `json:"address"`
+	AppLanguage      *string                     `json:"app_language"`
+	PhotoObjectKey   *string                     `json:"photo_object_key"`
+	Phone            *string                     `json:"phone"`
+	EmergencyContact *selfEmergencyContactBody   `json:"emergency_contact"`
+	BankAccount      *selfBankAccountBody        `json:"bank_account"`
+}
+
+// selfEmergencyContactBody is the emergency_contact object on the update body.
+type selfEmergencyContactBody struct {
+	Name  string `json:"name"`
+	Phone string `json:"phone"`
+}
+
+// selfBankAccountBody is the bank_account object on the update body.
+type selfBankAccountBody struct {
+	BankName          string `json:"bank_name"`
+	AccountNumber     string `json:"account_number"`
+	AccountHolderName string `json:"account_holder_name"`
 }
 
 // photoUploadInitBody is the POST /me/profile/photo-upload-init body.

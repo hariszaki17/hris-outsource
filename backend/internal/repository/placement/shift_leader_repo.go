@@ -245,6 +245,9 @@ func mapPlacementFromRoster(row sqlcgen.RosterForCompanyRow) domain.Placement {
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }

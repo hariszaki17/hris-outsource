@@ -13,28 +13,7 @@ export * from './gen/e2/people/people.ts';
 export * from './gen/e2/master-data/master-data.ts';
 export * from './gen/e2/model/index.ts';
 
-// The change-request sub-resource ops (`/employees/{id}/change-requests`) are tagged
-// `[change-requests, employees]`, so Orval emits identical members into BOTH the employees and
-// change-requests files. `employees.ts` (above) is the source for the two shared ops
-// (createChangeRequest / listOwnChangeRequests); here we re-export only the members UNIQUE to the
-// change-requests tag (approve / reject / get / listPending) to avoid duplicate-export ambiguity.
-export {
-  approveChangeRequest,
-  getApproveChangeRequestMutationOptions,
-  getApproveChangeRequestUrl,
-  useApproveChangeRequest,
-  rejectChangeRequest,
-  getRejectChangeRequestMutationOptions,
-  getRejectChangeRequestUrl,
-  useRejectChangeRequest,
-  getChangeRequest,
-  getGetChangeRequestQueryKey,
-  getGetChangeRequestQueryOptions,
-  getGetChangeRequestUrl,
-  useGetChangeRequest,
-  listPendingChangeRequests,
-  getListPendingChangeRequestsQueryKey,
-  getListPendingChangeRequestsQueryOptions,
-  getListPendingChangeRequestsUrl,
-  useListPendingChangeRequests,
-} from './gen/e2/change-requests/change-requests.ts';
+// NOTE — profile change-requests removed 2026-06-14 (EPICS §8 E11): agent self-edits
+// (phone / emergency contact / bank account) are now INSTANT via PATCH /me/profile.
+// The `change-requests` tag, paths, and hooks were deleted from the E2 spec and regen,
+// so this barrel no longer re-exports any change-request surface.

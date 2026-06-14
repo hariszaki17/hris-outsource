@@ -95,8 +95,10 @@ function LeaveApprovalsScreenInner({
   const isSL = user?.role === 'shift_leader';
   void isSL; // scoping used in column render (employee_company_name)
 
-  // Default status filter: HR sees PENDING_HR, SL sees PENDING_L1
-  const defaultStatus = isHR ? LeaveStatus.PENDING_HR : LeaveStatus.PENDING_L1;
+  // E11: approval sub-states collapsed into a single PENDING. This per-domain queue is a VIEW
+  // over the same pending requests the E11 inbox surfaces (IB-5); each row opens leave-detail,
+  // which renders the E11 chain + approve/reject actions via the instance hooks.
+  const defaultStatus = LeaveStatus.PENDING;
 
   const params: ListLeaveRequestsParams = {
     limit: PAGE_SIZE,

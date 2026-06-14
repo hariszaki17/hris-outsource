@@ -13,6 +13,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
        lr.balance_requires_override,
+       lr.approval_instance_id,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -48,6 +49,7 @@ SELECT lr.id, lr.employee_id, lr.placement_id, lr.company_id,
        lr.backdated, lr.clock_in_conflict, lr.no_leader, lr.assigned_leader_id,
        lr.balance_quota_id, lr.balance_requested_days, lr.balance_remaining_at_check,
        lr.balance_requires_override,
+       lr.approval_instance_id,
        lr.created_by, lr.created_at, lr.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -220,5 +222,13 @@ SET balance_requested_days     = sqlc.narg(requested_days),
     balance_remaining_at_check = sqlc.narg(remaining_at_check),
     balance_requires_override  = sqlc.narg(requires_override),
     updated_at                 = now()
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL;
+
+-- name: SetLeaveRequestApprovalInstanceID :exec
+-- E11 linkage: bind a leave request to its governing approval instance.
+UPDATE leave_requests
+SET approval_instance_id = sqlc.narg(approval_instance_id),
+    updated_at           = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;

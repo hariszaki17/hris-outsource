@@ -13,16 +13,17 @@ import { Button } from '../src/ui/Button';
 import { Card } from '../src/ui/Card';
 import { Text } from '../src/ui/Text';
 
+// Collapsed OvertimeStatus (E11):
+// PENDING_AGENT_CONFIRM | PENDING | APPROVED | REJECTED | CANCELLED.
 const tone: Record<string, string> = {
   APPROVED: 'text-ok-text',
   PENDING_AGENT_CONFIRM: 'text-warn-text',
-  PENDING_L1: 'text-warn-text',
-  PENDING_HR: 'text-warn-text',
+  PENDING: 'text-warn-text',
   REJECTED: 'text-bad-text',
-  WITHDRAWN: 'text-text-3',
+  CANCELLED: 'text-text-3',
 };
-const isPending = (s: string) =>
-  s === 'PENDING_AGENT_CONFIRM' || s === 'PENDING_L1' || s === 'PENDING_HR';
+// Withdrawable while still awaiting (agent-confirm or in the approval chain).
+const isPending = (s: string) => s === 'PENDING_AGENT_CONFIRM' || s === 'PENDING';
 
 export default function OvertimeScreen() {
   const { t } = useTranslation();
@@ -77,23 +78,42 @@ export default function OvertimeScreen() {
           <View className="gap-3 px-6 pb-8">
             {items.map((it) => (
               <Card key={it.id}>
-                <View className="flex-row items-center justify-between">
-                  <Text variant="body" className="font-semibold">
-                    {it.work_date}
-                  </Text>
-                  <Text className={`text-xs font-semibold ${tone[it.status] ?? 'text-text-3'}`}>
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/approval-status',
+                      params: {
+                        approval_instance_id: it.approval_instance_id ?? undefined,
+                        request_type: 'OVERTIME',
+                        request_label: it.id,
+                        request_title: it.work_date,
+                      },
+                    })
+                  }
+                  className="flex-row items-center justify-between"
+                >
+                  <Text variant="strong">{it.work_date}</Text>
+                  <Text
+                    variant="caption"
+                    weight="semibold"
+                    className={tone[it.status] ?? 'text-text-3'}
+                  >
                     {t(`m:overtime.status.${it.status}`)}
                   </Text>
-                </View>
+                </Pressable>
                 <View className="mt-2 flex-row gap-4">
                   {it.status === 'PENDING_AGENT_CONFIRM' ? (
                     <Pressable onPress={() => onConfirm(it.id)}>
-                      <Text className="text-primary font-semibold">{t('m:overtime.confirm')}</Text>
+                      <Text variant="strong" className="text-primary">
+                        {t('m:overtime.confirm')}
+                      </Text>
                     </Pressable>
                   ) : null}
                   {isPending(it.status) ? (
                     <Pressable onPress={() => onWithdraw(it.id)}>
-                      <Text className="text-danger font-semibold">{t('m:overtime.withdraw')}</Text>
+                      <Text variant="strong" className="text-danger">
+                        {t('m:overtime.withdraw')}
+                      </Text>
                     </Pressable>
                   ) : null}
                 </View>

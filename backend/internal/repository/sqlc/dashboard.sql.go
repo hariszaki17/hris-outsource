@@ -95,14 +95,13 @@ func (q *Queries) CountActiveUsers(ctx context.Context) (int64, error) {
 }
 
 const countBankApprovalsPending = `-- name: CountBankApprovalsPending :one
-SELECT count(*)::bigint AS total
-FROM change_requests
-WHERE bank_pending
+SELECT 0::bigint AS total
 `
 
-// pending_grants.bank_approvals: change-requests with a bank change escalated to
-// HR/super-admin (00048 bank_pending flag → change_requests_bank_pending_idx; see
-// rbac.CanApproveBank / PARTIALLY_APPROVED).
+// pending_grants.bank_approvals: DEPRECATED by E11 (2026-06-14). The profile
+// change-request queue (incl. bank-change escalation) was removed — bank edits are
+// now instant self-edit (E2). The symbol is retained for the SuperAdminWidgets DTO
+// but always returns 0; downstream E10 should drop or repurpose this widget.
 func (q *Queries) CountBankApprovalsPending(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countBankApprovalsPending)
 	var total int64
@@ -209,11 +208,11 @@ const countPendingLeaveApprove = `-- name: CountPendingLeaveApprove :one
 SELECT count(*)::bigint AS pending
 FROM leave_requests
 WHERE deleted_at IS NULL
-  AND status IN ('PENDING_L1','PENDING_HR')
+  AND status = 'PENDING'
   AND ($1::text IS NULL OR company_id = $1::text)
 `
 
-// Leave requests pending either approval level.
+// Leave requests pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 func (q *Queries) CountPendingLeaveApprove(ctx context.Context, companyID *string) (int64, error) {
 	row := q.db.QueryRow(ctx, countPendingLeaveApprove, companyID)
 	var pending int64
@@ -225,11 +224,12 @@ const countPendingLeaveApproveHR = `-- name: CountPendingLeaveApproveHR :one
 SELECT count(*)::bigint AS pending
 FROM leave_requests
 WHERE deleted_at IS NULL
-  AND status = 'PENDING_HR'
+  AND status = 'PENDING'
   AND ($1::text IS NULL OR company_id = $1::text)
 `
 
-// HR-level-only pending leave (HrDashboard.kpis.leave_pending = PENDING_HR).
+// HR-pending leave (E11 collapsed the two levels into a single PENDING; kept as a
+// distinct symbol for the HrDashboard KPI, now equal to CountPendingLeaveApprove).
 func (q *Queries) CountPendingLeaveApproveHR(ctx context.Context, companyID *string) (int64, error) {
 	row := q.db.QueryRow(ctx, countPendingLeaveApproveHR, companyID)
 	var pending int64
@@ -241,11 +241,11 @@ const countPendingOtApprove = `-- name: CountPendingOtApprove :one
 SELECT count(*)::bigint AS pending
 FROM overtime
 WHERE deleted_at IS NULL
-  AND status IN ('PENDING_L1','PENDING_HR')
+  AND status = 'PENDING'
   AND ($1::text IS NULL OR company_id = $1::text)
 `
 
-// Overtime pending either approval level.
+// Overtime pending approval (E11 collapsed PENDING_L1/PENDING_HR -> PENDING).
 func (q *Queries) CountPendingOtApprove(ctx context.Context, companyID *string) (int64, error) {
 	row := q.db.QueryRow(ctx, countPendingOtApprove, companyID)
 	var pending int64
@@ -257,10 +257,10 @@ const countPendingRequestsForEmployee = `-- name: CountPendingRequestsForEmploye
 SELECT
     (SELECT count(*) FROM leave_requests lr
        WHERE lr.deleted_at IS NULL AND lr.employee_id = $1
-         AND lr.status IN ('PENDING_L1','PENDING_HR'))::bigint AS leave_pending,
+         AND lr.status = 'PENDING')::bigint AS leave_pending,
     (SELECT count(*) FROM overtime o
        WHERE o.deleted_at IS NULL AND o.employee_id = $1
-         AND o.status IN ('PENDING_AGENT_CONFIRM','PENDING_L1','PENDING_HR'))::bigint AS ot_pending
+         AND o.status IN ('PENDING_AGENT_CONFIRM','PENDING'))::bigint AS ot_pending
 `
 
 type CountPendingRequestsForEmployeeRow struct {

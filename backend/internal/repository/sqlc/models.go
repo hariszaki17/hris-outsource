@@ -23,6 +23,52 @@ type AgreementAttachment struct {
 	CreatedAt   time.Time
 }
 
+type ApprovalAction struct {
+	ID              string
+	InstanceID      string
+	LineNo          int32
+	TemplateVersion *int32
+	ActorUserID     *string
+	Action          string
+	Reason          *string
+	CreatedAt       time.Time
+}
+
+type ApprovalInstance struct {
+	ID              string
+	RequestType     string
+	RequestID       string
+	CompanyID       *string
+	TemplateID      *string
+	TemplateVersion *int32
+	CurrentLine     int32
+	LineCount       int32
+	Status          string
+	RequesterID     *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type ApprovalLine struct {
+	ID         string
+	TemplateID string
+	LineNo     int32
+}
+
+type ApprovalLineMember struct {
+	LineID string
+	UserID string
+}
+
+type ApprovalTemplate struct {
+	ID        string
+	CompanyID string
+	Version   int32
+	CreatedBy *string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ApprovedLeaveDay struct {
 	ID             int64
 	EmployeeID     string
@@ -125,21 +171,6 @@ type AuditLog struct {
 	AfterState  []byte
 	RequestID   *string
 	CreatedAt   time.Time
-}
-
-type ChangeRequest struct {
-	ID               string
-	EmployeeID       string
-	Status           string
-	Changes          []byte
-	RequestType      string
-	Note             *string
-	SubmittedAt      time.Time
-	ResolvedAt       *time.Time
-	ResolvedBy       *string
-	RejectionReason  *string
-	FieldResolutions []byte
-	BankPending      bool
 }
 
 type ClientCompany struct {
@@ -289,20 +320,6 @@ type LeadAssignment struct {
 	UpdatedAt       time.Time
 }
 
-type LeaveApproval struct {
-	ID             int64
-	LeaveRequestID string
-	Stage          string
-	Decision       string
-	ActorID        *string
-	ActorRole      *string
-	DecisionNote   *string
-	RejectReason   *string
-	IsOverride     bool
-	OverrideReason *string
-	OccurredAt     time.Time
-}
-
 type LeaveQuota struct {
 	ID             string
 	EmployeeID     string
@@ -348,6 +365,7 @@ type LeaveRequest struct {
 	UpdatedAt               time.Time
 	DeletedAt               *time.Time
 	QuotaID                 *string
+	ApprovalInstanceID      *string
 }
 
 type LeaveType struct {
@@ -419,17 +437,7 @@ type Overtime struct {
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	DeletedAt            *time.Time
-}
-
-type OvertimeApproval struct {
-	ID           int64
-	OvertimeID   string
-	Level        int32
-	Decision     string
-	ApproverID   *string
-	ApproverName *string
-	Reason       *string
-	DecidedAt    time.Time
+	ApprovalInstanceID   *string
 }
 
 type OvertimeRule struct {

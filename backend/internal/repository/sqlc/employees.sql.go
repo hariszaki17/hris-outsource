@@ -735,11 +735,17 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 
 const updateEmployeeSelfInstant = `-- name: UpdateEmployeeSelfInstant :one
 UPDATE employees
-SET address          = COALESCE($1, address),
-    app_language     = COALESCE($2, app_language),
-    photo_object_key = COALESCE($3, photo_object_key),
-    updated_at       = now()
-WHERE id = $4
+SET address                  = COALESCE($1, address),
+    app_language             = COALESCE($2, app_language),
+    photo_object_key         = COALESCE($3, photo_object_key),
+    phone                    = COALESCE($4, phone),
+    emergency_contact_name   = COALESCE($5, emergency_contact_name),
+    emergency_contact_phone  = COALESCE($6, emergency_contact_phone),
+    bank_name                = COALESCE($7, bank_name),
+    bank_account_number      = COALESCE($8, bank_account_number),
+    bank_account_holder_name = COALESCE($9, bank_account_holder_name),
+    updated_at               = now()
+WHERE id = $10
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
@@ -749,10 +755,16 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
 `
 
 type UpdateEmployeeSelfInstantParams struct {
-	Address        *string
-	AppLanguage    *string
-	PhotoObjectKey *string
-	ID             string
+	Address               *string
+	AppLanguage           *string
+	PhotoObjectKey        *string
+	Phone                 *string
+	EmergencyContactName  *string
+	EmergencyContactPhone *string
+	BankName              *string
+	BankAccountNumber     *string
+	BankAccountHolderName *string
+	ID                    string
 }
 
 type UpdateEmployeeSelfInstantRow struct {
@@ -784,14 +796,23 @@ type UpdateEmployeeSelfInstantRow struct {
 	UpdatedAt             time.Time
 }
 
-// EP-5 agent self-service instant apply (PATCH /me/profile): only the instant-tier
-// fields (address, app_language, photo_object_key). COALESCE keeps a column unchanged
-// when the caller passes NULL, so partial patches don't clobber the other fields.
+// EP-5 agent self-service instant apply (PATCH /me/profile). E11 removed the
+// change-request approval queue: phone / emergency contact / bank fields are now
+// instant self-edit too (alongside address, app_language, photo_object_key).
+// COALESCE keeps a column unchanged when the caller passes NULL, so partial patches
+// don't clobber the other fields. Phone uniqueness is enforced in the Go service
+// layer, not here.
 func (q *Queries) UpdateEmployeeSelfInstant(ctx context.Context, arg UpdateEmployeeSelfInstantParams) (UpdateEmployeeSelfInstantRow, error) {
 	row := q.db.QueryRow(ctx, updateEmployeeSelfInstant,
 		arg.Address,
 		arg.AppLanguage,
 		arg.PhotoObjectKey,
+		arg.Phone,
+		arg.EmergencyContactName,
+		arg.EmergencyContactPhone,
+		arg.BankName,
+		arg.BankAccountNumber,
+		arg.BankAccountHolderName,
 		arg.ID,
 	)
 	var i UpdateEmployeeSelfInstantRow

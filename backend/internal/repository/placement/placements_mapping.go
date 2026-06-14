@@ -77,6 +77,9 @@ func mapPlacementFromList(row sqlcgen.ListPlacementsRow) domain.Placement {
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }
@@ -95,6 +98,9 @@ func mapPlacementFromExpiring(row sqlcgen.ListExpiringPlacementsRow) domain.Plac
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }
@@ -113,6 +119,9 @@ func mapPlacementFromGetByID(row sqlcgen.GetPlacementByIDRow) domain.Placement {
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }
@@ -131,6 +140,9 @@ func mapPlacementFromChain(row sqlcgen.GetPlacementChainRow) domain.Placement {
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }
@@ -149,6 +161,9 @@ func mapPlacementFromActive(row sqlcgen.GetActivePlacementForEmployeeRow) domain
 	p.EmployeeName = row.EmployeeName
 	p.ClientCompanyName = row.ClientCompanyName
 	p.SiteName = row.SiteName
+	p.SiteGeoLat = row.SiteGeoLat
+	p.SiteGeoLng = row.SiteGeoLng
+	p.SiteGeofenceRadiusM = row.SiteGeofenceRadiusM
 	p.AgreementType = row.AgreementType
 	return p
 }

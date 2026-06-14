@@ -84,4 +84,9 @@ export default defineConfig({
   // framework. Tags: dashboards, notifications, reports, exports. Typed hooks + MSW mocks;
   // Zod deferred (unions, WEB-STACK §4).
   e10: reactQuery('e10', 'E10-reporting', true),
+
+  // E11 Approvals — configurable per-company multi-line approval engine (templates +
+  // instances/actions). Tags: approval-templates, approval-instances. Single source of truth
+  // for leave/overtime approval (E6/E7 wired through it). Typed hooks + MSW mocks; Zod deferred.
+  e11: reactQuery('e11', 'E11-approvals', true),
 });

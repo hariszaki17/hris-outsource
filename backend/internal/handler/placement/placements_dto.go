@@ -95,6 +95,7 @@ type placementResponse struct {
 	ClientCompanyName *string  `json:"client_company_name"`
 	SiteID            string   `json:"site_id"`
 	SiteName          *string  `json:"site_name"`
+	SiteGeofence      *siteGeofenceResponse `json:"site_geofence"`
 	Position          string   `json:"position"`      // free-text position label
 	PositionName      string   `json:"position_name"` // denormalized alias — same value as Position
 	StartDate         string   `json:"start_date"`
@@ -113,6 +114,33 @@ type placementResponse struct {
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
 	Warnings          []string `json:"warnings"`
+}
+
+// siteGeofenceResponse is the openapi SiteGeofence object — the placement site's
+// centroid + radius, so the agent app can compute live distance pre-clock. Emitted
+// null when the site has no geofence configured (geo_lat/geo_lng NULL).
+type siteGeofenceResponse struct {
+	GeoLat  float64 `json:"geo_lat"`
+	GeoLng  float64 `json:"geo_lng"`
+	RadiusM int32   `json:"radius_m"`
+}
+
+// toSiteGeofence builds the SiteGeofence object, or nil when the site has no
+// coordinates (a geofence with no centroid is meaningless — RadiusM alone can't
+// place the agent). RadiusM falls back to 0 only if the join surprisingly nulls it.
+func toSiteGeofence(p domain.Placement) *siteGeofenceResponse {
+	if p.SiteGeoLat == nil || p.SiteGeoLng == nil {
+		return nil
+	}
+	var radius int32
+	if p.SiteGeofenceRadiusM != nil {
+		radius = *p.SiteGeofenceRadiusM
+	}
+	return &siteGeofenceResponse{
+		GeoLat:  *p.SiteGeoLat,
+		GeoLng:  *p.SiteGeoLng,
+		RadiusM: radius,
+	}
 }
 
 // placementSummaryResponse is the openapi PlacementSummary (history_chain item).
@@ -202,6 +230,7 @@ func toPlacementResponse(p domain.Placement, today time.Time) placementResponse 
 		ClientCompanyName: p.ClientCompanyName,
 		SiteID:            p.SiteID,
 		SiteName:          p.SiteName,
+		SiteGeofence:      toSiteGeofence(p),
 		Position:          p.Position,
 		PositionName:      p.Position, // alias — same free-text value
 		StartDate:         p.StartDate.Format("2006-01-02"),

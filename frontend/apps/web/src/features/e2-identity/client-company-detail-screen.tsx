@@ -12,6 +12,7 @@
  * placements — only deactivate, never delete.
  */
 
+import ApprovalTemplateEditorScreen from '@/features/e11-approvals/approval-template-editor-screen.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { type ClientCompany, ClientCompanyStatus, useGetClientCompany } from '@swp/api-client/e2';
@@ -28,7 +29,7 @@ import {
 } from './client-company-tab-panels.tsx';
 import { SitesPanel } from './site-form.tsx';
 
-type DetailTab = 'profil' | 'lokasi' | 'penempatan' | 'pemimpin' | 'riwayat';
+type DetailTab = 'profil' | 'lokasi' | 'penempatan' | 'pemimpin' | 'riwayat' | 'approval';
 
 interface ClientCompanyDetailScreenProps {
   clientCompanyId: string;
@@ -61,12 +62,20 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
   const query = useGetClientCompany(clientCompanyId);
   const company = query.data?.data as ClientCompany | undefined;
 
+  // E11 — only HR/super-admin (approvals.template.manage) see the approval-template tab.
+  const canManageApprovalTemplate = Boolean(
+    currentUser?.permissions.includes('approvals.template.manage'),
+  );
+
   const tabs: { id: DetailTab; label: string }[] = [
     { id: 'profil', label: t('detail.tabs.profil') },
     { id: 'lokasi', label: t('detail.tabs.lokasi') },
     { id: 'penempatan', label: t('detail.tabs.penempatan') },
     { id: 'pemimpin', label: t('detail.tabs.pemimpin') },
     { id: 'riwayat', label: t('detail.tabs.riwayat') },
+    ...(canManageApprovalTemplate
+      ? [{ id: 'approval' as const, label: t('detail.tabs.approval') }]
+      : []),
   ];
 
   if (query.isPending) {
@@ -212,6 +221,11 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
 
       {/* Riwayat — historical placements at this company */}
       {activeTab === 'riwayat' && <RiwayatPanel clientCompanyId={clientCompanyId} />}
+
+      {/* Template Persetujuan — per-company E11 approval-chain editor (F11.1) */}
+      {activeTab === 'approval' && canManageApprovalTemplate && (
+        <ApprovalTemplateEditorScreen companyId={clientCompanyId} />
+      )}
 
       {/* Role note */}
       <div className="flex items-center gap-[9px] rounded-lg bg-surface border border-border border-l-[3px] border-l-border px-[14px] py-[10px]">

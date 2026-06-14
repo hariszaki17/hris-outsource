@@ -64,8 +64,7 @@ function leaveStatusTone(status: LeaveStatus): StatusTone {
       return 'ok';
     case LeaveStatus.REJECTED:
       return 'bad';
-    case LeaveStatus.PENDING_L1:
-    case LeaveStatus.PENDING_HR:
+    case LeaveStatus.PENDING:
       return 'warn';
     default:
       return 'neutral';
@@ -73,11 +72,7 @@ function leaveStatusTone(status: LeaveStatus): StatusTone {
 }
 
 function isOvertimePending(status: OvertimeStatus): boolean {
-  return (
-    status === OvertimeStatus.PENDING_AGENT_CONFIRM ||
-    status === OvertimeStatus.PENDING_L1 ||
-    status === OvertimeStatus.PENDING_HR
-  );
+  return status === OvertimeStatus.PENDING_AGENT_CONFIRM || status === OvertimeStatus.PENDING;
 }
 
 // Inclusive day count between two plain dates, used as a fallback when the API omits duration_days.

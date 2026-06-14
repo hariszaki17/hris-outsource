@@ -483,33 +483,8 @@ func seedDemoEmployees(ctx context.Context, pool *db.Pool, d *demoData) error {
 
 	slog.Info("demo: seeded employees + agreements", "count", len(d.agents))
 
-	// A few PENDING change-requests so the HR queue is non-empty.
-	const crQ = `
-		INSERT INTO change_requests (id, employee_id, changes, request_type, note, submitted_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5, $6::timestamptz)
-		ON CONFLICT (id) DO NOTHING`
-	crTargets := []struct {
-		idx                int
-		changes, typ, note string
-		hoursAgo           int
-	}{
-		{3, `{"phone":"+62-812-5566-7788"}`, "PHONE", "Ganti nomor HP.", 4},
-		{17, `{"address":"Jl. Anggrek No. 12, Jakarta Selatan"}`, "ADDRESS", "Pindah rumah.", 26},
-		{42, `{"bank_account":{"bank_name":"Mandiri","account_number":"1440099887","account_holder_name":"-"}}`, "BANK_ACCOUNT", "Rekening baru.", 50},
-		{88, `{"phone":"+62-813-1122-3344","address":"Jl. Mawar No. 7, Depok"}`, "MULTIPLE", "Update kontak & alamat.", 73},
-	}
-	for ci, t := range crTargets {
-		if t.idx >= len(d.agents) {
-			continue
-		}
-		emp := d.agents[t.idx].empID
-		crID := fmt.Sprintf("SWP-CHG-22%02d", ci+1)
-		submitted := demoNow.Add(-time.Duration(t.hoursAgo) * time.Hour).UTC().Format(time.RFC3339)
-		if _, err := pool.Pool.Exec(ctx, crQ, crID, emp, t.changes, t.typ, t.note, submitted); err != nil {
-			return fmt.Errorf("seed demo change_request %q: %w", crID, err)
-		}
-	}
-	slog.Info("demo: seeded change_requests", "count", len(crTargets))
+	// The change_requests table was dropped (E11, migration 00061); the demo no
+	// longer seeds a HR change-request queue.
 	return nil
 }
 
@@ -951,14 +926,7 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 		VALUES ($1, $2, $3, $4, 'SWP-LT-001', $5::date, $6::date, $7, $8, $9, $10, $11, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
-	const laQ = `
-		INSERT INTO leave_approvals
-			(leave_request_id, stage, decision, actor_id, actor_role, decision_note, is_override)
-		SELECT $1, $2, $3, $4, $5, $6, false
-		WHERE NOT EXISTS (
-			SELECT 1 FROM leave_approvals WHERE leave_request_id = $1 AND stage = $2)`
-
-	// Leader lookup per company (for assigned_leader_id on PENDING_L1/HR rows).
+	// Leader lookup per company (for assigned_leader_id on PENDING rows).
 	leaderByCompany := map[string]string{}
 	for _, c := range d.companies {
 		for _, a := range d.agents {
@@ -994,8 +962,10 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 		quotaCount++
 	}
 
-	// ~40 leave requests across states.
-	states := []string{"PENDING_L1", "PENDING_L1", "PENDING_HR", "PENDING_HR", "APPROVED", "APPROVED", "REJECTED"}
+	// ~40 leave requests across states. E11 collapsed the two pending levels into a
+	// single engine-driven PENDING (the line being decided lives on the approval
+	// instance, not the status), so all pending rows are just PENDING.
+	states := []string{"PENDING", "PENDING", "PENDING", "PENDING", "APPROVED", "APPROVED", "REJECTED"}
 	reasons := []string{
 		"Keperluan keluarga.", "Kontrol kesehatan.", "Acara pernikahan.",
 		"Mudik ke kampung halaman.", "Urusan pribadi.", "Anak sakit.",
@@ -1039,33 +1009,12 @@ func seedDemoLeave(ctx context.Context, pool *db.Pool, d *demoData) error {
 		}
 		reqCount++
 
-		// Decision trail.
-		switch state {
-		case "PENDING_HR":
-			if leader != "" {
-				if _, err := pool.Pool.Exec(ctx, laQ, lrID, "L1", "APPROVED", leader, "shift_leader", "Coverage aman (demo)."); err != nil {
-					return fmt.Errorf("seed demo leave_approval(L1) %q: %w", lrID, err)
-				}
-			}
-		case "APPROVED":
-			if leader != "" {
-				if _, err := pool.Pool.Exec(ctx, laQ, lrID, "L1", "APPROVED", leader, "shift_leader", "Coverage aman (demo)."); err != nil {
-					return fmt.Errorf("seed demo leave_approval(L1) %q: %w", lrID, err)
-				}
-			}
-			if _, err := pool.Pool.Exec(ctx, laQ, lrID, "HR", "APPROVED", "SWP-USR-00002", "hr_admin", "Disetujui (demo)."); err != nil {
-				return fmt.Errorf("seed demo leave_approval(HR) %q: %w", lrID, err)
-			}
-		case "REJECTED":
-			actor := leader
-			role := "shift_leader"
-			if actor == "" {
-				actor, role = "SWP-USR-00002", "hr_admin"
-			}
-			if _, err := pool.Pool.Exec(ctx, laQ, lrID, "L1", "REJECTED", actor, role, "Coverage tidak cukup (demo)."); err != nil {
-				return fmt.Errorf("seed demo leave_approval(reject) %q: %w", lrID, err)
-			}
-		}
+		// The leave decision trail now lives in the E11 approval engine
+		// (approval_instances + approval_actions); the legacy leave_approvals table
+		// was dropped (migration 00061), so no per-request decision rows are seeded
+		// here. The demo terminal states (APPROVED/REJECTED) are carried by the
+		// leave_requests.status alone.
+		_ = leader
 	}
 	slog.Info("demo: seeded leave quotas + requests", "quotas", quotaCount, "requests", reqCount)
 	return nil
@@ -1114,12 +1063,6 @@ func seedDemoOvertime(ctx context.Context, pool *db.Pool, d *demoData) error {
 			$18, $19, $20, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
-	const oaQ = `
-		INSERT INTO overtime_approvals (overtime_id, level, decision, approver_id, approver_name, reason)
-		SELECT $1, $2, $3, $4, $5, $6
-		WHERE NOT EXISTS (
-			SELECT 1 FROM overtime_approvals WHERE overtime_id = $1 AND level = $2)`
-
 	leaderByCompany := map[string]string{}
 	for _, c := range d.companies {
 		for _, a := range d.agents {
@@ -1140,15 +1083,18 @@ func seedDemoOvertime(ctx context.Context, pool *db.Pool, d *demoData) error {
 	type otState struct {
 		status, source string
 	}
+	// E11 collapsed the OT two-level approval levels into a single engine-driven
+	// PENDING; WITHDRAWN folded into CANCELLED. PENDING_AGENT_CONFIRM stays the
+	// pre-chain candidate state.
 	stateMix := []otState{
 		{"PENDING_AGENT_CONFIRM", "AUTO_DETECTED"},
-		{"PENDING_L1", "REQUESTED"},
-		{"PENDING_L1", "REQUESTED"},
-		{"PENDING_HR", "REQUESTED"},
+		{"PENDING", "REQUESTED"},
+		{"PENDING", "REQUESTED"},
+		{"PENDING", "REQUESTED"},
 		{"APPROVED", "REQUESTED"},
 		{"APPROVED", "WORKED_WITHOUT_REQUEST"},
 		{"REJECTED", "REQUESTED"},
-		{"WITHDRAWN", "REQUESTED"},
+		{"CANCELLED", "REQUESTED"},
 	}
 	tiers := []struct {
 		dayType    string
@@ -1194,27 +1140,13 @@ func seedDemoOvertime(ctx context.Context, pool *db.Pool, d *demoData) error {
 		}
 		count++
 
-		leader := leaderByCompany[a.companyID]
-		switch st.status {
-		case "PENDING_HR":
-			if leader != "" {
-				_, _ = pool.Pool.Exec(ctx, oaQ, otID, 1, "APPROVED", leader, "Shift Leader (demo)", nil)
-			}
-		case "APPROVED":
-			if leader != "" {
-				_, _ = pool.Pool.Exec(ctx, oaQ, otID, 1, "APPROVED", leader, "Shift Leader (demo)", nil)
-			}
-			_, _ = pool.Pool.Exec(ctx, oaQ, otID, 2, "APPROVED", "SWP-USR-00002", "HR Admin", nil)
-		case "REJECTED":
-			actor := leader
-			name := "Shift Leader (demo)"
-			if actor == "" {
-				actor, name = "SWP-USR-00002", "HR Admin"
-			}
-			_, _ = pool.Pool.Exec(ctx, oaQ, otID, 1, "REJECTED", actor, name, nil)
-		}
+		// The OT decision trail now lives in the E11 approval engine
+		// (approval_instances + approval_actions); the legacy overtime_approvals
+		// table was dropped (migration 00061), so no per-OT decision rows are seeded
+		// here. Terminal states are carried by overtime.status alone.
+		_ = leaderByCompany[a.companyID]
 	}
-	slog.Info("demo: seeded overtime + approvals", "count", count)
+	slog.Info("demo: seeded overtime", "count", count)
 	return nil
 }
 

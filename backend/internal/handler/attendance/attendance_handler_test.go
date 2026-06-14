@@ -243,6 +243,173 @@ func TestListAttendance_AbsentRow_NullCheckInAt(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /attendance — agent riwayat self-scope + date-range + status filters
+// (AR-1 / AR-10 / AR-11). The agent's employee_id is forced to the caller; the
+// date basis is COALESCE(shift_start_at, check_in_at) in Asia/Jakarta, inclusive;
+// status is single/multi-value IN.
+// ---------------------------------------------------------------------------
+
+const empAgentSelf = "SWP-EMP-7001" // the calling agent's own employee id
+
+// newAgentHarness builds a harness whose principal is an agent (self-scope).
+func newAgentHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t, auth.RoleAgent, "", "")
+	h.principal.EmployeeID = empAgentSelf
+	return h
+}
+
+func TestListAttendance_AgentSelfScope_ForcesOwnRecords(t *testing.T) {
+	h := newAgentHarness(t)
+	// The agent's own records + a foreign agent's records at the same company.
+	h.seedAttendance("SWP-ATT-7001", cmpLed, empAgentSelf, att.VerificationVerified, checkInA, att.FlagLate)
+	h.seedAttendance("SWP-ATT-7002", cmpLed, empAgentSelf, att.VerificationVerified, checkInB)
+	h.seedAttendance("SWP-ATT-7099", cmpLed, empOther, att.VerificationVerified, checkInC)
+
+	// No employee_id supplied — service forces it to the caller.
+	rr := h.do("GET", "/attendance", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeBody(t, rr)["data"].([]any)
+	if len(data) != 2 {
+		t.Fatalf("data length = %d, want 2 (own records only)", len(data))
+	}
+	for _, d := range data {
+		if got := d.(map[string]any)["employee_id"]; got != empAgentSelf {
+			t.Errorf("returned record employee_id = %v, want own %s", got, empAgentSelf)
+		}
+	}
+}
+
+func TestListAttendance_AgentForeignEmployeeID_OutOfScope(t *testing.T) {
+	h := newAgentHarness(t)
+	h.seedAttendance("SWP-ATT-7099", cmpLed, empOther, att.VerificationVerified, checkInA)
+
+	// An agent explicitly asking for another employee's records is rejected.
+	rr := h.do("GET", "/attendance?employee_id="+empOther, nil)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "OUT_OF_SCOPE" {
+		t.Errorf("error code = %q, want OUT_OF_SCOPE", code)
+	}
+}
+
+func TestListAttendance_AgentOwnEmployeeID_Allowed(t *testing.T) {
+	h := newAgentHarness(t)
+	h.seedAttendance("SWP-ATT-7001", cmpLed, empAgentSelf, att.VerificationVerified, checkInA)
+
+	// Supplying one's OWN employee_id is fine (matches the forced value).
+	rr := h.do("GET", "/attendance?employee_id="+empAgentSelf, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(decodeBody(t, rr)["data"].([]any)) != 1 {
+		t.Errorf("want 1 own record")
+	}
+}
+
+func TestListAttendance_AgentDateRange_InclusiveShiftBasis(t *testing.T) {
+	h := newAgentHarness(t)
+	// All for the calling agent. Basis = shift_start_at when present, else check_in_at.
+	// Shift starts are WIB-local midnights; build via the Jakarta zone so the basis is
+	// unambiguous. 5,10,18 Mei in range; 4 Mei and 19 Mei out.
+	mk := func(d int) time.Time { return time.Date(2026, time.May, d, 8, 0, 0, 0, jakarta) }
+	h.seedAttendanceFull("SWP-ATT-M04", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(4), mk(4))
+	h.seedAttendanceFull("SWP-ATT-M05", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(5), mk(5))
+	h.seedAttendanceFull("SWP-ATT-M10", cmpLed, empAgentSelf, att.StatusLate, att.VerificationVerified, mk(10), mk(10))
+	h.seedAttendanceFull("SWP-ATT-M18", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(18), mk(18))
+	h.seedAttendanceFull("SWP-ATT-M19", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(19), mk(19))
+
+	rr := h.do("GET", "/attendance?date_from=2026-05-05&date_to=2026-05-18", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got := idSet(decodeBody(t, rr)["data"].([]any))
+	want := map[string]bool{"SWP-ATT-M05": true, "SWP-ATT-M10": true, "SWP-ATT-M18": true}
+	if !sameSet(got, want) {
+		t.Errorf("date-range ids = %v, want %v (5–18 Mei inclusive)", got, want)
+	}
+}
+
+func TestListAttendance_AgentDateRange_AbsentRowKeptByShiftDate(t *testing.T) {
+	h := newAgentHarness(t)
+	// An ABSENT row has NULL check_in_at; its shift_start_at must still place it in range
+	// (the bug was check_in_at::date only → ABSENT rows silently dropped from any range).
+	mk := func(d int) time.Time { return time.Date(2026, time.May, d, 7, 0, 0, 0, jakarta) }
+	absent := h.seedAttendanceFull("SWP-ATT-MAB", cmpLed, empAgentSelf, att.StatusAbsent, att.VerificationPending, mk(12), time.Time{})
+	absent.CheckInAt = nil
+	h.attendance.records[absent.ID] = absent
+
+	rr := h.do("GET", "/attendance?date_from=2026-05-10&date_to=2026-05-15", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got := idSet(decodeBody(t, rr)["data"].([]any))
+	if !got["SWP-ATT-MAB"] {
+		t.Errorf("ABSENT row missing from range; ids = %v (shift_start basis must keep it)", got)
+	}
+}
+
+func TestListAttendance_AgentStatusFilter_SingleAndMulti(t *testing.T) {
+	h := newAgentHarness(t)
+	mk := func(d int) time.Time { return time.Date(2026, time.May, d, 8, 0, 0, 0, jakarta) }
+	h.seedAttendanceFull("SWP-ATT-P", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(2), mk(2))
+	h.seedAttendanceFull("SWP-ATT-L", cmpLed, empAgentSelf, att.StatusLate, att.VerificationVerified, mk(3), mk(3))
+	h.seedAttendanceFull("SWP-ATT-A", cmpLed, empAgentSelf, att.StatusAbsent, att.VerificationPending, mk(4), time.Time{})
+
+	// Single-select (mobile sends one value).
+	rr := h.do("GET", "/attendance?status=LATE", nil)
+	got := idSet(decodeBody(t, rr)["data"].([]any))
+	if !sameSet(got, map[string]bool{"SWP-ATT-L": true}) {
+		t.Errorf("status=LATE ids = %v, want {SWP-ATT-L}", got)
+	}
+
+	// Multi-value (?status=LATE,ABSENT → IN clause).
+	rr = h.do("GET", "/attendance?status=LATE,ABSENT", nil)
+	got = idSet(decodeBody(t, rr)["data"].([]any))
+	if !sameSet(got, map[string]bool{"SWP-ATT-L": true, "SWP-ATT-A": true}) {
+		t.Errorf("status=LATE,ABSENT ids = %v, want {SWP-ATT-L,SWP-ATT-A}", got)
+	}
+}
+
+func TestListAttendance_AgentDateAndStatus_Combined(t *testing.T) {
+	h := newAgentHarness(t)
+	mk := func(d int) time.Time { return time.Date(2026, time.May, d, 8, 0, 0, 0, jakarta) }
+	h.seedAttendanceFull("SWP-ATT-C1", cmpLed, empAgentSelf, att.StatusLate, att.VerificationVerified, mk(6), mk(6))   // in range, LATE
+	h.seedAttendanceFull("SWP-ATT-C2", cmpLed, empAgentSelf, att.StatusLate, att.VerificationVerified, mk(20), mk(20)) // LATE but out of range
+	h.seedAttendanceFull("SWP-ATT-C3", cmpLed, empAgentSelf, att.StatusPresent, att.VerificationVerified, mk(7), mk(7)) // in range but PRESENT
+
+	rr := h.do("GET", "/attendance?date_from=2026-05-05&date_to=2026-05-18&status=LATE", nil)
+	got := idSet(decodeBody(t, rr)["data"].([]any))
+	if !sameSet(got, map[string]bool{"SWP-ATT-C1": true}) {
+		t.Errorf("combined filter ids = %v, want {SWP-ATT-C1}", got)
+	}
+}
+
+// idSet collects the ids from a JSON data array.
+func idSet(data []any) map[string]bool {
+	out := map[string]bool{}
+	for _, d := range data {
+		out[d.(map[string]any)["id"].(string)] = true
+	}
+	return out
+}
+
+func sameSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
 // GET /attendance/{id} — 200 {data} + cross-scope 404
 // ---------------------------------------------------------------------------
 

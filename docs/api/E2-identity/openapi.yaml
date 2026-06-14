@@ -5,6 +5,12 @@ info:
   description: |
     OpenAPI 3.1 contract for **E2 — Identity, Org & Master Data**.
 
+    > **NOTE — Profile change-requests removed 2026-06-14 (EPICS §8 E11):**
+    > agent self-edits to phone, emergency contact, and bank account are now
+    > **instant** (applied immediately, no approval). The `change-requests`
+    > tag, paths, and schemas are deleted. Configurable approval now lives only
+    > in E11 (leave/overtime).
+
     Scope: the people the system is about (employees + linked logins), the
     employment relationship (PKWT/PKWTT agreements + compensation), the client
     company directory, and the operational master data (leave types, attendance
@@ -34,19 +40,13 @@ servers:
 tags:
   - name: employees
     description: |
-      Employee directory + agent self-service change-requests. Doubles as the
-      Employee picker per §18 — listing fields are picker-shaped.
-  - name: change-requests
-    description: |
-      Agent-initiated change-requests (approval queue, routed to the agent's
-      shift leader with HR fallback). Approval-tier fields: phone,
-      emergency_contact, bank. Statutory fields stay HR-only; bank approval
-      additionally needs `change_requests.approve.bank` (HR-only).
+      Employee directory. Doubles as the Employee picker per §18 — listing
+      fields are picker-shaped.
   - name: self-service
     description: |
-      Agent self-service on their own record (`/me/*`). Instant-tier profile
-      edits (address, app_language, photo) apply immediately with no approval;
-      approval-tier fields go through `change-requests` instead.
+      Agent self-service on their own record (`/me/*`). All self-editable
+      profile fields (address, app_language, photo, phone, emergency_contact,
+      bank account) apply **instantly** with no approval.
   - name: agreements
     description: |
       Employment agreements (PKWT/PKWTT) — the legal SWP↔agent relationship
@@ -344,9 +344,10 @@ paths:
       summary: HR/admin edit of an employee (EP-6)
       description: |
         Partial update by HR/super-admin. **Statutory fields (NIK, NPWP,
-        full_name) are HR-only** per EP-6. Agents must instead use
-        `POST /employees/{id}/change-requests` for non-statutory edits
-        (phone, address, bank).
+        full_name) are HR-only** per EP-6. Agents edit their own non-statutory
+        fields (phone, address, emergency_contact, bank, app_language, photo)
+        directly via `PATCH /me/profile` — these apply **instantly** with no
+        approval.
       x-rbac:
         roles: [hr_admin, super_admin]
         scope: global
@@ -524,378 +525,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BulkResult' }
 
-  # --- Agent self-edit change requests (EP-5) -----------------------------
-
-  /employees/{employee_id}/change-requests:
-    parameters:
-      - { $ref: '#/components/parameters/EmployeeIdPath' }
-    post:
-      operationId: createChangeRequest
-      tags: [change-requests, employees]
-      summary: Agent submits a profile-change request (EP-5)
-      description: |
-        Approval-tier self-edit (web + mobile). Agent can request changes to
-        **phone, emergency_contact, or bank_account**. Statutory fields (NIK,
-        NPWP, full_name) are blocked — sending them returns `FIELD_NOT_EDITABLE`
-        (422). Instant-tier fields (`address`, `app_language`, photo) must NOT
-        be sent here — they apply immediately via `PATCH /me/profile` and
-        return `FIELD_REQUIRES_APPROVAL` only in the reverse direction.
-
-        The request is queued for approval (shift leader for the agent's
-        company, HR fallback); the resulting `ChangeRequest` has
-        `status=PENDING` and ID prefix `SWP-CHG-`.
-      x-rbac:
-        roles: [agent]
-        scope: self
-      x-design-screens:
-        - n465cT  # Agen · Ajukan Perubahan
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ChangeRequestCreate' }
-            examples:
-              budi_phone_and_bank:
-                value:
-                  changes:
-                    phone: "+62-812-9988-7766"
-                    bank_account:
-                      bank_name: BCA
-                      account_number: "9999000011"
-                      account_holder_name: Budi Santoso
-                  note: "Ganti nomor & rekening baru"
-      responses:
-        '201':
-          description: Pending change request created.
-          headers:
-            Location:
-              schema: { type: string, format: uri }
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeRequest' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422':
-          description: Validation — including `FIELD_NOT_EDITABLE` if a statutory field was sent.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                statutory_blocked:
-                  value:
-                    error:
-                      code: FIELD_NOT_EDITABLE
-                      message: "Field NIK hanya dapat diubah oleh HR."
-                      fields:
-                        nik: "Statutori — tidak dapat diajukan dari mobile."
-                      request_id: req_01J5XKN2
-    get:
-      operationId: listOwnChangeRequests
-      tags: [change-requests, employees]
-      summary: Agent lists own change requests
-      description: |
-        Agent's own history (PENDING/APPROVED/REJECTED). Powers the mobile
-        "Riwayat Pengajuan" list on `SXqA5`.
-      x-rbac:
-        roles: [agent, hr_admin, super_admin]
-        scope: self
-      x-design-screens:
-        - SXqA5
-      parameters:
-        - { $ref: '#/components/parameters/Limit' }
-        - { $ref: '#/components/parameters/Cursor' }
-        - in: query
-          name: status
-          schema: { $ref: '#/components/schemas/ChangeRequestStatus' }
-      responses:
-        '200':
-          description: Page of own change requests.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/PageEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: '#/components/schemas/ChangeRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  # --- HR approval queue --------------------------------------------------
-
-  /change-requests:
-    get:
-      operationId: listPendingChangeRequests
-      tags: [change-requests]
-      summary: HR approval queue — all pending change requests
-      description: |
-        HR sees the cross-employee pending queue (BLOCKER finding from
-        E2-AUDIT.md §6: this surface didn't exist in legacy). Filterable by
-        request type and employee.
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens: []  # AUDIT BLOCKER: design surface still missing
-      parameters:
-        - { $ref: '#/components/parameters/Limit' }
-        - { $ref: '#/components/parameters/Cursor' }
-        - { $ref: '#/components/parameters/Sort' }
-        - in: query
-          name: status
-          schema: { $ref: '#/components/schemas/ChangeRequestStatus' }
-        - in: query
-          name: employee_id
-          schema: { $ref: '#/components/schemas/EmployeeId' }
-        - in: query
-          name: request_type
-          description: |
-            Filter by the *type* of change requested. Derived server-side
-            from the fields present in the request body.
-          schema:
-            type: string
-            enum: [PHONE, EMERGENCY_CONTACT, BANK_ACCOUNT, MULTIPLE]
-        - in: query
-          name: q
-          description: Free-text search on submitter name / NIP.
-          schema: { type: string }
-      responses:
-        '200':
-          description: Pending queue page.
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/PageEnvelope'
-                  - type: object
-                    properties:
-                      data:
-                        type: array
-                        items: { $ref: '#/components/schemas/ChangeRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /change-requests/{change_request_id}:
-    parameters:
-      - in: path
-        name: change_request_id
-        required: true
-        schema: { $ref: '#/components/schemas/ChangeRequestId' }
-    get:
-      operationId: getChangeRequest
-      tags: [change-requests]
-      summary: View change-request detail (old → new diff + per-field resolutions)
-      description: |
-        Detail of a single change request including the old → new diff per
-        field and the `field_resolutions` map; powers the review modal for HR
-        **and shift leaders** (company-scoped). A shift leader sees the bank
-        row but can only approve it if they hold `change_requests.approve.bank`
-        (HR-only) — otherwise it surfaces as "Perlu HR" / escalated.
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
-        scope: company_or_global
-      x-design-screens:
-        - MdhFZ   # E2 · Change-request review (per-field diff + resolutions)
-        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
-        - jg8zl   # E2 · Reject change-request modal (reason required)
-      responses:
-        '200':
-          description: Change-request detail with diff.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeRequestDetail' }
-              examples:
-                budi_diff:
-                  value:
-                    id: SWP-CHG-2117
-                    employee:
-                      id: SWP-EMP-1042
-                      full_name: Budi Santoso
-                      nip: "1042"
-                    status: PENDING
-                    submitted_at: "2026-06-01T09:14:22Z"
-                    note: "Ganti nomor & rekening baru"
-                    diff:
-                      phone:
-                        old: "+62-812-3344-5566"
-                        new: "+62-812-9988-7766"
-                      bank_account:
-                        old:
-                          bank_name: BCA
-                          account_number: "1234567890"
-                          account_holder_name: Budi Santoso
-                        new:
-                          bank_name: BCA
-                          account_number: "9999000011"
-                          account_holder_name: Budi Santoso
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /change-requests/{change_request_id}:approve:
-    parameters:
-      - in: path
-        name: change_request_id
-        required: true
-        schema: { $ref: '#/components/schemas/ChangeRequestId' }
-    post:
-      operationId: approveChangeRequest
-      tags: [change-requests]
-      summary: Approve a change request — applies the change (bank-split aware)
-      description: |
-        On approve, the requested values are atomically written to the
-        Employee record (audit log captures the actor + before/after).
-        Idempotent via Idempotency-Key.
-
-        **Approver routing & bank split.** Shift leaders (company-scoped) and
-        HR/super-admin may approve. The `bank_account` field additionally
-        requires the `change_requests.approve.bank` permission (HR/super-admin
-        only). When a shift leader approves a **mixed** request (bank +
-        non-bank):
-        - the non-bank fields are applied now (`field_resolutions[*]=APPLIED`),
-        - the `bank_account` field is escalated
-          (`field_resolutions.bank_account=ESCALATED_TO_HR`, `bank_pending=true`),
-        - the request moves to `PARTIALLY_APPROVED`.
-
-        HR then approves again to finalize the bank field → `APPROVED`. A
-        bank-only request approved by a leader without the bank permission is
-        escalated, not applied. On approve the agent is notified
-        (`CHANGE_REQUEST_APPROVED`, listing the applied fields and whether it
-        was partial — see E10 `NotificationKind`).
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      x-design-screens:
-        - MdhFZ   # E2 · Change-request review (approve / partial-approve)
-        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
-        - jg8zl   # E2 · Reject change-request modal (reason required)
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      responses:
-        '200':
-          description: |
-            Approved & applied. When a shift leader approved a mixed request,
-            the response carries `status=PARTIALLY_APPROVED` + `bank_pending=true`
-            with the bank field escalated in `field_resolutions`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeRequest' }
-              examples:
-                fully_approved:
-                  summary: HR approves all fields
-                  value:
-                    id: SWP-CHG-2117
-                    employee_id: SWP-EMP-1042
-                    status: APPROVED
-                    bank_pending: false
-                sl_partial:
-                  summary: Shift leader applies phone, bank escalates to HR
-                  value:
-                    id: SWP-CHG-2117
-                    employee_id: SWP-EMP-1042
-                    status: PARTIALLY_APPROVED
-                    bank_pending: true
-                    field_resolutions:
-                      phone: { resolution: APPLIED, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
-                      bank_account: { resolution: ESCALATED_TO_HR, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403':
-          description: |
-            Forbidden — leader out of company scope (`OUT_OF_SCOPE`), or the
-            bank field requires `change_requests.approve.bank` which the caller
-            lacks (the UI escalates instead of calling approve in that case).
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Already resolved (APPROVED or REJECTED).
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /change-requests/{change_request_id}:reject:
-    parameters:
-      - in: path
-        name: change_request_id
-        required: true
-        schema: { $ref: '#/components/schemas/ChangeRequestId' }
-    post:
-      operationId: rejectChangeRequest
-      tags: [change-requests]
-      summary: Reject a change request (reason required — Wave-1 ModalReject)
-      description: |
-        Reject with a required free-text `reason` (Wave-1 ModalReject
-        pattern). The Employee record is **not** modified. Shift leaders
-        (company-scoped) and HR/super-admin may reject. The agent is notified
-        with the reason (`CHANGE_REQUEST_REJECTED` — see E10 `NotificationKind`).
-      x-rbac:
-        roles: [hr_admin, super_admin, shift_leader]
-        scope: company_or_global
-      x-design-screens:
-        - jg8zl   # E2 · Reject change-request modal (reason required)
-        - CATOn   # E2 SL · Inbox approval panel (company-scoped)
-        - MdhFZ   # E2 · Change-request review
-      parameters:
-        - { $ref: '#/components/parameters/IdempotencyKey' }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason:
-                  type: string
-                  minLength: 3
-                  maxLength: 500
-                  description: Human-readable rejection reason (surfaced to the agent).
-            examples:
-              budi_bank_rejected:
-                value:
-                  reason: "Mohon lampirkan foto buku tabungan untuk verifikasi rekening baru."
-      responses:
-        '200':
-          description: Rejected.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ChangeRequest' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Already resolved.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
   # --- Agent self-service (instant-tier) ----------------------------------
 
   /me/profile:
     patch:
       operationId: updateMyProfile
       tags: [self-service, employees]
-      summary: Agent edits own instant-tier profile fields
+      summary: Agent edits own profile fields (instant — no approval)
       description: |
         Instant self-edit of the caller's own employee record — **no
-        approval**. Only the instant-tier fields are accepted: `address`,
-        `app_language`, and `photo_object_key` (the `object_key` from a prior
+        approval**. All self-editable fields apply immediately: `address`,
+        `app_language`, `photo_object_key` (the `object_key` from a prior
         `POST /me/profile/photo-upload-init`, after the file was PUT to the
-        presigned URL). The change is written immediately and audited; no
-        notification is dispatched.
+        presigned URL), `phone`, `emergency_contact`, and `bank_account`. The
+        change is written immediately and audited; no notification is
+        dispatched.
 
-        Approval-tier fields (`phone`, `emergency_contact`, `bank_account`)
-        are rejected here with `FIELD_REQUIRES_APPROVAL` (422) — the agent
-        must use `POST /employees/{id}/change-requests` for those. The employee
-        is resolved from the authenticated principal (self scope); there is no
-        path id.
+        Statutory fields (NIK, NPWP, full_name) remain HR-only and are not
+        accepted here. The employee is resolved from the authenticated
+        principal (self scope); there is no path id.
       x-rbac:
         roles: [agent]
         scope: self
@@ -916,6 +564,18 @@ paths:
                 summary: Agent applies a freshly uploaded photo
                 value:
                   photo_object_key: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
+              phone_emergency_bank:
+                summary: Agent updates phone, emergency contact + bank (instant)
+                value:
+                  phone: "+62 812-1111-2222"
+                  emergency_contact:
+                    name: "Siti Santoso"
+                    relationship: "Istri"
+                    phone: "+62 813-3333-4444"
+                  bank_account:
+                    bank_name: "BCA"
+                    account_number: "1234567890"
+                    account_holder_name: "Budi Santoso"
       responses:
         '200':
           description: Applied immediately — returns the updated employee.
@@ -927,20 +587,11 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422':
           description: |
-            An approval-tier field was sent (`FIELD_REQUIRES_APPROVAL`), or the
+            A statutory field (NIK/NPWP/full_name) was sent, or the
             `photo_object_key` does not match a key issued to this employee.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-              examples:
-                requires_approval:
-                  value:
-                    error:
-                      code: FIELD_REQUIRES_APPROVAL
-                      message: "Perubahan nomor telepon memerlukan persetujuan. Gunakan Ajukan Perubahan."
-                      fields:
-                        phone: "Field ini memerlukan persetujuan dan tidak dapat diubah langsung."
-                      request_id: req_01J8XK7Q1
 
   /me/profile/photo-upload-init:
     post:
@@ -2671,10 +2322,6 @@ components:
       type: string
       pattern: '^SWP-EMP-\d+$'
       example: SWP-EMP-1042
-    ChangeRequestId:
-      type: string
-      pattern: '^SWP-CHG-\d+$'
-      example: SWP-CHG-2117
     AgreementId:
       type: string
       pattern: '^SWP-AG-\d+$'
@@ -2716,9 +2363,8 @@ components:
     EmergencyContact:
       type: object
       description: |
-        Agent's emergency contact (name + phone). Agent-editable via
-        change-request (approval tier) — NOT instant, since HR verifies the
-        next-of-kin record.
+        Agent's emergency contact (name + phone). Agent-editable **instantly**
+        via `PATCH /me/profile` (no approval).
       properties:
         name: { type: string, maxLength: 200, example: Siti Santoso }
         phone: { type: string, example: "+62-812-7766-5544" }
@@ -2773,8 +2419,8 @@ components:
           type: string
           description: |
             Primary login identifier (E.164, `+62...`), required and unique
-            (D2). Also the contact number; agent-editable via change-request
-            (E2 §8 lock).
+            (D2). Also the contact number; agent-editable **instantly** via
+            `PATCH /me/profile` (no approval).
           example: "+62-812-3344-5566"
         email_personal: { type: string, format: email }
         address:
@@ -2785,8 +2431,8 @@ components:
         emergency_contact:
           allOf: [{ $ref: '#/components/schemas/EmergencyContact' }]
           description: |
-            Tier: **approval** — agent-editable only via change-request
-            (`POST /employees/{id}/change-requests`), not instant.
+            Tier: **instant** self-edit via `PATCH /me/profile` (no approval).
+            Also HR-editable.
         app_language:
           allOf: [{ $ref: '#/components/schemas/AppLanguage' }]
           description: |
@@ -2810,8 +2456,8 @@ components:
         bank_account:
           allOf: [{ $ref: '#/components/schemas/BankAccount' }]
           description: |
-            Tier: **approval** — agent-editable only via change-request, not
-            instant.
+            Tier: **instant** self-edit via `PATCH /me/profile` (no approval).
+            Also HR-editable.
         status: { $ref: '#/components/schemas/EmployeeStatus' }
         temp_password:
           type: string
@@ -2880,15 +2526,21 @@ components:
     SelfProfileUpdate:
       type: object
       description: |
-        Body for `PATCH /me/profile` — instant-tier self-edit only. All fields
-        optional; only present fields are updated. Approval-tier fields
-        (phone, emergency_contact, bank_account) are NOT accepted here and
-        return `FIELD_REQUIRES_APPROVAL` (422).
+        Body for `PATCH /me/profile` — agent self-edit, all fields apply
+        **instantly** (no approval). All fields optional; only present fields
+        are updated. Statutory fields (NIK/NPWP/full_name) are HR-only and not
+        accepted here.
       minProperties: 1
       additionalProperties: false
       properties:
         address: { type: string }
         app_language: { $ref: '#/components/schemas/AppLanguage' }
+        phone:
+          type: string
+          description: Primary login identifier (E.164, `+62...`); unique (D2).
+          example: "+62-812-3344-5566"
+        emergency_contact: { $ref: '#/components/schemas/EmergencyContact' }
+        bank_account: { $ref: '#/components/schemas/BankAccount' }
         photo_object_key:
           type: string
           description: |
@@ -2896,165 +2548,6 @@ components:
             after the bytes were PUT to the presigned URL. Must belong to the
             caller's own key namespace.
           example: "profile-photos/SWP-EMP-1042/01J8XK7QF3.jpg"
-
-    # ---- ChangeRequest --------------------------------------------------
-
-    ChangeRequestStatus:
-      type: string
-      enum: [PENDING, APPROVED, REJECTED, PARTIALLY_APPROVED]
-      description: |
-        `PARTIALLY_APPROVED` — a shift leader applied the non-bank fields but
-        the request still has a `bank_account` change pending HR escalation
-        (`bank_pending=true`). HR finalizes the bank field to move it to
-        `APPROVED`. SL lacks `change_requests.approve.bank`, so a mixed
-        (bank + non-bank) request resolves to this intermediate state.
-
-    FieldResolution:
-      type: string
-      enum: [PENDING, APPLIED, ESCALATED_TO_HR]
-      description: |
-        Per-field resolution within a change request. `APPLIED` — written to
-        the Employee record (records who applied it). `ESCALATED_TO_HR` — the
-        bank field a shift leader could not approve; routed to the HR bank
-        queue. `PENDING` — not yet acted on.
-
-    ChangeRequest:
-      type: object
-      description: |
-        Agent's profile-change request awaiting approval. Whitelisted
-        (approval-tier) fields: `phone`, `emergency_contact`, `bank_account`.
-        Instant-tier fields (`address`, `app_language`, photo) never appear
-        here — they apply immediately via `PATCH /me/profile`.
-      required: [id, employee_id, status, submitted_at, changes]
-      properties:
-        id: { $ref: '#/components/schemas/ChangeRequestId' }
-        employee_id: { $ref: '#/components/schemas/EmployeeId' }
-        status: { $ref: '#/components/schemas/ChangeRequestStatus' }
-        submitted_at: { type: string, format: date-time }
-        resolved_at:
-          type: [string, "null"]
-          format: date-time
-        resolved_by:
-          allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
-          nullable: true
-        rejection_reason:
-          type: [string, "null"]
-          description: Set when status=REJECTED.
-        note:
-          type: [string, "null"]
-          description: Free-text note from the agent at submission.
-        changes:
-          type: object
-          description: Only the approval-tier subset.
-          properties:
-            phone: { type: string }
-            emergency_contact: { $ref: '#/components/schemas/EmergencyContact' }
-            bank_account: { $ref: '#/components/schemas/BankAccount' }
-        field_resolutions:
-          type: object
-          readOnly: true
-          description: |
-            Per-field resolution map (keys match `changes`), recording which
-            fields a shift leader already applied and which bank field was
-            escalated to HR. Drives the partial-approval flow. Empty until the
-            first approval action.
-          additionalProperties:
-            type: object
-            properties:
-              resolution: { $ref: '#/components/schemas/FieldResolution' }
-              resolved_by:
-                allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
-                nullable: true
-              resolved_at:
-                type: [string, "null"]
-                format: date-time
-          example:
-            phone: { resolution: APPLIED, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
-            bank_account: { resolution: ESCALATED_TO_HR, resolved_by: SWP-EMP-1043, resolved_at: "2026-06-11T03:20:00Z" }
-        bank_pending:
-          type: boolean
-          readOnly: true
-          default: false
-          description: |
-            Denormalized flag — `true` when a `bank_account` change is still
-            awaiting HR (escalated by a shift leader who lacks
-            `change_requests.approve.bank`). Drives the HR bank-escalation
-            queue (partial index).
-        request_type:
-          type: string
-          enum: [PHONE, EMERGENCY_CONTACT, BANK_ACCOUNT, MULTIPLE]
-          description: Derived from which fields are in `changes`; used by HR filters.
-
-    ChangeRequestCreate:
-      type: object
-      description: Body for `POST /employees/{id}/change-requests`.
-      required: [changes]
-      properties:
-        changes:
-          type: object
-          minProperties: 1
-          properties:
-            phone: { type: string }
-            emergency_contact: { $ref: '#/components/schemas/EmergencyContact' }
-            bank_account: { $ref: '#/components/schemas/BankAccount' }
-          additionalProperties: false
-        note: { type: string, maxLength: 500 }
-
-    ChangeRequestDetail:
-      type: object
-      description: |
-        Review detail (HR or shift leader) — embeds submitter summary +
-        per-field diff + per-field resolutions.
-      required: [id, employee, status, submitted_at, diff]
-      properties:
-        id: { $ref: '#/components/schemas/ChangeRequestId' }
-        employee:
-          type: object
-          properties:
-            id: { $ref: '#/components/schemas/EmployeeId' }
-            full_name: { type: string }
-            nip: { type: string }
-        status: { $ref: '#/components/schemas/ChangeRequestStatus' }
-        submitted_at: { type: string, format: date-time }
-        resolved_at:
-          type: [string, "null"]
-          format: date-time
-        resolved_by:
-          allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
-          nullable: true
-        rejection_reason:
-          type: [string, "null"]
-        note:
-          type: [string, "null"]
-        bank_pending:
-          type: boolean
-          readOnly: true
-          default: false
-          description: |
-            `true` when a bank change is still awaiting HR escalation (a shift
-            leader applied the non-bank fields). See `ChangeRequest.bank_pending`.
-        field_resolutions:
-          type: object
-          readOnly: true
-          description: Per-field resolution map — see `ChangeRequest.field_resolutions`.
-          additionalProperties:
-            type: object
-            properties:
-              resolution: { $ref: '#/components/schemas/FieldResolution' }
-              resolved_by:
-                allOf: [{ $ref: '#/components/schemas/EmployeeId' }]
-                nullable: true
-              resolved_at:
-                type: [string, "null"]
-                format: date-time
-        diff:
-          type: object
-          description: Per-field old → new diff.
-          additionalProperties:
-            type: object
-            properties:
-              old: {}
-              new: {}
 
     # ---- Agreement ------------------------------------------------------
 

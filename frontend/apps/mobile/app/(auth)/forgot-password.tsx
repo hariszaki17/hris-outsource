@@ -7,6 +7,7 @@ import { ArrowLeft, Mail } from 'lucide-react-native';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image, Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../src/ui/Button';
 import { Text } from '../../src/ui/Text';
 import { TextField } from '../../src/ui/TextField';
@@ -14,6 +15,7 @@ import { TextField } from '../../src/ui/TextField';
 export default function ForgotPassword() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
 
   async function onSubmit() {
@@ -23,7 +25,10 @@ export default function ForgotPassword() {
 
   return (
     <ScrollView className="flex-1 bg-surface" contentContainerStyle={{ flexGrow: 1 }}>
-      <View className="flex-1 pb-7" style={{ paddingTop: 60 }}>
+      <View
+        className="flex-1"
+        style={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 28 }}
+      >
         <View className="flex-1 px-7">
           {/* Brand: chip 64×64 r16 + wordmark (Poppins 22/700) + subtitle */}
           <View className="items-center gap-3.5">
@@ -34,12 +39,14 @@ export default function ForgotPassword() {
                 resizeMode="contain"
               />
             </View>
-            <Text className="font-display text-[22px] font-bold text-text">SaranaWisesa</Text>
-            <Text className="text-[13px] text-text-3">HRIS Outsource</Text>
+            <Text variant="displayTitle">SaranaWisesa</Text>
+            <Text variant="secondary" className="text-text-3">
+              HRIS Outsource
+            </Text>
           </View>
 
-          <View className="gap-3.5 pt-8">
-            <Text variant="section">{t('m:reset.title')}</Text>
+          <View className="gap-3.5 pt-[22px]">
+            <Text variant="displayTitle">{t('m:reset.title')}</Text>
             <Text variant="secondary" className="text-text-3" style={{ lineHeight: 22 }}>
               {t('m:reset.subtitle')}
             </Text>
@@ -64,14 +71,16 @@ export default function ForgotPassword() {
               hitSlop={8}
             >
               <ArrowLeft size={16} color={color.primary} />
-              <Text className="text-[13px] font-semibold text-primary">
+              <Text variant="label" weight="semibold" className="text-primary">
                 {t('m:reset.backToLoginLink')}
               </Text>
             </Pressable>
           </View>
         </View>
 
-        <Text className="text-center text-[12px] text-text-3">{t('m:login.footer')}</Text>
+        <Text variant="caption" className="text-center text-text-3">
+          {t('m:login.footer')}
+        </Text>
       </View>
     </ScrollView>
   );

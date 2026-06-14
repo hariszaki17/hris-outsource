@@ -30,9 +30,9 @@ export function leaveStatusTone(status: LeaveStatus): StatusTone {
       return 'ok';
     case 'REJECTED':
       return 'bad';
-    case 'PENDING_L1':
-    case 'PENDING_HR':
+    case 'PENDING':
       return 'warn';
+    case 'DRAFT':
     case 'CANCELLED':
       return 'neutral';
     default:

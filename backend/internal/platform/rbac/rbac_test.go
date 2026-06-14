@@ -67,14 +67,3 @@ func TestGuardCompany_StaffGlobal(t *testing.T) {
 		}
 	}
 }
-
-// A lead does NOT gain the bank-approval sub-permission: it falls to the default
-// (false) and must escalate a bank_account change to HR.
-func TestCanApproveBank_LeadFalse(t *testing.T) {
-	leadCtx := auth.WithPrincipal(context.Background(), auth.Principal{
-		UserID: "SWP-USR-LEAD", Role: auth.RoleLead, CompanyIDs: []string{"SWP-CMP-0021"},
-	})
-	if CanApproveBank(leadCtx) {
-		t.Fatal("lead must NOT be able to approve bank changes (escalates to HR)")
-	}
-}

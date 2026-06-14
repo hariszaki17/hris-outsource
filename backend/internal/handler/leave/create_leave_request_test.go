@@ -52,9 +52,13 @@ func TestCreateLeaveRequest_AgentCreateAndSubmit201(t *testing.T) {
 		t.Errorf("missing Location header")
 	}
 	d := dataObject(t, rr)
-	// submit defaults true → reserved → PENDING_L1 (the led company has a leader).
-	if d["status"] != "PENDING_L1" {
-		t.Errorf("status = %v, want PENDING_L1 (create-and-submit)", d["status"])
+	// submit defaults true → reserved → PENDING (E11 owns the chain progress).
+	if d["status"] != "PENDING" {
+		t.Errorf("status = %v, want PENDING (create-and-submit)", d["status"])
+	}
+	// the E11 approval instance was created + linked at submit.
+	if d["approval_instance_id"] == nil {
+		t.Errorf("approval_instance_id missing after create-and-submit: %v", d)
 	}
 	// duration_days is server-computed (3 inclusive days, fake stand-in).
 	if dd, _ := d["duration_days"].(float64); int(dd) != 3 {
@@ -135,7 +139,7 @@ func TestCreateLeaveRequest_MissingRequiredDocument422(t *testing.T) {
 func TestCreateLeaveRequest_Overlapping409(t *testing.T) {
 	h := seedAgentHarness(t, 12)
 	// an existing live request overlapping [2026-06-20, 2026-06-22].
-	h.seedRequest("SWP-LR-8010", cmpLed, empAgent, dom.LeaveStatusPendingHR, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8010", cmpLed, empAgent, dom.LeaveStatusPending, createStart, createEnd, 3)
 	rr := h.do("POST", "/leave-requests", map[string]any{
 		"leave_type_id": leaveAnn,
 		"start_date":    "2026-06-21",
@@ -211,14 +215,14 @@ func TestSubmitLeaveRequest_DraftToPending(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if d := dataObject(t, rr); d["status"] != "PENDING_L1" {
-		t.Errorf("status = %v, want PENDING_L1", d["status"])
+	if d := dataObject(t, rr); d["status"] != "PENDING" {
+		t.Errorf("status = %v, want PENDING", d["status"])
 	}
 }
 
 func TestSubmitLeaveRequest_NotDraft409(t *testing.T) {
 	h := seedAgentHarness(t, 12)
-	h.seedRequest("SWP-LR-8021", cmpLed, empAgent, dom.LeaveStatusPendingHR, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8021", cmpLed, empAgent, dom.LeaveStatusPending, createStart, createEnd, 3)
 	rr := h.do("POST", "/leave-requests/SWP-LR-8021:submit", nil)
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
@@ -231,8 +235,8 @@ func TestSubmitLeaveRequest_NotDraft409(t *testing.T) {
 
 func TestListLeaveRequests_AgentSelfScoped(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, cmpLed, empAgent)
-	h.seedRequest("SWP-LR-8030", cmpLed, empAgent, dom.LeaveStatusPendingHR, createStart, createEnd, 3)
-	h.seedRequest("SWP-LR-8031", cmpLed, "SWP-EMP-9999", dom.LeaveStatusPendingHR, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8030", cmpLed, empAgent, dom.LeaveStatusPending, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8031", cmpLed, "SWP-EMP-9999", dom.LeaveStatusPending, createStart, createEnd, 3)
 
 	rr := h.do("GET", "/leave-requests", nil)
 	if rr.Code != http.StatusOK {
@@ -249,7 +253,7 @@ func TestListLeaveRequests_AgentSelfScoped(t *testing.T) {
 
 func TestGetLeaveRequest_AgentOther404(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, cmpLed, empAgent)
-	h.seedRequest("SWP-LR-8040", cmpLed, "SWP-EMP-9999", dom.LeaveStatusPendingHR, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8040", cmpLed, "SWP-EMP-9999", dom.LeaveStatusPending, createStart, createEnd, 3)
 	rr := h.do("GET", "/leave-requests/SWP-LR-8040", nil)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
@@ -258,7 +262,7 @@ func TestGetLeaveRequest_AgentOther404(t *testing.T) {
 
 func TestGetLeaveRequest_AgentSelf200(t *testing.T) {
 	h := newHarness(t, auth.RoleAgent, cmpLed, empAgent)
-	h.seedRequest("SWP-LR-8041", cmpLed, empAgent, dom.LeaveStatusPendingHR, createStart, createEnd, 3)
+	h.seedRequest("SWP-LR-8041", cmpLed, empAgent, dom.LeaveStatusPending, createStart, createEnd, 3)
 	rr := h.do("GET", "/leave-requests/SWP-LR-8041", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())

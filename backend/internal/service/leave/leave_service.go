@@ -1,10 +1,9 @@
-// Package leave — LeaveService: the two-level approval state machine
-// (PENDING_L1 → PENDING_HR → APPROVED; reject → REJECTED), the balance re-check +
-// quota deduct, and the INV-3 loop-closer (cancel overlapping schedule_entries +
-// INSERT approved_leave_days in the same tx). Every action guards state
-// (*ForUpdate → 409 on terminal/wrong-state), scope (GuardCompany → 403
-// OUT_OF_SCOPE), and self-approval (403 FORBIDDEN), then audits in-tx + stubs the
-// notification (TODO Phase-11). Mirrors the Phase-7 attendance state machine.
+// Package leave — LeaveService: leave-request lifecycle (create/submit/cancel/
+// shorten) + the per-type quota meter (reserve/commit/release/reverse), wired to the
+// E11 approval engine. Submit reserves the duration, sets status=PENDING, and creates
+// an E11 ApprovalInstance; the engine drives the chain and calls the OnApproved /
+// OnRejected hooks on terminal transition (in the engine's tx) to apply the leave-
+// domain side-effects (quota commit/release, INV-3 schedule loop-closer, notify).
 package leave
 
 import (
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	reportingdom "github.com/hariszaki17/hris-outsource/backend/internal/domain/reporting"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
@@ -24,20 +24,26 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 )
 
-// LeaveService implements the leave-request approval business logic.
+// LeaveService implements the leave-request business logic.
 type LeaveService struct {
 	repo     LeaveRepository
 	meter    *QuotaMeter // per-type cap_basis ledger (2026-06-12; the sole balance model)
 	schedule SchedulePort
 	txm      TxRunner
 	now      Clock
-	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
+	notifier jobs.Dispatcher  // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
+	engine   approval.Engine  // E11: creates the approval instance at :submit
 }
 
 // SetMeter wires the per-type QuotaMeter (EPICS §8 2026-06-12): reserve/commit/
 // release/reverse meter against per-type cap_basis windows. Production (cmd/api)
 // sets it; tests wire an in-memory meter via the same hook.
 func (s *LeaveService) SetMeter(m *QuotaMeter) { s.meter = m }
+
+// SetApprovalEngine wires the E11 approval engine. REQUIRED for Submit (the
+// integrator in cmd/api/main.go injects the real engine after constructing it). A
+// nil engine fails submit with a clear RULE_VIOLATION rather than panicking.
+func (s *LeaveService) SetApprovalEngine(e approval.Engine) { s.engine = e }
 
 // AdjustTypeQuota applies an HR per-type quota adjustment (LQ-6 / "Sesuaikan Kuota"):
 // signed delta on the (employee, type, window) entitlement, audited. start selects
@@ -83,7 +89,8 @@ func mapMeterErr(err error) error {
 }
 
 // NewLeaveService wires the leave service. The per-type QuotaMeter is attached via
-// SetMeter (production + tests); the schedule port is the INV-3 loop-closer surface.
+// SetMeter (production + tests); the approval engine via SetApprovalEngine; the
+// schedule port is the INV-3 loop-closer surface.
 func NewLeaveService(repo LeaveRepository, schedule SchedulePort, txm TxRunner) *LeaveService {
 	return &LeaveService{repo: repo, schedule: schedule, txm: txm, now: time.Now}
 }
@@ -137,14 +144,11 @@ func (s *LeaveService) List(ctx context.Context, f RequestFilter) ([]dom.LeaveRe
 		}
 		next = &c
 	}
-	// Attach the timeline to each row for the queue (best-effort).
-	for i := range rows {
-		rows[i].Timeline = s.buildTimeline(ctx, rows[i])
-	}
 	return rows, next, hasMore, nil
 }
 
-// Get loads a single request with its timeline; cross-scope reads are hidden as 404.
+// Get loads a single request; cross-scope reads are hidden as 404. The approval
+// chain is read by the client from approval_instance_id (E11), not assembled here.
 func (s *LeaveService) Get(ctx context.Context, id string) (dom.LeaveRequest, error) {
 	rec, err := s.repo.GetLeaveRequest(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -162,288 +166,153 @@ func (s *LeaveService) Get(ctx context.Context, id string) (dom.LeaveRequest, er
 	} else if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
 		return dom.LeaveRequest{}, apperr.NotFound()
 	}
-	rec.Timeline = s.buildTimeline(ctx, rec)
 	return rec, nil
 }
 
-// --- approve-l1 ---
+// --- E11 hooks (called by the approval engine on terminal transition, in its tx) ---
 
-// ApproveL1 forwards PENDING_L1 → PENDING_HR. Guards: state (409), scope (403
-// OUT_OF_SCOPE), self-approve (403 FORBIDDEN). No quota deducted yet (LA-4).
-func (s *LeaveService) ApproveL1(ctx context.Context, id, note string) (dom.LeaveRequest, error) {
-	actor := actorEmployeeID(ctx)
-	role := actorRole(ctx)
-	var out dom.LeaveRequest
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lockRequest(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.LeaveStatusPendingL1 {
-			return stateConflict(rec.Status)
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-		if serr := guardSelf(ctx, rec); serr != nil {
-			return serr
-		}
-		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
-			ID:               id,
-			Status:           dom.LeaveStatusPendingHR,
-			NoLeader:         rec.Routing.NoLeader,
-			AssignedLeaderID: rec.Routing.AssignedLeaderID,
-			ClockInConflict:  rec.ClockInConflict,
-		})
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		notePtr := strOrNil(note)
-		if _, aerr := s.repo.InsertLeaveApproval(ctx, tx, ApprovalRow{
-			LeaveRequestID: id, Stage: dom.StageL1, Decision: dom.DecisionApproved,
-			ActorID: actor, ActorRole: role, DecisionNote: notePtr,
-		}); aerr != nil {
-			return aerr
-		}
-		// Phase-11 stub (documented): the L1→HR next-stage event targets the HR
-		// approver QUEUE, not a single recipient — there is no clean per-user
-		// recipient at this point (the HR pool is not enumerated here). Left as a
-		// stub per the plan's OPTIONAL coverage; the submitter-facing
-		// approve-final/reject points ARE wired below. See 11-02-SUMMARY.
-		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "PENDING_HR", actor, "APPROVE_L1"))
-	})
-	if err != nil {
-		return dom.LeaveRequest{}, asAppErr(err)
+// OnApproved applies the leave-domain side-effects when the E11 instance reaches a
+// terminal APPROVED/BYPASS_APPROVED decision. Runs INSIDE the engine's tx: it locks
+// the request (FOR UPDATE), commits the per-type reservation (pending→used; over-cap
+// recheck fails the tx → EX-9), fires the INV-3 loop-closer (cancel overlapping
+// schedule entries + INSERT approved_leave_days), sets status=APPROVED + the balance
+// snapshot, and dispatches NotifLeaveApproved on the transactional outbox.
+//
+// The engine owns the instance/line state — this hook only does leave-domain effects
+// + sets the leave status. Returning an error rolls the engine's tx back.
+func (s *LeaveService) OnApproved(ctx context.Context, tx pgx.Tx, requestID string) error {
+	rec, lerr := s.repo.GetLeaveRequestForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
 	}
-	return s.reread(ctx, out)
+	if lerr != nil {
+		return lerr
+	}
+	// Idempotency: a re-fired hook on an already-terminal request is a no-op.
+	if rec.Status == dom.LeaveStatusApproved {
+		return nil
+	}
+	if rec.Status != dom.LeaveStatusPending {
+		return stateConflict(rec.Status)
+	}
+
+	// 1. resolve the leave type (for the approved_leave_days code below).
+	lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
+	if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
+		return lterr
+	}
+
+	// 2. per-type meter: commit the SUBMIT-time reservation (pending→used) against the
+	// cap_basis window. Over-cap recheck fails here (no override on the hook path —
+	// a super-admin bypass is an E11 concern; the leave domain still rechecks quota).
+	if cerr := s.meter.Commit(ctx, tx, CommitInput{
+		EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+		StartDate: rec.StartDate, Days: rec.DurationDays, Override: false,
+	}); cerr != nil {
+		return mapMeterErr(cerr)
+	}
+
+	// 3. INV-3 loop-closer: cancel overlapping schedule entries (DB CANCELLED_BY_LEAVE)
+	// + INSERT approved_leave_days for each leave date.
+	cancels, cerr := s.schedule.CancelScheduleEntriesForLeave(ctx, tx, rec.EmployeeID, rec.StartDate, rec.EndDate)
+	if cerr != nil {
+		return cerr
+	}
+	leaveTypeCode := ""
+	if lt.Code != "" {
+		leaveTypeCode = lt.Code
+	}
+	for d := rec.StartDate; !d.After(rec.EndDate); d = d.AddDate(0, 0, 1) {
+		if ierr := s.schedule.InsertApprovedLeaveDay(ctx, tx, rec.EmployeeID, d, requestID, leaveTypeCode); ierr != nil {
+			return ierr
+		}
+	}
+	_ = cancels // schedule_impact is recomputed at read time; not persisted here.
+
+	// 4. transition + commit the BalanceCheck snapshot.
+	req := rec.DurationDays
+	if _, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+		ID:                   requestID,
+		Status:               dom.LeaveStatusApproved,
+		NoLeader:             rec.NoLeader,
+		AssignedLeaderID:     rec.AssignedLeaderID,
+		ClockInConflict:      rec.ClockInConflict,
+		BalanceRequestedDays: &req,
+	}); uerr != nil {
+		return uerr
+	}
+	if serr := s.writeSnapshot(ctx, tx, requestID, &req, nil, boolPtr(false)); serr != nil {
+		return serr
+	}
+
+	// 5. notify the submitter (transactional outbox — enqueued in THIS tx, so a
+	// rolled-back approval never notifies).
+	if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+		NotifKind:        string(reportingdom.NotifLeaveApproved),
+		RecipientID:      rec.EmployeeID,
+		Title:            "Cuti disetujui",
+		Body:             leaveDateBody("Pengajuan cuti Anda disetujui", rec.StartDate, rec.EndDate),
+		DeepLinkEpic:     "E6",
+		DeepLinkEntityID: requestID,
+		DeepLinkPath:     "/leave-requests/" + requestID,
+		ActorID:          actorUserID(ctx),
+		IsCritical:       true,
+	}); derr != nil {
+		return derr
+	}
+	return audit.Record(ctx, tx, leaveAudit(requestID, "leave_request", string(rec.Status), "APPROVED", actorEmployeeID(ctx), "APPROVE"))
 }
 
-// --- approve-final ---
-
-// ApproveFinal moves PENDING_HR → APPROVED. Re-checks balance (LA-5): an annual
-// over-balance returns 422 BALANCE_RECHECK_FAILED(requires_override). On success it
-// deducts the quota and fires the INV-3 side effects, all in one tx.
-func (s *LeaveService) ApproveFinal(ctx context.Context, id, note string) (dom.LeaveRequest, error) {
-	return s.finalize(ctx, id, note, false, "")
-}
-
-// ApproveOverride force-approves PENDING_HR even over-balance (LA-8). override_reason
-// (min 10) is recorded on the timeline + the quota's last_override. Skips the
-// balance block; still deducts + fires INV-3.
-func (s *LeaveService) ApproveOverride(ctx context.Context, id, overrideReason string) (dom.LeaveRequest, error) {
-	if len([]rune(overrideReason)) < 10 {
-		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"override_reason": "Wajib diisi (minimum 10 karakter)."})
+// OnRejected applies the leave-domain side-effects when the E11 instance reaches a
+// terminal REJECTED decision. Runs INSIDE the engine's tx: releases the SUBMIT-time
+// pending reservation, sets status=REJECTED, and dispatches NotifLeaveRejected.
+func (s *LeaveService) OnRejected(ctx context.Context, tx pgx.Tx, requestID string) error {
+	rec, lerr := s.repo.GetLeaveRequestForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
 	}
-	return s.finalize(ctx, id, "", true, overrideReason)
-}
-
-// finalize is the shared PENDING_HR → APPROVED path for approve-final / override.
-func (s *LeaveService) finalize(ctx context.Context, id, note string, override bool, overrideReason string) (dom.LeaveRequest, error) {
-	actor := actorEmployeeID(ctx)
-	role := actorRole(ctx)
-	var out dom.LeaveRequest
-	var impact []dom.ScheduleImpactEntry
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lockRequest(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.LeaveStatusPendingHR {
-			return stateConflict(rec.Status)
-		}
-		// L2 approvers: HR/super (global) or lead (scoped). RequireRole gates the
-		// route; defense-in-depth here. guardSelf blocks self-approval (LA-6);
-		// GuardCompany scopes a lead to the agent's company (no-op for super/hr).
-		if serr := guardSelf(ctx, rec); serr != nil {
-			return serr
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-
-		// 1. resolve the leave type (for the approved_leave_days code below).
-		lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
-		if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
-			return lterr
-		}
-
-		// 2. per-type meter: commit the SUBMIT-time reservation (pending→used) against
-		// the cap_basis window. Over-cap blocks unless override (LA-5/LA-8).
-		if cerr := s.meter.Commit(ctx, tx, CommitInput{
-			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-			StartDate: rec.StartDate, Days: rec.DurationDays, Override: override,
-		}); cerr != nil {
-			return mapMeterErr(cerr)
-		}
-
-		// 3. INV-3 loop-closer: cancel overlapping schedule entries (DB
-		// CANCELLED_BY_LEAVE) + INSERT approved_leave_days for each leave date.
-		cancels, cerr := s.schedule.CancelScheduleEntriesForLeave(ctx, tx, rec.EmployeeID, rec.StartDate, rec.EndDate)
-		if cerr != nil {
-			return cerr
-		}
-		impact = make([]dom.ScheduleImpactEntry, 0, len(cancels))
-		for _, c := range cancels {
-			impact = append(impact, dom.ScheduleImpactEntry{
-				ScheduleID:  c.ScheduleID,
-				Date:        c.Date.Format("2006-01-02"),
-				PriorStatus: "PUBLISHED",
-				NewStatus:   dtoNewStatus(c.NewStatus), // CANCELLED_BY_LEAVE → LEAVE
-			})
-		}
-		leaveTypeCode := ""
-		if lt.Code != "" {
-			leaveTypeCode = lt.Code
-		}
-		for d := rec.StartDate; !d.After(rec.EndDate); d = d.AddDate(0, 0, 1) {
-			if ierr := s.schedule.InsertApprovedLeaveDay(ctx, tx, rec.EmployeeID, d, id, leaveTypeCode); ierr != nil {
-				return ierr
-			}
-		}
-
-		// 4. transition + commit the BalanceCheck snapshot.
-		req := int(rec.DurationDays)
-		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
-			ID:                      id,
-			Status:                  dom.LeaveStatusApproved,
-			NoLeader:                rec.Routing.NoLeader,
-			AssignedLeaderID:        rec.Routing.AssignedLeaderID,
-			ClockInConflict:         rec.ClockInConflict,
-			BalanceRequestedDays:    &req,
-			BalanceRequiresOverride: boolPtr(override),
-		})
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(override)); serr != nil {
-			return serr
-		}
-
-		// 5. decision row + audit.
-		decision := dom.DecisionApproved
-		var ovReason *string
-		if override {
-			decision = dom.DecisionOverrideApproved
-			ovReason = &overrideReason
-		}
-		if _, aerr := s.repo.InsertLeaveApproval(ctx, tx, ApprovalRow{
-			LeaveRequestID: id, Stage: dom.StageHR, Decision: decision,
-			ActorID: actor, ActorRole: role, DecisionNote: strOrNil(note),
-			IsOverride: override, OverrideReason: ovReason,
-		}); aerr != nil {
-			return aerr
-		}
-		action := "APPROVE_FINAL"
-		if override {
-			action = "APPROVE_OVERRIDE"
-		}
-		// E10 (11-02): notify the submitter their leave is approved (transactional
-		// outbox — enqueued in THIS tx, so a rolled-back approval never notifies).
-		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
-			NotifKind:        string(reportingdom.NotifLeaveApproved),
-			RecipientID:      rec.EmployeeID,
-			Title:            "Cuti disetujui",
-			Body:             leaveDateBody("Pengajuan cuti Anda disetujui", rec.StartDate, rec.EndDate),
-			DeepLinkEpic:     "E6",
-			DeepLinkEntityID: id,
-			DeepLinkPath:     "/leave-requests/" + id,
-			ActorID:          actorUserID(ctx),
-			IsCritical:       true,
-		}); derr != nil {
-			return derr
-		}
-		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "APPROVED", actor, action))
-	})
-	if err != nil {
-		return dom.LeaveRequest{}, asAppErr(err)
+	if lerr != nil {
+		return lerr
 	}
-	full, rerr := s.reread(ctx, out)
-	if rerr != nil {
-		return dom.LeaveRequest{}, rerr
+	if rec.Status == dom.LeaveStatusRejected {
+		return nil // idempotent
 	}
-	full.ScheduleImpact = impact
-	return full, nil
-}
-
-// --- reject ---
-
-// Reject moves PENDING_L1 / PENDING_HR → REJECTED (reason required, min 5). The
-// recorded stage matches the rejector's level. Terminal → 409; self-reject → 403.
-func (s *LeaveService) Reject(ctx context.Context, id, reason string) (dom.LeaveRequest, error) {
-	if len([]rune(reason)) < 5 {
-		return dom.LeaveRequest{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
+	if rec.Status != dom.LeaveStatusPending {
+		return stateConflict(rec.Status)
 	}
-	actor := actorEmployeeID(ctx)
-	role := actorRole(ctx)
-	var out dom.LeaveRequest
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lockRequest(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.LeaveStatusPendingL1 && rec.Status != dom.LeaveStatusPendingHR {
-			return stateConflict(rec.Status)
-		}
-		if serr := rbac.GuardCompany(ctx, deref(rec.CompanyID)); serr != nil {
-			return serr
-		}
-		if serr := guardSelf(ctx, rec); serr != nil {
-			return serr
-		}
-		stage := dom.StageHR
-		if rec.Status == dom.LeaveStatusPendingL1 {
-			stage = dom.StageL1
-		}
-		// Release the SUBMIT-time pending reservation (the request never consumed).
-		if rerr := s.meter.Release(ctx, tx, WindowOp{
-			EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
-			StartDate: rec.StartDate, Days: rec.DurationDays,
-		}); rerr != nil {
-			return rerr
-		}
-		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
-			ID:               id,
-			Status:           dom.LeaveStatusRejected,
-			NoLeader:         rec.Routing.NoLeader,
-			AssignedLeaderID: rec.Routing.AssignedLeaderID,
-			ClockInConflict:  rec.ClockInConflict,
-		})
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		if serr := s.writeSnapshot(ctx, tx, id, nil, nil, nil); serr != nil {
-			return serr
-		}
-		rsn := reason
-		if _, aerr := s.repo.InsertLeaveApproval(ctx, tx, ApprovalRow{
-			LeaveRequestID: id, Stage: stage, Decision: dom.DecisionRejected,
-			ActorID: actor, ActorRole: role, RejectReason: &rsn,
-		}); aerr != nil {
-			return aerr
-		}
-		// E10 (11-02): notify the submitter their leave is rejected.
-		if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
-			NotifKind:        string(reportingdom.NotifLeaveRejected),
-			RecipientID:      rec.EmployeeID,
-			Title:            "Cuti ditolak",
-			Body:             "Pengajuan cuti Anda ditolak: " + reason,
-			DeepLinkEpic:     "E6",
-			DeepLinkEntityID: id,
-			DeepLinkPath:     "/leave-requests/" + id,
-			ActorID:          actorUserID(ctx),
-			IsCritical:       true,
-		}); derr != nil {
-			return derr
-		}
-		return audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), "REJECTED", actor, "REJECT"))
-	})
-	if err != nil {
-		return dom.LeaveRequest{}, asAppErr(err)
+	// Release the SUBMIT-time pending reservation (the request never consumed).
+	if rerr := s.meter.Release(ctx, tx, WindowOp{
+		EmployeeID: rec.EmployeeID, LeaveTypeID: rec.LeaveTypeID,
+		StartDate: rec.StartDate, Days: rec.DurationDays,
+	}); rerr != nil {
+		return rerr
 	}
-	return s.reread(ctx, out)
+	if _, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
+		ID:               requestID,
+		Status:           dom.LeaveStatusRejected,
+		NoLeader:         rec.NoLeader,
+		AssignedLeaderID: rec.AssignedLeaderID,
+		ClockInConflict:  rec.ClockInConflict,
+	}); uerr != nil {
+		return uerr
+	}
+	if serr := s.writeSnapshot(ctx, tx, requestID, nil, nil, nil); serr != nil {
+		return serr
+	}
+	if derr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
+		NotifKind:        string(reportingdom.NotifLeaveRejected),
+		RecipientID:      rec.EmployeeID,
+		Title:            "Cuti ditolak",
+		Body:             "Pengajuan cuti Anda ditolak.",
+		DeepLinkEpic:     "E6",
+		DeepLinkEntityID: requestID,
+		DeepLinkPath:     "/leave-requests/" + requestID,
+		ActorID:          actorUserID(ctx),
+		IsCritical:       true,
+	}); derr != nil {
+		return derr
+	}
+	return audit.Record(ctx, tx, leaveAudit(requestID, "leave_request", string(rec.Status), "REJECTED", actorEmployeeID(ctx), "REJECT"))
 }
 
 // --- create (F6.2 agent file-a-request) ---
@@ -469,10 +338,7 @@ type CreateLeaveInput struct {
 // (INVALID_DATE_RANGE → MISSING_REQUIRED_DOCUMENT → OVERLAPPING_LEAVE → BACKDATED_LEAVE),
 // computes duration_days via the server-authoritative calculator (rostered days minus
 // public holidays), inserts the DRAFT, and — when submit (default true) — runs submitTx
-// (FIFO reservation; QUOTA_EXCEEDED surfaces here). Returns the full request.
-// TODO: attachment upload + edit-draft + document-required leave types — the
-// attachment endpoint is deferred; document_file_id stays optional on the wire but
-// MISSING_REQUIRED_DOCUMENT is still enforced for document-required types.
+// (reserve + create the E11 instance; QUOTA_EXCEEDED surfaces here). Returns the request.
 func (s *LeaveService) Create(ctx context.Context, in CreateLeaveInput) (dom.LeaveRequest, error) {
 	p, ok := auth.PrincipalFrom(ctx)
 	if !ok {
@@ -568,7 +434,7 @@ func (s *LeaveService) Create(ctx context.Context, in CreateLeaveInput) (dom.Lea
 			return aerr
 		}
 
-		// 8. submit (default true): reserve → transition → QUOTA_EXCEEDED surfaces here.
+		// 8. submit (default true): reserve → PENDING → create the E11 instance.
 		if submit {
 			submitted, serr := s.submitTx(ctx, tx, created)
 			if serr != nil {
@@ -584,12 +450,11 @@ func (s *LeaveService) Create(ctx context.Context, in CreateLeaveInput) (dom.Lea
 	return s.reread(ctx, out)
 }
 
-// --- submit (reserve) ---
+// --- submit (reserve + create the E11 instance) ---
 
-// Submit transitions DRAFT → PENDING_L1 (or PENDING_HR when no leader) and FIFO-
-// reserves the duration across the employee's active matching-earmark lots, persisting
-// the BalanceCheck allocation snapshot. Insufficient balance → QUOTA_EXCEEDED (HR
-// pre-funds a lot instead of going negative). Quota-untracked types skip reservation.
+// Submit transitions DRAFT → PENDING: it reserves the duration against the per-type
+// window, sets status=PENDING, and creates the E11 ApprovalInstance (the engine then
+// drives the chain). Insufficient balance → QUOTA_EXCEEDED.
 func (s *LeaveService) Submit(ctx context.Context, id string) (dom.LeaveRequest, error) {
 	var out dom.LeaveRequest
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -613,16 +478,20 @@ func (s *LeaveService) Submit(ctx context.Context, id string) (dom.LeaveRequest,
 	return s.reread(ctx, out)
 }
 
-// submitTx is the shared DRAFT → PENDING_L1/PENDING_HR reservation core, called from
-// both the public Submit (after lock + self-guard) and Create (with submit=true, on
-// the freshly-inserted DRAFT). It state-checks DRAFT, FIFO-reserves the duration for
-// quota-tracked types (QUOTA_EXCEEDED on insufficient balance), writes the snapshot,
-// transitions, and audits — all inside the caller's tx. Returns the updated row.
+// submitTx is the shared DRAFT → PENDING reservation + instance-creation core, called
+// from both the public Submit (after lock + self-guard) and Create (with submit=true,
+// on the freshly-inserted DRAFT). It state-checks DRAFT, reserves the duration for
+// quota-tracked types (QUOTA_EXCEEDED on insufficient balance), transitions to
+// PENDING, creates the E11 ApprovalInstance, links it on the request, and audits —
+// all inside the caller's tx. Returns the updated row.
 func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveRequest) (dom.LeaveRequest, error) {
 	actor := actorEmployeeID(ctx)
 	id := rec.ID
 	if rec.Status != dom.LeaveStatusDraft {
 		return dom.LeaveRequest{}, stateConflict(rec.Status)
+	}
+	if s.engine == nil {
+		return dom.LeaveRequest{}, apperr.Rule("RULE_VIOLATION", map[string]string{"approval": "Approval engine tidak aktif."})
 	}
 	// Per-type meter: reserve the duration against the type's cap_basis window
 	// (auto-opens a quota-bearing window if absent). QUOTA_EXCEEDED / gate failures
@@ -634,15 +503,11 @@ func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveReq
 		return dom.LeaveRequest{}, mapMeterErr(merr)
 	}
 
-	next := dom.LeaveStatusPendingL1
-	if rec.Routing.NoLeader {
-		next = dom.LeaveStatusPendingHR
-	}
 	updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 		ID:               id,
-		Status:           next,
-		NoLeader:         rec.Routing.NoLeader,
-		AssignedLeaderID: rec.Routing.AssignedLeaderID,
+		Status:           dom.LeaveStatusPending,
+		NoLeader:         rec.NoLeader,
+		AssignedLeaderID: rec.AssignedLeaderID,
 		ClockInConflict:  rec.ClockInConflict,
 	})
 	if uerr != nil {
@@ -652,7 +517,23 @@ func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveReq
 	if serr := s.writeSnapshot(ctx, tx, id, &req, nil, boolPtr(false)); serr != nil {
 		return dom.LeaveRequest{}, serr
 	}
-	if aerr := audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(next), actor, "SUBMIT")); aerr != nil {
+
+	// Create the E11 ApprovalInstance for this request and link it.
+	instanceID, ierr := s.engine.CreateInstance(ctx, tx, approval.CreateInstanceInput{
+		RequestType: approval.RequestTypeLeave,
+		RequestID:   id,
+		CompanyID:   deref(rec.CompanyID),
+		RequesterID: rec.EmployeeID,
+	})
+	if ierr != nil {
+		return dom.LeaveRequest{}, ierr
+	}
+	if lerr := s.repo.SetApprovalInstanceID(ctx, tx, id, instanceID); lerr != nil {
+		return dom.LeaveRequest{}, lerr
+	}
+	updated.ApprovalInstanceID = &instanceID
+
+	if aerr := audit.Record(ctx, tx, leaveAudit(id, "leave_request", string(rec.Status), string(dom.LeaveStatusPending), actor, "SUBMIT")); aerr != nil {
 		return dom.LeaveRequest{}, aerr
 	}
 	return updated, nil
@@ -660,7 +541,7 @@ func (s *LeaveService) submitTx(ctx context.Context, tx pgx.Tx, rec dom.LeaveReq
 
 // --- cancel (withdraw a not-yet-approved request) ---
 
-// Cancel withdraws a DRAFT/PENDING_* request (LR-7). Releases any pending reservation;
+// Cancel withdraws a DRAFT/PENDING request (LR-7). Releases any pending reservation;
 // no schedule effect (the request never reached APPROVED).
 func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.LeaveRequest, error) {
 	actor := actorEmployeeID(ctx)
@@ -671,7 +552,7 @@ func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.Leave
 			return lerr
 		}
 		switch rec.Status {
-		case dom.LeaveStatusDraft, dom.LeaveStatusPendingL1, dom.LeaveStatusPendingHR:
+		case dom.LeaveStatusDraft, dom.LeaveStatusPending:
 		default:
 			return stateConflict(rec.Status)
 		}
@@ -687,8 +568,8 @@ func (s *LeaveService) Cancel(ctx context.Context, id, reason string) (dom.Leave
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 			ID:               id,
 			Status:           dom.LeaveStatusCancelled,
-			NoLeader:         rec.Routing.NoLeader,
-			AssignedLeaderID: rec.Routing.AssignedLeaderID,
+			NoLeader:         rec.NoLeader,
+			AssignedLeaderID: rec.AssignedLeaderID,
 			ClockInConflict:  rec.ClockInConflict,
 		})
 		if uerr != nil {
@@ -738,8 +619,8 @@ func (s *LeaveService) CancelApproved(ctx context.Context, id, reason string) (d
 		updated, uerr := s.repo.UpdateLeaveRequestStatus(ctx, tx, UpdateStatusParams{
 			ID:               id,
 			Status:           dom.LeaveStatusCancelled,
-			NoLeader:         rec.Routing.NoLeader,
-			AssignedLeaderID: rec.Routing.AssignedLeaderID,
+			NoLeader:         rec.NoLeader,
+			AssignedLeaderID: rec.AssignedLeaderID,
 			ClockInConflict:  rec.ClockInConflict,
 		})
 		if uerr != nil {
@@ -864,78 +745,12 @@ func (s *LeaveService) lockRequest(ctx context.Context, tx pgx.Tx, id string) (d
 	return rec, nil
 }
 
-// buildTimeline assembles the FE timeline[] from the leave_approvals rows plus an
-// implicit leading "pending" marker. No-leader requests have NO L1 entry (the
-// collapsed-timeline variant); the first marker is then HR-stage.
-func (s *LeaveService) buildTimeline(ctx context.Context, rec dom.LeaveRequest) []dom.LeaveTimelineEntry {
-	rows, err := s.repo.ListLeaveApprovalsForRequest(ctx, rec.ID)
-	if err != nil {
-		return nil
-	}
-	out := make([]dom.LeaveTimelineEntry, 0, len(rows)+1)
-	// implicit submitted/pending marker at the first stage (HR if no-leader, else L1).
-	firstStage := dom.StageL1
-	if rec.Routing.NoLeader {
-		firstStage = dom.StageHR
-	}
-	hasFirst := false
-	for _, r := range rows {
-		if r.Stage == firstStage {
-			hasFirst = true
-		}
-	}
-	if !hasFirst && (rec.Status == dom.LeaveStatusPendingL1 || rec.Status == dom.LeaveStatusPendingHR) {
-		out = append(out, dom.LeaveTimelineEntry{
-			Stage:      firstStage,
-			Status:     dom.TimelineStatusPending,
-			OccurredAt: rec.CreatedAt,
-		})
-	}
-	for _, r := range rows {
-		out = append(out, dom.LeaveTimelineEntry{
-			Stage:          r.Stage,
-			Status:         timelineStatus(r.Decision),
-			ActorID:        r.ActorID,
-			ActorRole:      r.ActorRole,
-			Decision:       decisionPtr(r.Decision),
-			DecisionNote:   r.DecisionNote,
-			RejectReason:   r.RejectReason,
-			Override:       r.IsOverride,
-			OverrideReason: r.OverrideReason,
-			OccurredAt:     r.OccurredAt,
-		})
-	}
-	// If still PENDING_HR after an L1 approval, append the implicit HR pending marker.
-	if rec.Status == dom.LeaveStatusPendingHR && !rec.Routing.NoLeader {
-		hasHR := false
-		for _, r := range rows {
-			if r.Stage == dom.StageHR {
-				hasHR = true
-			}
-		}
-		if !hasHR {
-			out = append(out, dom.LeaveTimelineEntry{Stage: dom.StageHR, Status: dom.TimelineStatusPending, OccurredAt: rec.UpdatedAt})
-		}
-	}
-	return out
-}
-
-// reread re-loads the request with denormalized names + timeline for the DTO.
+// reread re-loads the request with denormalized names for the DTO.
 func (s *LeaveService) reread(ctx context.Context, fallback dom.LeaveRequest) (dom.LeaveRequest, error) {
 	if full, err := s.repo.GetLeaveRequest(ctx, fallback.ID); err == nil {
-		full.Timeline = s.buildTimeline(ctx, full)
 		return full, nil
 	}
-	fallback.Timeline = s.buildTimeline(ctx, fallback)
 	return fallback, nil
-}
-
-// guardSelf enforces LA-6: an approver cannot decide their own request.
-func guardSelf(ctx context.Context, rec dom.LeaveRequest) error {
-	if p, ok := auth.PrincipalFrom(ctx); ok && p.EmployeeID != "" && p.EmployeeID == rec.EmployeeID {
-		return apperr.Forbidden()
-	}
-	return nil
 }
 
 // stateConflict is the 409 for a wrong/terminal-state transition (carries status).
@@ -948,49 +763,6 @@ func stateConflict(cur dom.LeaveStatus) error {
 	}
 }
 
-// balanceRecheckFailed is the 422 for LA-5 (offers the override CTA).
-func balanceRecheckFailed(requested, remaining int) error {
-	return &apperr.Error{
-		Code:       "BALANCE_RECHECK_FAILED",
-		HTTPStatus: 422,
-		Message:    "Saldo cuti tidak mencukupi saat persetujuan akhir.",
-		Fields: map[string]string{
-			"requires_override": "true",
-			"requested_days":    itoa(requested),
-			"remaining_days":    itoa(remaining),
-		},
-	}
-}
-
-// dtoNewStatus maps the DB schedule status to the openapi ScheduleImpactEntry
-// new_status enum: 'CANCELLED_BY_LEAVE' → 'LEAVE'. 'LEAVE' lives ONLY at the DTO.
-func dtoNewStatus(dbStatus string) string {
-	if dbStatus == "CANCELLED_BY_LEAVE" {
-		return "LEAVE"
-	}
-	return dbStatus
-}
-
-func timelineStatus(d dom.LeaveDecision) dom.TimelineStatus {
-	switch d {
-	case dom.DecisionApproved:
-		return dom.TimelineStatusApproved
-	case dom.DecisionRejected:
-		return dom.TimelineStatusRejected
-	case dom.DecisionOverrideApproved:
-		return dom.TimelineStatusOverrideApproved
-	default:
-		return dom.TimelineStatusPending
-	}
-}
-
-func decisionPtr(d dom.LeaveDecision) *dom.LeaveDecision {
-	if d == "" {
-		return nil
-	}
-	return &d
-}
-
 func leaveAudit(id, entity, before, after string, actor *string, action string) audit.Entry {
 	return audit.Entry{
 		Action:     audit.ActionUpdate,
@@ -999,14 +771,6 @@ func leaveAudit(id, entity, before, after string, actor *string, action string) 
 		Before:     map[string]any{"status": before},
 		After:      map[string]any{"status": after, "decided_by": ptrStr(actor), "decision": action},
 	}
-}
-
-func actorRole(ctx context.Context) *string {
-	if p, ok := auth.PrincipalFrom(ctx); ok {
-		r := string(p.Role)
-		return &r
-	}
-	return nil
 }
 
 func strOrNil(s string) *string {

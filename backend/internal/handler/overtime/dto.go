@@ -114,7 +114,7 @@ type overtimeResponse struct {
 	FlaggedNoPreapproval bool                `json:"flagged_no_preapproval"`
 	Reason               *string             `json:"reason"`
 	Calculation          calculationResponse `json:"calculation"`
-	Approvals            []approvalResponse  `json:"approvals,omitempty"`
+	ApprovalInstanceID   *string             `json:"approval_instance_id"`
 	CreatedAt            string              `json:"created_at"`
 	UpdatedAt            string              `json:"updated_at"`
 }
@@ -175,24 +175,11 @@ func toOvertimeResponse(o dom.Overtime, calc svc.Calculation, includeApprovals b
 		FlaggedNoPreapproval: o.FlaggedNoPreapproval,
 		Reason:               o.Reason,
 		Calculation:          toCalculationResponse(calc),
+		ApprovalInstanceID:   o.ApprovalInstanceID,
 		CreatedAt:            rfc3339(o.CreatedAt),
 		UpdatedAt:            rfc3339(o.UpdatedAt),
 	}
-	if includeApprovals {
-		out.Approvals = make([]approvalResponse, 0, len(o.Approvals))
-		for _, a := range o.Approvals {
-			ar := approvalResponse{
-				Level:     a.Level,
-				Decision:  a.Decision,
-				Reason:    a.Reason,
-				DecidedAt: rfc3339(a.DecidedAt),
-			}
-			if a.ApproverID != nil {
-				ar.Approver = &employeeRef{ID: *a.ApproverID, Name: derefStr(a.ApproverName)}
-			}
-			out.Approvals = append(out.Approvals, ar)
-		}
-	}
+	_ = includeApprovals // approval chain is OWNED BY E11 (read via approval_instance_id)
 	return out
 }
 
@@ -231,21 +218,6 @@ func toHolidayResponse(h dom.Holiday) holidayResponse {
 		CreatedAt:       rfc3339(h.CreatedAt),
 		UpdatedAt:       rfc3339(h.UpdatedAt),
 	}
-}
-
-func toBulkResultResponse(r svc.BulkResult) bulkResultResponse {
-	out := bulkResultResponse{
-		Succeeded: make([]string, 0, len(r.Succeeded)),
-		Failed:    make([]bulkFailedItem, 0, len(r.Failed)),
-	}
-	out.Succeeded = append(out.Succeeded, r.Succeeded...)
-	for _, f := range r.Failed {
-		out.Failed = append(out.Failed, bulkFailedItem{
-			ID:    f.ID,
-			Error: bulkFailedErr{Code: f.Code, Message: f.Message},
-		})
-	}
-	return out
 }
 
 func derefStr(p *string) string {

@@ -57,9 +57,9 @@ export function hasPermission(permissions: readonly Permission[], requires: Requ
 
 /**
  * Primary sidebar nav (domain backbone). `Kotak Masuk` is a cross-cutting workflow surface —
- * the aggregated "needs my decision" queue (leave + overtime + attendance + change requests),
- * a *view* over the same data the per-domain approval tabs show (one source of truth). It is
- * visible to anyone who can approve *anything* (`anyOf`).
+ * the aggregated "needs my decision" queue (E11 approval lines + E5 attendance verification),
+ * a *view* over the same data the per-domain tabs show (one source of truth). It is visible to
+ * anyone on an approval line (`approvals.act`) or who verifies attendance (`anyOf`).
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard, requires: 'dashboard.view' },
@@ -67,9 +67,10 @@ export const NAV_ITEMS: readonly NavItem[] = [
     to: '/inbox',
     labelKey: 'nav.inbox',
     icon: Inbox,
-    requires: {
-      anyOf: ['leave.approve', 'overtime.approve', 'attendance.verify', 'change_requests.approve'],
-    },
+    // E11: approval visibility is now `approvals.act` (line-member "needs my decision" queue;
+    // acting on a line is membership-gated server-side). `attendance.verify` keeps the E5
+    // verification queue in the same inbox.
+    requires: { anyOf: ['approvals.act', 'attendance.verify'] },
   },
   { to: '/employees', labelKey: 'nav.employees', icon: Users, requires: 'employees.read' },
   { to: '/placements', labelKey: 'nav.placements', icon: MapPin, requires: 'placements.read' },
@@ -147,7 +148,6 @@ export const SECTION_SUBNAV: Record<string, readonly SubnavItem[]> = {
     // Perjanjian kerja (employment agreement) is a SWP↔employee contract — it lives
     // under Karyawan, not under Klien (the agreement is not client-scoped).
     { to: '/agreements', labelKey: 'nav.agreements', requires: 'agreements.read' },
-    { to: '/change-requests', labelKey: 'nav.changeRequests', requires: 'change_requests.read' },
   ],
   '/client-companies': [
     { to: '/client-companies', labelKey: 'nav.clientCompanies', requires: 'clients.read' },
@@ -252,7 +252,6 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   [/^\/client-companies\/[^/]+\/roster/, 'placements.read'],
   [/^\/client-companies/, 'clients.read'],
   [/^\/employees/, 'employees.read'],
-  [/^\/change-requests/, 'change_requests.read'],
   [/^\/agreements/, 'agreements.read'],
   [/^\/master-data/, 'masterdata.manage'],
   [/^\/placements/, 'placements.read'],
@@ -267,12 +266,7 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   [/^\/overtime/, 'overtime.read'],
   [/^\/payroll/, 'payroll.read'],
   [/^\/reports/, 'reports.read'],
-  [
-    /^\/inbox/,
-    {
-      anyOf: ['leave.approve', 'overtime.approve', 'attendance.verify', 'change_requests.approve'],
-    },
-  ],
+  [/^\/inbox/, { anyOf: ['approvals.act', 'attendance.verify'] }],
   [/^\/settings/, 'settings.access'],
 ];
 

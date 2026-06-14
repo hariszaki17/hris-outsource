@@ -84,6 +84,7 @@ func mapOvertimeFromList(r sqlcgen.ListOvertimeRow) dom.Overtime {
 		CrossMidnight:        r.CrossMidnight,
 		Source:               dom.OvertimeSource(r.Source),
 		Status:               dom.OvertimeStatus(r.Status),
+		ApprovalInstanceID:   r.ApprovalInstanceID,
 		DayType:              dom.OvertimeTier(r.DayType),
 		WorkedMinutes:        int(r.WorkedMinutes),
 		CountedMinutes:       int(r.CountedMinutes),
@@ -117,6 +118,7 @@ func mapOvertimeFromGet(r sqlcgen.GetOvertimeRow) dom.Overtime {
 		CrossMidnight:        r.CrossMidnight,
 		Source:               dom.OvertimeSource(r.Source),
 		Status:               dom.OvertimeStatus(r.Status),
+		ApprovalInstanceID:   r.ApprovalInstanceID,
 		DayType:              dom.OvertimeTier(r.DayType),
 		WorkedMinutes:        int(r.WorkedMinutes),
 		CountedMinutes:       int(r.CountedMinutes),
@@ -226,16 +228,6 @@ func mapOvertimeFromUpdate(r sqlcgen.UpdateOvertimeStatusRow) dom.Overtime {
 	}
 }
 
-func mapApproval(r sqlcgen.OvertimeApproval) dom.OvertimeApproval {
-	return dom.OvertimeApproval{
-		Level:        int(r.Level),
-		Decision:     r.Decision,
-		ApproverID:   r.ApproverID,
-		ApproverName: r.ApproverName,
-		Reason:       r.Reason,
-		DecidedAt:    r.DecidedAt,
-	}
-}
 
 // --- holiday mappers (holidays are GLOBAL ONLY; no applicable_service_lines) ---
 
