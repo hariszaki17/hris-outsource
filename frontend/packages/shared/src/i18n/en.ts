@@ -158,7 +158,6 @@ export const en: Messages = {
       required: 'Required',
       optional: 'Optional',
       lineBadge: 'Line {{n}}',
-      memberAlreadyAssigned: 'This member is already on another line in this template.',
       connector: 'then',
       orNote: 'Any one member clears the line (OR).',
       addLine: 'Add line',
@@ -2226,6 +2225,7 @@ export const en: Messages = {
       employeeLabel: 'Employee',
       typeLabel: 'Leave Type',
       typePlaceholder: 'Select a leave type…',
+      typePlaceholderNoEmployee: 'Select an employee first…',
       deltaLabel: 'Days to add',
       saveBtn: 'Save',
     },
@@ -3076,6 +3076,8 @@ export const en: Messages = {
     leaveQuota: 'Insufficient leave quota',
     leaveBackdated: 'Cannot request a past date',
     leaveNeedDoc: 'This leave type requires a document',
+    leaveStatutoryNote:
+      'Statutory entitlement: {{count}} days — end date pre-filled, you may shorten it.',
     leaveError: 'Failed to submit request',
     leaveBalance: 'Annual leave remaining: {{days}} days',
     // Overtime (/me/overtime, /me/overtime/new)

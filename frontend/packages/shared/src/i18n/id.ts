@@ -162,7 +162,6 @@ export const id = {
       required: 'Wajib',
       optional: 'Opsional',
       lineBadge: 'Baris {{n}}',
-      memberAlreadyAssigned: 'Anggota ini sudah ada di baris lain pada template ini.',
       connector: 'lalu',
       orNote: 'Salah satu anggota cukup untuk meneruskan (OR).',
       addLine: 'Tambah baris',
@@ -2247,6 +2246,7 @@ export const id = {
       employeeLabel: 'Karyawan',
       typeLabel: 'Jenis Cuti',
       typePlaceholder: 'Pilih jenis cuti…',
+      typePlaceholderNoEmployee: 'Pilih karyawan dahulu…',
       deltaLabel: 'Jumlah hari (tambahan)',
       saveBtn: 'Simpan',
     },
@@ -3100,6 +3100,8 @@ export const id = {
     leaveQuota: 'Kuota cuti tidak cukup',
     leaveBackdated: 'Tidak dapat mengajukan tanggal lampau',
     leaveNeedDoc: 'Jenis cuti ini memerlukan dokumen',
+    leaveStatutoryNote:
+      'Hak {{count}} hari sesuai ketentuan — tanggal selesai terisi otomatis, bisa dipersingkat.',
     leaveError: 'Gagal mengirim pengajuan',
     leaveBalance: 'Sisa cuti tahunan: {{days}} hari',
     // Overtime (/me/overtime, /me/overtime/new)
