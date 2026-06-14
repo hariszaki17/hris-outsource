@@ -1,0 +1,108 @@
+// Package attendance (handler) — hand-written chi handlers for the 10 FE-used E5
+// endpoints (F5.3 verification + F5.4 corrections). Decode → validate → service →
+// httpx.WriteJSON; apperr envelopes flow through httpx.WriteError. Bulk verify/
+// reject pick 200 (≥1 succeeded) vs 422 (all failed). Matches the openapi
+// byte-for-shape; mirrors the scheduling/placement handler patterns.
+package attendance
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
+	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
+)
+
+// Handler holds the attendance + correction services (one struct serves both,
+// like scheduling's NewHandler(masters, schedule)).
+type Handler struct {
+	attendance  *svc.AttendanceService
+	corrections *svc.CorrectionService
+}
+
+// NewHandler wires the handler to its services.
+func NewHandler(a *svc.AttendanceService, c *svc.CorrectionService) *Handler {
+	return &Handler{attendance: a, corrections: c}
+}
+
+// --- shared helpers ---
+
+func decodeJSON(r *http.Request, dst any) error {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		return apperr.Invalid(nil).WithCause(err)
+	}
+	return nil
+}
+
+// decodeOptionalJSON decodes a body that may be empty (verify/approve note).
+func decodeOptionalJSON(r *http.Request, dst any) error {
+	if r.Body == nil {
+		return nil
+	}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(dst); err != nil {
+		// An empty body is acceptable for optional-body endpoints.
+		if err.Error() == "EOF" {
+			return nil
+		}
+		return apperr.Invalid(nil).WithCause(err)
+	}
+	return nil
+}
+
+func strPtrParam(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func intParam(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+// csvParam splits a comma-separated query value into a slice (empty → nil).
+func csvParam(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	cur := ""
+	for _, c := range s {
+		if c == ',' {
+			if cur != "" {
+				out = append(out, cur)
+			}
+			cur = ""
+			continue
+		}
+		cur += string(c)
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}
+
+// parseDateParam parses a YYYY-MM-DD query param into a *time.Time (nil if empty/invalid).
+func parseDateParam(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil
+	}
+	return &t
+}

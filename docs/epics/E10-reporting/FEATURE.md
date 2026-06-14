@@ -109,7 +109,7 @@ flowchart TD
 
 ### F10.2 — Role-Based Dashboards
 
-Landing dashboards tailored by role: agent (my next shift, my attendance/leave/OT status), shift leader (today's roster, pending approvals, exceptions for their company), HR (cross-company KPIs).
+Landing dashboards tailored by role: agent (my next shift, my attendance/leave/OT status), shift leader (today's roster, pending approvals, exceptions for their company — on **web and mobile**), HR (cross-company KPIs). **Super Admin** sees the HR cockpit **plus admin-only widgets** (users & access, audit feed, org rollups, pending grants — DB-7).
 
 ```mermaid
 flowchart LR
@@ -119,7 +119,11 @@ flowchart LR
     subgraph SYS[System]
         D2 -- Agent --> A1[My shift, attendance, leave/OT status]
         D2 -- Leader --> B1[Roster today, approvals pending, exceptions - own company]
-        D2 -- HR --> C1[Cross-company KPIs: attendance, OT, leave, headcount]
+        B1 --> B2[Same payload backs web team dashboard AND mobile Beranda - DB-8]
+        D2 -- HR Admin --> C1[Cross-company KPIs: attendance, OT, leave, headcount]
+        D2 -- Super Admin --> C1
+        C1 --> C2{Super Admin?}
+        C2 -- Yes --> C3[+ Admin widgets: users and access, audit feed, org rollups, pending grants - DB-7]
     end
 ```
 
@@ -129,17 +133,17 @@ flowchart LR
 
 ### F10.3 — Attendance & Billable-Hours Report (v1 priority)
 
-The core outsource report: **verified** worked/billable hours per agent / client company / service line / period — what SWP uses to bill clients (billing done outside the system) and analyze utilization.
+The core outsource report: **verified** worked/billable hours per agent / client company / position / period — what SWP uses to bill clients (billing done outside the system) and analyze utilization.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Leader]
-        R1([Run report]) --> R2[Filter: company, service line, period]
+        R1([Run report]) --> R2[Filter: company, position, period]
         R2 --> R5{Export?}
     end
     subgraph SYS[System]
         R2 --> Q1[Aggregate verified attendance on billable codes E5/E2]
-        Q1 --> Q2[Group by agent / company / service line / period]
+        Q1 --> Q2[Group by agent / company / position / period]
         Q2 --> R3[Render report + totals]
         R5 -- Yes --> Q3[Export via F10.4]
     end
@@ -183,6 +187,10 @@ flowchart TD
 - ✅ **Billable counting** = verified records only (consistent with E5).
 - ✅ **Notification preferences** = all-on in v1 (mute non-critical later).
 - ✅ **Billing math** = hours only (rates applied outside the system).
+
+**Resolved (2026-06-11), see [EPICS.md §8](../../EPICS.md):**
+- ✅ **Super Admin dashboard = HR cockpit superset** (DB-7) — adds an admin-only widget section (users & access, recent audit feed, org rollups by position, pending grants) on `HrDashboard.admin`, present only for `super_admin`. Extends the earlier "same body, distinct label" stance into a true superset.
+- ✅ **Shift-leader dashboard is dual-surface** (DB-8) — the existing `LeaderDashboard` payload backs both the web team dashboard and a mobile Beranda; no new endpoint.
 
 **Deferred to build/tech phase:**
 1. Push provider (FCM/APNs) setup + reminder lead times.

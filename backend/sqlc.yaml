@@ -1,0 +1,25 @@
+version: "2"
+# Type-safe Go from plain SQL. Schema is the goose migration set (sqlc reads the
+# Up direction only); queries are the annotated .sql files per epic.
+sql:
+  - engine: "postgresql"
+    schema: "db/migrations"
+    queries: "db/queries/*"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/repository/sqlc"
+        sql_package: "pgx/v5"
+        emit_interface: true # generates Querier — repositories depend on the iface (mockable)
+        emit_json_tags: false
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        overrides:
+          # All timestamps come back as time.Time; pgx maps timestamptz natively.
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "time.Time"
+              pointer: true

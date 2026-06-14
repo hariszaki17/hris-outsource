@@ -7,7 +7,7 @@
 
 ## 1. Shape of the change
 
-Legacy `shifts` are **per company** (`company_id`); hris-outsource makes the shift master **global** (with an optional service-line tag), so legacy shifts collapse + dedupe. Legacy `schedules` key on `user_id`; the new `Schedule` keys on `employee_id` and additionally links the **placement** active on that date (legacy had no such link).
+Legacy `shifts` are **per company** (`company_id`); hris-outsource makes the shift master a single **global** catalog, so legacy shifts collapse + dedupe. Legacy `schedules` key on `user_id`; the new `Schedule` keys on `employee_id` and additionally links the **placement** active on that date (legacy had no such link).
 
 ## 2. Source tables
 
@@ -26,8 +26,7 @@ Legacy `shifts` are **per company** (`company_id`); hris-outsource makes the shi
 | `start_at` | `start_at` | — |
 | `end_at` | `end_at` | if `end_at <= start_at` ⇒ set `spans_midnight = true` |
 | `start_break` / `end_break` | same | nullable |
-| `company_id` | **DROP** | global catalog; used only to dedupe/inform service-line tagging |
-| — | `service_line_id` | **manual tag** (no source); optional |
+| `company_id` | **DROP** | global catalog; used only to dedupe identical shifts |
 | `status` | `status` | active/inactive |
 
 ### `schedules` → Schedule
@@ -45,7 +44,6 @@ Legacy `shifts` are **per company** (`company_id`); hris-outsource makes the shi
 | # | Gap | Handling |
 |---|-----|----------|
 | G-1 | **Per-company shift dedupe** | Collapse identical shifts (same title + start/end/break) across companies into one master row; remap schedules to the surviving id. |
-| G-2 | **Service-line tag absent** | Optional manual tagging post-migration (consistent with E2/E3 service-line decision); untagged shifts are still usable globally. |
 | G-3 | **Schedule → placement link missing** | Derive `placement_id` from the active placement on each `work_date`; rows with no active placement (or overlapping placements) go to a review queue, not silently dropped. |
 | G-4 | **Identity remap** | `schedules.user_id` → Employee via the users↔employees crosswalk (E2 G-5); orphan user_ids flagged. |
 | G-5 | **Historical vs future schedules** | Decide cutoff: migrate all history, or only schedules from a date forward (future + recent). Past schedules are mostly needed for attendance reconciliation (E5). Confirm window with E9. |

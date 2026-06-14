@@ -7,12 +7,12 @@
 
 ## 1. Context & problem
 
-Agents move between client sites — a parking attendant reassigned from one mall to another, a building crew rotated to a new property. The system must let HR **move an agent to a different client company and/or service line** while preserving the full placement history (where they were, when, and why they moved). Legacy ims-system tracked this only as a typed-over `placement` string and a `new_office` note, losing the chain. This feature makes transfer a first-class, history-preserving operation.
+Agents move between client sites — a parking attendant reassigned from one mall to another, a building crew rotated to a new property. The system must let HR **move an agent to a different client company (and/or site/position)** while preserving the full placement history (where they were, when, and why they moved). Legacy ims-system tracked this only as a typed-over `placement` string and a `new_office` note, losing the chain. This feature makes transfer a first-class, history-preserving operation.
 
 ## 2. Goals & non-goals
 
 **Goals**
-- Move an active agent to a new company/service line in one operation.
+- Move an active agent to a new company (and/or site/position) in one operation.
 - Close the current placement (reason `Transferred`) and open a **linked successor** (`predecessor_id`).
 - Preserve a queryable transfer history per agent.
 - Handle the side effects: vacate shift-leader role if the agent led the old company; warn if the new company has no leader.
@@ -37,7 +37,7 @@ sequenceDiagram
     participant OLD as Old Shift Leader
     participant NEW as New Shift Leader
     participant AG as Agent
-    HR->>SYS: Transfer agent → new company + service line + period
+    HR->>SYS: Transfer agent → new company + site + position + period
     SYS->>SYS: Validate (active placement exists, new company active,<br/>buffer, agreement window)
     alt new company has no leader
         SYS-->>HR: Warn (assign leader after transfer)
@@ -55,9 +55,9 @@ sequenceDiagram
 
 | Ref | Rule |
 |-----|------|
-| TR-1 | Transfer requires an agent with a current `Active`/`Expiring` placement, a **different** target company **or** service line, and a new period. |
-| TR-2 | The current placement is closed with `ended_reason = Transferred` and `ended_at = newStart − 1 day` (honouring the 1-day buffer, F3.1 BR-2). |
-| TR-3 | A successor placement is created (F3.1 rules apply: active company, position from master, agreement window/auto-cap, buffer) with `predecessor_id` → the closed placement. |
+| TR-1 | Transfer requires an agent with a current `Active`/`Expiring` placement, a **different** target company **or** site **or** position, and a new period. *(2026-06-12: `service_line` removed — a position-only change at the same company/site is a valid transfer.)* |
+| TR-2 | The current placement is closed with `ended_reason = Transferred` and `ended_at = newStart − 1 day` (honouring the 1-day buffer, F3.1 BR-2). A transfer (like a renewal) closes **only the placement** and **never revokes the agent's login** — login revocation is employment-end only (E2 [F2.7](../../E2-identity/prds/offboarding.md), INV-6 / OB-2). |
+| TR-3 | A successor placement is created (F3.1 rules apply: active company, free-text position, agreement window/auto-cap, buffer) with `predecessor_id` → the closed placement. |
 | TR-4 | If the agent was the **shift leader of the old company**, the transfer **vacates** that leadership (F3.4) and raises a vacancy for the old company. |
 | TR-5 | If the **new company has no shift leader**, the transfer still succeeds but warns and prompts F3.4. |
 | TR-6 | Transfer is **atomic** — closing the old and creating the new succeed or fail together. |
@@ -76,11 +76,11 @@ Feature: Agent transfer between client companies
 
   Background:
     Given I am signed in as an HR admin
-    And "Budi" has an active placement at "Mall Kelapa Gading" in "Parking"
+    And "Budi" has an active placement at "Mall Kelapa Gading" as "Parking Attendant"
     And "Plaza Senayan" is an active client company
 
   Scenario: Transfer an agent to a new company
-    When I transfer "Budi" to "Plaza Senayan" in "Building Management" starting next Monday
+    When I transfer "Budi" to "Plaza Senayan" as "Building Technician" starting next Monday
     Then his "Mall Kelapa Gading" placement is closed with reason "Transferred"
     And its end date is the day before next Monday
     And a new active/scheduled placement at "Plaza Senayan" is created with predecessor set to the old one
@@ -105,7 +105,7 @@ Feature: Agent transfer between client companies
     And I am warned to assign a shift leader for "Plaza Senayan"
 
   Scenario: Transfer requires an actual change
-    When I "transfer" "Budi" to the same company and same service line
+    When I "transfer" "Budi" to the same company, same site, and same position
     Then it is rejected as a renewal (use F3.2), not a transfer
 
   Scenario: Position may change on transfer
@@ -121,7 +121,7 @@ Feature: Agent transfer between client companies
 |---|------|-------------------|
 | C-1 | Transfer effective immediately (new start = today) | Old closed `ended_at = yesterday`; new `Active` today. |
 | C-2 | Transfer with a future start | New placement `Scheduled`; old stays active until `newStart − 1 day`. |
-| C-3 | Same company, different service line | Valid transfer (TR-1 allows service-line-only change). |
+| C-3 | Same company/site, different position | Valid transfer (TR-1 allows a position-only change). |
 | C-4 | Agent currently `Expiring` | Transfer allowed; treated like active. |
 | C-5 | Destination company is inactive/archived | Blocked (F3.1 BR-3). |
 | C-6 | Agent has no active placement (already ended) | Use F3.1 (new placement), not transfer. |

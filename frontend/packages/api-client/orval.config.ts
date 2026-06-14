@@ -1,0 +1,92 @@
+import { defineConfig } from 'orval';
+
+/**
+ * Contract-first codegen. Source of truth = the per-epic openapi.yaml under docs/api
+ * (CONVENTIONS.md). Output under src/gen is GENERATED — never hand-edit (ENGINEERING.md E2).
+ * Run `pnpm gen`.
+ *
+ * Specs are self-contained per epic (each redefines ErrorEnvelope, etc.), so we generate
+ * one project per epic into its own folder to avoid schema name collisions.
+ *
+ * NOTE (caveat, WEB-STACK.md §4): epics using oneOf/discriminator (incl. E6) can produce
+ * imperfect Zod from Orval on OpenAPI 3.1. We generate Zod for clean specs (E1) and defer
+ * Zod for union-heavy ones until validated; react-query + MSW mocks still generate for all.
+ */
+const SPECS = '../../../docs/api';
+
+const reactQuery = (epic: string, file: string, mock: boolean) => ({
+  input: { target: `${SPECS}/${file}/openapi.yaml` },
+  output: {
+    mode: 'tags-split' as const,
+    target: `./src/gen/${epic}/${epic}.ts`,
+    schemas: `./src/gen/${epic}/model`,
+    client: 'react-query' as const,
+    httpClient: 'fetch' as const,
+    mock: mock ? { type: 'msw' as const, useExamples: true } : false,
+    clean: true,
+    override: {
+      mutator: { path: './src/mutator.ts', name: 'customFetch' },
+      query: { useQuery: true, signal: true },
+    },
+  },
+});
+
+const zod = (epic: string, file: string) => ({
+  input: { target: `${SPECS}/${file}/openapi.yaml` },
+  output: {
+    mode: 'tags-split' as const,
+    target: `./src/gen/${epic}/${epic}.zod.ts`,
+    client: 'zod' as const,
+    fileExtension: '.zod.ts',
+    clean: false,
+  },
+});
+
+export default defineConfig({
+  // E1 Foundations — auth, users, audit, platform. No oneOf → full Zod + MSW mocks.
+  e1: reactQuery('e1', 'E1-foundations', true),
+  'e1-zod': zod('e1', 'E1-foundations'),
+
+  // E2 Identity — employees, change-requests, agreements, client-companies, master-data.
+  // Typed react-query hooks + MSW mocks. Zod DEFERRED (Orval-zod caveat, WEB-STACK §4):
+  // forms hand-author their zod schemas; re-enable when the spec/Orval is reconciled.
+  e2: reactQuery('e2', 'E2-identity', true),
+
+  // E3 Placement — placements (+ transfer/renew/end/terminate/resign actions), shift-leader
+  // assignments, company roster. Typed hooks + MSW mocks; Zod deferred (1 oneOf union + forms
+  // hand-author zod, WEB-STACK §4).
+  e3: reactQuery('e3', 'E3-placement', true),
+
+  // E4 Shift Scheduling — shift masters + weekly schedule grid (+ bulk-apply / conflict-check
+  // actions). Typed hooks + MSW mocks; Zod deferred (3 unions, WEB-STACK §4).
+  e4: reactQuery('e4', 'E4-shift-scheduling', true),
+
+  // E5 Attendance — clock-in/out (mobile), attendance records, verification queue, corrections.
+  // Typed hooks + MSW mocks; Zod deferred (1 union, WEB-STACK §4).
+  e5: reactQuery('e5', 'E5-attendance', true),
+
+  // E6 Leave — typed react-query hooks only. MSW mocks + Zod DEFERRED: Orval's faker
+  // mocks emit `string | undefined` against required fields on E6's union/nullable
+  // schemas under strict null checks (the documented oneOf/discriminator caveat,
+  // WEB-STACK §4). Hand-author E6 fixtures or post-process before enabling.
+  e6: reactQuery('e6', 'E6-leave', true),
+
+  // E7 Overtime — OT records/rekap, approval queue (L1/final/bulk), the central OT decision
+  // detail (auto-detect/confirm/withdraw), OT rules, HR holiday calendar. Tags: overtime,
+  // overtime-internal, holidays. Typed hooks + MSW mocks; Zod deferred (unions, WEB-STACK §4).
+  e7: reactQuery('e7', 'E7-overtime', true),
+
+  // E8 Payroll (read-only) — payslip archive + detail, audit notes, Excel export. Tags:
+  // payslips, payslip-audit-notes, payslip-export. Typed hooks + MSW mocks; Zod deferred.
+  e8: reactQuery('e8', 'E8-payroll', true),
+
+  // E10 Reporting & Notifications — dashboards, notifications, billable report, export
+  // framework. Tags: dashboards, notifications, reports, exports. Typed hooks + MSW mocks;
+  // Zod deferred (unions, WEB-STACK §4).
+  e10: reactQuery('e10', 'E10-reporting', true),
+
+  // E11 Approvals — configurable per-company multi-line approval engine (templates +
+  // instances/actions). Tags: approval-templates, approval-instances. Single source of truth
+  // for leave/overtime approval (E6/E7 wired through it). Typed hooks + MSW mocks; Zod deferred.
+  e11: reactQuery('e11', 'E11-approvals', true),
+});

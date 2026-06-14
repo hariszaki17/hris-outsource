@@ -32,6 +32,7 @@ Migration tooling (CLI/job) → Postgres. Reports surface in F9.3.
 | Ref | Rule |
 |-----|------|
 | LD-1 | Load order: **identity/master (E2) → placement (E3) → schedule (E4) → attendance (E5) → leave (E6) → overtime (E7) → payroll (E8)**. |
+| LD-1b | During E2 load, **auto-create one primary "Main Site" per ClientCompany** (E2 F2.6 / DATA-MAPPING G-8) with an empty geofence, so the required `Placement.site_id` (E3) resolves at placement load. Sites are net-new — no legacy geo is migrated; HR configures geofences post-cutover. |
 | LD-2 | Each row is **upserted by crosswalk** (`legacy_id → new_id`): existing → update, new → insert + write crosswalk (INV-1). |
 | LD-3 | A row whose dependencies aren't loaded yet is **deferred/queued**, not force-inserted with dangling refs. |
 | LD-4 | Loads are **transactional per batch**; a failed batch rolls back and is reported (no partial corruption). |

@@ -7,7 +7,7 @@
 
 ## 1. Goal & outcome
 
-Define **who** the system is about (agents/employees + their SWP login), the **employment relationship** (PKWT/PKWTT agreement that placement designations sit under), the **client company directory** (placement targets), and the **master/reference data** (service lines, positions, leave types, attendance codes, overtime rules). E3 already depends on these; E4–E8 consume them. This epic makes them first-class and admin-managed instead of the free-text / encrypted-blob shapes in legacy.
+Define **who** the system is about (agents/employees + their SWP login), the **employment relationship** (PKWT/PKWTT agreement that placement designations sit under), the **client company directory** (placement targets), and the **master/reference data** (leave types, attendance codes, overtime rules). E3 already depends on these; E4–E8 consume them. This epic makes them first-class and admin-managed instead of the free-text / encrypted-blob shapes in legacy. **Position is free-text per placement (E3) — no master, no CRUD here.**
 
 ## 2. Actors & roles
 
@@ -21,7 +21,7 @@ Define **who** the system is about (agents/employees + their SWP login), the **e
 
 ## 3. Scope
 
-**In scope:** Employee profile + user provisioning, EmploymentAgreement (PKWT/PKWTT + current comp), ClientCompany directory, ServiceLine + Position master, operational master (leave types, attendance codes, overtime rules).
+**In scope:** Employee profile + user provisioning, EmploymentAgreement (PKWT/PKWTT + current comp), ClientCompany directory, **Client Sites + geofence config** (placement locations per company), operational master (leave types, attendance codes, overtime rules).
 **Out of scope:** auth/RBAC mechanics & sessions (E1), placement (E3), schedules (E4), the *behavior* of attendance/leave/overtime (E5/E6/E7 — E2 only owns their master definitions), payslip history (E8).
 
 ## 4. Domain entities
@@ -30,7 +30,7 @@ Define **who** the system is about (agents/employees + their SWP login), the **e
 erDiagram
     USER ||--|| EMPLOYEE : "logs in as"
     EMPLOYEE ||--o{ EMPLOYMENT_AGREEMENT : "employed under"
-    SERVICE_LINE ||--o{ POSITION : "groups"
+    CLIENT_COMPANY ||--|{ SITE : "has one or more"
 
     EMPLOYEE {
         bigint id PK
@@ -64,32 +64,42 @@ erDiagram
     CLIENT_COMPANY {
         bigint id PK
         string name
-        string address
-        string lat
-        string lng
-        int geofence_radius_m "default 100"
+        string address "registered / billing"
+        string leader_scope "company | site (default company)"
         string npwp
         string pic_name
         string phone
         string status
     }
-    SERVICE_LINE {
+    SITE {
         bigint id PK
-        string name "Facility | Building Mgmt | Parking"
-        string status
-    }
-    POSITION {
-        bigint id PK
-        bigint service_line_id FK
-        string name
-        string alias
+        bigint client_company_id FK
+        string name "e.g. Plaza Senayan / Main Site"
+        string code "nullable short code"
+        string address "physical site address"
+        string lat "nullable until geofence set"
+        string lng "nullable until geofence set"
+        int geofence_radius_m "default 100"
+        boolean is_primary "the default Main Site"
+        string pic_name "nullable on-site contact"
+        string phone "nullable"
         string status
     }
     LEAVE_TYPE {
         bigint id PK
+        string code "unique — CTHO|CT|SDSKD|…"
         string name
-        boolean is_annual
-        boolean is_document_required
+        string category
+        string cap_basis "ANNUAL_POOL|PER_EVENT|PER_MONTH|PER_YEAR_COUNT|UNCAPPED|LIFETIME_ONCE|SERVICE_UNPAID"
+        int cap_value "nullable"
+        string cap_unit "DAYS|COUNT"
+        boolean paid
+        string gender "ANY|FEMALE|MALE"
+        boolean requires_document
+        int notice_days
+        int min_service_years
+        int lead_days
+        int trail_days
         string status
     }
     ATTENDANCE_CODE {
@@ -103,7 +113,6 @@ erDiagram
     }
     OVERTIME_RULE {
         bigint id PK
-        bigint service_line_id FK "nullable"
         string name
         decimal multiplier
         int min_minutes
@@ -115,8 +124,8 @@ erDiagram
 **Invariants:**
 - **INV-1:** an Employee maps **1:1 to a User** (nullable until a login is provisioned).
 - **INV-2:** an Employee has **at most one *active* EmploymentAgreement** at a time (history retained; renewals link via `predecessor_id`).
-- **INV-3:** a Position belongs to **exactly one** ServiceLine; position name is unique within its line.
-- **INV-4:** ServiceLine is the fixed seed set (Facility Services, Building Management, Parking); admin-extendable but not deletable while referenced.
+- **INV-5:** a ClientCompany has **at least one** Site, **exactly one** of which is `is_primary` (the default "Main Site"). Geofence config (lat/lng/`geofence_radius_m`) lives on **Site**, never on ClientCompany. Site name is unique within its company. *(Added 2026-06-03, F2.6.)*
+- **INV-6:** login access is bound to **employment**, not placement. Revocation fires **only** when the EmploymentAgreement closes (offboarding); ending/transferring/renewing a *placement* never revokes a login. *(Added 2026-06-06, F2.7.)*
 
 ## 5. Features
 
@@ -125,8 +134,9 @@ erDiagram
 | **F2.1** | Employee & Agent Profile (+ login provisioning) | [employee-profile.md](prds/employee-profile.md) |
 | **F2.2** | Employment Agreement (PKWT/PKWTT + comp) | [employment-agreement.md](prds/employment-agreement.md) |
 | **F2.3** | Client Company Directory | [client-company-directory.md](prds/client-company-directory.md) |
-| **F2.4** | Service Lines & Position Master | [service-lines-positions.md](prds/service-lines-positions.md) |
+| **F2.6** | Client Sites & Geofence | [client-sites-geofence.md](prds/client-sites-geofence.md) |
 | **F2.5** | Operational Master Data (leave / attendance / overtime) | [operational-master-data.md](prds/operational-master-data.md) |
+| **F2.7** | Employee Offboarding & Session Revocation | [offboarding.md](prds/offboarding.md) |
 
 ---
 
@@ -186,49 +196,61 @@ flowchart TD
 
 **Entities:** `EmploymentAgreement`. **Depends on:** F2.1. **Consumed by:** E3 (placement window/auto-cap), E7 (OT calc base), E8 (payroll history).
 
+> **MVP scope note (2026-06-07, EPICS §8):** agreements are **created `active`** in one step — there is **no DRAFT** state (DB `status` CHECK = `active | superseded | closed`) and **no agreement document/attachment upload** (object/bucket storage isn't provisioned for MVP; the attachments capability is **deferred post-MVP**). The flow above reflects this. `expiring` (EA-8/EA-9) is a derived flag over an `active` PKWT, not a stored status. See [employment-agreement PRD](prds/employment-agreement.md) EA-11/EA-12.
+
 ---
 
 ### F2.3 — Client Company Directory
 
-The catalog of partnering companies where agents are placed (legacy `companies` where `role=2`). Pure reference data with geo (used later by attendance geofencing) and statutory info.
+The catalog of partnering companies where agents are placed (legacy `companies` where `role=2`). Reference data carrying the company's **statutory/billing** info (name, registered address, NPWP, PIC) plus `leader_scope`. The **physical placement locations + geofence** live on its Sites (F2.6), not here.
 
 ```mermaid
 flowchart LR
     subgraph HR[HR / Admin]
         D1([Manage clients]) --> D2[Create/edit client]
-        D2 --> D3[Name, address, geo, NPWP, PIC, phone]
+        D2 --> D3[Name, address, NPWP, PIC, phone, leader_scope]
     end
     subgraph SYS[System]
         D3 --> E1[Unique name/NPWP check]
         E1 --> E2[Save ClientCompany = Active]
-        E2 --> E3[(Persist + audit)]
-        E3 --> E4[Available as placement target E3]
+        E2 --> E2b[Auto-create primary Main Site F2.6]
+        E2b --> E3[(Persist + audit)]
+        E3 --> E4[Sites available as placement targets E3]
     end
 ```
 
-**Entities:** `ClientCompany`. **Consumed by:** E3, E5 (geofence).
+**Entities:** `ClientCompany` (auto-creates a primary `Site`). **Consumed by:** E3, F2.6.
+
+> **UI/flow** *(2026-06-07, EPICS §8):* edit is a **full-page screen launched from the detail page** (`/client-companies/$id/edit`), not a drawer; the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, guarded by CC-5); the detail **"Profil" tab** shows statutory/billing + `leader_scope` only — **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated.
+
+> **Detail tabs & list scope** *(2026-06-08):* the detail page also carries three **E3-backed** tabs — **Penempatan Aktif** (active roster), **Pemimpin Shift** (current leader + assign/replace/revoke, the single entry point for E3 [F3.4](../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`) — all reading the E3 company-roster (F3.5); leader mutations call the E3 shift-leader-assignment endpoints. The company **list is role-scoped**: a shift leader sees only the company they lead (CC-7).
 
 ---
 
-### F2.4 — Service Lines & Position Master
+### F2.6 — Client Sites & Geofence
 
-The three service lines (Facility / Building Mgmt / Parking) and the **positions scoped under each** (e.g., Parking → Attendant/Supervisor; Building → Technician/Engineer). Positions are picked per placement (E3 BR-9). Service line drives shift/attendance rules downstream (E4/E5).
+The **physical placement locations** of a client company — a mall, an office tower, a parking complex. One company has **one or more** Sites; single-location companies get one auto **primary "Main Site"**. Each site carries the **geofence** (center lat/lng + radius) that E5 clock-in validates against, plus an optional on-site contact. This is the new home for the geo that used to sit on ClientCompany (relocated 2026-06-03 — reverses the earlier "flat, no sub-sites" decision; EPICS §8). Placement (E3) targets a **Site**, and `ClientCompany.leader_scope` decides whether the shift leader is per-company or per-site.
 
 ```mermaid
-flowchart LR
-    subgraph Admin[Super Admin / HR]
-        F1([Manage master]) --> F2[Service lines: Facility / Building / Parking]
-        F2 --> F3[Define positions under a line]
+flowchart TD
+    subgraph HR[HR / Admin]
+        K1([Manage sites]) --> K2[Select client company]
+        K2 --> K3[Add/edit site: name, address]
+        K3 --> K4[Set geofence center lat/lng + radius_m]
     end
     subgraph SYS[System]
-        F3 --> G1{Name unique within line?}
-        G1 -- No --> G2[Error] --> F3
-        G1 -- Yes --> G3[(Persist + audit)]
-        G3 --> G4[Positions selectable per placement E3]
+        K4 --> L1{Site name unique<br/>within company?}
+        L1 -- No --> L2[Error] --> K3
+        L1 -- Yes --> L3{Geo set?}
+        L3 -- No --> L4[Save site; geofence disabled + flagged in E5]
+        L3 -- Yes --> L5[Save site with active geofence]
+        L4 --> L6[(Persist + audit)]
+        L5 --> L6
+        L6 --> L7[Site selectable as placement target E3 / geofence source E5]
     end
 ```
 
-**Entities:** `ServiceLine`, `Position`. **Consumed by:** E3, E4, E5.
+**Entities:** `Site`. **Depends on:** F2.3 (parent company). **Consumed by:** E3 (placement target), E5 (geofence center), E10 (per-site reporting).
 
 ---
 
@@ -255,13 +277,43 @@ flowchart LR
 
 ---
 
+### F2.7 — Employee Offboarding & Session Revocation
+
+The deliberate end of the SWP↔agent **employment** relationship — distinct from ending a *placement* (E3). One atomic action closes the active EmploymentAgreement, deactivates the Employee, ends the open placement, disables the linked User, and **instantly revokes every session** (INV-6). Two trigger classes: **expiry-driven** (system flags a PKWT 30d before `end_date` → HR decides *continue* or *end*; nothing auto-terminates — a lapsed contract keeps access under **grace** until HR acts) and **event-driven** (HR records resignation, termination/PHK, retirement, death, or absconding with a reason + effective date, which may be future-dated). Revocation uses a **session epoch** on `User` (E1) so the stateless access token is instantly invalidated without a per-token denylist.
+
+```mermaid
+flowchart TD
+    subgraph SYS[System job · Asia/Jakarta]
+        P1([PKWT within 30d of end]) --> P2[Agreement → expiring]
+        P2 --> P3[Raise decision task to HR Inbox]
+        P3 -. no decision by end_date .-> P4[Stay expiring · login valid · escalate]
+        P4 --> D1
+    end
+    subgraph HR[HR / Super Admin]
+        P3 --> D1{Decide}
+        D1 -- Continue --> R1[Renew agreement + placement · NO revoke]
+        D1 -- End --> OFF
+        E1([Event: resign / terminate / retire / death / mangkir]) --> OFF
+    end
+    subgraph OFF[Offboard · atomic tx]
+        T1[Close agreement + closed_reason] --> T2[End placement]
+        T2 --> T3[Employee → inactive]
+        T3 --> T4[Disable User · bump tokens_valid_after · revoke refresh]
+        T4 --> T5[(Audit + reason)]
+    end
+```
+
+**Entities:** `Offboarding` (new) + extends `EmploymentAgreement` (status `expiring`, `closed_reason` enum). **Depends on:** F2.1, F2.2, E3 (placement terminal states), E1 (session revocation hook). **Consumed by:** E10 (Inbox task + notifications).
+
+---
+
 ## 6. Cross-feature rules
 
-- **Platform / clients:** master-data authoring (employees, agreements, clients, service lines, positions, operational master) is **web console** (admin/HR). Agents access only their **own profile** (read + limited edit) via the **mobile app**; shift leaders consume master data read-only. Each PRD restates its surfaces. Heavier mobile surfaces appear in E4–E7.
+- **Platform / clients:** master-data authoring (employees, agreements, clients, operational master) is **web console** (admin/HR). Agents access only their **own profile** (read + limited edit) via the **mobile app**; shift leaders consume master data read-only. Each PRD restates its surfaces. Heavier mobile surfaces appear in E4–E7.
 - Master data is **soft-deleted / deactivated**, never hard-deleted, because historical records (placements, attendance, leave) reference it.
 - All create/update/deactivate actions are audited (E1).
 - Compensation fields on EmploymentAgreement are **encrypted at rest** (carry-over from legacy `DBEncryption`); access is role-gated.
-- Uniqueness: User email, Employee NIK, ClientCompany name/NPWP, Position name-within-line.
+- Uniqueness: User email, Employee NIK, ClientCompany name/NPWP, **Site name-within-company**.
 
 ## 7. Decisions & open questions
 
@@ -269,13 +321,19 @@ flowchart LR
 - ✅ **Hybrid agent login** — Employee 1:1 User; agents get lightweight self-service (clock-in, schedule, leave/OT), staff/leaders get fuller access (F2.1).
 - ✅ **EmploymentAgreement carries current comp** (base salary, BPJS, tax) for downstream calcs; historical payslips stay in E8.
 - ✅ **Flat internal org** — roles only, no SWP department/division hierarchy.
-- ✅ **Position scoped by service line** (INV-3).
+- ✅ **Position is free-text per placement** *(2026-06-12, EPICS §8 — supersedes "position scoped by service line"; service_line + Position master removed entirely)* — no master, no CRUD, no uniqueness; a typeahead endpoint searches `DISTINCT` existing placement position values (E3 BR-9).
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **Login provisioning** = opt-in at create (provisionable later).
-- ✅ **Service lines** = the 3 seeded but **admin-extendable**.
-- ✅ **Geofence** = per-site `geofence_radius_m` on ClientCompany (default 100m) — added to the model (§4 / F2.3).
-- ✅ **Agent mobile-editable fields** = phone, address, bank (HR-approved).
+- ✅ **Geofence** = per-site `geofence_radius_m` (default 100m) — *(superseded 2026-06-03: relocated from ClientCompany onto the new `Site` entity, see below).*
+- ✅ **Agent self-editable fields — all instant, no approval** *(reworked 2026-06-14, EPICS §8 E11 — supersedes the 2026-06-11 two-tier model)* — **instant (no approval):** photo, address, app language, **phone, emergency contact, bank account** (phone keeps its uniqueness check); **read-only:** statutory/terms (NIK, name, NPWP, BPJS, placement, contract, comp). The **profile change-request feature is removed** — no `SWP-CHG`, no `change_requests.*` (incl. `.approve.bank`), no Inbox profile-review, no bank-escalation split. The only configurable approval engine is **E11** (leave/overtime). EP-5/EP-5b.
+
+**Resolved (2026-06-03) — Client Sites (EPICS §8):**
+- ✅ **Sites are first-class** (reverses "flat, no sub-sites"): ClientCompany 1→N `Site`; geofence (address, lat/lng, radius) **moves off ClientCompany onto Site** (INV-5, F2.6).
+- ✅ **Every company has ≥1 Site** — single-location companies get one auto primary **Main Site**; Placement (E3) targets a Site (required).
+- ✅ **Geofence model** = single circle (center + radius) per site; multi-circle/polygon are post-v1.
+- ✅ **`leader_scope`** on ClientCompany (`company` | `site`, default `company`) decides per-company vs per-site shift leadership (E3 INV-2/3/4).
+- ✅ **Migration** = sites net-new; loader auto-creates one Main Site per company; HR configures geofences post-cutover (E9).
 - ✅ **Overtime rules** shape defined in E7.
 
 **Still open (migration data verification → E9):**

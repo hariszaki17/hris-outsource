@@ -7,7 +7,7 @@
 
 ## 1. Context & problem
 
-Staged legacy data must be reshaped into the new model: identity remapped, `employee_contracts` **split** into EmploymentAgreement + Placement, shifts deduped, links derived (schedule→placement, attendance→schedule), and values classified (service line, day_type). Every produced row needs a **crosswalk** (legacy_id → new_id) so the whole migration is idempotent and traceable.
+Staged legacy data must be reshaped into the new model: identity remapped, `employee_contracts` **split** into EmploymentAgreement + Placement (position copied verbatim as free-text), shifts deduped, links derived (schedule→placement, attendance→schedule), and values classified (day_type). Every produced row needs a **crosswalk** (legacy_id → new_id) so the whole migration is idempotent and traceable.
 
 ## 2. Goals & non-goals
 
@@ -34,9 +34,9 @@ Migration tooling (CLI/job) over staging → transformed dataset. No end-user su
 | TR-1 | Transform applies the **authoritative per-epic mappings** (E2–E8 DATA-MAPPING.md); E9 does not redefine field semantics. |
 | TR-2 | Every transformed row gets a **`CROSSWALK`** entry (`legacy_table`, `legacy_id`, `new_table`, `new_id`, `run_id`). |
 | TR-3 | **Identity remap** (`users`/`employees` → User/Employee) is computed first; later transforms reference it. |
-| TR-4 | `employee_contracts` is **split** into an EmploymentAgreement (terms/comp/dates) + a Placement (client/service-line/period). |
+| TR-4 | `employee_contracts` is **split** into an EmploymentAgreement (terms/comp/dates) + a Placement (client/position/period); `position` is a **free-text copy** of the legacy `recruitment_roles` value (no master, no FK, no classification). |
 | TR-5 | **Derived links** are computed: schedule→placement (by employee+date), attendance→schedule, OT→attendance where possible. |
-| TR-6 | **Classifications** (service line for placements/positions; day_type for OT) are applied where derivable; otherwise queued (F9.3). |
+| TR-6 | **Classifications** (day_type for OT) are applied where derivable; otherwise queued (F9.3). Position carries across as free-text and is **never** classified or queued. |
 | TR-7 | Any row that can't be cleanly mapped → **`REVIEW_ITEM`** with its issue type; never dropped (INV-2). |
 | TR-8 | Transform is **deterministic + re-runnable** against the same staging snapshot. |
 

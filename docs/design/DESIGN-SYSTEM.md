@@ -74,10 +74,33 @@ warn · Berakhir (Ended) → neutral · Diberhentikan (Terminated) → bad · Re
 Superseded → neutral · Transfer (Transferred) → orange.
 
 ## 3. Typography
-- **UI:** Inter. Scale: 30/700 page title · 22/700 section · 19/700 card title · 14/600 strong ·
-  14/400 body · 13 secondary · 12 caption · 11/600 +0.5ls table header.
-- **Mono:** IBM Plex Mono — IDs (MIG-xxxxx), times, coordinates.
-- **Display/brand:** Poppins/Gilroy (login & marketing only).
+- **UI:** Inter. **Canonical ramp** — every UI text snaps to one of these variants, no ad-hoc sizes:
+
+  | Variant | Size/Weight | Use |
+  |---|---|---|
+  | `pageTitle` | 30/700 | biggest screen title |
+  | `section` | 22/700 | section heading |
+  | `displayTitle` | 22/700 **Poppins** | brand wordmark + auth headlines (see Display below) |
+  | `screenTitle` | 20/700 | tab / app-bar title (mobile) |
+  | `cardTitle` | 19/700 | card heading |
+  | `subtitle` | 15/700 | card/date headers (e.g. "Sel, 9 Jun 2026") |
+  | `strong` | 14/600 | emphasised body |
+  | `body` | 14/400 | body |
+  | `label` | 13/700 | field / card-section labels (e.g. "Clock-in") |
+  | `secondary` | 13/400 | secondary body |
+  | `caption` | 12/400 | caption (use `weight` for 12/500·600·700 sublines) |
+  | `badge` | 11/600 | flag/pill chips, table header (+0.5ls) |
+  | `micro` | 10/500 | tab-bar labels |
+  | `metric` | 28/700 | stat numbers |
+  | `buttonLg` | 16/700 | primary button label |
+
+- **Mono:** IBM Plex Mono — IDs (SWP-EMP-xxxx, SWP-PL-xxxx, etc. per `docs/api/CONVENTIONS.md`), times, coordinates. Variants `monoLg` (20/700, masuk/keluar tiles) and `monoHero` (46/700, live clock); any variant can opt into mono via the `mono` flag (e.g. a 13/500 mono value = `label` + `mono` + `weight="medium"`).
+- **Mobile component contract:** ALL mobile text goes through `src/ui/Text.tsx` with a `variant` (+ optional `weight: regular|medium|semibold|bold` and `mono`). Size/family are applied via inline **style** (not className): NativeWind v4 lets a component's variant class shadow caller font classes, and arbitrary `text-[Npx]` / `font-mono-*` are unreliable. **Never hand-roll** `fontSize`/`fontFamily`/`text-[Npx]`/`font-*` on a Text — pick a variant. Weight = the font FAMILY (Inter_400/500/600/700 · IBMPlexMono_400/500/700 · Poppins_700); RN can't synthesize weights.
+- **Display/brand:** Poppins/Gilroy (login & marketing only). On auth screens this is the
+  **`displayTitle`** treatment = 22/700 in Poppins — used for the brand wordmark *and* every
+  auth-screen headline (e.g. "Lupa kata sandi?", "Setel kata sandi baru"). Code: `Text`
+  `variant="displayTitle"` (mobile `src/ui/Text.tsx`) — distinct from `section` (same size,
+  Inter) so the global section ramp stays Inter elsewhere.
 
 ## 4. Spacing / radius / elevation
 - **Spacing scale:** 2 · 4 · 6 · 8 · 10 · 12 · 14 · 16 · 18 · 20 · 24 · 32.
@@ -221,15 +244,16 @@ Screens by role / platform (all under feature group `Z3cS3`):
 - **Web · HR/Admin** (canonical): List `WElYh` · Detail `JBjBb` · Form (Tambah/Edit) `h6bDz`.
 - **Web · Shift Leader** (read-only, company/location-scoped): scoped List `n3wi1w` (no Tambah, scope
   banner) · read-only Detail `rtKzk` (no Edit; Statutori & Akun Login hidden → replaced by a locked
-  note; role can't provision login or see statutory fields).
+  note; role can't manage credentials or see statutory fields).
 - **Mobile · Agen** (self-service phone, 390×844): Profil Saya `s5RO1` (read-only; statutory locked,
   Kontak/Bank flagged editable) · Ajukan Perubahan `n465cT` (only `phone`/`address`/bank editable,
   statutory locked, submits to HR review) · Status Pengajuan `SXqA5` (request states:
   Menunggu→`warn`, Disetujui→`info`, Ditolak→`bad`).
 
-Role access rule of thumb: HR/Admin = full CRUD + login provisioning + statutory; Shift Leader =
-read-only within their location, no statutory/login; Agen = own record, read-only except a request
-flow for phone/address/bank that HR must approve. Fields, grouped as on the form:
+Role access rule of thumb: HR/Admin = full CRUD + credential management (regenerate temp password,
+deactivate; every employee already has a login) + statutory; Shift Leader = read-only within their
+location, no statutory/credentials; Agen = own record, read-only except a request flow for
+phone/address/bank that HR must approve. Fields, grouped as on the form:
 
 | Group | Field | Type | Rules |
 |---|---|---|---|
@@ -319,7 +343,7 @@ Entities: **ShiftMaster** (`title`, `start_at`, `end_at`, `start_break?`, `end_b
 `placement_id`, `work_date`, `status` ∈ `Scheduled|Off|Changed`); unique `(employee_id, work_date)`.
 Rules: one shift/agent/day (INV-1); only agents with an **active placement** that date (INV-2); a
 shift leader schedules **own company only** (INV-3); **save = auto-publish + notify** (INV-4 — no
-draft/approval gate). Shift picker is filtered by the placement's service line. **Scheduling over
+draft/approval gate). Shift picker shows all active shift masters. **Scheduling over
 approved leave is blocked** (the Cuti cell is locked). **Cross-midnight** shift attributes to its
 start date (shown with a `+1` moon badge). Shift-master status: Aktif→ok · Nonaktif→neutral.
 
@@ -345,7 +369,7 @@ AutoApproved|Pending|Verified|Rejected) · **AttendanceCorrection** (`type`, `co
 Status→token: Present(Hadir)→ok · Late(Terlambat)→warn · Incomplete(Tidak lengkap)→bad ·
 Absent→bad · Pulang awal (early-out flag)→orange. Verification→token: AutoApproved(Terverifikasi
 otomatis)→info · Pending(Menunggu)→warn · Verified→ok · Rejected→bad.
-Rules: **GPS geofence only** (radius per ClientCompany, default 100m); **out-of-geofence allowed +
+Rules: **GPS geofence only** (center + radius per **Site**, E2 F2.6, default 100m); **out-of-geofence allowed +
 flagged** (not blocked); late grace **15 min**; **exceptions-only verification** (clean records
 AutoApproved, only late/out-of-geofence/auto-closed/absent/code-flagged reach the queue);
 **auto-clock-out at shift end** → Incomplete + Pending; cross-midnight attributes to start date;
@@ -445,8 +469,35 @@ agent **self-scope**, HR/super **cross-company**; audit **HR/Super Admin only**.
 WIB), **IDR** + Indonesian formatting, **role-based nav** on web + mobile. **Login uses Poppins display
 font + a split brand panel** (not the standard sidebar shell).
 
+### 8.15 E11 — Approvals (configurable engine) *(added 2026-06-14)*
+Routing is now a per-company **template** of ordered lines (OR within a line, sequential across lines);
+leave/OT route through it. Screens live in the platform×role boards (not a per-epic group — the canvas
+was reorganized into `PLATFORM · WEB CONSOLE` `nNYxY` + `PLATFORM · MOBILE` `yPwPD`, lanes by role).
+- **Web · HR/Super Admin** (Lane · Other roles `Uy7CG`, POV line `udZWc`): Template editor `d7tFAM`
+  (2–3 line cards, each an OR-set of member chips + "Tambah anggota", "lalu (berurutan)" connectors,
+  optional removable Baris 3, live-reset warning) · Kotak Masuk `yv7Gs` (type tabs + table with a
+  **Baris N/M** column + Setujui/Tolak row actions) · Detail Permintaan `OHseV` (request card + **chain
+  timeline**: done line shows OR-clearer + "tidak perlu bertindak", current line ringed, action trail;
+  **super-admin Bypass** card). Overlays: Bypass modal `KT3Jz` (reason required), Reset-pending confirm
+  `uoTwN`; **reject reuses `comp/ModalReject` `EnabP`**.
+- **Mobile · Shift Leader** (Lane `Iavxr`, POV `sXgHB`): approver inbox `DxK66` (current-line cards +
+  Setujui/Tolak) · approve **bottom sheet** `viUFF` (mini chain progress + optional note).
+- **Mobile · Agent** (Lane `AikTF`, POV `zTfPi`): Status Pengajuan `PGrLa` (read-only **chain timeline**
+  replacing L1/L2 + action history).
+
+Entities (read E11 FEATURE.md): **ApprovalTemplate** (`company_id` unique, `version`, lines) ·
+**ApprovalLine** (`line_no` 1..3, OR-set members) · **ApprovalInstance** (`request_type`, `request_id`,
+`current_line`, `status` ∈ PENDING|APPROVED|REJECTED) · **ApprovalAction** (`APPROVE|REJECT|BYPASS`,
+reason, append-only). Status→token: Pending/Menunggu→warn · current line→warn · cleared line→ok ·
+upcoming→neutral · Rejected→bad · Bypass→`accent-purple`. Rules: **routing = line membership**
+(server-enforced, not a `*.approve` perm); OR within a line, sequential across; **no self-approval**
+(INV-3); **super-admin bypass** with reason (INV-5); **no template → super-admin fallback** (INV-7);
+**live template + pending reset** on edit (INV-6); leave/OT side-effects fire from the engine's
+`OnApproved`/`OnRejected` hook. **Profile change-requests removed** — the E2 `Ckteo` CR queue +
+agent CR mobile screens are deleted; profile edits are instant self-edit.
+
 ---
 
-> **Coverage:** §8.1–§8.14 now document the full component library + every designed feature
-> (E1–E8, E10). E9 Migration is back-end (no UI). The `.pen` file holds one feature group per epic,
-> stacked top-to-bottom, each with platform sub-groups and per-role POV lines.
+> **Coverage:** §8.1–§8.15 now document the full component library + every designed feature
+> (E1–E8, E10, E11). E9 Migration is back-end (no UI). Canvas is organized into two platform boards
+> (`nNYxY` web · `yPwPD` mobile) with per-role lanes and POV lines.

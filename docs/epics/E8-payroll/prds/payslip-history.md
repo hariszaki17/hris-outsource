@@ -34,7 +34,7 @@ Agent (own, mobile), HR/Super Admin (all), System (scope, decrypt, audit).
 
 | Ref | Rule |
 |-----|------|
-| PH-1 | A payslip summary shows: period (year/month), `paid_on`, `working_days`, `gross_earnings`, `gross_deductions`, `take_home_pay`. |
+| PH-1 | A payslip summary shows: period (year/month), `paid_on`, `working_days`, `gross_earnings`, `gross_deductions`, `take_home_pay`, **`payment_status`** (Unpaid/Paid). The list is **unified** — migrated (`source=Migrated`) and generated (`source=Generated`, from F8.3) payslips appear together, ordered by period. |
 | PH-2 | **Scope:** an agent sees only their **own** payslips; HR/Super Admin see all. |
 | PH-3 | Monetary fields are **decrypted on read** only for authorized viewers; transport is secured. |
 | PH-4 | **Read-only** — no creation/edits in-app (INV-1). |

@@ -1,0 +1,15 @@
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+
+# Local tooling
+.gstack/
+
+# AI agent tooling (caveman skills + rtk proxy — local-only, not shared)
+.agents/
+.claude/
+.rtk/
+skills-lock.json
+
+# Node (frontend has its own .gitignore for node_modules/dist/gen/.env.local)
+node_modules/

@@ -7,7 +7,7 @@
 
 ## 1. Goal & outcome
 
-Give SWP a single **work-shift master** (shift templates with working hours + breaks) and let each company's **shift leader assign a shift to each placed agent, per day**. Schedules are the backbone the attendance epic (E5) judges clock-ins against. Per the decisions: scheduling is **day-by-day manual** (no rotation engine), the master is **global but service-line-taggable**, schedules **auto-publish on save** (no approval gate), and there are **no coverage minimums**.
+Give SWP a single **work-shift master** (shift templates with working hours + breaks) and let each company's **shift leader assign a shift to each placed agent, per day**. Schedules are the backbone the attendance epic (E5) judges clock-ins against. Per the decisions: scheduling is **day-by-day manual** (no rotation engine), the master is a single **global catalog**, schedules **auto-publish on save** (no approval gate), and there are **no coverage minimums**.
 
 ## 2. Actors & roles
 
@@ -27,7 +27,6 @@ Give SWP a single **work-shift master** (shift templates with working hours + br
 
 ```mermaid
 erDiagram
-    SERVICE_LINE ||--o{ SHIFT_MASTER : "tags"
     SHIFT_MASTER ||--o{ SCHEDULE : "scheduled as"
     EMPLOYEE ||--o{ SCHEDULE : "works"
     PLACEMENT ||--o{ SCHEDULE : "under"
@@ -39,7 +38,6 @@ erDiagram
         time end_at
         time start_break "nullable"
         time end_break "nullable"
-        bigint service_line_id FK "nullable tag"
         boolean spans_midnight
         string status
     }
@@ -56,9 +54,10 @@ erDiagram
 
 **Invariants:**
 - **INV-1:** at most **one schedule entry per agent per date** (no double-booking a day).
-- **INV-2:** an agent can only be scheduled on a date where they have an **active placement** (E3); the schedule links that `placement_id` (and thus the company + service line).
+- **INV-2:** an agent can only be scheduled on a date where they have an **active placement** (E3); the schedule links that `placement_id` (and thus the company).
 - **INV-3:** a shift leader may schedule only agents at **their own company** (F3.4 scope); HR/Super Admin any.
 - **INV-4:** **auto-publish** — saving a schedule entry makes it immediately visible to the agent (mobile) and triggers a notification.
+- **INV-5:** a schedule entry's times **track the shift master until realized by attendance** — `start_time` is frozen at **check-in**; `end_time`/`cross_midnight` is frozen at **check-out**. Before check-in both values follow the current master live; after check-in but before check-out, `start_time` is frozen while `end_time` still tracks master edits (the open attendance window updates accordingly). Both are frozen once check-out is recorded. Propagation scope: only entries with `work_date >= today`, `status != Off`, and not leave-cancelled. Break times are master-only and not stored on entries.
 
 ## 5. Features
 
@@ -82,37 +81,36 @@ erDiagram
 
 ### F4.1 — Work-Shift Master Catalog
 
-Admin-defined shift templates (working hours + break window), tagged optionally to a service line so leaders see the relevant ones. Global across SWP. Handles cross-midnight shifts (e.g., night 23:00–07:00).
+Admin-defined shift templates (working hours + break window). A single global catalog across SWP. Handles cross-midnight shifts (e.g., night 23:00–07:00).
 
 ```mermaid
 flowchart TD
     subgraph Admin[Super Admin / HR]
         A1([New shift template]) --> A2[Title, start/end, break window]
-        A2 --> A3[Optional service-line tag]
-        A3 --> A4[Save]
+        A2 --> A4[Save]
     end
     subgraph SYS[System]
         A4 --> S1{Valid times? break within shift}
         S1 -- No --> S2[Errors] --> A2
         S1 -- Yes --> S3[Detect spans_midnight if end <= start]
         S3 --> S4[(Persist + audit)]
-        S4 --> S5[Available in scheduling, filtered by line]
+        S4 --> S5[Available in scheduling]
     end
 ```
 
-**Entities:** `ShiftMaster`. **Depends on:** E2 (ServiceLine).
+**Entities:** `ShiftMaster`. **Depends on:** —.
 
 ---
 
 ### F4.2 — Daily Schedule Assignment
 
-The shift leader's core task: for a date (or date range), assign each placed agent a shift picked from the master (filtered by the placement's service line). Saving is **immediately live** to the agent — no draft/publish step.
+The shift leader's core task: for a date (or date range), assign each placed agent a shift picked from the master. Saving is **immediately live** to the agent — no draft/publish step.
 
 ```mermaid
 flowchart TD
     subgraph SL[Shift Leader]
         B1([Open company schedule grid]) --> B2[Pick date + agent]
-        B2 --> B3[Choose shift from master<br/>filtered by service line]
+        B2 --> B3[Choose shift from master]
         B3 --> B5[Save cell]
         B6[Mark day OFF] --> B5
     end
@@ -189,7 +187,7 @@ flowchart TD
 
 ## 6b. Cross-feature rules
 
-- Service line drives which shift templates are offered and (downstream) the attendance policy (E5).
+- The shift master is a single global catalog; all active templates are offered to every leader.
 - Ending a placement (E3) **cancels future schedule entries** for that agent at that company.
 - Cross-midnight shifts attribute the work to the **start date** (confirm in §7); E5 must handle the overnight clock-out.
 - All schedule writes auto-publish + audit + notify (INV-4).
@@ -198,7 +196,7 @@ flowchart TD
 
 **Resolved (2026-05-29):**
 - ✅ **Day-by-day manual** scheduling (no rotation/pattern engine).
-- ✅ **Global shift master**, optionally tagged by service line.
+- ✅ **Global shift master** (single catalog, independent of any service line). *(Service-line tagging dropped 2026-06-12 — service line removed project-wide.)*
 - ✅ **Auto-publish on save** (no draft/approval gate).
 - ✅ **No coverage minimums** (pure individual assignment).
 

@@ -1,0 +1,1622 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource — E6 Leave Management API
+  version: 1.0.0
+  description: |
+    OpenAPI contract for **E6 — Leave Management**: leave types (read-through), the
+    **per-type quota ledger** (cap_basis windows), agent leave requests, schedule integration
+    side-effects, and team/agent calendar reads.
+
+    > **Approval routes through the E11 engine (EPICS §8 E11).**
+    > Leave approval does **not** run its own state machine. It **routes through the
+    > E11 configurable approval engine** ([`docs/api/E11-approvals/openapi.yaml`](../E11-approvals/openapi.yaml)):
+    > submitting a request **creates an `ApprovalInstance`** (`request_type: LEAVE`, surfaced as
+    > `approval_instance_id` on the request), and all approval decisions are made via
+    > `POST /approval-instances/{id}:approve | :reject | :bypass`. `LeaveRequest.status` is
+    > `DRAFT | PENDING | APPROVED | REJECTED | CANCELLED`, synced to the E11 instance (the chain
+    > tracks per-line progress internally). The balance **reserve→commit→release** lifecycle fires
+    > from leave's E11 `OnApproved`/`OnRejected` **hook** (re-check + commit / release).
+
+    **Inherits all shared rules from [`docs/api/CONVENTIONS.md`](../CONVENTIONS.md).**
+    Where this spec is silent, CONVENTIONS wins (auth, pagination, error envelope, audit log,
+    notifications, idempotency, RBAC scope semantics, ID prefix table).
+
+    ## Locked product decisions (EPICS.md §8 + FEATURE.md §7)
+    - **Balance = per-type quota ledger** *(resolved 2026-06-12 — supersedes the grant-lot model)*.
+      `leave_type` is the cap axis: each type carries its own **`cap_basis`** (`ANNUAL_POOL |
+      PER_EVENT | PER_MONTH | PER_YEAR_COUNT | UNCAPPED | LIFETIME_ONCE | SERVICE_UNPAID`) which
+      drives a per-type quota **window** keyed by `period_key` (year · year-month · `EMP`). Each
+      quota-bearing window tracks `entitled_days / used_days / pending_days`; `remaining =
+      entitled − used − pending`. See `GET /leave-balances/by-employee/{employee_id}/types` and
+      `POST /leave-quotas:adjust-entitled`.
+      - **Window auto-open:** the first reserve against a quota-bearing type opens its window at the
+        type entitlement (ANNUAL_POOL: the agreement's annual days; else `cap_value`).
+      - **PER_EVENT / UNCAPPED** types hold **no standing window** — validated per-occurrence at
+        request time (event day-cap / document-bounded), no `entitled/used/pending` row.
+      - **Eligibility gates** (request-time): gender · notice_days · min_service_years ·
+        once-per-year (PER_YEAR_COUNT) · once-per-employment (LIFETIME_ONCE / SERVICE_UNPAID).
+      - **No negative balance:** a quota-bearing reserve/commit is blocked when it would exceed the
+        window's remaining (HR raises it via `:adjust-entitled`, or a super admin bypasses the
+        approval instance in E11).
+      - **Reservation lifecycle:** submit → **reserve** (`pending_days`); final approve → **commit**
+        (`pending → used`); reject/cancel/shorten → **release / reverse**.
+    - **Duration** = working days **excluding public holidays**.
+      A "working day" is a day the agent would otherwise be **rostered** for a shift (cross-references E4
+      `Schedule` for the period). Public holidays come from the E7 holiday calendar (`SWP-HOL-*`).
+      Both inputs feed the server-side duration calculation on every `POST /leave-requests`.
+    - **Annual auto-grant** opens the ANNUAL_POOL window at the agreement's
+      `annual_leave_entitlement_days` (E2), expiring at period end.
+    - **Half-day leave** — **not in v1**. All requests are full-day units.
+    - **Delegate** — informational only (non-binding suggested backfill; coverage is solved by E4 re-roster).
+    - **No template → super-admin fallback** (E11 INV-7): when the agent's company has no approval
+      template configured, the request routes to a single implicit super-admin line (never
+      auto-approves, never blocks the agent). Routing/lines/order are owned by E11.
+    - **Team calendar** shows **approved** entries always and **pending** entries via a
+      `show_pending` query toggle (default `false`).
+
+    > **History:** the grant-lot ledger (`/leave-grants`, `/leave-balances`) and the legacy per-type
+    > `/leave-quotas` list/adjust/bulk-grant endpoints were **removed 2026-06-12** in favor of the
+    > per-type cap_basis ledger above.
+
+    ## Cross-epic dependencies
+    - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The type's
+      `cap_basis` (+ `cap_value`, gender / notice / service gates) and the `requires_document`
+      flag drive this spec's validation.
+    - **E3** — `Placement` is the source of truth for the agent's company, which selects the
+      E11 approval template the request routes through.
+    - **E4** — implicit side-effect of the leave **`OnApproved`** hook (fired by E11 on terminal
+      approve/bypass): overlapping `Schedule` entries are cancelled / marked `LEAVE`
+      (LI-1, LI-2). Cancel/shorten reverses (LI-4). No explicit API surface here — clients learn
+      affected dates via the response `schedule_impact[]` array.
+    - **E5** — implicit side-effect: leave-covered dates suppress `Absent` records on the
+      attendance end-of-day job (LI-2). If the day was already clocked-in, the leave is approved
+      but a `clock_in_conflict` flag rides on the request detail (LI-3).
+    - **E7** — `PublicHoliday` master is consulted during duration counting (excluded from working days).
+
+    ## Resource ID prefixes (E6-scoped — see CONVENTIONS §4 for the full table)
+    - `SWP-LR-*` — Leave Request
+    - `SWP-LQ-*` — Leave Quota (one per-type quota window in the cap_basis ledger)
+    - Cross-epic: `SWP-EMP-*`, `SWP-LT-*`, `SWP-CMP-*`, `SWP-SVC-*`, `SWP-SCH-*`, `SWP-HOL-*`, `SWP-FILE-*`.
+  contact:
+    name: hris-outsource product+architecture
+  license:
+    name: Internal — SWP only
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production (internal)
+  - url: https://api.staging.swp.example.com/api/v1
+    description: Staging
+
+tags:
+  - name: leave-balances
+    description: |
+      F6.1/F6.5 — Per-type **quota ledger**. The per-type balance view
+      (`/leave-balances/by-employee/{id}/types`) and the HR per-type entitlement adjust
+      (`/leave-quotas:adjust-entitled`), both over the cap_basis windows.
+  - name: leave-requests
+    description: |
+      F6.2 + F6.3 — Agent request lifecycle (create, submit, cancel/withdraw) plus HR
+      post-approval edits (shorten / cancel of approved leave with schedule restore, LI-4).
+      Approval **decisions** are made through the E11 engine, not here.
+  - name: leave-calendar
+    description: F6.5 — Team leave calendar (leader / HR).
+  - name: leave-types
+    description: |
+      Read-through of E2 master data for client convenience (forms, filters). All writes live
+      in the E2 spec under `/leave-types`.
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  PATHS
+# ────────────────────────────────────────────────────────────────────────────────
+paths:
+
+  /leave-balances/by-employee/{employee_id}/types:
+    get:
+      tags: [leave-balances]
+      summary: Per-type leave balance (per-type ledger, 2026-06-12)
+      description: |
+        The **per-type** balance view (supersedes the grant-lot pool for the per-type
+        ledger, EPICS §8). One row per **active leave type**, each joined to the
+        employee's quota row for the **current window** of that type's `cap_basis`
+        (year · year-month · `EMP`). `PER_EVENT`/`UNCAPPED` types have no standing
+        window (`has_window=false`); `remaining_days` is null for `UNCAPPED` / nil-cap
+        types ("sesuai ketentuan"). Mobile flat list (`o1BUa`) reads from here.
+      operationId: getEmployeeTypeBalances
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - "o1BUa"  # Agen · Cuti Saya — per-type flat list
+      parameters:
+        - name: employee_id
+          in: path
+          required: true
+          schema: { type: string, example: SWP-EMP-1042 }
+      responses:
+        '200':
+          description: The employee's per-type balances.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaveTypeBalance' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /leave-quotas:adjust-entitled:
+    post:
+      tags: [leave-balances]
+      summary: HR per-type quota adjust (per-type ledger, 2026-06-12)
+      description: |
+        Applies a signed `delta` to a (employee, leave_type, window) entitlement
+        (LQ-6 / "Sesuaikan Kuota"). `start_date` selects the window by the type's
+        `cap_basis`; the window is opened if absent. Refuses dropping entitled below
+        used+pending (422). `reason` required; audited.
+      operationId: adjustTypeQuota
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: all
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [employee_id, leave_type_id, start_date, delta, reason]
+              properties:
+                employee_id: { type: string, example: SWP-EMP-1042 }
+                leave_type_id: { type: string, example: SWP-LT-001 }
+                start_date: { type: string, format: date, description: Any date inside the target window. }
+                delta: { type: integer, example: 2 }
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200':
+          description: The adjusted quota.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LeaveQuota' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  # ───────────────────────────  LEAVE REQUESTS  ───────────────────────────
+  /leave-requests:
+    get:
+      tags: [leave-requests]
+      summary: List leave requests (queues, history)
+      description: |
+        Powers the HR L2 queue (`yho5i`), SL L1 queue (`qb0S0`), and agent history (`o1BUa`).
+        Scope is enforced by role: `agent` sees own, `shift_leader` sees own company,
+        `hr_admin` / `super_admin` see all.
+      operationId: listLeaveRequests
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - "yho5i"  # HR L2 queue
+        - "qb0S0"  # SL L1 queue
+        - "o1BUa"  # Agent history
+      parameters:
+        - { $ref: '#/components/parameters/EmployeeIdQuery' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/LeaveStatus' }
+        - name: status__in
+          in: query
+          description: Comma-separated `LeaveStatus` values.
+          schema: { type: string, example: "PENDING,APPROVED" }
+        - { $ref: '#/components/parameters/LeaveTypeIdQuery' }
+        - name: company_id
+          in: query
+          schema: { type: string, example: SWP-CMP-014 }
+        - name: start_date__gte
+          in: query
+          schema: { type: string, format: date }
+        - name: start_date__lte
+          in: query
+          schema: { type: string, format: date }
+        - name: q
+          in: query
+          description: Free-text search on agent name, request reason, and `SWP-LR-*` ID.
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, default: "created_at:desc", example: "start_date:asc" }
+        - { $ref: '#/components/parameters/LimitQuery' }
+        - { $ref: '#/components/parameters/CursorQuery' }
+      responses:
+        '200':
+          description: Paginated list of leave requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequestListResponse' }
+              examples:
+                hr_l2_queue:
+                  $ref: '#/components/examples/HRQueueExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [leave-requests]
+      summary: Submit a new leave request (agent or HR-on-behalf)
+      description: |
+        Agent files from mobile screen `QT92D`. HR may file on behalf (screen TBD; same payload).
+        The request is created in **`DRAFT`** if `submit: false` (HR-on-behalf save-before-submit),
+        otherwise it transitions immediately to **`PENDING`** and an E11 `ApprovalInstance`
+        (`request_type: LEAVE`) is created for the agent's company (its template selects the chain;
+        no template → super-admin fallback, E11 INV-7). `approval_instance_id` carries the instance ID.
+
+        ### Server-side validation order (stop on first failure)
+        1. **`INVALID_DATE_RANGE`** (422) — `end_date < start_date`.
+        2. **`MISSING_REQUIRED_DOCUMENT`** (422) — `leave_type.requires_document == true`
+           but no `document_file_id` provided (LR-2 / INV-5).
+        3. **`OVERLAPPING_LEAVE`** (409) — any non-rejected, non-cancelled `LeaveRequest` for the
+           same employee overlaps `[start_date, end_date]` (LR-5).
+        4. **`BACKDATED_LEAVE`** (422) — `start_date < today` and the leave type does not permit
+           backdating (or, when it does, server flags it). When `requires_hr_override: true`
+           is returned in `error.fields`, the agent's UI may still submit but only HR may approve.
+        5. **`QUOTA_EXCEEDED`** (422) — for quota-tracked types, `duration_days > remaining`.
+           Includes `requested_days` and `remaining_days` in `error.fields` per the locked
+           §8 "block annual over-balance" rule.
+
+        ### Duration computation (server-authoritative)
+        `duration_days` is **always** server-computed from `[start_date, end_date]` and equals the
+        number of days the agent **would otherwise be rostered** for a shift (E4 `Schedule`)
+        **minus public holidays** (E7 `PublicHoliday` calendar). The client may send a hint
+        but the server overrides it. Days the agent has no shift on the published roster (i.e. a
+        scheduled day off) do **not** count.
+
+        ### Idempotency
+        `Idempotency-Key` is required. Re-submitting with the same key returns the same `SWP-LR-*`
+        ID and body for 24h (CONVENTIONS §13).
+      operationId: createLeaveRequest
+      x-rbac:
+        roles: [agent, hr_admin, super_admin, shift_leader]
+        scope: self  # leader/HR widen by sending `employee_id` of someone else (their scope)
+      x-design-screens:
+        - "QT92D"  # Agen · Ajukan Cuti (mobile)
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveRequestWriteRequest' }
+            examples:
+              agent_annual_3_days:
+                $ref: '#/components/examples/CreateAnnualRequestExample'
+              agent_sick_with_doc:
+                $ref: '#/components/examples/CreateSickRequestExample'
+              hr_on_behalf_draft:
+                $ref: '#/components/examples/CreateOnBehalfDraftExample'
+      responses:
+        '201':
+          description: Leave request created.
+          headers:
+            Location:
+              description: URI of the new request.
+              schema: { type: string, example: /api/v1/leave-requests/SWP-LR-2026-0042 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+              examples:
+                pending:
+                  $ref: '#/components/examples/CreatedPendingExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            Idempotency conflict OR overlapping non-rejected request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                overlapping:
+                  $ref: '#/components/examples/ErrorOverlappingExample'
+                idempotency_reuse:
+                  $ref: '#/components/examples/ErrorIdempotencyExample'
+        '422':
+          description: Business-rule rejection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                quota_exceeded:
+                  $ref: '#/components/examples/ErrorQuotaExceededExample'
+                missing_doc:
+                  $ref: '#/components/examples/ErrorMissingDocExample'
+                backdated:
+                  $ref: '#/components/examples/ErrorBackdatedExample'
+                invalid_range:
+                  $ref: '#/components/examples/ErrorInvalidRangeExample'
+
+  /leave-requests/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+    get:
+      tags: [leave-requests]
+      summary: Get a leave request
+      description: |
+        Returns the full `LeaveRequest`. The **approval chain progress** (lines, who acted, who's
+        pending) is **owned by E11** — clients read `approval_instance_id` and call
+        `GET /approval-instances/{id}` (E11) to render the chain timeline.
+
+        Cross-epic conflict signals are surfaced as flags on the request:
+        - `clock_in_conflict: true` if any day in `[start_date, end_date]` already has an
+          attendance clock-in (LI-3; surfaced for backdated approvals).
+        - `schedule_impact[]` lists overlapping E4 schedule entries that will be (or were)
+          cancelled on final approval (LI-1).
+      operationId: getLeaveRequest
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - "DJrBn"  # E6 · Detail Pengajuan Cuti (HR L2 detail)
+        - "hjCYy"  # Agen · Status Pengajuan Cuti (mobile)
+      responses:
+        '200':
+          description: Leave request detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+              examples:
+                pending:
+                  $ref: '#/components/examples/RequestDetailPendingExample'
+                clock_in_conflict:
+                  $ref: '#/components/examples/RequestDetailClockInConflictExample'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    patch:
+      tags: [leave-requests]
+      summary: Edit a DRAFT leave request (agent only)
+      description: |
+        Partial update allowed only while `status == DRAFT`. Same validation rules as `POST`
+        re-run on submission via `:submit`. Once a request is `PENDING` or beyond, edits are
+        rejected (`409 CONFLICT`).
+      operationId: updateLeaveRequest
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - "QT92D"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveRequestPatchRequest' }
+      responses:
+        '200':
+          description: Updated draft.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Request is past `DRAFT`; edits not allowed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /leave-requests/{id}:submit:
+    post:
+      tags: [leave-requests]
+      summary: Submit a DRAFT → PENDING (creates the E11 approval instance)
+      description: |
+        Transitions `DRAFT → PENDING` and creates an E11 `ApprovalInstance`
+        (`request_type: LEAVE`) for the agent's company; `approval_instance_id` is set on the
+        response. Re-runs the same validation suite as `POST /leave-requests`.
+      operationId: submitLeaveRequest
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - "QT92D"
+      parameters:
+        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      responses:
+        '200':
+          description: Submitted; transitioned to `PENDING`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not in `DRAFT`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /leave-requests/{id}:cancel:
+    post:
+      tags: [leave-requests]
+      summary: Agent withdraws a not-yet-approved request (LR-7)
+      description: |
+        Allowed while `status ∈ {DRAFT, PENDING}`. Transitions to `CANCELLED`, closes the E11
+        approval instance, and restores any `pending` reservation on the matching `LeaveQuota`
+        (quota-tracked types). No schedule effect (the request never reached APPROVED so no shifts
+        were cancelled).
+
+        For cancelling an **APPROVED** future leave, see `:cancel-approved`.
+      operationId: cancelLeaveRequest
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self
+      x-design-screens:
+        - "hjCYy"  # mobile status detail — "Tarik Pengajuan"
+      parameters:
+        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  example: "Rencana berubah."
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already approved or terminal — use `:cancel-approved` for approved futures.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /leave-requests/{id}:cancel-approved:
+    post:
+      tags: [leave-requests]
+      summary: Cancel an APPROVED leave (agent for own future leave, or HR anytime) — Wave 3.4
+      description: |
+        Cancels an already-`APPROVED` `LeaveRequest`. Side effects (LI-4):
+
+        - **Quota** — `used -= duration_days`, `remaining += duration_days` (LQ-3).
+        - **E4 schedule** — previously-cleared schedule entries are **restored to UNASSIGNED**;
+          the leader must re-assign (auto-assignment is out of scope v1).
+        - **E5 attendance** — absent-suppression for the affected dates is lifted.
+
+        ### Permissions
+        - **Agent** may cancel **own** approved leave **only if `start_date > today`** (future-only).
+        - **HR / super_admin** may cancel any approved leave including past-dated; past-date
+          cancellations create a flagged audit entry (LI C-3 historical reconciliation).
+
+        `reason` is required.
+      operationId: cancelApprovedLeaveRequest
+      x-rbac:
+        roles: [agent, hr_admin, super_admin]
+        scope: self  # HR widens
+      x-design-screens:
+        - "hjCYy"  # mobile (audit M12)
+        - "DJrBn"  # HR detail
+      parameters:
+        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  example: "Klien minta agen kembali bertugas — cuti dibatalkan."
+      responses:
+        '200':
+          description: Approved leave cancelled; schedule + quota restored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+              examples:
+                cancelled_with_restore:
+                  $ref: '#/components/examples/CancelApprovedExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not in `APPROVED`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: Agent attempted to cancel a leave that already started (`start_date <= today`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /leave-requests/{id}:shorten:
+    post:
+      tags: [leave-requests]
+      summary: HR shortens an APPROVED leave (LI-4 partial restore)
+      description: |
+        HR-only. Sets a new `end_date` earlier than the current one on an `APPROVED` request;
+        the days between `new_end_date + 1` and the original `end_date` are restored:
+
+        - `LeaveQuota.used -= delta`, `remaining += delta` (LQ-3).
+        - Schedule entries on those restored dates → `UNASSIGNED` (leader re-roster).
+        - Absent-suppression on those dates is lifted.
+
+        `reason` is required. Cannot shorten past `start_date` (use `:cancel-approved` instead).
+      operationId: shortenLeaveRequest
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "DJrBn"  # HR detail (audit M12)
+      parameters:
+        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_end_date, reason]
+              properties:
+                new_end_date:
+                  type: string
+                  format: date
+                  description: New end date; must satisfy `start_date <= new_end_date < original_end_date`.
+                  example: "2026-06-16"
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                  example: "Agen kembali bertugas lebih awal, sisa hari dikembalikan."
+      responses:
+        '200':
+          description: Shortened; quota and schedule partially restored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Not in `APPROVED`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: |
+            `new_end_date` is out of range (must be `>= start_date` and `< current end_date`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /leave-requests/{id}/attachments:
+    post:
+      tags: [leave-requests]
+      summary: Upload a supporting document (LR-2 / INV-5)
+      description: |
+        Multipart upload. The returned `file_id` (`SWP-FILE-*`) is then passed as
+        `document_file_id` on `POST /leave-requests` or `PATCH /leave-requests/{id}` while the
+        request is still `DRAFT`. Uploading on a non-DRAFT request **replaces** the prior
+        attachment and is audited.
+
+        - **Max size:** 10 MB.
+        - **Allowed types:** PDF, JPEG, PNG.
+        - **Server returns** `422 LEAVE_TYPE_REQUIRES_DOC` if the request's leave type does not
+          require a document **and** strict mode is on; otherwise the file is accepted as
+          supplementary evidence.
+      operationId: uploadLeaveRequestAttachment
+      x-rbac:
+        roles: [agent, hr_admin, super_admin, shift_leader]
+        scope: self
+      x-design-screens:
+        - "QT92D"  # mobile upload field
+      parameters:
+        - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF / JPEG / PNG; ≤ 10 MB.
+                caption:
+                  type: string
+                  description: Optional caption (e.g. "Surat dokter").
+                  maxLength: 200
+                  example: "Surat dokter klinik Senayan."
+      responses:
+        '201':
+          description: File attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadedFile' }
+              examples:
+                doctor_note:
+                  $ref: '#/components/examples/AttachmentExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: File too large (>10 MB).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '415':
+          description: Unsupported file type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ───────────────────────────  LEAVE CALENDAR  ───────────────────────────
+  /leave-calendar:
+    get:
+      tags: [leave-calendar]
+      summary: Team / cross-company leave calendar (LC-1, LV-3, LV-4)
+      description: |
+        Returns aggregated leave entries for the calendar grid.
+
+        ### `show_pending` toggle (per audit M10)
+        - `false` (default per FEATURE.md §7 D6) — only `APPROVED` entries.
+        - `true` — `APPROVED` + `PENDING`, with each entry's `status` set so the client can
+          render dashed / striped pending visuals.
+      operationId: getLeaveCalendar
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - "s5niW"  # HR cross-company calendar
+        - "YvYcr"  # SL team calendar
+      parameters:
+        - name: company_id
+          in: query
+          description: Required when caller is `shift_leader` (server enforces own-company match).
+          schema: { type: string, example: SWP-CMP-014 }
+        - name: leave_type_id
+          in: query
+          schema: { type: string }
+        - name: period
+          in: query
+          description: Calendar year (defaults to current year).
+          schema: { type: integer, example: 2026 }
+        - name: month
+          in: query
+          description: 1–12; when provided, response is one month. Else returns all 12 months of `period`.
+          schema: { type: integer, minimum: 1, maximum: 12, example: 6 }
+        - name: show_pending
+          in: query
+          description: Include PENDING entries (rendered with `status` so the client styles them as pending).
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Calendar grid (entries).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveCalendarResponse' }
+              examples:
+                hr_june:
+                  $ref: '#/components/examples/CalendarHRJuneExample'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ───────────────────────────  LEAVE TYPES (read-through)  ───────────────────────────
+  /leave-types:
+    get:
+      tags: [leave-types]
+      summary: List leave types (read-through; writes live in E2)
+      description: |
+        Convenience read for forms (mobile request type picker, HR queue filter). The canonical
+        master-data endpoint with all CRUD operations lives in the **E2 spec** (`/leave-types`).
+        Returns the same shape; the `requires_document` flag governs E6 attachment validation
+        (LR-2 / INV-5).
+      operationId: listLeaveTypes
+      x-rbac:
+        roles: [agent, shift_leader, hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "QT92D"  # mobile type picker
+        - "yho5i"  # HR queue filter
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [ACTIVE, INACTIVE] }
+        - name: is_annual
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Leave types.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaveType' }
+              examples:
+                types:
+                  $ref: '#/components/examples/LeaveTypesExample'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  COMPONENTS
+# ────────────────────────────────────────────────────────────────────────────────
+components:
+
+  # ──────────────────────────────  PARAMETERS  ─────────────────────────────
+  parameters:
+    EmployeeIdQuery:
+      name: employee_id
+      in: query
+      description: Filter by employee.
+      schema: { type: string, example: SWP-EMP-1042 }
+    LeaveTypeIdQuery:
+      name: leave_type_id
+      in: query
+      description: Filter by leave type (`SWP-LT-*`).
+      schema: { type: string, example: SWP-LT-001 }
+    PeriodYearQuery:
+      name: period
+      in: query
+      description: Calendar year of the quota period (e.g., `2026`).
+      schema: { type: integer, example: 2026 }
+    LeaveRequestIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: SWP-LR-2026-0042 }
+    LimitQuery:
+      name: limit
+      in: query
+      description: Page size (CONVENTIONS §8). Max 200.
+      schema: { type: integer, default: 50, maximum: 200 }
+    CursorQuery:
+      name: cursor
+      in: query
+      description: Opaque cursor from a prior response (CONVENTIONS §8).
+      schema: { type: string }
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID v4. Required on all write/action endpoints (CONVENTIONS §13).
+      schema:
+        type: string
+        format: uuid
+        example: 3c7e9a8d-4f12-4f3a-9b27-15c2c6c4d111
+
+  # ──────────────────────────────  RESPONSES  ─────────────────────────────
+  responses:
+    BadRequest:
+      description: Malformed JSON or invalid query parameters.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            invalid_request:
+              $ref: '#/components/examples/ErrorInvalidRequestExample'
+    Unauthenticated:
+      description: Missing or expired token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but role/scope insufficient.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource doesn't exist (or hidden from caller).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    IdempotencyConflict:
+      description: Same `Idempotency-Key` re-used with a different body (CONVENTIONS §13).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    UnprocessableEntity:
+      description: Business-rule rejection.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  # ──────────────────────────────  SECURITY  ─────────────────────────────
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+
+  # ──────────────────────────────  SCHEMAS  ─────────────────────────────
+  schemas:
+
+    # ── per-type ledger (2026-06-12) ──
+    LeaveTypeBalance:
+      type: object
+      description: One active leave type's current-window balance (per-type ledger, F6.5).
+      required: [leave_type_id, code, name, cap_basis, cap_unit, paid, gender, requires_document, color, has_window, used_days, pending_days]
+      properties:
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        code: { type: string, example: CT }
+        name: { type: string, example: Cuti Tahunan Pegawai PKWT }
+        cap_basis:
+          type: string
+          enum: [ANNUAL_POOL, PER_EVENT, PER_MONTH, PER_YEAR_COUNT, UNCAPPED, LIFETIME_ONCE, SERVICE_UNPAID]
+        cap_value: { type: integer, nullable: true, description: Day/occurrence cap; null = uncapped/variable. }
+        cap_unit: { type: string, enum: [DAYS, COUNT] }
+        paid: { type: boolean }
+        gender: { type: string, enum: [ANY, FEMALE, MALE] }
+        requires_document: { type: boolean }
+        color: { type: string, example: '#188E4D' }
+        has_window: { type: boolean, description: A standing quota row exists for the current window. }
+        entitled_days: { type: integer, nullable: true }
+        used_days: { type: integer }
+        pending_days: { type: integer }
+        remaining_days: { type: integer, nullable: true, description: null for UNCAPPED / nil-cap ("sesuai ketentuan"). }
+        expires_at: { type: string, format: date, nullable: true }
+
+    # ── enums ──
+    LeaveStatus:
+      type: string
+      description: |
+        Lifecycle states for `LeaveRequest`. Approval sub-states are collapsed into a single
+        `PENDING` — the E11 approval chain tracks per-line progress internally (read via
+        `approval_instance_id`).
+
+        Path: `DRAFT → PENDING → APPROVED`.
+        Terminal via reject: `→ REJECTED` (an E11 line member rejected).
+        Terminal via withdraw: `→ CANCELLED`.
+      enum:
+        - DRAFT
+        - PENDING
+        - APPROVED
+        - REJECTED
+        - CANCELLED
+
+    LeaveQuota:
+      type: object
+      description: |
+        One per-type quota **window** under the cap_basis ledger (2026-06-12): one row
+        per `(employee, leave_type, period_key)`. `period_key` is the window key —
+        `<year>` (ANNUAL_POOL / PER_YEAR_COUNT) · `<year>-<MM>` (PER_MONTH) · `EMP`
+        (LIFETIME_ONCE / SERVICE_UNPAID). `remaining = entitled_days - used_days -
+        pending_days`. Returned by `POST /leave-quotas:adjust-entitled`.
+      required: [id, employee_id, leave_type_id, period_key, entitled_days, used_days, pending_days, remaining]
+      properties:
+        id: { type: string, example: SWP-LQ-1042-001-2026 }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        employee_name: { type: string, example: "Budi Santoso" }
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        leave_type_name: { type: string, example: "Cuti Tahunan" }
+        period_key:
+          type: string
+          description: The window key (year · year-month · `EMP`) per the type's cap_basis.
+          example: "2026"
+        entitled_days:
+          type: integer
+          description: Entitlement in days for this window.
+          example: 12
+        used_days:
+          type: integer
+          description: Days committed by APPROVED requests.
+          example: 4
+        pending_days:
+          type: integer
+          description: Days held by open PENDING requests (reserved, not yet committed).
+          example: 0
+        remaining:
+          type: integer
+          description: "`entitled_days - used_days - pending_days` (never negative by design)."
+          example: 8
+        source:
+          type: string
+          enum: [AUTO, ADJUSTMENT, MIGRATION]
+          description: How the window was created.
+          example: AUTO
+        remark: { type: string, example: "Kuota tahunan 2026." }
+        expires_at:
+          type: string
+          format: date
+          nullable: true
+          example: "2026-12-31"
+        last_adjustment:
+          type: object
+          description: Last LQ-6 manual adjustment (if any).
+          nullable: true
+          properties:
+            delta: { type: integer, example: 1 }
+            reason: { type: string, example: "Koreksi entitlement sesuai surat HRD 2026-06-01." }
+            adjusted_by: { type: string, example: SWP-USR-022 }
+            adjusted_at: { type: string, format: date-time, example: "2026-06-01T08:32:00Z" }
+        last_override:
+          type: object
+          description: |
+            Set when a super-admin **bypass** of the leave approval instance (E11 INV-5)
+            force-approved past the balance re-check (E6 LA-5) and drove `remaining` negative.
+          nullable: true
+          properties:
+            leave_request_id: { type: string, example: SWP-LR-2026-0099 }
+            override_reason: { type: string }
+            overridden_by: { type: string, example: SWP-USR-022 }
+            overridden_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time, example: "2026-01-01T00:00:00Z" }
+        updated_at: { type: string, format: date-time, example: "2026-06-01T08:32:00Z" }
+
+    LeaveType:
+      type: object
+      description: |
+        Master data (E2). This read-through mirrors the canonical E2 `LeaveType` schema
+        exactly — same field names and shape — so the generated E2/E6 clients agree.
+      required: [id, name, code, is_annual, requires_document, status]
+      properties:
+        id: { type: string, example: SWP-LT-001 }
+        name: { type: string, example: "Cuti Tahunan" }
+        code: { type: string, example: ANNUAL }
+        description: { type: string }
+        default_annual_quota:
+          type: integer
+          minimum: 0
+          description: Default per-year quota days (consumed by E6 quota seeding).
+        is_annual:
+          type: boolean
+          description: If true, quota accrues annually (LT-2).
+        requires_document:
+          type: boolean
+          description: If true, leave request must attach a document (LT-3).
+        color:
+          type: string
+          description: Hex color used by calendar UIs. Tokenized — DESIGN-SYSTEM §2.
+          example: "#188E4D"
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    LeaveRequest:
+      type: object
+      description: |
+        A leave request. Approval routing and the chain-progress timeline are **owned by E11**:
+        read `approval_instance_id` and call `GET /approval-instances/{id}` (E11) to render the
+        lines, who acted, and who's pending.
+      required: [id, employee_id, leave_type_id, start_date, end_date, duration_days, status, created_at]
+      properties:
+        id: { type: string, example: SWP-LR-2026-0042 }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        employee_name: { type: string, example: "Budi Santoso" }
+        employee_company_id: { type: string, example: SWP-CMP-014 }
+        employee_company_name: { type: string, example: "Plaza Senayan" }
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        leave_type_name: { type: string, example: "Cuti Tahunan" }
+        start_date: { type: string, format: date, example: "2026-06-15" }
+        end_date: { type: string, format: date, example: "2026-06-17" }
+        duration_days:
+          type: integer
+          description: |
+            Server-computed. Counts days the agent would be rostered (per E4 `Schedule`) minus
+            E7 public holidays. Excludes scheduled days off and holidays.
+          example: 3
+        reason:
+          type: string
+          example: "Mengantar orang tua kontrol rumah sakit."
+        notes: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        approval_instance_id:
+          type: string
+          nullable: true
+          readOnly: true
+          pattern: '^SWP-APV-'
+          description: |
+            ID of the E11 `ApprovalInstance` tracking this request's approval chain; null only
+            transiently before the instance is created (i.e. while `status == DRAFT`, before
+            `:submit`). The frontend calls `GET /approval-instances/{id}` (E11) to render the
+            chain timeline.
+          example: SWP-APV-2026-0042
+        delegate_id:
+          type: string
+          nullable: true
+          description: Optional non-binding suggested backfill (FEATURE.md §7 D5 / resolved 2026-05-31).
+          example: SWP-EMP-1055
+        delegate_name: { type: string, nullable: true, example: "Citra Putri" }
+        document_file_id:
+          type: string
+          nullable: true
+          description: '`SWP-FILE-*`; required when `leave_type.requires_document == true`.'
+          example: SWP-FILE-9912
+        document_url:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://api.swp.example.com/api/v1/files/SWP-FILE-9912"
+        backdated:
+          type: boolean
+          description: True when `start_date < created_at::date`.
+          example: false
+        clock_in_conflict:
+          type: boolean
+          description: |
+            True if any day in `[start_date, end_date]` already has an attendance clock-in
+            (LI-3 — surfaces backdated-approval conflict). Set when the leave `OnApproved` hook
+            fires (E11 terminal approve/bypass).
+          example: false
+        balance_check:
+          $ref: '#/components/schemas/BalanceCheck'
+        schedule_impact:
+          type: array
+          description: |
+            Set when the leave `OnApproved` hook fires (E11 terminal approve/bypass; LI-1 / LI-2).
+            Lists the E4 schedule entries that were cancelled/marked LEAVE so the leader sees
+            affected slots and can backfill via E4.
+          items: { $ref: '#/components/schemas/ScheduleImpactEntry' }
+        created_at: { type: string, format: date-time, example: "2026-06-03T08:00:00Z" }
+        updated_at: { type: string, format: date-time, example: "2026-06-03T10:12:00Z" }
+
+    BalanceCheck:
+      type: object
+      description: |
+        Snapshot taken at the most recent server-side check (submit-reserve, or the
+        `OnApproved`-hook commit re-check at E11 terminal approve). `remaining_days_at_check`
+        is the per-type window's available balance (entitled − used − pending) at check time.
+        Re-used in the `422` over-cap payloads.
+      properties:
+        requested_days: { type: integer, example: 3 }
+        remaining_days_at_check:
+          type: integer
+          description: The per-type window's available balance at check time.
+          example: 8
+        checked_at: { type: string, format: date-time, example: "2026-06-03T08:00:01Z" }
+        requires_override:
+          type: boolean
+          description: |
+            True when `requested_days > remaining_days_at_check` at the finalize re-check (LA-5);
+            the hook fails the transaction and a super admin may bypass the instance (E11 INV-5).
+          example: false
+
+    ScheduleImpactEntry:
+      type: object
+      description: |
+        One E4 schedule entry affected by an approval/cancel/shorten (LI-1, LI-4).
+      properties:
+        schedule_id: { type: string, example: SWP-SCH-771122 }
+        date: { type: string, format: date, example: "2026-06-15" }
+        prior_status:
+          type: string
+          enum: [PUBLISHED, ASSIGNED, OPEN, LEAVE, UNASSIGNED]
+          example: PUBLISHED
+        new_status:
+          type: string
+          enum: [LEAVE, UNASSIGNED]
+          example: LEAVE
+        clock_in_conflict:
+          type: boolean
+          description: True if an `Attendance` clock-in already exists on this date (LI-3).
+          example: false
+
+    LeaveRequestWriteRequest:
+      type: object
+      required: [leave_type_id, start_date, end_date, reason]
+      properties:
+        employee_id:
+          type: string
+          description: |
+            Required when HR/leader files on behalf; agents must omit (server fills from token).
+            Server returns `403 FORBIDDEN` if an agent supplies a different employee.
+          example: SWP-EMP-1042
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        start_date: { type: string, format: date, example: "2026-06-15" }
+        end_date: { type: string, format: date, example: "2026-06-17" }
+        reason:
+          type: string
+          minLength: 5
+          maxLength: 1000
+          example: "Mengantar orang tua kontrol rumah sakit."
+        delegate_id:
+          type: string
+          nullable: true
+          description: Optional non-binding suggested backfill (informational).
+          example: SWP-EMP-1055
+        document_file_id:
+          type: string
+          nullable: true
+          description: |
+            Required when `leave_type.requires_document == true` (LR-2 / INV-5).
+            Upload via `POST /leave-requests/{id}/attachments`.
+          example: SWP-FILE-9912
+        submit:
+          type: boolean
+          description: |
+            `true` (default) submits immediately; `false` creates as `DRAFT` and the client
+            calls `:submit` later. HR-on-behalf flows often use `false` to allow review before
+            routing.
+          default: true
+
+    LeaveRequestPatchRequest:
+      type: object
+      description: Partial update; allowed only while `status == DRAFT`.
+      properties:
+        leave_type_id: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        reason: { type: string, minLength: 5, maxLength: 1000 }
+        delegate_id: { type: string, nullable: true }
+        document_file_id: { type: string, nullable: true }
+
+    LeaveRequestListResponse:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/LeaveRequest' }
+        next_cursor: { type: string, nullable: true }
+        has_more: { type: boolean }
+
+    # ── calendar ──
+    LeaveCalendarResponse:
+      type: object
+      required: [period, entries]
+      properties:
+        period: { type: integer, example: 2026 }
+        month: { type: integer, nullable: true, example: 6 }
+        show_pending: { type: boolean, example: false }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/LeaveCalendarEntry' }
+
+    LeaveCalendarEntry:
+      type: object
+      required: [leave_request_id, employee_id, start_date, end_date, status, leave_type_id]
+      properties:
+        leave_request_id: { type: string, example: SWP-LR-2026-0042 }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        employee_name: { type: string, example: "Budi Santoso" }
+        company_id: { type: string, example: SWP-CMP-014 }
+        company_name: { type: string, example: "Plaza Senayan" }
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        leave_type_code: { type: string, example: ANNUAL }
+        start_date: { type: string, format: date, example: "2026-06-15" }
+        end_date: { type: string, format: date, example: "2026-06-17" }
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        delegate_id: { type: string, nullable: true, example: SWP-EMP-1055 }
+        delegate_name: { type: string, nullable: true, example: "Citra Putri" }
+
+    # ── shared ──
+    UploadedFile:
+      type: object
+      required: [id, url, name, size_bytes, mime, uploaded_at]
+      properties:
+        id: { type: string, example: SWP-FILE-9912 }
+        url: { type: string, format: uri }
+        name: { type: string, example: "surat-dokter-budi.pdf" }
+        size_bytes: { type: integer, example: 245678 }
+        mime: { type: string, example: "application/pdf" }
+        uploaded_at: { type: string, format: date-time }
+
+    # ── error envelope (CONVENTIONS §11) ──
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/ErrorDetail' }
+
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: |
+            **E6 error codes (in addition to CONVENTIONS §11):**
+
+            - `QUOTA_EXCEEDED` (422) — `fields.requested_days`, `fields.remaining_days`.
+            - `MISSING_REQUIRED_DOCUMENT` (422) — `fields.document_file_id`.
+            - `BACKDATED_LEAVE` (422) — `fields.requires_hr_override` (boolean).
+            - `INVALID_DATE_RANGE` (422) — `fields.end_date`.
+            - `OVERLAPPING_LEAVE` (409) — `fields.conflicting_leave_request_id`.
+            - `BALANCE_RECHECK_FAILED` (422) — raised by the leave `OnApproved` hook at E11
+              finalize when remaining dropped below the request (LA-5); the instance stays at its
+              line and a super admin may bypass. `fields.requires_override: true`,
+              `fields.requested_days`, `fields.remaining_days`.
+            - `LEAVE_TYPE_REQUIRES_DOC` (422) — leave-type / document mismatch on upload.
+            - `IDEMPOTENCY_KEY_REUSED` (409) — same `Idempotency-Key`, different body.
+          example: QUOTA_EXCEEDED
+        message:
+          type: string
+          example: "Pengajuan 5 hari melebihi sisa kuota 3 hari."
+        fields:
+          type: object
+          additionalProperties: true
+          description: |
+            Field-level errors (form binding) and/or structured payload for the specific code.
+            E.g. for `QUOTA_EXCEEDED`: `{ requested_days: 5, remaining_days: 3 }`.
+        request_id:
+          type: string
+          example: "req_01J5XK..."
+
+  # ──────────────────────────────  EXAMPLES  ─────────────────────────────
+  examples:
+    # ── grant-lot ledger (2026-06-08) ──
+    HRQueueExample:
+      summary: Approval queue — 2 pending rows.
+      value:
+        data:
+          - id: SWP-LR-2026-0042
+            employee_id: SWP-EMP-1042
+            employee_name: "Budi Santoso"
+            employee_company_id: SWP-CMP-014
+            employee_company_name: "Plaza Senayan"
+            leave_type_id: SWP-LT-001
+            leave_type_name: "Cuti Tahunan"
+            start_date: "2026-06-15"
+            end_date: "2026-06-17"
+            duration_days: 3
+            reason: "Mengantar orang tua kontrol rumah sakit."
+            status: PENDING
+            approval_instance_id: SWP-APV-2026-0042
+            backdated: false
+            clock_in_conflict: false
+            balance_check:
+              requested_days: 3
+              remaining_days_at_check: 8
+              checked_at: "2026-06-03T09:16:00Z"
+              requires_override: false
+            created_at: "2026-06-03T08:00:00Z"
+            updated_at: "2026-06-03T09:15:00Z"
+        next_cursor: null
+        has_more: false
+
+    CreateAnnualRequestExample:
+      summary: Budi requests 3 annual days from mobile.
+      value:
+        leave_type_id: SWP-LT-001
+        start_date: "2026-06-15"
+        end_date: "2026-06-17"
+        reason: "Mengantar orang tua kontrol rumah sakit."
+        delegate_id: SWP-EMP-1055
+        submit: true
+
+    CreateSickRequestExample:
+      summary: Budi requests 2 sick days with attached doctor's note.
+      value:
+        leave_type_id: SWP-LT-002
+        start_date: "2026-06-04"
+        end_date: "2026-06-05"
+        reason: "Demam, surat dokter terlampir."
+        document_file_id: SWP-FILE-9912
+        submit: true
+
+    CreateOnBehalfDraftExample:
+      summary: HR Sari files a draft on behalf of an agent (saves before submitting).
+      value:
+        employee_id: SWP-EMP-1042
+        leave_type_id: SWP-LT-001
+        start_date: "2026-07-01"
+        end_date: "2026-07-03"
+        reason: "Cuti dibuat HR atas permintaan agen — verifikasi dulu."
+        submit: false
+
+    CreatedPendingExample:
+      summary: 201 — created PENDING; E11 approval instance attached.
+      value:
+        id: SWP-LR-2026-0042
+        employee_id: SWP-EMP-1042
+        employee_name: "Budi Santoso"
+        employee_company_id: SWP-CMP-014
+        employee_company_name: "Plaza Senayan"
+        leave_type_id: SWP-LT-001
+        leave_type_name: "Cuti Tahunan"
+        start_date: "2026-06-15"
+        end_date: "2026-06-17"
+        duration_days: 3
+        reason: "Mengantar orang tua kontrol rumah sakit."
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0042
+        delegate_id: SWP-EMP-1055
+        delegate_name: "Citra Putri"
+        document_file_id: null
+        backdated: false
+        clock_in_conflict: false
+        balance_check:
+          requested_days: 3
+          remaining_days_at_check: 8
+          checked_at: "2026-06-03T08:00:01Z"
+          requires_override: false
+        schedule_impact: []
+        created_at: "2026-06-03T08:00:00Z"
+        updated_at: "2026-06-03T08:00:01Z"
+
+    RequestDetailPendingExample:
+      summary: Request detail — PENDING; chain progress read via the E11 instance.
+      value:
+        id: SWP-LR-2026-0042
+        employee_id: SWP-EMP-1042
+        employee_name: "Budi Santoso"
+        employee_company_id: SWP-CMP-014
+        employee_company_name: "Plaza Senayan"
+        leave_type_id: SWP-LT-001
+        leave_type_name: "Cuti Tahunan"
+        start_date: "2026-06-15"
+        end_date: "2026-06-17"
+        duration_days: 3
+        reason: "Mengantar orang tua kontrol rumah sakit."
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0042
+        delegate_id: SWP-EMP-1055
+        delegate_name: "Citra Putri"
+        document_file_id: null
+        document_url: null
+        backdated: false
+        clock_in_conflict: false
+        balance_check:
+          requested_days: 3
+          remaining_days_at_check: 8
+          checked_at: "2026-06-03T09:16:00Z"
+          requires_override: false
+        schedule_impact: []
+        created_at: "2026-06-03T08:00:00Z"
+        updated_at: "2026-06-03T09:15:00Z"
+
+    RequestDetailClockInConflictExample:
+      summary: Backdated sick leave covering a day Budi already clocked-in (LI-3).
+      value:
+        id: SWP-LR-2026-0061
+        employee_id: SWP-EMP-1042
+        employee_name: "Budi Santoso"
+        employee_company_id: SWP-CMP-014
+        employee_company_name: "Plaza Senayan"
+        leave_type_id: SWP-LT-002
+        leave_type_name: "Cuti Sakit"
+        start_date: "2026-06-01"
+        end_date: "2026-06-02"
+        duration_days: 2
+        reason: "Sakit demam — surat dokter."
+        status: PENDING
+        approval_instance_id: SWP-APV-2026-0061
+        delegate_id: null
+        delegate_name: null
+        document_file_id: SWP-FILE-9912
+        document_url: "https://api.swp.example.com/api/v1/files/SWP-FILE-9912"
+        backdated: true
+        clock_in_conflict: true
+        balance_check:
+          requested_days: 2
+          remaining_days_at_check: 10
+          checked_at: "2026-06-03T07:00:00Z"
+          requires_override: false
+        schedule_impact:
+          - schedule_id: SWP-SCH-771122
+            date: "2026-06-01"
+            prior_status: PUBLISHED
+            new_status: LEAVE
+            clock_in_conflict: true
+        created_at: "2026-06-03T07:00:00Z"
+        updated_at: "2026-06-03T07:30:00Z"
+
+    CancelApprovedExample:
+      summary: HR cancels an APPROVED future leave — schedule restored.
+      value:
+        id: SWP-LR-2026-0042
+        employee_id: SWP-EMP-1042
+        employee_name: "Budi Santoso"
+        leave_type_id: SWP-LT-001
+        leave_type_name: "Cuti Tahunan"
+        start_date: "2026-06-15"
+        end_date: "2026-06-17"
+        duration_days: 3
+        status: CANCELLED
+        approval_instance_id: SWP-APV-2026-0042
+        schedule_impact:
+          - schedule_id: SWP-SCH-771122
+            date: "2026-06-15"
+            prior_status: LEAVE
+            new_status: UNASSIGNED
+            clock_in_conflict: false
+          - schedule_id: SWP-SCH-771123
+            date: "2026-06-16"
+            prior_status: LEAVE
+            new_status: UNASSIGNED
+            clock_in_conflict: false
+          - schedule_id: SWP-SCH-771124
+            date: "2026-06-17"
+            prior_status: LEAVE
+            new_status: UNASSIGNED
+            clock_in_conflict: false
+        created_at: "2026-06-03T08:00:00Z"
+        updated_at: "2026-06-05T14:00:00Z"
+
+    AttachmentExample:
+      summary: Uploaded doctor's note attached to a sick leave.
+      value:
+        id: SWP-FILE-9912
+        url: "https://api.swp.example.com/api/v1/files/SWP-FILE-9912"
+        name: "surat-dokter-budi.pdf"
+        size_bytes: 245678
+        mime: "application/pdf"
+        uploaded_at: "2026-06-03T07:30:00Z"
+
+    CalendarHRJuneExample:
+      summary: HR cross-company calendar — June 2026.
+      value:
+        period: 2026
+        month: 6
+        show_pending: false
+        entries:
+          - leave_request_id: SWP-LR-2026-0042
+            employee_id: SWP-EMP-1042
+            employee_name: "Budi Santoso"
+            company_id: SWP-CMP-014
+            company_name: "Plaza Senayan"
+            leave_type_id: SWP-LT-001
+            leave_type_code: ANNUAL
+            start_date: "2026-06-15"
+            end_date: "2026-06-17"
+            status: APPROVED
+            delegate_id: SWP-EMP-1055
+            delegate_name: "Citra Putri"
+
+    LeaveTypesExample:
+      summary: Active leave types.
+      value:
+        data:
+          - id: SWP-LT-001
+            code: ANNUAL
+            name: "Cuti Tahunan"
+            default_annual_quota: 12
+            is_annual: true
+            requires_document: false
+            color: "#188E4D"
+            status: ACTIVE
+          - id: SWP-LT-002
+            code: SICK
+            name: "Cuti Sakit"
+            default_annual_quota: 12
+            is_annual: false
+            requires_document: true
+            color: "#E8833A"
+            status: ACTIVE
+          - id: SWP-LT-003
+            code: MATERNITY
+            name: "Cuti Melahirkan"
+            default_annual_quota: 90
+            is_annual: false
+            requires_document: true
+            color: "#C6538C"
+            status: ACTIVE
+          - id: SWP-LT-004
+            code: UNPAID
+            name: "Cuti Tidak Dibayar"
+            default_annual_quota: 0
+            is_annual: false
+            requires_document: false
+            color: "#6B7280"
+            status: ACTIVE
+
+    # ── error examples ──
+    ErrorInvalidRequestExample:
+      summary: Generic 400 — malformed JSON.
+      value:
+        error:
+          code: INVALID_REQUEST
+          message: "Body JSON tidak valid."
+          request_id: "req_01J5XK7Z0A0B0C0D"
+
+    ErrorOverlappingExample:
+      summary: 409 OVERLAPPING_LEAVE.
+      value:
+        error:
+          code: OVERLAPPING_LEAVE
+          message: "Pengajuan beririsan dengan cuti yang masih berjalan."
+          fields:
+            conflicting_leave_request_id: SWP-LR-2026-0019
+            conflicting_start_date: "2026-06-10"
+            conflicting_end_date: "2026-06-12"
+          request_id: "req_01J5XK..."
+
+    ErrorIdempotencyExample:
+      summary: 409 IDEMPOTENCY_KEY_REUSED.
+      value:
+        error:
+          code: IDEMPOTENCY_KEY_REUSED
+          message: "Idempotency-Key sudah digunakan dengan payload berbeda."
+          request_id: "req_01J5XK..."
+
+    ErrorQuotaExceededExample:
+      summary: 422 QUOTA_EXCEEDED.
+      value:
+        error:
+          code: QUOTA_EXCEEDED
+          message: "Pengajuan 5 hari melebihi sisa kuota 3 hari."
+          fields:
+            requested_days: 5
+            remaining_days: 3
+          request_id: "req_01J5XK..."
+
+    ErrorMissingDocExample:
+      summary: 422 MISSING_REQUIRED_DOCUMENT.
+      value:
+        error:
+          code: MISSING_REQUIRED_DOCUMENT
+          message: "Jenis cuti ini membutuhkan dokumen pendukung."
+          fields:
+            document_file_id: "wajib untuk Cuti Sakit"
+          request_id: "req_01J5XK..."
+
+    ErrorBackdatedExample:
+      summary: 422 BACKDATED_LEAVE — HR override required.
+      value:
+        error:
+          code: BACKDATED_LEAVE
+          message: "Cuti backdated memerlukan persetujuan override dari HR."
+          fields:
+            start_date: "2026-05-25"
+            requires_hr_override: true
+          request_id: "req_01J5XK..."
+
+    ErrorInvalidRangeExample:
+      summary: 422 INVALID_DATE_RANGE.
+      value:
+        error:
+          code: INVALID_DATE_RANGE
+          message: "Tanggal akhir tidak boleh lebih awal dari tanggal mulai."
+          fields:
+            end_date: "harus >= start_date"
+          request_id: "req_01J5XK..."
+
+    ErrorBalanceRecheckExample:
+      summary: 422 BALANCE_RECHECK_FAILED — leave OnApproved hook blocked at E11 finalize (LA-5).
+      value:
+        error:
+          code: BALANCE_RECHECK_FAILED
+          message: "Saldo cuti berubah sejak pengajuan; persetujuan diblokir. Super admin dapat bypass atau HR menyesuaikan kuota."
+          fields:
+            requested_days: 3
+            remaining_days: 1
+            requires_override: true
+          request_id: "req_01J5XK..."
+
+# ────────────────────────────────────────────────────────────────────────────────
+#  GLOBAL SECURITY
+# ────────────────────────────────────────────────────────────────────────────────
+security:
+  - BearerAuth: []

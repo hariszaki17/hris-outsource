@@ -99,6 +99,6 @@ F5.1 (clock data), E4 (scheduled shift times), E2 (codes, grace), E6 (leave vs a
 ## 10. Decisions & open questions
 
 - ✅ Auto-clock-out at shift end + flag; exceptions-only routing.
-- **Open:** grace-period value (proposed 15 min) and whether it varies by service line.
+- **Open:** grace-period value (proposed 15 min) — global (does not vary by work segmentation).
 - **Open:** early-clock-out threshold before it's flagged Incomplete.
 - **Open (C-6):** approved leave must suppress Absent — confirm E6↔E5 precedence.

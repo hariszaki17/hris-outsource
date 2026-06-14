@@ -39,7 +39,10 @@ erDiagram
         bigint schedule_id FK "null if unscheduled"
         bigint placement_id FK
         bigint attendance_code_id FK
-        datetime check_in_at
+        bigint company_id FK "denormalized from placement (scope/filter)"
+        bigint site_id FK "denormalized from placement (scope/filter)"
+        string position "denormalized from placement (free-text, filter)"
+        datetime check_in_at "nullable (null when Absent)"
         datetime check_out_at "nullable"
         decimal lat_in
         decimal lng_in
@@ -73,6 +76,10 @@ erDiagram
 - **INV-2:** geofence is evaluated against the **placement's client-company location + radius** (radius is a ClientCompany config — see §6b).
 - **INV-3:** **exceptions-only verification** — a record needs leader verification iff `is_late` OR out-of-geofence OR `auto_closed` OR missing clock-in/out OR its attendance code `needs_verification`; otherwise `AutoApproved`.
 - **INV-4:** if no clock-out by the scheduled shift end, the system **auto-clocks-out** at shift end, sets `auto_closed`, and marks the record `Pending` verification.
+- **INV-5:** **`Absent` is set only for a scheduled shift with no clock-in by shift end** — the record carries `check_in_at = null` (and no clock-in geofence). An `Absent` record is **resolvable via a `check_in` correction (F5.4)**, whose approval re-evaluates `status` (`Absent → Present/Late` per `shift_start_at` + grace). An approved leave suppresses `Absent` → `On Leave` (F5.2, E6).
+- **INV-6:** **`shift_start_at` is fixed at clock-in; `shift_end_at` tracks master edits until clock-out, then fixed** (see E4 INV-5; detail in F5.1 CI-9). INV-4's auto-close and F5.2's lateness/early evaluation always use the entry's current effective end until checkout.
+
+**Denormalization:** `company_id`, `site_id`, and `position` (free-text) are **denormalized onto `Attendance`** (resolved from the agent's placement → site/position) so the high-volume records list (F5.5) can **filter and scope by company · site · position** without a JOIN — the same pattern as `company_id` carried for leader scope.
 
 ## 5. Features
 
@@ -83,6 +90,7 @@ erDiagram
 | **F5.3** | Shift-Leader Verification (exceptions) | [attendance-verification.md](prds/attendance-verification.md) |
 | **F5.4** | Attendance Corrections | [attendance-corrections.md](prds/attendance-corrections.md) |
 | **F5.5** | Attendance Records & Dashboard | [attendance-records.md](prds/attendance-records.md) |
+| **F5.6** | Manual Attendance Entry | [manual-attendance.md](prds/manual-attendance.md) |
 
 ## 6. Platform / clients
 
@@ -94,7 +102,7 @@ erDiagram
 
 ## 6b. Cross-epic note
 
-Geofencing needs a **radius per site** — proposing a `geofence_radius_m` field on **ClientCompany (E2)** alongside its existing lat/lng. Late detection needs a **grace period** (proposed default below). Both flagged as open items.
+Geofencing needs a **center + radius per site** — held on the **`Site` entity (E2 F2.6)** (`lat`/`lng` + `geofence_radius_m`); the agent's placement resolves to exactly one site (E3 INV-5). *(2026-06-03: relocated from ClientCompany onto Site.)* Late detection needs a **grace period** (proposed default below).
 
 ---
 
@@ -214,7 +222,7 @@ flowchart LR
         R1([My attendance]) --> R2[History + status + corrections]
     end
     subgraph LH[Leader / HR - web]
-        R3([Team attendance]) --> R4[Filter by date, status, exceptions]
+        R3([Team attendance]) --> R4[Filter by company, site, position, date, status, exceptions]
         R4 --> R5{Export?}
         R5 -- Yes --> R6[Billable/payable rollup -> E10]
     end
@@ -228,6 +236,86 @@ flowchart LR
 
 ---
 
+### F5.6 — Manual Attendance Entry (Buat Kehadiran Manual)
+
+HR/Shift-Leader creates attendance record for any employee who forgot clock-in or whose clock was not captured. Bypasses GPS/geofence entirely.
+
+**Page-based flow** (full-page form, not a modal):
+1. **Employee search** — type-ahead search selects target employee
+2. **Date picker** — select attendance date
+3. **Autofill** — server resolves placement + today's schedule + any **existing attendance record** (GET `:manual-autofill`); shows company, site, position, schedule times in a right-column summary card
+4. **Enter times** — check-in (required) + check-out (optional) datetime-local inputs
+5. **Optional note** — free-text reason
+6. **Submit** — POST `:manual-create`; redirects to attendance dashboard. *If a record already exists for the employee + date (e.g. the absence-sweep's `ABSENT`/`PENDING` row), the form disables create and links to verify/correct it instead (MR-14).*
+
+**Business rules:**
+- **MR-1:** server resolves employee's active placement; rejects with `422 NO_ACTIVE_PLACEMENT` if none.
+- **MR-2:** check_out_at >= check_in_at required; `400 INVALID_REQUEST` if violated.
+- **MR-3:** always created with `verification_status=PENDING` + `MANUAL_ENTRY` flag.
+- **MR-4:** if schedule exists for today, lateness/early evaluation runs against it (15 min grace); flags `LATE`/`EARLY` as applicable.
+- **MR-5:** no schedule → no lateness evaluation (unscheduled manual entry).
+- **MR-6:** geofence bypassed: `geofence_in = { inside: true, distance_m: 0, radius_m: 0 }`, `lat_in/lng_in = null`.
+- **MR-7:** `worked_minutes` computed server-side from check_in → check_out (0 if negative).
+- **MR-8:** `WFO = true` always (manual entry implies on-site).
+- **MR-9:** audit record written with source `manual_entry`.
+- **MR-10:** idempotency required (same `Idempotency-Key` + body → safe replay).
+- **MR-11:** `NOTE` optional, stored as `note` text.
+- **MR-12:** `created_by` set from JWT principal of the creating user (HR/SL), stored on `attendance.created_by`.
+- **MR-13:** shift leader scope: SL can create attendance only for employees whose active placement belongs to the SL's own company; `422 OUT_OF_SCOPE` if violated.
+- **MR-14:** autofill also returns any **existing attendance** for the employee + date (`existing_attendance_id`/`_status`/`_verification_status`); when present the web form disables create and steers to verify/correct it (F5.3/F5.4) — avoiding duplicate rows.
+- **MR-15:** autofill `422 NO_ACTIVE_PLACEMENT` is a **non-blocking informational warning** in the web form (re-validate employee/date), not a hard error; create still re-validates per MR-1. Genuine network/5xx → blocking error with retry.
+
+**Autofill endpoint:** `GET /attendance:manual-autofill?employee_id=SWP-EMP-xxxx&date=YYYY-MM-DD` returns placement info (company, site, position) + today's schedule (schedule_id, shift_start_at, shift_end_at) + existing-attendance fields (existing_attendance_id, existing_attendance_status, existing_verification_status) — or `422 NO_ACTIVE_PLACEMENT` if the employee has no active placement. Placement resolution: `lifecycle_status IN (ACTIVE, EXPIRING, EXTENDED)` whose term covers the date (`end_date IS NULL` = open-ended PKWTT).
+
+```mermaid
+flowchart TD
+    HR([HR/SL opens manual attendance page]) --> H1[Search/select employee]
+    H1 --> H2[Select date]
+    H2 --> H3[Autofill: GET :manual-autofill]
+    subgraph SYS_AF[Server: autofill]
+        H3 --> AF1{Active placement covering date?}
+        AF1 -- No --> AF2[422 NO_ACTIVE_PLACEMENT]
+        AF1 -- Yes --> AF3[Resolve schedule + existing attendance for date]
+        AF3 --> AF4[Return placement + schedule + existing-attendance info]
+    end
+    AF2 -. non-blocking warning .-> H4
+    AF4 --> H4[HR reviews placement/schedule]
+    H4 --> HX{Existing attendance record?}
+    HX -- Yes --> HXa[Disable create; link to verify/correct F5.3/F5.4]
+    HX -- No --> H5[Enter check-in time + optional check-out / note]
+    H5 --> H6[Submit POST :manual-create]
+    subgraph SYS[Server: create]
+        H6 --> S1{SL creating outside own company?}
+        S1 -- Yes --> S1a[422 OUT_OF_SCOPE]
+        S1 -- No --> S2{Active placement?}
+        S2 -- No --> S3[422 NO_ACTIVE_PLACEMENT]
+        S2 -- Yes --> S4{check_out >= check_in?}
+        S4 -- No --> S5[400 INVALID_REQUEST]
+        S4 -- Yes --> S6[Resolve today's schedule]
+        S6 --> S7[Evaluate lateness vs shift start + 15 min grace]
+        S7 --> S8[Evaluate early clock-out vs shift end + 15 min grace]
+        S8 --> S9[Compute worked_minutes]
+        S9 --> S10[Create Attendance: PENDING + MANUAL_ENTRY flag]
+        S10 --> S11[Audit: source=manual_entry, created_by=actor]
+    end
+```
+
+**API:** `GET /attendance:manual-autofill` (autofill) + `POST /attendance:manual-create` (create, idempotency-wrapped).
+**Entities:** `Attendance` (create). **Depends on:** E3 (placement resolution), E4 (schedule lookup). `attendance.created_by` column (migration 00046).
+
+**Decisions:**
+- ✅ Geofence bypassed entirely — manual entry assumes the agent was on-site.
+- ✅ Always PENDING — another HR/leader must verify.
+- ✅ Shift leader allowed (scoped to own company) — actual practice requires SL to create attendance for missed check-ins; scope enforcement via MR-13.
+- ✅ Page-based flow, not modal — form has enough fields to warrant full page (employee search, date, placement card, schedule card, times, note, submit).
+- ✅ No `attendance_code_id` on manual entry — no code picker; the `MANUAL_ENTRY` flag covers the classification.
+- ✅ `created_by` traced from JWT principal — enables audit trail of who manually overrode clock-in.
+- ✅ *(2026-06-10)* Autofill surfaces existing attendance + steers to verify/correct — the absence-sweep already creates `ABSENT`/`PENDING` rows for scheduled shifts, so manual create is reserved for unscheduled/unprocessed gaps (MR-14).
+- ✅ *(2026-06-10)* No-placement on autofill is a non-blocking warning; placement window includes `EXPIRING`/`EXTENDED` and open-ended (PKWTT) terms (MR-1, MR-15).
+- ✅ PRD: [manual-attendance.md](prds/manual-attendance.md).
+
+---
+
 ## 7. Decisions & open questions
 
 **Resolved (2026-05-29):**
@@ -237,7 +325,7 @@ flowchart LR
 - ✅ **Auto-clock-out at scheduled shift end** + flag (legacy `checked_out_by_system` behavior).
 
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
-- ✅ **Geofence radius** = per-site `geofence_radius_m` on ClientCompany (default 100m).
+- ✅ **Geofence radius** = per-site `geofence_radius_m` (default 100m) — *(2026-06-03: on the `Site` entity, E2 F2.6; was ClientCompany).*
 - ✅ **Late grace** = 15 min.
 - ✅ **Unscheduled clock-in** = allowed + flagged.
 - ✅ **Offline clock-in** = online-only for v1 (queue+sync revisited later).
@@ -246,3 +334,8 @@ flowchart LR
 - ✅ **Leaders' own exceptions** → escalate to HR (no self-verify).
 - ✅ **Self-correction window** = 7 days (older = HR only).
 - ✅ **Anti-spoofing** = post-v1; early clock-out flagged if >15 min early.
+
+**Resolved (2026-06-08):**
+- ✅ **Site & position denormalized onto `Attendance`** (alongside company) so the records list (F5.5) filters and scopes by **company · site · position** (position is free-text). *(Service-line denormalization dropped 2026-06-12; `position_id` FK → `position` free-text — service line and the position master removed project-wide.)*
+- ✅ **`check_in_at` nullable** — a true `Absent` record (scheduled shift, no clock-in) carries `check_in_at = null` (INV-5).
+- ✅ **Correction re-evaluates status** — an approved `check_in` correction on an `Absent` record re-runs F5.2 (`Absent → Present/Late` by `shift_start_at` + grace) and recomputes `is_late` / `late_minutes`.

@@ -1,0 +1,1424 @@
+openapi: 3.1.0
+info:
+  title: hris-outsource — E4 Shift Configuration & Scheduling
+  version: 1.0.0
+  description: |
+    Shift master catalog + daily schedule assignment for SWP outsourced agents.
+
+    **Scope (v1):** leader-driven schedule edits, bulk apply-to-range, conflict-checked auto-publish.
+    Agent shift-swap / day-off requests are **deferred to post-v1** (EPICS.md §8, 2026-05-29).
+
+    **Invariants (FEATURE.md §4):**
+    - INV-1: one schedule entry per agent per date (no split shifts).
+    - INV-2: an agent can be scheduled only on a date covered by an active placement.
+    - INV-3: shift leader is scoped to their own company; HR/super-admin scope is global.
+    - INV-4: writes auto-publish — every successful POST/PATCH/DELETE on /schedule is immediately visible
+      to the affected agent on mobile and triggers a notification dispatch (§16.2 of CONVENTIONS). There is
+      no separate "publish" endpoint and no draft state.
+
+    **Conflict rules — every write to /schedule runs all five checks server-side. Each conflict is a
+    distinct, machine-readable error code so the client can render a precise block reason:**
+    1. `DOUBLE_SHIFT` (409) — agent already has a shift on that date (INV-1; SA-2).
+    2. `SHIFT_OVER_LEAVE` (409) — agent has an approved leave covering that date (EPICS §8 lock).
+    3. `OUTSIDE_PLACEMENT_PERIOD` (422) — date outside the agent's active placement window (SA-1, SA-5; INV-2).
+    4. `OUT_OF_SCOPE` (403) — leader attempting to assign an agent outside their own company (INV-3, SA-3).
+
+    Additional rule:
+    - `SHIFT_DEACTIVATED` (422) — picked shift master is inactive (SM-5).
+
+    Informational (does **not** block):
+    - `COVERAGE_BELOW_MIN` — surfaced as a warning array on a 200 response; no coverage minimums are
+      enforced in v1 (FEATURE.md §1 / §3) but the field is reserved for future thresholds and the bulk
+      preview surface.
+
+    **Cross-epic dependencies:**
+    - E2 — Employee (`SWP-EMP-*`), ClientCompany (`SWP-CMP-*`).
+    - E3 — Placement (`SWP-PL-*`): active-placement window drives INV-2 / OUTSIDE_PLACEMENT_PERIOD.
+    - E6 — Leave (`SWP-LR-*`): approved leave on a date blocks scheduling on that date.
+    - E10 — Notifications: auto-dispatch on every write (CONVENTIONS §16.2 — "Schedule published").
+
+    **Times & timezone:** all `start_time` / `end_time` fields are `HH:MM` in 24-hour Asia/Jakarta local
+    (CONVENTIONS §10). `cross_midnight` is derived server-side when `end_time <= start_time` and the work
+    is attributed to the **start date** (EPICS §8).
+
+    **Idempotency:** every schedule write (POST/PATCH/DELETE/bulk) requires an `Idempotency-Key` header.
+    See CONVENTIONS §13.
+
+servers:
+  - url: https://api.swp.example.com/api/v1
+    description: Production
+
+tags:
+  - name: shift-masters
+    description: |
+      F4.1 — Work-shift master catalog. Global templates (title + times + break);
+      cross-midnight auto-detected. Deactivate, never hard-delete (SM-5).
+  - name: schedule
+    description: |
+      F4.2 / F4.3 / F4.4 — daily schedule assignment grid + reads + leader edits (v1 = leader-driven only).
+      Writes auto-publish and notify (INV-4).
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+paths:
+
+  # =====================================================================
+  # F4.1 — Shift master catalog
+  # =====================================================================
+
+  /shift-masters:
+    get:
+      tags: [shift-masters]
+      operationId: listShiftMasters
+      summary: List shift master templates
+      description: |
+        Returns the shift-template catalog. Used by both the master-catalog list screen AND as the picker
+        data source for the cell-assign popover (F4.2). When called as a picker, pass
+        `status=ACTIVE` to hide deactivated templates (SM-5).
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+            example: ACTIVE
+        - name: q
+          in: query
+          description: Free-text search on `name`.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ShiftMaster' }
+                  next_cursor:
+                    type: [string, "null"]
+                  has_more: { type: boolean }
+              examples:
+                catalog:
+                  summary: First page of the catalog
+                  value:
+                    data:
+                      - id: SWP-SHF-0001
+                        name: Pagi
+                        start_time: "07:00"
+                        end_time: "15:00"
+                        break_start: "12:00"
+                        break_end: "13:00"
+                        break_minutes: 60
+                        cross_midnight: false
+                        is_active: true
+                        status: ACTIVE
+                        in_use_count: 142
+                        created_at: "2026-05-12T03:11:24Z"
+                        updated_at: "2026-05-12T03:11:24Z"
+                      - id: SWP-SHF-0004
+                        name: Parkir Malam
+                        start_time: "23:00"
+                        end_time: "07:00"
+                        break_start: "02:00"
+                        break_end: "03:00"
+                        break_minutes: 60
+                        cross_midnight: true
+                        is_active: true
+                        status: ACTIVE
+                        in_use_count: 38
+                        created_at: "2026-05-12T03:14:02Z"
+                        updated_at: "2026-05-12T03:14:02Z"
+                    next_cursor: null
+                    has_more: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: global
+      x-design-screens:
+        - O5JgF   # Master Shift list
+        - Rubba   # Jadwal Mingguan (picker data source)
+
+    post:
+      tags: [shift-masters]
+      operationId: createShiftMaster
+      summary: Create a shift master template
+      description: |
+        Creates a new shift template (SM-1). `cross_midnight` is **derived by the server**
+        when `end_time <= start_time`; clients SHOULD NOT send it (the server overwrites).
+        Break window, if provided, must fall within the shift window (SM-1). `name` is unique (SM-4).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShiftMasterWriteRequest' }
+            examples:
+              parkir_malam:
+                summary: Cross-midnight parking night shift
+                value:
+                  name: Parkir Malam
+                  start_time: "23:00"
+                  end_time: "07:00"
+                  break_start: "02:00"
+                  break_end: "03:00"
+                  is_active: true
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              schema: { type: string }
+              description: URL of the new shift master.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftMaster' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Conflict — name already exists (SM-4).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                duplicate_name:
+                  value:
+                    error:
+                      code: DUPLICATE_NAME
+                      message: "Nama shift sudah dipakai."
+                      fields:
+                        name: "Sudah ada shift dengan nama 'Pagi'."
+                      request_id: req_01J6HG2P
+        '422':
+          description: Unprocessable — business-rule violation (e.g., break outside window).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                break_outside_window:
+                  value:
+                    error:
+                      code: BREAK_OUTSIDE_WINDOW
+                      message: "Jendela istirahat di luar jam kerja shift."
+                      fields:
+                        break_start: "Harus berada di antara start_time dan end_time."
+                      request_id: req_01J6HG41
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      x-design-screens:
+        - Mn9ux   # Tambah Shift modal
+
+  /shift-masters/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ShiftMasterId'
+    get:
+      tags: [shift-masters]
+      operationId: getShiftMaster
+      summary: Get one shift master
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftMaster' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: global
+      x-design-screens:
+        - O5JgF
+
+    patch:
+      tags: [shift-masters]
+      operationId: updateShiftMaster
+      summary: Edit a shift master template
+      description: |
+        Partial update. Server warns (via `in_use_count` on the response body) when the template is in
+        use by existing schedules; the client uses this to prompt "X schedules reference this shift —
+        changes apply to future picks only" (audit notification). Editing does NOT rewrite past schedules.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShiftMasterWriteRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftMaster' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Name uniqueness violation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: Business-rule violation (break-outside-window, etc.).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      x-design-screens:
+        - O5JgF
+        - Mn9ux
+
+  /shift-masters/{id}:deactivate:
+    parameters:
+      - $ref: '#/components/parameters/ShiftMasterId'
+    post:
+      tags: [shift-masters]
+      operationId: deactivateShiftMaster
+      summary: Soft-deactivate a shift master (SM-5)
+      description: |
+        Sets `is_active=false` and `status=INACTIVE`. The template is **hidden from pickers** (F4.2)
+        but **existing schedules remain intact** (SM-5; FEATURE §5 invariants). Use this in place of
+        DELETE — hard-delete is not supported because schedules reference the template.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Deactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftMaster' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already inactive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                already_inactive:
+                  value:
+                    error:
+                      code: ALREADY_INACTIVE
+                      message: "Shift sudah nonaktif."
+                      request_id: req_01J6HJZ2
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      x-design-screens:
+        - O5JgF
+
+  /shift-masters/{id}:reactivate:
+    parameters:
+      - $ref: '#/components/parameters/ShiftMasterId'
+    post:
+      tags: [shift-masters]
+      operationId: reactivateShiftMaster
+      summary: Reactivate a previously deactivated shift master
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Reactivated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShiftMaster' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+      x-rbac:
+        roles: [super_admin, hr_admin]
+        scope: global
+      x-design-screens:
+        - O5JgF
+
+  # =====================================================================
+  # F4.2 / F4.3 / F4.4 — Schedule
+  # =====================================================================
+
+  /schedule:
+    get:
+      tags: [schedule]
+      operationId: listSchedule
+      summary: Query the schedule grid (SV-1)
+      description: |
+        Returns the daily-schedule grid for a client company over a date range. Powers all three
+        F4.3 calendar variants (day / week / by-agent matrix) — the variant is purely a client-side
+        render concern; the server returns the same `ScheduleEntry[]`.
+
+        **RBAC scope:**
+        - `shift_leader`: server auto-scopes to the leader's own company; `company_id` is ignored if
+          the leader passes a different value (returns 403 OUT_OF_SCOPE).
+        - `hr_admin` / `super_admin`: must pass `company_id`; can read any company.
+        - `agent`: cannot use this endpoint (use `/schedule/by-agent/{employee_id}` with their own id).
+
+        Cross-midnight shifts appear once on their `work_date` (start date) with `cross_midnight=true`
+        and the `end_time` field belonging to the next day (SA-8, SV-6).
+      parameters:
+        - name: company_id
+          in: query
+          required: true
+          description: Client company. Required even for leaders (server validates scope).
+          schema: { type: string, example: SWP-CMP-0042 }
+        - name: start_date
+          in: query
+          required: true
+          schema: { type: string, format: date, example: "2026-06-08" }
+        - name: end_date
+          in: query
+          required: true
+          schema: { type: string, format: date, example: "2026-06-14" }
+        - name: employee_id
+          in: query
+          description: Optional — narrow to one agent (still must be inside the company).
+          schema: { type: string }
+        - name: status__in
+          in: query
+          description: Filter by entry status.
+          schema:
+            type: string
+            example: "SCHEDULED,MODIFIED"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScheduleEntry' }
+                  warnings:
+                    type: array
+                    description: |
+                      Non-blocking informational warnings about the queried range — e.g.,
+                      `COVERAGE_BELOW_MIN` for days under a future coverage threshold. Always present
+                      on 200; empty array when nothing to surface.
+                    items: { $ref: '#/components/schemas/Warning' }
+              examples:
+                plaza_senayan_week:
+                  summary: Rudi's Plaza Senayan week
+                  value:
+                    data:
+                      - id: SWP-SCH-100481
+                        employee_id: SWP-EMP-2031
+                        employee_name: Budi Santoso
+                        company_id: SWP-CMP-0042
+                        placement_id: SWP-PL-0881
+                        shift_master_id: SWP-SHF-0001
+                        shift_master_name: Pagi
+                        start_time: "07:00"
+                        end_time: "15:00"
+                        cross_midnight: false
+                        work_date: "2026-06-10"
+                        status: SCHEDULED
+                        is_day_off: false
+                        created_by: SWP-EMP-1001
+                        created_at: "2026-06-03T08:14:00Z"
+                        updated_at: "2026-06-03T08:14:00Z"
+                    warnings: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba   # Jadwal Mingguan
+
+    post:
+      tags: [schedule]
+      operationId: createScheduleEntry
+      summary: Assign one shift to one agent on one date (SA-1)
+      description: |
+        Core F4.2 cell-assign action. The server enforces ALL conflict rules in order; the first
+        failing rule short-circuits the response:
+
+        1. **`OUT_OF_SCOPE` (403)** — leader's `company_id` ≠ agent's placement company.
+        2. **`OUTSIDE_PLACEMENT_PERIOD` (422)** — `date` falls outside the agent's active placement
+           window (E3 Placement, INV-2 / SA-1 / SA-5).
+        3. **`SHIFT_DEACTIVATED` (422)** — picked shift master is inactive.
+        4. **`SHIFT_OVER_LEAVE` (409)** — agent has an approved leave covering `date`
+           (EPICS §8 lock 2026-05-29).
+        5. **`DOUBLE_SHIFT` (409)** — agent already has a schedule entry on `date` (INV-1 / SA-2;
+           returned only when `force_replace=false`). When `force_replace=true`, the existing entry is
+           replaced atomically and the response carries `status=MODIFIED` on the new entry plus the
+           replaced entry's id in `replaced_entry_id`.
+
+        **Implicit side effects (CONVENTIONS §16):**
+        - **Auto-publish (INV-4):** the new entry is immediately visible to the agent on mobile.
+        - **Notification (CONVENTIONS §16.2):** a "Schedule published" notification is dispatched to the
+          affected agent (fire-and-forget; failures don't block).
+        - **Audit:** one E1 audit entry per write.
+
+        To mark a day OFF (SA-7), POST with `is_day_off=true` and omit `shift_master_id`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleEntryWriteRequest' }
+            examples:
+              assign:
+                summary: Rudi assigns Budi the Pagi shift
+                value:
+                  kind: single
+                  employee_id: SWP-EMP-2031
+                  shift_master_id: SWP-SHF-0001
+                  date: "2026-06-10"
+                  force_replace: false
+              day_off:
+                summary: Mark a day OFF (no shift master)
+                value:
+                  kind: single
+                  employee_id: SWP-EMP-2031
+                  date: "2026-06-12"
+                  is_day_off: true
+      responses:
+        '201':
+          description: Created (auto-published).
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ScheduleEntry'
+                  - type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items: { $ref: '#/components/schemas/Warning' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: |
+            Forbidden — leader acting outside their company scope (INV-3).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                out_of_scope:
+                  value:
+                    error:
+                      code: OUT_OF_SCOPE
+                      message: "Anda tidak boleh menjadwalkan agen di luar perusahaan yang Anda pimpin."
+                      request_id: req_01J6HK0Q
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Conflict — INV-1 violation (`DOUBLE_SHIFT`) or schedule-over-leave (`SHIFT_OVER_LEAVE`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                double_shift:
+                  value:
+                    error:
+                      code: DOUBLE_SHIFT
+                      message: "Agen sudah memiliki shift di tanggal ini."
+                      fields:
+                        date: "2026-06-10 sudah terisi shift 'Pagi'."
+                      request_id: req_01J6HK10
+                      details:
+                        existing_entry_id: SWP-SCH-100481
+                        existing_shift_name: Pagi
+                shift_over_leave:
+                  value:
+                    error:
+                      code: SHIFT_OVER_LEAVE
+                      message: "Agen sedang cuti yang disetujui pada tanggal ini."
+                      fields:
+                        date: "2026-06-10 termasuk periode cuti SWP-LR-44210."
+                      request_id: req_01J6HK11
+                      details:
+                        leave_request_id: SWP-LR-44210
+                        leave_type: ANNUAL
+        '422':
+          description: |
+            Business-rule violation — outside placement period or deactivated shift.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                outside_placement_period:
+                  value:
+                    error:
+                      code: OUTSIDE_PLACEMENT_PERIOD
+                      message: "Tanggal di luar periode penempatan aktif agen."
+                      fields:
+                        date: "Penempatan SWP-PL-0881 berlaku 2026-04-01 — 2026-06-30."
+                      request_id: req_01J6HK12
+                      details:
+                        placement_id: SWP-PL-0881
+                        placement_start: "2026-04-01"
+                        placement_end: "2026-06-30"
+                shift_deactivated:
+                  value:
+                    error:
+                      code: SHIFT_DEACTIVATED
+                      message: "Shift sudah dinonaktifkan."
+                      request_id: req_01J6HK14
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba   # cell-assign popover (BLOCKER per E4-AUDIT §3.1)
+
+  /schedule/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+    patch:
+      tags: [schedule]
+      operationId: updateScheduleEntry
+      summary: Change an existing schedule entry (F4.4 leader edit)
+      description: |
+        Leader-driven shift change (e.g., swap to a different master, toggle to OFF, change date).
+        Re-runs ALL five conflict rules (same codes as POST). On success, `status` becomes `MODIFIED`,
+        the entry auto-publishes, and the agent is notified (CH-2).
+
+        v1 = leader edits only; agent-initiated swap requests are deferred (FEATURE.md §7 / EPICS §8).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shift_master_id:
+                  type: [string, "null"]
+                  description: New shift; pass `null` to convert to OFF.
+                date:
+                  type: string
+                  format: date
+                  description: New date (rare; usually the date is stable).
+                is_day_off:
+                  type: boolean
+              additionalProperties: false
+            examples:
+              swap_master:
+                value:
+                  shift_master_id: SWP-SHF-0003
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: Out of scope.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Conflict — `DOUBLE_SHIFT` or `SHIFT_OVER_LEAVE`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '422':
+          description: Business-rule violation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba   # cell-edit popover
+
+    delete:
+      tags: [schedule]
+      operationId: deleteScheduleEntry
+      summary: Clear a schedule cell (SA-2 / CH-1)
+      description: |
+        Hard-removes the entry (distinct from marking OFF — CH-1). Auto-publishes the removal and
+        notifies the agent. The audit record preserves the prior state.
+
+        **Note:** clearing a past date is restricted (PRD F4.4 C-5) — leaders cannot clear past
+        entries because attendance (E5) references them; HR/super-admin can with an audit note.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Cleared.
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403':
+          description: |
+            Out of scope OR leader attempting to clear a past date.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba
+
+  /schedule/by-agent/{employee_id}:
+    parameters:
+      - name: employee_id
+        in: path
+        required: true
+        schema: { type: string, example: SWP-EMP-2031 }
+    get:
+      tags: [schedule]
+      operationId: getScheduleByAgent
+      summary: Get an agent's schedule (mobile + E3 placement view)
+      description: |
+        Reads one agent's schedule across companies/placements. Powers:
+        - Mobile "Jadwal Saya" (agent self-view).
+        - E3 placement detail's embedded "agent's upcoming shifts" panel.
+
+        **RBAC scope:**
+        - `agent`: only their own `employee_id` (SV-1 — server returns 403 otherwise).
+        - `shift_leader`: only agents currently placed at their company.
+        - `hr_admin` / `super_admin`: any agent.
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: end_date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: include_company
+          in: query
+          description: Inline the agent's `client_company` (name + address + geo) for the mobile detail card (SV-3).
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ScheduleEntry' }
+                  warnings:
+                    type: array
+                    items: { $ref: '#/components/schemas/Warning' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: company_or_global
+      x-design-screens:
+        - fN9AJ   # Agen · Jadwal Saya
+
+  /schedule:bulk-apply:
+    post:
+      tags: [schedule]
+      operationId: bulkApplySchedule
+      summary: Apply a shift to a date range × employees (SA-3 bulk helper)
+      description: |
+        Implements the locked "Terapkan ke rentang" decision (EPICS §8, FEATURE §7 / PRD F4.2 C-1):
+        apply ONE shift master across a date range to N employees, optionally restricting to weekdays.
+        Each day × agent is validated independently with the same five conflict rules; per-cell
+        results land in the `succeeded` / `failed` arrays per CONVENTIONS §14.
+
+        - `weekdays_mask` is an array of ISO-8601 weekday numbers (1=Monday..7=Sunday). Empty/omitted
+          means every weekday in the range.
+        - `override_existing=true` replaces existing entries (equivalent to `force_replace`); when
+          `false`, days with an existing shift go to `failed[]` with `DOUBLE_SHIFT`.
+        - **Idempotency-Key is REQUIRED** (CONVENTIONS §13 + §14).
+        - Status code is 200 if ≥1 cell succeeded; 422 only when ALL cells failed.
+
+        Implicit: every successful cell auto-publishes + notifies + audits (one audit row each, per
+        CONVENTIONS §16.1).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkApplyRequest' }
+            examples:
+              week_morning:
+                summary: Apply Pagi to 3 agents Mon–Fri for one week
+                value:
+                  kind: bulk
+                  shift_master_id: SWP-SHF-0001
+                  start_date: "2026-06-08"
+                  end_date: "2026-06-14"
+                  employee_ids:
+                    - SWP-EMP-2031
+                    - SWP-EMP-2032
+                    - SWP-EMP-2033
+                  weekdays_mask: [1, 2, 3, 4, 5]
+                  override_existing: false
+      responses:
+        '200':
+          description: Partial or full success (per §14).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkApplyResult' }
+              examples:
+                partial:
+                  value:
+                    succeeded:
+                      - id: SWP-SCH-100501
+                        employee_id: SWP-EMP-2031
+                        date: "2026-06-08"
+                      - id: SWP-SCH-100502
+                        employee_id: SWP-EMP-2031
+                        date: "2026-06-09"
+                    failed:
+                      - employee_id: SWP-EMP-2032
+                        date: "2026-06-10"
+                        error:
+                          code: SHIFT_OVER_LEAVE
+                          message: "Agen sedang cuti yang disetujui pada tanggal ini."
+                          details:
+                            leave_request_id: SWP-LR-44210
+                      - employee_id: SWP-EMP-2033
+                        date: "2026-06-11"
+                        error:
+                          code: OUTSIDE_PLACEMENT_PERIOD
+                          message: "Tanggal di luar periode penempatan aktif agen."
+                    warnings: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: All cells failed (per §14).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkApplyResult' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba   # Terapkan ke rentang modal (BLOCKER per E4-AUDIT §3.3)
+
+  /schedule:check:
+    post:
+      tags: [schedule]
+      operationId: checkScheduleConflicts
+      summary: Dry-run conflict check (no writes)
+      description: |
+        Powers the **bulk-apply preview** ("X jadwal akan dibuat, Y dilewati") and the cell-assign
+        popover's pre-flight check. Same input shape as bulk-apply (or a single-cell shape), but
+        nothing is persisted, no notifications fire, and no audit entries are written. Returns the
+        same `succeeded` / `failed` arrays so the UI can render an exact summary before the user
+        confirms.
+
+        Idempotency is NOT required (no side effects).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/BulkApplyRequest'
+                - $ref: '#/components/schemas/ScheduleEntryWriteRequest'
+              discriminator:
+                propertyName: kind
+            examples:
+              bulk_preview:
+                summary: Preview a bulk apply
+                value:
+                  kind: bulk
+                  shift_master_id: SWP-SHF-0001
+                  start_date: "2026-06-08"
+                  end_date: "2026-06-14"
+                  employee_ids: [SWP-EMP-2031, SWP-EMP-2032]
+                  weekdays_mask: [1, 2, 3, 4, 5]
+                  override_existing: false
+              single_preview:
+                summary: Preview a single-cell assignment
+                value:
+                  kind: single
+                  employee_id: SWP-EMP-2031
+                  shift_master_id: SWP-SHF-0001
+                  date: "2026-06-10"
+      responses:
+        '200':
+          description: Conflict preview (no writes performed).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkApplyResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader]
+        scope: company_or_global
+      x-design-screens:
+        - Rubba
+
+# ---------------------------------------------------------------------------
+# Components
+# ---------------------------------------------------------------------------
+
+components:
+
+  parameters:
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Optional client-generated UUID v4 (CONVENTIONS §13). Server caches the response for 24h;
+        re-submission returns the same body. Re-using a key with a different body yields
+        `409 IDEMPOTENCY_KEY_REUSED`.
+      schema: { type: string, format: uuid }
+
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Required UUID v4. Bulk endpoints MUST include this header (CONVENTIONS §13 + §14).
+      schema: { type: string, format: uuid }
+
+    ShiftMasterId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: SWP-SHF-0001 }
+
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, example: SWP-SCH-100481 }
+
+  responses:
+
+    BadRequest:
+      description: Validation failure (malformed JSON, missing required field, unknown filter).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            invalid_request:
+              value:
+                error:
+                  code: INVALID_REQUEST
+                  message: "Tanggal akhir tidak boleh sebelum tanggal mulai."
+                  fields:
+                    end_date: "Harus >= start_date."
+                  request_id: req_01J6HK20
+
+    Unauthenticated:
+      description: Missing or expired token (CONVENTIONS §3).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            unauth:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: "Sesi habis. Mohon masuk kembali."
+                  request_id: req_01J6HK21
+
+    Forbidden:
+      description: Authenticated but RBAC denies access (CONVENTIONS §3).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: "Anda tidak memiliki izin untuk tindakan ini."
+                  request_id: req_01J6HK22
+
+    NotFound:
+      description: Resource does not exist OR caller lacks visibility.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          examples:
+            not_found:
+              value:
+                error:
+                  code: NOT_FOUND
+                  message: "Sumber daya tidak ditemukan."
+                  request_id: req_01J6HK23
+
+  schemas:
+
+    # ----- Shift master -----
+
+    ShiftMaster:
+      type: object
+      required:
+        - id
+        - name
+        - start_time
+        - end_time
+        - cross_midnight
+        - is_active
+        - status
+      properties:
+        id:
+          type: string
+          example: SWP-SHF-0001
+          description: Opaque ID (CONVENTIONS §4).
+        name:
+          type: string
+          maxLength: 60
+          example: Pagi
+          description: Unique within the catalog (SM-4).
+        start_time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "07:00"
+          description: HH:MM 24h, Asia/Jakarta (CONVENTIONS §10).
+        end_time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "15:00"
+        break_start:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "12:00"
+          description: Optional. If set, must fall inside the working window (SM-1).
+        break_end:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "13:00"
+        break_minutes:
+          type: [integer, "null"]
+          minimum: 0
+          example: 60
+          description: Derived (end - start in minutes). Read-only.
+        cross_midnight:
+          type: boolean
+          example: true
+          description: |
+            Server-derived from `end_time <= start_time` (SM-2). Cross-midnight shifts attribute work
+            to the **start date** (FEATURE §7 / SA-8).
+        is_active:
+          type: boolean
+          example: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+          example: ACTIVE
+        in_use_count:
+          type: integer
+          minimum: 0
+          example: 142
+          description: |
+            Count of schedule entries referencing this template. Used to (a) warn on edit and
+            (b) block hard-delete in favor of deactivate (SM-5).
+        created_by:
+          type: [string, "null"]
+          example: SWP-EMP-1001
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ShiftMasterWriteRequest:
+      type: object
+      required:
+        - name
+        - start_time
+        - end_time
+      properties:
+        name:
+          type: string
+          maxLength: 60
+          example: Parkir Malam
+        start_time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "23:00"
+        end_time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "07:00"
+        break_start:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        break_end:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+        is_active:
+          type: boolean
+          default: true
+      additionalProperties: false
+
+    # ----- Schedule entry -----
+
+    ScheduleEntry:
+      type: object
+      required:
+        - id
+        - employee_id
+        - placement_id
+        - work_date
+        - status
+        - is_day_off
+      properties:
+        id:
+          type: string
+          example: SWP-SCH-100481
+        employee_id:
+          type: string
+          example: SWP-EMP-2031
+        employee_name:
+          type: [string, "null"]
+          example: Budi Santoso
+          description: Denormalized read-only.
+        company_id:
+          type: string
+          example: SWP-CMP-0042
+          description: Derived from the linked placement (E3).
+        company_name:
+          type: [string, "null"]
+          example: Plaza Senayan
+        company_address:
+          type: [string, "null"]
+          description: Included when `include_company=true` is requested on /schedule/by-agent (SV-3).
+        company_geo:
+          type: [object, "null"]
+          description: Site geo for the mobile detail card; null when not configured.
+          properties:
+            lat: { type: number, format: double }
+            lng: { type: number, format: double }
+            radius_m: { type: integer, minimum: 0 }
+        placement_id:
+          type: string
+          example: SWP-PL-0881
+          description: |
+            E3 placement that this entry "hangs off" (INV-2). Ending the placement cancels
+            future entries (FEATURE §6b).
+        shift_master_id:
+          type: [string, "null"]
+          example: SWP-SHF-0001
+          description: Null only when `is_day_off=true`.
+        shift_master_name:
+          type: [string, "null"]
+          example: Pagi
+        start_time:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "07:00"
+          description: Snapshot from the shift master at the time of write (clients render this).
+        end_time:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: "15:00"
+        cross_midnight:
+          type: boolean
+          example: false
+          description: |
+            True when the shift spans midnight; client renders the entry across two visual days while
+            the entry itself remains attributed to `work_date` (SA-8 / SV-6).
+        work_date:
+          type: string
+          format: date
+          example: "2026-06-10"
+        status:
+          type: string
+          enum:
+            - SCHEDULED
+            - CANCELLED_BY_LEAVE
+            - MODIFIED
+          description: |
+            - `SCHEDULED` — normal entry (initial state).
+            - `CANCELLED_BY_LEAVE` — leave was approved after the schedule was published; system
+              auto-cancels the entry so the agent sees the cancellation (kept for audit).
+            - `MODIFIED` — entry was edited after initial publish (CH-2: F4.4 leader edit, or
+              force_replace on POST).
+        is_day_off:
+          type: boolean
+          example: false
+          description: True when the day is explicitly OFF (SA-7) — distinct from "no entry".
+        replaced_entry_id:
+          type: [string, "null"]
+          description: When this entry replaced a prior one via `force_replace=true`, the old id.
+        created_by:
+          type: [string, "null"]
+          example: SWP-EMP-1001
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ScheduleEntryWriteRequest:
+      type: object
+      required:
+        - kind
+        - employee_id
+        - date
+      properties:
+        kind:
+          type: string
+          enum: [single]
+          default: single
+          description: |
+            Discriminator for /schedule:check (oneOf vs BulkApplyRequest). On POST /schedule the
+            client may omit it (defaults to `single`); on /schedule:check it MUST be sent so the
+            server can route the dry-run handler.
+        employee_id:
+          type: string
+          example: SWP-EMP-2031
+        shift_master_id:
+          type: [string, "null"]
+          description: Required unless `is_day_off=true`.
+          example: SWP-SHF-0001
+        date:
+          type: string
+          format: date
+          example: "2026-06-10"
+        is_day_off:
+          type: boolean
+          default: false
+        force_replace:
+          type: boolean
+          default: false
+          description: |
+            When true and the cell already has a shift, atomically replace it (SA-2 "replace warning"
+            flow). When false, the server returns 409 `DOUBLE_SHIFT`.
+      additionalProperties: false
+
+    # ----- Bulk apply -----
+
+    BulkApplyRequest:
+      type: object
+      required:
+        - kind
+        - shift_master_id
+        - start_date
+        - end_date
+        - employee_ids
+      properties:
+        kind:
+          type: string
+          enum: [bulk]
+          default: bulk
+          description: Discriminator for /schedule:check.
+        shift_master_id:
+          type: string
+          example: SWP-SHF-0001
+        start_date:
+          type: string
+          format: date
+          example: "2026-06-08"
+        end_date:
+          type: string
+          format: date
+          example: "2026-06-14"
+          description: Inclusive. Must be >= start_date.
+        employee_ids:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { type: string }
+          example: [SWP-EMP-2031, SWP-EMP-2032, SWP-EMP-2033]
+        weekdays_mask:
+          type: array
+          description: |
+            ISO-8601 weekday numbers (1=Monday..7=Sunday). Empty or omitted = every weekday.
+            E.g., `[1,2,3,4,5]` = Mon–Fri only.
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+          example: [1, 2, 3, 4, 5]
+        override_existing:
+          type: boolean
+          default: false
+          description: |
+            When true, replace any existing entries on the targeted day×agent cells. When false,
+            those cells fail with `DOUBLE_SHIFT` and the rest succeed.
+      additionalProperties: false
+
+    BulkApplyResult:
+      type: object
+      description: |
+        Partial-success bulk response per CONVENTIONS §14. `succeeded` carries the created/updated
+        entries (lightweight summary), `failed` carries one row per blocked cell with the conflict
+        code.
+      required:
+        - succeeded
+        - failed
+      properties:
+        succeeded:
+          type: array
+          items:
+            type: object
+            required: [id, employee_id, date]
+            properties:
+              id: { type: string, example: SWP-SCH-100501 }
+              employee_id: { type: string, example: SWP-EMP-2031 }
+              date: { type: string, format: date, example: "2026-06-08" }
+              status:
+                type: string
+                enum: [SCHEDULED, MODIFIED]
+        failed:
+          type: array
+          items:
+            type: object
+            required: [employee_id, date, error]
+            properties:
+              employee_id: { type: string }
+              date: { type: string, format: date }
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum:
+                      - DOUBLE_SHIFT
+                      - SHIFT_OVER_LEAVE
+                      - OUTSIDE_PLACEMENT_PERIOD
+                      - OUT_OF_SCOPE
+                      - SHIFT_DEACTIVATED
+                  message: { type: string }
+                  details:
+                    $ref: '#/components/schemas/ConflictDetails'
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/Warning' }
+
+    # ----- Errors -----
+
+    ConflictDetails:
+      type: object
+      description: |
+        Structured payload attached to conflict errors so the UI can render rich block messaging
+        (e.g., "Agent has approved leave SWP-LR-44210 covering this date — view leave"). Only the
+        fields relevant to the specific conflict code are populated.
+      properties:
+        existing_entry_id:
+          type: string
+          description: For `DOUBLE_SHIFT` — the entry that blocks the write.
+        existing_shift_name:
+          type: string
+        leave_request_id:
+          type: string
+          description: For `SHIFT_OVER_LEAVE` — the E6 leave request id.
+        leave_type:
+          type: string
+          description: For `SHIFT_OVER_LEAVE` — e.g., ANNUAL / SICK / MATERNITY.
+        leave_start:
+          type: string
+          format: date
+        leave_end:
+          type: string
+          format: date
+        placement_id:
+          type: string
+          description: For `OUTSIDE_PLACEMENT_PERIOD`.
+        placement_start:
+          type: string
+          format: date
+        placement_end:
+          type: [string, "null"]
+          format: date
+        leader_company_id:
+          type: string
+          description: For `OUT_OF_SCOPE`.
+        agent_company_id:
+          type: string
+      additionalProperties: false
+
+    Warning:
+      type: object
+      description: |
+        Non-blocking informational warning included on 200 responses. v1 carries only
+        `COVERAGE_BELOW_MIN` as reserved-but-unused; future code thresholds may add more.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [COVERAGE_BELOW_MIN]
+          example: COVERAGE_BELOW_MIN
+        message:
+          type: string
+          example: "Hari ini hanya 1 dari 2 agen yang dijadwalkan."
+        details:
+          type: object
+          additionalProperties: true
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable machine-readable code. E4-specific:
+                `DOUBLE_SHIFT`, `SHIFT_OVER_LEAVE`, `OUTSIDE_PLACEMENT_PERIOD`, `OUT_OF_SCOPE`,
+                `SHIFT_DEACTIVATED`, `DUPLICATE_NAME`,
+                `BREAK_OUTSIDE_WINDOW`, `ALREADY_INACTIVE`. Cross-cutting codes per CONVENTIONS §11.
+              example: DOUBLE_SHIFT
+            message:
+              type: string
+              example: "Agen sudah memiliki shift di tanggal ini."
+            fields:
+              type: object
+              additionalProperties: { type: string }
+            details:
+              $ref: '#/components/schemas/ConflictDetails'
+            request_id:
+              type: string
+              example: req_01J6HK10
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-or-jwt
+
+security:
+  - BearerAuth: []

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+coverage/
+playwright-report/
+test-results/
+
+# Generated API client (Orval) — regenerated via `pnpm gen` (turbo build/typecheck/test depend on it).
+packages/api-client/src/gen/
+
+# MSW service worker, created by `pnpm dlx msw init public/ --save`
+apps/web/public/mockServiceWorker.js
+
+# Playwright e2e screenshot artifacts
+apps/web/e2e/__screenshots__/

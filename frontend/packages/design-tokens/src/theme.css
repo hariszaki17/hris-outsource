@@ -1,0 +1,119 @@
+/**
+ * SWP HRIS — Tailwind v4 theme partial (imported by the app after `@import "tailwindcss"`).
+ * Source of truth: docs/design/DESIGN-SYSTEM.md §2–4. Mirrors ./index.ts.
+ * shadcn/ui semantic variables are mapped onto SWP tokens so primitives inherit the brand.
+ * NEVER paste raw hex in components — use these tokens (ENGINEERING.md E3 / G4).
+ */
+:root {
+  /* shadcn semantic surface set */
+  --background: #ffffff; /* surface (cards/components sit on white) */
+  --foreground: #18181b; /* text */
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #188e4d; /* brand green — primary actions only */
+  --primary-foreground: #ffffff;
+  --secondary: #f9fafb; /* surface-2 */
+  --secondary-foreground: #18181b;
+  --muted: #f9fafb;
+  --muted-foreground: #52525b; /* text-2 */
+  --accent: #e7f4ec; /* primary-soft (selected rows, active nav tint) */
+  --accent-foreground: #0e6033; /* primary-strong */
+  --destructive: #bf4a40; /* SWP red */
+  --destructive-foreground: #ffffff;
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #188e4d;
+  --radius: 0.5rem; /* 8px — inputs/buttons */
+}
+
+@theme inline {
+  /* shadcn color mapping */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* SWP-specific tokens (no shadcn equivalent) */
+  --color-primary-strong: #0e6033;
+  --color-primary-soft: #e7f4ec;
+  --color-text: #18181b;
+  --color-text-2: #52525b;
+  --color-text-3: #9ca3af;
+  --color-app: #f3f4f6; /* page background (content area) */
+  --color-surface: var(--background); /* #ffffff — cards/modals/selects/tables sit on white.
+    Without this, `bg-surface` generates no rule and those surfaces render transparent (the grey
+    page bleeds through — looks like a "transparent" modal/dropdown). DESIGN-SYSTEM §2 surface. */
+  --color-surface-2: #f9fafb;
+  --color-border-soft: #eef0f2;
+  --color-error: var(--destructive); /* #bf4a40 — form validation text/border/ring (= bad-tx) */
+
+  /* dark sidebar */
+  --color-sidebar: #18181b;
+  --color-sidebar-hover: #27272a;
+  --color-sidebar-text: #a1a1aa;
+
+  /* status — present is TEAL, not green */
+  --color-ok-bg: #f0fdfa;
+  --color-ok-bd: #99f6e4;
+  --color-ok-tx: #0f766e;
+  --color-warn-bg: #fffaeb;
+  --color-warn-bd: #fedf89;
+  --color-warn-tx: #b54708;
+  --color-bad-bg: #fbeae9;
+  --color-bad-bd: #f1c5c0;
+  --color-bad-tx: #bf4a40;
+  --color-info-bg: #eff8ff;
+  --color-info-bd: #b2ddff;
+  --color-info-tx: #175cd3;
+  /* orange — "Tdk Lengkap" / transfer (brainstorm.pen variables: orange-*) */
+  --color-orange-bg: #fff3e8;
+  --color-orange-bd: #fdd9b5;
+  --color-orange-tx: #c2410c;
+
+  /* neutral avatar — identity initials on a cool-grey chip (Topbar user / comp/Avatar neutral tone) */
+  --color-avatar-neutral: #dde3ea;
+
+  /* scrim — modal/drawer overlay backdrop (DESIGN-SYSTEM §6 overlays) */
+  --color-scrim: rgba(24, 24, 27, 0.7);
+
+  /* control-off — unchecked toggle/switch track (.pen comp/Toggle `Uma0O`) */
+  --color-control-off: #d1d5db;
+
+  /* logo accents */
+  --color-accent-gold: #f5a800;
+  --color-accent-green: #5e8c2a;
+  --color-accent-blue: #0b5fae;
+  --color-accent-purple: #8e0e8e;
+
+  /* fonts */
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: "Poppins", "Inter", sans-serif;
+
+  /* radius ramp (DESIGN-SYSTEM §4) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* elevation */
+  --shadow-card: 0 0 0 1px #e5e7eb;
+  --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.08);
+}

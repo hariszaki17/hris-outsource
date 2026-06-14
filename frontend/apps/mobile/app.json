@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "SWP HRIS",
+    "slug": "swp-hris-mobile",
+    "scheme": "swphris",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.hariszaki17.swphris",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.hariszaki17.swphris",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-updates",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SWP HRIS uses your location to verify you are at the assigned client site when you clock in or out."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SWP HRIS needs photo access so you can attach supporting documents to leave requests."
+        }
+      ],
+      "expo-notifications",
+      "expo-secure-store",
+      "expo-status-bar",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4426c8ea-de92-4a45-9593-a2617d4f29b4"
+      }
+    },
+    "owner": "hariszaki17"
+  }
+}

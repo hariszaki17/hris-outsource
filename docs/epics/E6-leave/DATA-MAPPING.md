@@ -7,14 +7,14 @@
 
 ## 1. Shape of the change
 
-Legacy `leaves` carries a single `status` **string** (no multi-level approval) and `employee_leave_quotas` tracks **one annual quota per period per employee** (no leave-type link). hris-outsource adds **two-level approval** (reconstructed as final state for history) and ties quota to the annual `LeaveType`. Documents were attached via the polymorphic `File` table, not a column.
+Legacy `leaves` carries a single `status` **string** (no multi-level approval) and `employee_leave_quotas` tracks **one annual quota per period per employee** (no leave-type link). hris-outsource adds **two-level approval** (reconstructed as final state for history) and a **per-type entitlement ledger** *(2026-06-12 — `LeaveQuota`, `cap_basis` per type)*. The legacy quota is annual-only, so its remaining balance backfills as **one `ANNUAL_POOL` `MIGRATION` `LeaveQuota`** per employee (keyed to the employee's annual type CTHO/CT); statutory types have **no legacy quota** to migrate (they meter forward from the seeded catalog). Documents were attached via the polymorphic `File` table, not a column.
 
 ## 2. Source tables
 
 | Table | → Target | Key columns |
 |-------|----------|-------------|
 | `leaves` | LeaveRequest | `id, type(int), employee_id, delegate_id, status, notes, admin_notes, duration, start_date, end_date, issued_date, deleted_at` |
-| `employee_leave_quotas` | LeaveQuota | `id, employee_id, leave_total, leave_used, leave_remaining, start_period, end_period, deleted_at` |
+| `employee_leave_quotas` | LeaveQuota (one `ANNUAL_POOL` `MIGRATION` row/employee) | `id, employee_id, leave_total, leave_used, leave_remaining, start_period, end_period, deleted_at` |
 | `leave_types` | LeaveType (E2) | mapped in E2 |
 | `files` (morph `fileable`) | LeaveRequest.document_url | leave documents attached polymorphically |
 
@@ -37,15 +37,19 @@ Legacy `leaves` carries a single `status` **string** (no multi-level approval) a
 | `File` morph | `document_url` | map attached file if present, else null (G-3) |
 | — | `LeaveApproval` rows | historical single-status → no per-level approver data; create one imputed `Approved`/`Rejected` record or leave empty (G-2) |
 
-### `employee_leave_quotas` → LeaveQuota
+### `employee_leave_quotas` → LeaveQuota *(per-type ledger, 2026-06-12)*
+Legacy quota rows backfill the new per-type ledger as **one `ANNUAL_POOL` `MIGRATION` `LeaveQuota` per employee**, keyed to the employee's annual leave type (CTHO for Head Office, CT for PKWT). Statutory/sick/religious types have no legacy quota — they meter forward from the seeded catalog. See [leave-quota-balances PRD C-7](prds/leave-quota-balances.md) + [EPICS.md §8](../../EPICS.md).
+
 | Legacy | → | Notes |
 |---|---|---|
-| `employee_id` | `employee_id` | remap |
-| `leave_total` | `total` | — |
-| `leave_used` | `used` | — |
-| `leave_remaining` | `remaining` | — |
-| `start_period` / `end_period` | `period_start` / `period_end` | datetime → date |
-| — | `leave_type_id` | assign to the **annual** LeaveType (legacy quota is annual-only, G-5) |
+| `employee_id` | `LeaveQuota.employee_id` | remap |
+| — | `LeaveQuota.leave_type_id` | the employee's annual type (CTHO/CT), resolved from employment class (G-5). |
+| `leave_remaining` | `LeaveQuota.entitled_days` | carry the **remaining** balance as `entitled_days` (`used_days = 0`, `pending_days = 0`) — `leave_total`/`leave_used` are historical and not re-projected (G-5). |
+| — | `LeaveQuota.source` | constant `MIGRATION`. |
+| `end_period` | `LeaveQuota.expires_at` | datetime → date; legacy period end, or a configured cutover horizon if absent (G-5). |
+| `start_period` + year | `LeaveQuota.period_key` | the period year (e.g. `"2026"`). |
+| — | `LeaveQuota.remark` | constant note, e.g. `"Backfill saldo cuti dari lumen_swp"`. |
+| `id` | `legacy_quota_id` | crosswalk for idempotency. |
 
 ## 4. Gaps & decisions
 
@@ -55,7 +59,7 @@ Legacy `leaves` carries a single `status` **string** (no multi-level approval) a
 | G-2 | **No multi-level approval history** | Legacy single `status` → import final state only; `LeaveApproval` history not reconstructable (impute one record or leave empty). |
 | G-3 | **Documents via `File` morph** | Pull leave documents from the polymorphic `files` table (fileable = leave); map to `document_url`; else null. |
 | G-4 | **Identity remap** | `employee_id`, `delegate_id` via crosswalk. |
-| G-5 | **Quota is annual-only** | Assign migrated quotas to the annual LeaveType; non-annual types had no quota in legacy. |
+| G-5 | **Quota is annual-only** | Legacy quota is the annual pool; backfill its `leave_remaining` as **one `ANNUAL_POOL` `MIGRATION` `LeaveQuota`** per employee, keyed to the annual type (CTHO/CT by employment class). Statutory types have no legacy quota — they meter forward (2026-06-12). `leave_total`/`leave_used` are historical context only. |
 | G-6 | **Duration semantics** | Legacy `duration` (calendar vs working days) unknown — carry as-is; confirm the rule for go-forward (FEATURE §7 Q1). |
 | G-7 | **No schedule/attendance link** | Historical leave won't retro-cancel schedules; only go-forward leaves trigger F6.4 integration. |
 

@@ -7,16 +7,18 @@
 
 ## 1. Context & problem
 
-Placements (E3) point at **client companies** — the malls, office towers, and properties SWP services. The system needs a clean directory of these companies with the geo and statutory info that downstream features need (attendance geofencing in E5, reporting in E10). In legacy these were `companies` rows with `role=2`, mixed into a self-referential tree alongside SWP's own internal units.
+Placements (E3) point at a client company's **site** — the malls, office towers, and properties SWP services. This directory owns the **company** record: its statutory/billing info (name, registered address, NPWP, PIC) and `leader_scope`. The **physical locations + attendance geofence** live on its **Sites** ([F2.6](client-sites-geofence.md)) — a company has one or more. In legacy these were `companies` rows with `role=2`, mixed into a self-referential tree alongside SWP's own internal units.
 
 ## 2. Goals & non-goals
 
 **Goals**
-- A managed directory of client companies (name, address, geo-coordinates, NPWP, PIC, contact).
+- A managed directory of client companies (name, registered address, NPWP, PIC, contact, `leader_scope`).
 - Active/inactive status; safe deactivation when referenced by placements.
+- On create, **auto-provision a primary "Main Site"** (F2.6) so the company is immediately placeable.
 
 **Non-goals**
-- Placement itself (E3). Internal SWP org (out of scope — flat). Sub-company/site hierarchy (not used by SWP — DATA-MAPPING G-6).
+- Placement itself (E3). Internal SWP org (out of scope — flat).
+- Sites + geofence config → **[F2.6](client-sites-geofence.md)** (per-location, was previously folded in here).
 
 ## 3. Actors
 
@@ -26,25 +28,28 @@ HR/Placement Admin & Super Admin (author), System (validate, audit). Read consum
 
 | Surface | Who | What |
 |---|---|---|
-| **Web console** | HR/Super Admin | Full CRUD of client companies. |
+| **Web console** | HR/Super Admin | Full CRUD of client companies. **List** shows the directory; its only per-row action is **Aktifkan/Nonaktifkan** (no row kebab) — create and edit live elsewhere. The list is **role-scoped** server-side (CC-7): HR/Super Admin see all, a shift leader sees only their own company. **Edit** is a dedicated full-page screen reached from the **detail** page (route `/client-companies/$id/edit`), not a drawer. The detail **"Profil" tab** shows statutory/billing fields + `leader_scope` only; **Sites & geofence are on the "Lokasi & Site" tab** (F2.6), never duplicated in Profil. The detail page also carries three **E3-backed** tabs: **Penempatan Aktif** (active agent roster at the company), **Pemimpin Shift** (current shift leader + assign/replace/revoke — the single entry point for E3 [F3.4](../../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`). All three read the **E3 company-roster** endpoint (F3.5); the Pemimpin Shift mutations call the **E3 shift-leader-assignment** endpoints (F3.4). |
 | **Mobile app** | Agent / Shift Leader | Read-only: see the client they're placed at (name, address, geo) — surfaced via placement/attendance, not as a directory. |
 
 ## 5. Business rules
 
 | Ref | Rule |
 |-----|------|
-| CC-1 | A client company requires: name, address. Geo (lat/lng), NPWP, PIC, phone are optional but recommended (geo needed for E5 geofencing). |
+| CC-1 | A client company requires: name, registered address. NPWP, PIC, phone are optional but recommended. **Geofence/geo lives on Sites** (F2.6), not here. |
+| CC-1b | `leader_scope ∈ {company, site}`, default `company` — drives per-company vs per-site shift leadership (E3 F3.4). |
+| CC-1c | Creating a company **auto-creates one primary "Main Site"** (F2.6 ST-3); the company is then a valid placement target via that site. |
 | CC-2 | `name` and `NPWP` (when provided) are **unique**. |
 | CC-3 | Status ∈ {Active, Inactive}. Only **Active** companies can receive new placements (E3 BR-3). |
 | CC-4 | A company referenced by any placement **cannot be hard-deleted** — only deactivated. |
 | CC-5 | Deactivating a company with **active placements** warns and requires those placements to be ended/transferred first (or blocks). |
 | CC-6 | All actions audited (E1). |
+| CC-7 | **List scope.** `GET /client-companies` (the directory list) is **scoped server-side by role**: HR / Super Admin see all companies; a **shift leader sees only the one company they lead** (derived from their active E3 shift-leader assignment — F3.4 SL-10). |
 
 ## 6. Data model
 
-`ClientCompany`: `id, name (unique), address, lat, lng, geofence_radius_m (default 100), npwp (unique nullable), pic_name, phone, email, status, created_by`. (`legacy_company_id` crosswalk for migration.)
+`ClientCompany`: `id, name (unique), address (registered/billing), leader_scope (company|site, default company), npwp (unique nullable), pic_name, phone, email, status, created_by`. (`legacy_company_id` crosswalk for migration.)
 
-> `geofence_radius_m` (per-site, default 100m) drives E5 attendance geofencing — resolved in the 2026-05-29 open-items review (EPICS.md §8).
+> **Geofence relocated (2026-06-03):** `lat`, `lng`, `geofence_radius_m` moved **off ClientCompany onto `Site`** (F2.6, EPICS §8). The company keeps only its registered address. Each company has ≥1 Site, and E5 resolves the geofence from the agent's placement **site**.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -53,9 +58,10 @@ Feature: Client company directory
 
   Scenario: Create a client company
     Given I am an HR admin
-    When I create "Plaza Senayan" with address and geo-coordinates
+    When I create "Plaza Group" with a registered address
     Then it is saved as Active
-    And it becomes selectable as a placement target
+    And a primary "Main Site" is auto-created (F2.6)
+    And it becomes selectable as a placement target via that site
 
   Scenario: Reject a duplicate company name
     Given "Plaza Senayan" exists
@@ -72,16 +78,16 @@ Feature: Client company directory
     When I try to deactivate it
     Then I am warned to end/transfer those placements first
 
-  Scenario: Geo is available for attendance geofencing
-    Given "Plaza Senayan" has lat/lng set
-    Then E5 attendance can use it as the geofence center
+  Scenario: Geofence lives on the site, not the company
+    Given the company "Plaza Group" has a site "Plaza Senayan" with lat/lng set (F2.6)
+    Then E5 attendance uses the site's coordinates as the geofence center
 ```
 
 ## 8. Cases & edge cases
 
 | # | Case | Expected |
 |---|------|----------|
-| C-1 | Company without geo | Allowed; E5 geofencing for that site is disabled/flagged until geo added. |
+| C-1 | Company/site without geo | Allowed; E5 geofencing for that **site** is disabled/flagged until geo added (F2.6 ST-8). |
 | C-2 | Reactivate an inactive company | Allowed; becomes a valid placement target again. |
 | C-3 | Migration: legacy role=3/4 rows | Not imported as ClientCompany (DATA-MAPPING G-6). |
 | C-4 | Duplicate by alias/typo across legacy data | Reconciled during migration (E3 G-2 / review queue). |
@@ -92,5 +98,8 @@ E1 (RBAC/audit), E3 (placement target), E5 (geofence), E9 (migration), E10 (repo
 
 ## 10. Decisions & open questions
 
-- ✅ ClientCompany = `companies.role=2`; flat (no sub-sites) for now.
+- ✅ ClientCompany = `companies.role=2`. ~~flat (no sub-sites)~~ **superseded 2026-06-03**: companies now have one or more **Sites** (F2.6); geofence moved to Site. (EPICS §8.)
+- ✅ `leader_scope` (company | site) added to support per-site shift leaders (E3 F3.4).
+- ✅ **UI/flow** *(resolved 2026-06-07, EPICS §8)* — edit is a **full-page screen from the detail page** (`/client-companies/$id/edit`), not a drawer (the `EditClientCompanyDrawer` is removed); the **list's only row action is Aktifkan/Nonaktifkan** (no row kebab, still guarded by CC-5); the detail **"Profil" tab** does **not** duplicate Sites/geofence (those live only in the "Lokasi & Site" tab, F2.6).
+- ✅ **Detail tabs + list scope** *(shipped 2026-06-08)* — the detail page implements three **E3-backed** tabs: **Penempatan Aktif** (active roster), **Pemimpin Shift** (current leader + assign/replace/revoke — the single entry point for E3 [F3.4](../../E3-placement/prds/shift-leader-assignment.md)), and **Riwayat** (historical placements, `include_history`); all read the E3 company-roster endpoint (F3.5) and the leader mutations hit the E3 shift-leader-assignment endpoints (F3.4). The company **list is role-scoped** server-side — a shift leader sees only their own company (CC-7).
 - **Open:** should deactivation with active placements **hard-block** or **warn-and-guide**? (currently warn-and-guide / block-until-resolved.)

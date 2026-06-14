@@ -7,7 +7,7 @@
 
 ## 1. Context & problem
 
-The shift leader's daily job: decide who works which shift on which day at their site. hris-outsource does this **day-by-day, manually** — the leader picks a shift (from the master, filtered by the placement's service line) for each placed agent on each date. Saving is **immediately live** to the agent (auto-publish), so the schedule the agent sees on mobile is always current. This schedule is what E5 attendance is judged against.
+The shift leader's daily job: decide who works which shift on which day at their site. hris-outsource does this **day-by-day, manually** — the leader picks a shift from the master (all active templates) for each placed agent on each date. Saving is **immediately live** to the agent (auto-publish), so the schedule the agent sees on mobile is always current. This schedule is what E5 attendance is judged against.
 
 ## 2. Goals & non-goals
 
@@ -39,12 +39,12 @@ Shift Leader (own company), HR/Super Admin (any company), System (validate, publ
 | SA-1 | An agent can be scheduled on a date only if they have an **active placement** on that date (E3 INV); the schedule links that `placement_id`. |
 | SA-2 | **One shift per agent per date** (INV-1). Assigning a second replaces the first (with a warning). |
 | SA-3 | A **shift leader may schedule only agents at their own company** (F3.4 scope). HR/Super Admin may schedule any. |
-| SA-4 | The shift picker is **filtered by the placement's service line** (tagged templates first; untagged available too). |
 | SA-5 | Cannot schedule **before placement start** or **after placement end**; ending a placement cancels its future schedule entries. |
 | SA-6 | Saving a cell **auto-publishes** (no draft) and **notifies the agent** on mobile (INV-4). |
 | SA-7 | A day can be explicitly marked **OFF** (status `Off`) — distinct from "no entry". |
 | SA-8 | Cross-midnight shifts are attributed to their **start date** (FEATURE §7). |
 | SA-9 | All writes audited. |
+| SA-10 | **Shift-master time edits propagate to unrealized schedule entries** (INV-5). A master `start_at` / `end_at` edit updates all matching `Schedule` rows where `work_date >= today`, `status != Off`, and not leave-cancelled — but only the **not-yet-realized** portion: `start_time` is frozen once the agent has checked in; `end_time`/`cross_midnight` is frozen once the agent has checked out. For entries where the agent is checked-in-but-not-out, the open attendance record's shift-end window is also updated to the new master end so that lateness / early / auto-close evaluation uses the live end until checkout. Break times are **not** propagated (master-only; no consumer on `Schedule`). |
 
 ## 6. Data model
 
@@ -57,7 +57,7 @@ Feature: Daily schedule assignment
 
   Background:
     Given I am the shift leader of "Plaza Senayan"
-    And "Budi" has an active placement at "Plaza Senayan" in "Parking"
+    And "Budi" has an active placement at "Plaza Senayan"
 
   Scenario: Assign a shift and auto-publish
     When I assign "Budi" the "Parking Night" shift on 2026-06-10
@@ -75,10 +75,9 @@ Feature: Daily schedule assignment
     When I assign him "Night" on 2026-06-10
     Then I am warned and the entry is replaced with "Night"
 
-  Scenario: Shift picker is filtered by service line
-    Given Budi's placement is in "Parking"
-    When I open the shift picker for him
-    Then Parking-tagged shifts appear first, untagged shifts also available
+  Scenario: Shift picker shows all active shifts
+    When I open the shift picker for "Budi"
+    Then all active shift templates from the master are available
 
   Scenario: Cannot schedule beyond placement end
     Given Budi's placement ends 2026-06-30
@@ -105,10 +104,12 @@ Feature: Daily schedule assignment
 | C-4 | Cross-midnight shift on the last placement day | Allowed; overnight portion handled by E5. |
 | C-5 | HR admin schedules a company with no leader | Allowed (HR scope); agent still notified. |
 | C-6 | Concurrent edits to the same cell | Last write wins on `(employee, date)` unique; both audited. |
+| C-7 | Master `end_at` edited after agent has checked in but not yet checked out | Entry's `start_time` stays frozen; `end_time`/`cross_midnight` updates to the new master value. The open attendance record's stored shift-end window is also updated so lateness/early/auto-close evaluation uses the new end. |
+| C-8 | Master times edited after agent has already checked out | Entry's `start_time` and `end_time` are both frozen (fully realized); the edit does **not** affect this entry. |
 
 ## 9. Dependencies
 
-F4.1 (shift master), E3 (active placement + leader scope), E2 (service line), E1 (audit), E10 (notifications), E5 (consumes schedule), E6 (leave conflicts).
+F4.1 (shift master), E3 (active placement + leader scope), E1 (audit), E10 (notifications), E5 (consumes schedule), E6 (leave conflicts).
 
 ## 10. Decisions & open questions
 

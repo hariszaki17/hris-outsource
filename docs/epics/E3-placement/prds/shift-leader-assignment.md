@@ -7,14 +7,14 @@
 
 ## 1. Context & problem
 
-Each client company runs its on-site team under **exactly one shift leader** — the person who builds rosters, verifies attendance, and approves leave/overtime for that site. The shift leader is themselves an agent placed at that company, granted elevated authority scoped to it. This PRD owns **designating, reassigning, and vacating** that role, and is the gate that turns an ordinary agent into the company's approver.
+Each **leadership unit** runs its on-site team under **exactly one shift leader** — the person who builds rosters, verifies attendance, and approves leave/overtime there. The unit is set by `ClientCompany.leader_scope` (E2 F2.6): **`company`** = one leader for the whole company (the default, today's behavior); **`site`** = one leader **per active site** (for multi-site clients where each location needs its own on-site supervisor). The shift leader is themselves an agent placed within that unit, granted elevated authority scoped to it. This PRD owns **designating, reassigning, and vacating** that role, and is the gate that turns an ordinary agent into the unit's approver.
 
 ## 2. Goals & non-goals
 
 **Goals**
-- Assign exactly one shift leader per client company (INV-2).
-- Enforce that the leader is an agent **actively placed at that same company** (INV-4) and leads **only that one company** (INV-3).
-- Grant the shift-leader role scoped to the company on assignment; revoke on vacancy/reassignment.
+- Assign exactly one shift leader per **leadership unit** — company or site, per `leader_scope` (INV-2).
+- Enforce that the leader is an agent **actively placed within that unit** (INV-4) and leads **only that one unit** (INV-3).
+- Grant the shift-leader role scoped to the unit on assignment; revoke on vacancy/reassignment.
 - Keep an assignment history.
 
 **Non-goals**
@@ -55,29 +55,33 @@ flowchart TD
 
 | Ref | Rule |
 |-----|------|
-| SL-1 | A client company has **at most one active** shift-leader assignment (INV-2). |
-| SL-2 | The candidate must have an **active placement at that company** (INV-4). |
-| SL-3 | A person may lead **only one company at a time** (INV-3) — assigning someone who already leads another company is blocked (reassign/vacate the other first). |
+| SL-0 | The **leadership unit** is the company when `leader_scope=company`, else each **site** (E2 F2.6). All rules below apply per unit; `ShiftLeaderAssignment.site_id` is null for company-scope and set to the site for site-scope. |
+| SL-1 | A leadership unit has **at most one active** shift-leader assignment (INV-2) — uniqueness is on `client_company_id` (company-scope) or `(client_company_id, site_id)` (site-scope). |
+| SL-2 | The candidate must have an **active placement within that unit** (INV-4) — at the company (company-scope) or **at that site** (site-scope). |
+| SL-3 | A person may lead **only one unit at a time** (INV-3) — assigning someone who already leads another company/site is blocked (reassign/vacate the other first). |
 | SL-4 | Assigning a new leader where one exists **ends the previous assignment** (`unassigned_at = now`) and revokes its role scope, atomically. |
 | SL-5 | Assignment **grants the shift-leader role scoped to the company**; the agent retains their base agent capabilities for their own attendance/leave. |
 | SL-6 | When the leader's **placement at the company ends** (terminate/resign/transfer/expire — F3.2/F3.3), their assignment is **auto-vacated** and a vacancy is raised. |
 | SL-7 | A company **may temporarily have no leader** (vacancy); approvals that require a leader escalate to HR admin until filled. |
 | SL-8 | All assignments/vacancies are audited and notify the incoming leader, outgoing leader, and the company's agents (E10). |
 | SL-9 | Assignment history is retained (never hard-deleted). |
+| SL-10 | A shift leader is **identified by an active `shift_leader_assignments` row** (keyed by `employee_id`); the employee's **auth role and company scope are derived at request time** by server middleware from that active assignment — **not stored on `users`**. An active assignment ⇒ effective role `shift_leader` scoped to that one company (INV-3); none ⇒ a plain agent. Reassign/revoke takes effect on the **next request** (no re-login). This is the mechanism behind SL-5 and is consistent with INV-2/3/4. |
+| SL-11 | **Single entry point.** Assign / replace / revoke a leader is performed from the **client-company detail "Pemimpin Shift" tab** (E2 [F2.3](../../E2-identity/prds/client-company-directory.md)). The placement-detail shift-leader card is **read-only** and links to that tab; the company-roster "Ganti" action (F3.5) links to the same tab. |
 
 ## 6. Data model
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `id` | PK | |
-| `client_company_id` | FK | **unique among active** assignments (SL-1) |
-| `employee_id` | FK | the leader; must have active placement at the company (SL-2) |
+| `client_company_id` | FK | the unit's company; **unique among active** for company-scope (SL-1) |
+| `site_id` | FK (nullable) | null for company-scope; the site for site-scope — `(client_company_id, site_id)` **unique among active** (SL-1) |
+| `employee_id` | FK | the leader; must have active placement within the unit (SL-2) |
 | `assigned_at` | datetime | |
 | `unassigned_at` | datetime | null while active |
 | `assigned_by` | FK → User | actor |
 | `vacated_reason` | enum | `Reassigned` \| `PlacementEnded` \| `Manual` |
 
-> RBAC scope: assignment writes a company-scoped `shift_leader` grant (E1). Revoked on `unassigned_at`.
+> RBAC scope: the `shift_leader` role + company scope are **derived at request time** from the active assignment by server middleware (SL-10), **not persisted on `users`**; they take effect on assign and lapse on `unassigned_at`, both effective on the next request (E1).
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -121,6 +125,14 @@ Feature: Shift-leader assignment
     Given "Plaza Senayan" has no active shift leader
     When an agent there submits a leave request
     Then the approval is routed to an HR admin
+
+  Scenario: Per-site leadership when leader_scope = site
+    Given "Plaza Group" has leader_scope = site
+    And sites "Plaza Senayan" and "Plaza Indonesia" each have active placements
+    When I assign "Budi" (placed at "Plaza Senayan") as leader of site "Plaza Senayan"
+    And I assign "Sari" (placed at "Plaza Indonesia") as leader of site "Plaza Indonesia"
+    Then each site has exactly one shift leader scoped to that site
+    And "Budi" cannot also be assigned to lead "Plaza Indonesia" (strict 1:1 per unit)
 ```
 
 ## 8. Cases & edge cases
@@ -140,7 +152,12 @@ Feature: Shift-leader assignment
 
 ## 10. Decisions & open questions
 
-- ✅ One leader per company; one company per leader (strict 1:1).
-- ✅ Leader must be actively placed at the company.
+**Resolved (2026-06-08 — shipped shift-leader identity model):**
+- ✅ **Role/scope derived, not stored.** A shift leader = an Employee with an active `shift_leader_assignments` row; the auth role (`shift_leader`) and single-company scope are derived at request time by server middleware (consistent with INV-2/3/4), never persisted on `users`. Reassign/revoke is effective on the next request — no re-login. (SL-10)
+- ✅ **Single entry point** = the client-company detail **"Pemimpin Shift" tab** (E2 [F2.3](../../E2-identity/prds/client-company-directory.md)). The placement-detail shift-leader card is read-only (links to the tab); the F3.5 roster "Ganti" action links there too. (SL-11)
+
+- ✅ One leader per **leadership unit**; one unit per leader (strict 1:1). *(2026-06-03: unit = company **or** site per `ClientCompany.leader_scope`; default `company` preserves prior behavior.)*
+- ✅ Leader must be actively placed **within the unit** (at the company / at that site).
 - ✅ Vacancy allowed; approvals escalate to HR admin meanwhile.
+- **Open:** when a company switches `leader_scope` company→site, existing company-level assignment is flagged for re-designation per site (F2.6 C-3) — confirm the transition UX.
 - **Open:** can an HR admin act as a **stand-in approver** for a specific company indefinitely, or is escalation only a stop-gap until a leader is named? (assumed: stop-gap.)
