@@ -708,11 +708,15 @@ export function LeaveQuotasScreen() {
     ...(search.cursor ? { cursor: search.cursor } : {}),
   });
 
-  type EmpList = { data: EmployeeRow[]; next_cursor?: string | null; has_more?: boolean };
-  const list = unwrap<EmpList>(listQuery.data?.data);
-  const employees: EmployeeRow[] = list?.data ?? [];
-  const hasMore = list?.has_more ?? false;
-  const nextCursor = list?.next_cursor ?? null;
+  // The employee list envelope is { data: EmployeeRow[], next_cursor, has_more } — a SINGLE
+  // pagination wrapper, not the double-nested mutator shape. unwrap<EmployeeRow[]> peels straight
+  // to the rows (same as the picker); pagination is read off the body alongside `data`.
+  const employees: EmployeeRow[] = unwrap<EmployeeRow[]>(listQuery.data?.data) ?? [];
+  const pageBody = listQuery.data?.data as
+    | { next_cursor?: string | null; has_more?: boolean }
+    | undefined;
+  const hasMore = pageBody?.has_more ?? false;
+  const nextCursor = pageBody?.next_cursor ?? null;
 
   type NavFn = (o: { to: string; search?: Record<string, unknown> }) => void;
   const nav = navigate as unknown as NavFn;
