@@ -1060,7 +1060,13 @@ components:
         requires_document: { type: boolean }
         color: { type: string, example: '#188E4D' }
         has_window: { type: boolean, description: A standing quota row exists for the current window. }
-        entitled_days: { type: integer, nullable: true }
+        entitled_days: { type: integer, nullable: true, description: The finite day cap that applies (window / HR base / type cap); null = uncapped. }
+        assigned_days:
+          type: integer
+          nullable: true
+          description: >-
+            HR-defined base quota from the entitlement. When set, the type is enforced +
+            adjustable even if "sesuai ketentuan" (UNCAPPED / PER_EVENT). null = no HR quota.
         used_days: { type: integer }
         pending_days: { type: integer }
         remaining_days: { type: integer, nullable: true, description: null for UNCAPPED / nil-cap ("sesuai ketentuan"). }

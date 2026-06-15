@@ -77,6 +77,7 @@ func (r *QuotaRepo) ListEmployeeTypeBalances(ctx context.Context, employeeID, cu
 			Used:             derefI32(row.UsedDays),
 			Pending:          derefI32(row.PendingDays),
 			ExpiresAt:        pgDatePtr(row.ExpiresAt),
+			AssignedDays:     i32ptrToIntPtr(row.AssignedDays),
 		})
 	}
 	return out, nil

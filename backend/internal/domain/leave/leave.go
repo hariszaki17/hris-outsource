@@ -199,23 +199,49 @@ type TypeBalance struct {
 	Used      int
 	Pending   int
 	ExpiresAt *time.Time
+
+	// AssignedDays is the HR-defined base quota from the employee's entitlement
+	// (employee_leave_entitlements.entitled_days). When set, it caps even an
+	// "sesuai ketentuan" (UNCAPPED / PER_EVENT) type (2026-06-15). nil = no HR quota.
+	AssignedDays *int
 }
 
-// Remaining is the displayed remaining for quota-bearing capped types
-// (entitled-used-pending). nil for UNCAPPED / nil-cap types ("sesuai ketentuan").
-func (b TypeBalance) Remaining() *int {
-	if !b.CapBasis.QuotaBearing() && b.CapBasis != CapBasisPerEvent {
-		return nil // UNCAPPED
+// EffectiveEntitled is the finite day cap that applies, or nil when the type is
+// uncapped ("sesuai ketentuan"): the open window's entitled if any, else HR's
+// assigned base, else a type-level cap_value (annual / per-event). A nil-cap
+// quota-bearing type (e.g. hajj) is non-binding and returns nil.
+func (b TypeBalance) EffectiveEntitled() *int {
+	if b.HasWindow {
+		// noDayCapEntitlement (sentinel) means the open window does not day-limit.
+		if b.Entitled >= 36500 {
+			return nil
+		}
+		v := b.Entitled
+		return &v
+	}
+	if b.AssignedDays != nil {
+		return b.AssignedDays
 	}
 	if b.CapBasis == CapBasisAnnualPool || b.CapValue != nil {
-		entitled := b.Entitled
-		if !b.HasWindow && b.CapValue != nil {
-			entitled = *b.CapValue
+		if b.CapValue != nil {
+			v := *b.CapValue
+			return &v
 		}
-		r := entitled - b.Used - b.Pending
-		return &r
+		z := 0
+		return &z
 	}
-	return nil // quota-bearing but no day cap (e.g. hajj)
+	return nil
+}
+
+// Remaining is the displayed remaining for capped types (entitled-used-pending).
+// nil for uncapped types ("sesuai ketentuan").
+func (b TypeBalance) Remaining() *int {
+	cap := b.EffectiveEntitled()
+	if cap == nil {
+		return nil
+	}
+	r := *cap - b.Used - b.Pending
+	return &r
 }
 
 // LeaveEntitlement is one HR-assigned per-employee leave assignment (the base

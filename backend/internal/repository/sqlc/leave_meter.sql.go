@@ -99,6 +99,7 @@ func (q *Queries) GetLeaveTypeCap(ctx context.Context, id string) (GetLeaveTypeC
 const listEmployeeLeaveBalances = `-- name: ListEmployeeLeaveBalances :many
 SELECT lt.id, lt.code, lt.name, lt.cap_basis, lt.cap_value, lt.cap_unit, lt.paid,
        lt.gender, lt.requires_document, lt.color, lt.applies_to, lt.common,
+       ele.entitled_days AS assigned_days,
        lq.id           AS quota_id,
        lq.entitled_days,
        lq.used_days,
@@ -118,6 +119,8 @@ LEFT JOIN leave_quotas lq
         WHEN 'PER_MONTH'      THEN $2::text
         WHEN 'LIFETIME_ONCE'  THEN 'EMP'
         WHEN 'SERVICE_UNPAID' THEN 'EMP'
+        WHEN 'UNCAPPED'       THEN 'EMP'
+        WHEN 'PER_EVENT'      THEN 'EMP'
         ELSE $3::text
       END
 WHERE lt.deleted_at IS NULL AND lt.status = 'active'
@@ -143,6 +146,7 @@ type ListEmployeeLeaveBalancesRow struct {
 	Color            string
 	AppliesTo        string
 	Common           bool
+	AssignedDays     *int32
 	QuotaID          *string
 	EntitledDays     *int32
 	UsedDays         *int32
@@ -179,6 +183,7 @@ func (q *Queries) ListEmployeeLeaveBalances(ctx context.Context, arg ListEmploye
 			&i.Color,
 			&i.AppliesTo,
 			&i.Common,
+			&i.AssignedDays,
 			&i.QuotaID,
 			&i.EntitledDays,
 			&i.UsedDays,

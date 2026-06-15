@@ -110,24 +110,29 @@ func (m *QuotaMeter) Reserve(ctx context.Context, tx pgx.Tx, in ReserveInput) (R
 
 	charge := chargeFor(cap, in.Days)
 
-	// Non-quota-bearing: no standing window.
-	if !cap.CapBasis.QuotaBearing() {
+	isWin, err := m.windowed(ctx, cap, in.EmployeeID)
+	if err != nil {
+		return ReserveResult{}, err
+	}
+
+	// Not windowed: no standing window (truly "sesuai ketentuan" / per-event).
+	if !isWin {
 		if cap.CapBasis == dom.CapBasisPerEvent && cap.CapValue != nil && in.Days > *cap.CapValue {
 			return ReserveResult{}, &GateError{Reason: GateOverEventCap, Message: fmt.Sprintf("Melebihi batas %d hari per kejadian.", *cap.CapValue)}
 		}
 		return ReserveResult{QuotaID: nil, Charge: charge, Paid: cap.Paid}, nil
 	}
 
-	// Quota-bearing: resolve (row-lock) or auto-open the window.
+	// Windowed: resolve (row-lock) or auto-open the window.
 	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
 	if err != nil {
 		return ReserveResult{}, err
 	}
 
-	// Day cap applies to annual and to any quota-bearing type with an explicit
-	// cap_value; nil-cap lifetime types (e.g. hajj) are bounded by the once gate
-	// and the document, not a day count.
-	if dayCapped(cap) && win.RemainingPerType() < charge {
+	// Enforce the day cap when the window carries a finite entitled (annual pool, a
+	// type cap_value, or an HR-defined quota). The non-binding sentinel (nil-cap
+	// lifetime types, e.g. hajj) is bounded by the document, not a day count.
+	if win.EntitledDays < noDayCapEntitlement && win.RemainingPerType() < charge {
 		return ReserveResult{}, &GateError{Reason: GateOverCap, Message: "Sisa kuota jenis cuti ini tidak mencukupi."}
 	}
 
@@ -165,7 +170,11 @@ func (m *QuotaMeter) Commit(ctx context.Context, tx pgx.Tx, in CommitInput) erro
 	if err != nil {
 		return err
 	}
-	if !cap.CapBasis.QuotaBearing() {
+	isWin, err := m.windowed(ctx, cap, in.EmployeeID)
+	if err != nil {
+		return err
+	}
+	if !isWin {
 		return nil
 	}
 	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
@@ -173,7 +182,7 @@ func (m *QuotaMeter) Commit(ctx context.Context, tx pgx.Tx, in CommitInput) erro
 		return err
 	}
 	charge := chargeFor(cap, in.Days)
-	if win.PendingDays < charge && dayCapped(cap) {
+	if win.PendingDays < charge && win.EntitledDays < noDayCapEntitlement {
 		shortfall := charge - win.PendingDays
 		if !in.Override && win.RemainingPerType() < shortfall {
 			return &GateError{Reason: GateOverCap, Message: "Sisa kuota jenis cuti ini tidak mencukupi."}
@@ -198,7 +207,11 @@ func (m *QuotaMeter) adjust(ctx context.Context, tx pgx.Tx, in WindowOp, fn func
 	if err != nil {
 		return err
 	}
-	if !cap.CapBasis.QuotaBearing() {
+	isWin, err := m.windowed(ctx, cap, in.EmployeeID)
+	if err != nil {
+		return err
+	}
+	if !isWin {
 		return nil
 	}
 	key, _, _, _, _ := windowFor(cap.CapBasis, in.StartDate)
@@ -232,8 +245,14 @@ func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEnt
 	if err != nil {
 		return dom.LeaveQuota{}, err
 	}
-	if !cap.CapBasis.QuotaBearing() {
-		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Jenis cuti ini tidak punya kuota yang bisa disesuaikan."}
+	isWin, err := m.windowed(ctx, cap, in.EmployeeID)
+	if err != nil {
+		return dom.LeaveQuota{}, err
+	}
+	if !isWin {
+		// Not windowed: a truly "sesuai ketentuan" type with no HR-defined quota. HR must
+		// first set a base entitled_days on the employee's Hak Cuti before adjusting.
+		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Tetapkan kuota dasar di Hak Cuti karyawan sebelum menyesuaikan."}
 	}
 	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
 	if err != nil {
@@ -244,6 +263,22 @@ func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEnt
 	}
 	adj := dom.LeaveQuotaAdjustment{Delta: in.Delta, Reason: in.Reason, AdjustedBy: in.Actor, AdjustedAt: in.Now}
 	return m.store.AdjustQuotaEntitled(ctx, tx, win.ID, in.Delta, in.Reason, adj)
+}
+
+// windowed reports whether the type meters against a standing window FOR THIS EMPLOYEE.
+// A type is windowed when its cap_basis is inherently quota-bearing, OR HR assigned the
+// employee a numeric entitled_days for it (set on the Hak Cuti tab) — an HR-defined quota
+// turns even an "sesuai ketentuan" (UNCAPPED / PER_EVENT) type into an enforced, adjustable
+// quota (2026-06-15). UNCAPPED / PER_EVENT use the existing "EMP" lifetime window (no reset).
+func (m *QuotaMeter) windowed(ctx context.Context, cap dom.LeaveTypeCap, employeeID string) (bool, error) {
+	if cap.CapBasis.QuotaBearing() {
+		return true, nil
+	}
+	ent, err := m.reader.GetEmployeeEntitlement(ctx, employeeID, cap.ID)
+	if err != nil {
+		return false, err
+	}
+	return ent != nil && ent.EntitledDays != nil, nil
 }
 
 // resolveOrOpen row-locks the window, auto-opening it at its entitlement if absent.
@@ -319,14 +354,6 @@ func chargeFor(cap dom.LeaveTypeCap, days int) int {
 		return 1
 	}
 	return days
-}
-
-// dayCapped reports whether the window enforces a day/occurrence remaining check.
-func dayCapped(cap dom.LeaveTypeCap) bool {
-	if cap.CapBasis == dom.CapBasisAnnualPool {
-		return true
-	}
-	return cap.CapValue != nil
 }
 
 // windowFor maps a cap_basis + request start to the quota window key and the

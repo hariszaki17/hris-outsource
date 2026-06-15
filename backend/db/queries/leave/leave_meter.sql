@@ -23,6 +23,7 @@ WHERE id = sqlc.arg(id) AND deleted_at IS NULL;
 -- picker + balance grid never show a type the employee was not granted.
 SELECT lt.id, lt.code, lt.name, lt.cap_basis, lt.cap_value, lt.cap_unit, lt.paid,
        lt.gender, lt.requires_document, lt.color, lt.applies_to, lt.common,
+       ele.entitled_days AS assigned_days,
        lq.id           AS quota_id,
        lq.entitled_days,
        lq.used_days,
@@ -42,6 +43,8 @@ LEFT JOIN leave_quotas lq
         WHEN 'PER_MONTH'      THEN sqlc.arg(cur_month)::text
         WHEN 'LIFETIME_ONCE'  THEN 'EMP'
         WHEN 'SERVICE_UNPAID' THEN 'EMP'
+        WHEN 'UNCAPPED'       THEN 'EMP'
+        WHEN 'PER_EVENT'      THEN 'EMP'
         ELSE sqlc.arg(cur_year)::text
       END
 WHERE lt.deleted_at IS NULL AND lt.status = 'active'

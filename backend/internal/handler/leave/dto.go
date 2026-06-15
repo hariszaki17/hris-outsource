@@ -303,24 +303,27 @@ func toCalendarResponse(r svc.CalendarResult) calendarResponse {
 // typeBalanceResponse is one row in GET /leave-balances/by-employee/{id}/types
 // (openapi LeaveTypeBalance) — per-type current-window balance (F6.5, 2026-06-12).
 type typeBalanceResponse struct {
-	LeaveTypeID      string  `json:"leave_type_id"`
-	Code             string  `json:"code"`
-	Name             string  `json:"name"`
-	CapBasis         string  `json:"cap_basis"`
-	CapValue         *int    `json:"cap_value,omitempty"`
-	CapUnit          string  `json:"cap_unit"`
-	Paid             bool    `json:"paid"`
-	Gender           string  `json:"gender"`
-	RequiresDocument bool    `json:"requires_document"`
-	Color            string  `json:"color"`
-	AppliesTo        string  `json:"applies_to"`
-	Common           bool    `json:"common"`
-	HasWindow        bool    `json:"has_window"`
-	EntitledDays     *int    `json:"entitled_days,omitempty"`
-	UsedDays         int     `json:"used_days"`
-	PendingDays      int     `json:"pending_days"`
-	RemainingDays    *int    `json:"remaining_days,omitempty"`
-	ExpiresAt        *string `json:"expires_at,omitempty"`
+	LeaveTypeID      string `json:"leave_type_id"`
+	Code             string `json:"code"`
+	Name             string `json:"name"`
+	CapBasis         string `json:"cap_basis"`
+	CapValue         *int   `json:"cap_value,omitempty"`
+	CapUnit          string `json:"cap_unit"`
+	Paid             bool   `json:"paid"`
+	Gender           string `json:"gender"`
+	RequiresDocument bool   `json:"requires_document"`
+	Color            string `json:"color"`
+	AppliesTo        string `json:"applies_to"`
+	Common           bool   `json:"common"`
+	HasWindow        bool   `json:"has_window"`
+	EntitledDays     *int   `json:"entitled_days,omitempty"`
+	// AssignedDays is the HR-defined base quota (entitlement). Non-null → the type is
+	// HR-quota'd (enforced + adjustable) even when "sesuai ketentuan" (UNCAPPED/PER_EVENT).
+	AssignedDays  *int    `json:"assigned_days,omitempty"`
+	UsedDays      int     `json:"used_days"`
+	PendingDays   int     `json:"pending_days"`
+	RemainingDays *int    `json:"remaining_days,omitempty"`
+	ExpiresAt     *string `json:"expires_at,omitempty"`
 }
 
 func toTypeBalanceResponse(b dom.TypeBalance) typeBalanceResponse {
@@ -338,17 +341,14 @@ func toTypeBalanceResponse(b dom.TypeBalance) typeBalanceResponse {
 		AppliesTo:        b.AppliesTo,
 		Common:           b.Common,
 		HasWindow:        b.HasWindow,
+		AssignedDays:     b.AssignedDays,
 		UsedDays:         b.Used,
 		PendingDays:      b.Pending,
 		RemainingDays:    b.Remaining(),
 	}
-	if b.HasWindow {
-		e := b.Entitled
-		out.EntitledDays = &e
-	} else if b.CapValue != nil {
-		e := *b.CapValue
-		out.EntitledDays = &e
-	}
+	// entitled_days = the finite day cap that applies (window / HR base / type cap),
+	// or absent for uncapped types ("sesuai ketentuan").
+	out.EntitledDays = b.EffectiveEntitled()
 	if b.ExpiresAt != nil {
 		s := b.ExpiresAt.Format("2006-01-02")
 		out.ExpiresAt = &s
