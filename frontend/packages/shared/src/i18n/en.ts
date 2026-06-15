@@ -40,7 +40,7 @@ export const en: Messages = {
       searchPlaceholder: 'Search requester…',
       tabsAria: 'Filter by type',
       tableAria: 'Approvals awaiting decision',
-      tabs: { all: 'All', leave: 'Leave', overtime: 'Overtime' },
+      tabs: { all: 'All', leave: 'Leave', overtime: 'Overtime', correction: 'Correction' },
       colRequester: 'Requester',
       colType: 'Type',
       colSummary: 'Summary',
@@ -50,7 +50,7 @@ export const en: Messages = {
       colActions: 'Actions',
       lineLabel: 'Line {{current}}/{{total}}',
       unknownRequester: 'Unknown requester',
-      requestType: { LEAVE: 'Leave', OVERTIME: 'Overtime' },
+      requestType: { LEAVE: 'Leave', OVERTIME: 'Overtime', CORRECTION: 'Correction' },
       resultRange: '{{count}} rows',
       emptyTitle: 'Nothing pending',
       emptyBody: 'All requests have been handled.',
@@ -89,6 +89,7 @@ export const en: Messages = {
       fieldSubmitted: 'Submitted',
       typeLeave: 'Leave',
       typeOvertime: 'Overtime',
+      typeCorrection: 'Correction',
       statusPendingLine: 'Pending · Line {{current}} of {{total}}',
       terminalApproved: 'Approved',
       terminalRejected: 'Rejected',
@@ -850,6 +851,8 @@ export const en: Messages = {
     fieldRole: 'Role',
     fieldLoginStatus: 'Login status',
     fieldPosition: 'Position',
+    fieldPositionHint: "Agent's job title/role — e.g. Petugas Parkir, Koordinator Lokasi.",
+    fieldPositionPlaceholder: 'Type or pick a position…',
     fieldClientCompany: 'Client company',
     autoProvisionBannerTitle: 'Login created automatically',
     autoProvisionBanner:
@@ -1326,6 +1329,9 @@ export const en: Messages = {
     sectionAgent: 'Agent & Employment Agreement',
     sectionPlacement: 'Placement',
     sectionPeriod: 'Period & Terms',
+    sectionTerms: 'Terms',
+    openEndedNote:
+      'A placement is open-ended — it starts on its creation date and is active immediately. There is no end date; it closes when the agent is transferred or deactivated.',
 
     fieldEmployee: 'Agent',
     fieldEmployeePlaceholder: 'Search name / employee ID…',
@@ -1493,6 +1499,7 @@ export const en: Messages = {
     field: {
       company: 'Client Company',
       position: 'Position',
+      placedSince: 'Placed since',
       annualLeave: 'Annual Leave',
       annualLeaveDays: '{{count}} days',
       period: 'Period',
@@ -1575,6 +1582,7 @@ export const en: Messages = {
       reason: 'Transfer reason',
       reasonPlaceholder: 'Explain the reason for the transfer...',
       bufferHint: 'The old placement ends 1 day before the new start (BR-2).',
+      timingHint: 'The new placement starts on the transfer date; the old one closes the same day.',
       confirmBtn: 'Transfer (end the old one)',
     },
     renew: {
@@ -1997,7 +2005,8 @@ export const en: Messages = {
   },
   corrections: {
     title: 'Attendance Corrections',
-    subtitle: 'Review and decide on attendance correction requests from agents and shift leaders.',
+    subtitle:
+      'History of attendance correction requests from agents and shift leaders. Approvals happen in the Inbox.',
     tableAriaLabel: 'Attendance corrections queue',
     searchPlaceholder: 'Search employee or ID...',
     filterStatus: 'All statuses',
@@ -2035,6 +2044,10 @@ export const en: Messages = {
     typeCheckOut: 'Clock-out correction',
     typeCode: 'Code correction',
     typeOther: 'Other',
+    typeNewEntry: 'New entry (no schedule)',
+    close: 'Close',
+    decideInInbox: 'Approval for this correction happens in the Approval Inbox.',
+    viewApproval: 'View approval chain',
     status: {
       PENDING: 'Pending',
       APPROVED: 'Approved',
@@ -3075,6 +3088,60 @@ export const en: Messages = {
     corrAlreadyPending: 'A correction is already pending',
     corrError: 'Failed to submit correction',
     corrWindowHint: 'Corrections can only be filed within 7 days.',
+    // Correction — Requests · Corrections tab (F5.6)
+    tabKoreksi: 'Corrections',
+    corrHistoryTitle: 'Correction History',
+    corrNewBtn: 'File Correction',
+    corrEmpty: 'No corrections filed yet.',
+    corrColDate: 'Date',
+    corrColType: 'Type',
+    corrColChange: 'Change',
+    corrType: {
+      CHECK_IN: 'Clock-in correction',
+      CHECK_OUT: 'Clock-out correction',
+      CODE: 'Code correction',
+      OTHER: 'Other',
+      NEW_ENTRY: 'New entry (no schedule)',
+    },
+    corrStatus: {
+      PENDING: 'Pending',
+      APPROVED: 'Approved',
+      APPLIED: 'Applied',
+      REJECTED: 'Rejected',
+      CANCELLED: 'Cancelled',
+    },
+    // Status / detail modal
+    corrStatusTitle: 'Correction Status',
+    corrStageApplied: 'Applied',
+    corrAppliedNote: 'Changes have been applied to the attendance record.',
+    corrLineProgress: 'Line {{current}} of {{total}}',
+    corrWithdraw: 'Withdraw Correction',
+    corrWithdrawn: 'Correction withdrawn',
+    corrWithdrawError: 'Failed to withdraw correction',
+    corrPayablePending: 'Awaiting payable status',
+    // Searchable attendance picker
+    corrPickerTitle: 'Pick Attendance Day',
+    corrPickerSubtitle:
+      'Select the attendance day to correct, or create an entry for a day with no schedule.',
+    corrPickerSearch: 'Search date or company',
+    corrPickerDateFrom: 'From date',
+    corrPickerDateTo: 'To date',
+    corrPickerReset: 'Reset filters',
+    corrPickerEmpty: 'No attendance history yet.',
+    corrPickerNoResults: 'No results',
+    corrPickerNoResultsBody: 'Try adjusting the search or date range.',
+    corrPickerNewEntry: 'Create for a day with no schedule',
+    // NEW_ENTRY form
+    corrNewEntryTitle: 'New Entry Correction',
+    corrNewEntryHint:
+      'Create an attendance record for a day with no schedule (e.g. forgot to clock in entirely).',
+    corrWorkDate: 'Date',
+    corrCheckInTime: 'Clock-in',
+    corrCheckOutTime: 'Clock-out',
+    corrBadDate: 'Invalid date',
+    // New-entry / placement error codes
+    corrAlreadyExists: 'An attendance record already exists for this date',
+    corrNoPlacement: 'No active placement for this date',
     // Leave status detail (modal)
     statusTitle: 'Request Status',
     statusDuration: 'Duration',

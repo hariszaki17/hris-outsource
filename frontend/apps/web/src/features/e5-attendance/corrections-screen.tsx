@@ -1,13 +1,16 @@
 /**
- * E5 · Koreksi Kehadiran — HR corrections approval queue (F5.4).
+ * E5 · Koreksi Kehadiran — HR/SL corrections history (READ-ONLY, F5.4).
  *
  * .pen frames implemented:
  *   QfamL  HR · Koreksi · Antrian  (this file — CorrectionsScreen)
  *   sSKtK  HR · Koreksi · Detail   (CorrectionDetailDrawer in correction-overlays.tsx)
  *
- * Route:   /corrections  (add to router.tsx — see RETURN section in task)
- * Hooks:   useListCorrections, useGetCorrection, useApproveCorrection, useRejectCorrection
- *          (all from @swp/api-client/e5)
+ * Approve/Reject moved to the E11 Kotak Masuk (approval inbox) — corrections route through the
+ * generic approval engine like LEAVE / OVERTIME. This surface is now a read-only list + filters;
+ * the detail drawer links out to the correction's approval_instance.
+ *
+ * Route:   /corrections
+ * Hooks:   useListCorrections, useGetCorrection (both from @swp/api-client/e5)
  * Data:    query.data?.data = { data: Correction[], next_cursor?, has_more }
  * RBAC:    Client-side gating is defense-in-depth; API is the gate.
  */
@@ -192,7 +195,6 @@ function CorrectionsScreenInner({
     {
       id: 'summary',
       header: t('corrections.colSummary'),
-      width: 280,
       cell: (c) => (
         <p className="max-w-[260px] truncate text-sm text-text-2" title={c.reason}>
           {c.reason}
@@ -213,6 +215,17 @@ function CorrectionsScreenInner({
         <StatusBadge dot tone={correctionStatusTone(c.status)}>
           {t(`corrections.status.${c.status}`)}
         </StatusBadge>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (c) => (
+        <Button variant="secondary" size="sm" onClick={() => openDrawer(c.id)}>
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -309,7 +322,6 @@ function CorrectionsScreenInner({
         getRowId={(c) => c.id}
         isLoading={query.isLoading}
         skeletonRows={8}
-        onRowClick={(c) => openDrawer(c.id)}
         empty={
           hasFilters ? (
             <EmptyState

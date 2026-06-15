@@ -134,7 +134,6 @@ export function EmployeeLeaveEntitlementsSection({
     {
       id: 'type',
       header: t('colType'),
-      width: 280,
       cell: (r) => (
         <div className="flex items-center gap-2">
           <span

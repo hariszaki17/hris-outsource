@@ -42,11 +42,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { overtimeStatusTone } from '../e7-overtime/overtime-shared.tsx';
 import { AgentPage } from './agent-page.tsx';
+import { AgentCorrectionPanel } from './me-correction-panel.tsx';
 import { AgentLeaveCreateModal } from './me-leave-create-screen.tsx';
 import { AgentLeaveStatusModal } from './me-leave-status-modal.tsx';
 import { AgentOvertimeCreateModal } from './me-overtime-create-screen.tsx';
 
-type Tab = 'cuti' | 'lembur';
+type Tab = 'cuti' | 'lembur' | 'koreksi';
 
 // ---------------------------------------------------------------------------
 // Status tone helpers
@@ -101,16 +102,18 @@ export function AgentPengajuanScreen() {
     return ai - bi || a.name.localeCompare(b.name);
   });
 
+  // Koreksi's primary action ("Ajukan Koreksi") lives inside the panel — it drives the
+  // searchable-picker flow state — so the header action is omitted on that tab.
   const actions =
     tab === 'cuti' ? (
       <Button variant="primary" size="sm" onClick={() => setLeaveCreateOpen(true)}>
         {t('leaveNewBtn')}
       </Button>
-    ) : (
+    ) : tab === 'lembur' ? (
       <Button variant="primary" size="sm" onClick={() => setOvertimeCreateOpen(true)}>
         {t('otNewBtn')}
       </Button>
-    );
+    ) : null;
 
   return (
     <AgentPage title={t('pengajuanHeading')} actions={actions}>
@@ -132,7 +135,7 @@ export function AgentPengajuanScreen() {
             />
           </section>
         </div>
-      ) : (
+      ) : tab === 'lembur' ? (
         <section className="flex flex-col gap-3">
           <h2 className="text-[15px] font-bold text-text">{t('otHistoryTitle')}</h2>
           <OvertimePanel
@@ -142,6 +145,8 @@ export function AgentPengajuanScreen() {
             onCreateOpenChange={setOvertimeCreateOpen}
           />
         </section>
+      ) : (
+        <AgentCorrectionPanel />
       )}
     </AgentPage>
   );
@@ -156,6 +161,7 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'cuti', label: t('tabCuti') },
     { id: 'lembur', label: t('tabLembur') },
+    { id: 'koreksi', label: t('tabKoreksi') },
   ];
   return (
     <div
@@ -359,11 +365,28 @@ function LeavePanel({
     {
       id: 'status',
       header: t('leaveStatus'),
-      width: 160,
+      width: 200,
       cell: (r) => (
         <StatusBadge dot tone={leaveStatusTone(r.status as LeaveStatus)}>
           {t(`leave.status.${r.status}`, { defaultValue: r.status })}
         </StatusBadge>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (row) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setSelected(row);
+          }}
+        >
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -380,7 +403,6 @@ function LeavePanel({
           getRowId={(r) => r.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(r) => setSelected(r)}
           empty={<EmptyState variant="fresh" title={t('leaveEmpty')} />}
         />
       )}

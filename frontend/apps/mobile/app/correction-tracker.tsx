@@ -7,7 +7,13 @@
  *   [Semua 5][Pending 2][Disetujui 2][Ditolak 1]   — filter tabs
  *   List of correction cards: type, date, time arrow, id, status badge, Detail >
  */
-import { type Correction, type CorrectionPage, useListCorrections } from '@swp/api-client/e5';
+import {
+  type Correction,
+  type CorrectionPage,
+  CorrectionStatus,
+  CorrectionType,
+  useListCorrections,
+} from '@swp/api-client/e5';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +33,8 @@ function correctionTypeLabel(type: string): string {
       return 'Koreksi Clock-out';
     case 'CODE':
       return 'Koreksi Status';
+    case 'NEW_ENTRY':
+      return 'Buat Catatan';
     default:
       return 'Koreksi Lainnya';
   }
@@ -40,6 +48,8 @@ function correctionTypeIcon(type: string): string {
       return '←';
     case 'CODE':
       return '◎';
+    case 'NEW_ENTRY':
+      return '＋';
     default:
       return '·';
   }
@@ -105,11 +115,12 @@ function filterMatches(item: Correction, key: FilterKey): boolean {
 
 function CorrectionRow({ item }: { item: Correction }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const { bStatus, label } = corrStatusBadge(item.status);
   const icon = correctionTypeIcon(item.type);
   const typeLabel = correctionTypeLabel(item.type);
 
-  // Build time arrow display
+  // Build time / change display
   const snap = item.original_snapshot as Record<string, string | null | undefined>;
   let timeArrow = '';
   if (item.type === 'CHECK_IN') {
@@ -120,9 +131,20 @@ function CorrectionRow({ item }: { item: Correction }) {
     const orig = timeSlug(snap?.check_out_at);
     const prop = timeSlug(item.proposed_check_out_at);
     timeArrow = `${orig} → ${prop}`;
+  } else if (item.type === 'NEW_ENTRY') {
+    const ci = timeSlug(item.proposed_check_in_at);
+    const co = item.proposed_check_out_at ? timeSlug(item.proposed_check_out_at) : null;
+    timeArrow = co ? `↓ ${ci}  ↑ ${co}` : `↓ ${ci}`;
   } else {
     timeArrow = item.type === 'CODE' ? 'Absen → Hadir' : '—';
   }
+
+  // Date basis: NEW_ENTRY carries work_date; corrections of an existing row use created_at.
+  const rowDate = item.work_date ?? item.created_at;
+
+  // NEW_ENTRY no-shift days await a payable decision by HR/SL once applied.
+  const showPayablePending =
+    item.type === CorrectionType.NEW_ENTRY && item.status === CorrectionStatus.APPLIED;
 
   return (
     <Card>
@@ -137,7 +159,7 @@ function CorrectionRow({ item }: { item: Correction }) {
               {typeLabel}
             </Text>
             <Text variant="caption" className="text-text-3">
-              {dateLabel(item.created_at)}
+              {dateLabel(rowDate)}
             </Text>
           </View>
         </View>
@@ -148,6 +170,15 @@ function CorrectionRow({ item }: { item: Correction }) {
       <Text variant="body" className="mt-1.5 text-text-2">
         {timeArrow}
       </Text>
+
+      {/* Payable-pending indicator (NEW_ENTRY no-shift day awaiting HR/SL decision) */}
+      {showPayablePending ? (
+        <View className="mt-1.5 self-start rounded-pill bg-info-bg px-2 py-1">
+          <Text variant="caption" weight="semibold" className="text-info-text">
+            {t('m:koreksi.payablePending')}
+          </Text>
+        </View>
+      ) : null}
 
       {/* ID + detail link */}
       <View className="mt-2 flex-row items-center justify-between border-t border-border pt-2">
@@ -257,10 +288,10 @@ export default function CorrectionTrackerScreen() {
           </View>
         )}
 
-        {/* New correction CTA */}
+        {/* New correction CTA — opens the searchable attendance picker (step 1). */}
         <Pressable
           className="items-center py-3"
-          onPress={() => router.push({ pathname: '/correction' })}
+          onPress={() => router.push({ pathname: '/correction-picker' })}
         >
           <Text variant="strong" className="text-primary">
             {t('m:koreksi.ajukan')}

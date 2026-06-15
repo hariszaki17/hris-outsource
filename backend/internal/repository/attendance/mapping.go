@@ -42,6 +42,32 @@ func pgDateToTime(d pgtype.Date) time.Time {
 	return d.Time
 }
 
+// pgDateToTimePtr maps a nullable date column to *time.Time (nil when NULL).
+func pgDateToTimePtr(d pgtype.Date) *time.Time {
+	if !d.Valid {
+		return nil
+	}
+	t := d.Time
+	return &t
+}
+
+// derefOrEmpty maps a nullable text column to "" when NULL (a still-PENDING
+// NEW_ENTRY has a null attendance_id; the domain models that as the empty string).
+func derefOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// strPtrOrNil maps "" → nil (a NEW_ENTRY correction inserts a null attendance_id).
+func strPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func i32ToInt(v int32) int { return int(v) }
 
 func i32PtrToIntPtr(v *int32) *int {
@@ -129,6 +155,7 @@ type attendanceCols struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedBy          *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -173,6 +200,7 @@ func mapAttendance(c attendanceCols) att.Attendance {
 		RejectedAt:         c.RejectedAt,
 		RejectReason:       c.RejectReason,
 		LastCorrectionID:   c.LastCorrectionID,
+		IsPayable:          c.IsPayable,
 		CreatedBy:          c.CreatedBy,
 		CreatedAt:          c.CreatedAt,
 		UpdatedAt:          c.UpdatedAt,
@@ -193,7 +221,7 @@ func mapAttendanceFromList(r sqlcgen.ListAttendanceRow) att.Attendance {
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
-		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, IsPayable: r.IsPayable, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName, SiteName: r.SiteName,
 	})
 }
@@ -208,7 +236,7 @@ func mapAttendanceFromGet(r sqlcgen.GetAttendanceRow) att.Attendance {
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
-		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, IsPayable: r.IsPayable, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		EmployeeName: r.EmployeeName, CompanyName: r.CompanyName, SiteName: r.SiteName,
 	})
 }
@@ -269,11 +297,27 @@ func mapAttendanceFromApply(r sqlcgen.ApplyCorrectionToAttendanceRow) att.Attend
 	})
 }
 
+func mapAttendanceFromSetPayable(r sqlcgen.SetAttendancePayableRow) att.Attendance {
+	return mapAttendance(attendanceCols{
+		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
+		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
+		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
+		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
+		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
+		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
+		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
+		RejectReason: r.RejectReason, LastCorrectionID: r.LastCorrectionID, IsPayable: r.IsPayable, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	})
+}
+
 // --- correction row shape ---
 
 type correctionCols struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
+	ApprovalInstanceID       *string
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -294,8 +338,6 @@ type correctionCols struct {
 	CompanyName              *string
 }
 
-
-
 func mapAttendanceFromCreate(r sqlcgen.CreateManualAttendanceRow) att.Attendance {
 	return mapAttendance(attendanceCols{
 		ID: r.ID, EmployeeID: r.EmployeeID, PlacementID: r.PlacementID, ScheduleID: r.ScheduleID,
@@ -313,7 +355,9 @@ func mapAttendanceFromCreate(r sqlcgen.CreateManualAttendanceRow) att.Attendance
 func mapCorrection(c correctionCols) att.Correction {
 	return att.Correction{
 		ID:                       c.ID,
-		AttendanceID:             c.AttendanceID,
+		AttendanceID:             derefOrEmpty(c.AttendanceID),
+		WorkDate:                 pgDateToTimePtr(c.WorkDate),
+		ApprovalInstanceID:       c.ApprovalInstanceID,
 		RequesterID:              c.RequesterID,
 		CompanyID:                c.CompanyID,
 		Type:                     att.CorrectionType(c.Type),
@@ -337,7 +381,7 @@ func mapCorrection(c correctionCols) att.Correction {
 
 func mapCorrectionFromList(r sqlcgen.ListCorrectionsRow) att.Correction {
 	return mapCorrection(correctionCols{
-		ID: r.ID, AttendanceID: r.AttendanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
+		ID: r.ID, AttendanceID: r.AttendanceID, WorkDate: r.WorkDate, ApprovalInstanceID: r.ApprovalInstanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
 		Type: r.Type, ProposedCheckInAt: r.ProposedCheckInAt, ProposedCheckOutAt: r.ProposedCheckOutAt,
 		ProposedAttendanceCodeID: r.ProposedAttendanceCodeID, Reason: r.Reason, EvidenceFileID: r.EvidenceFileID,
 		Status: r.Status, DecidedBy: r.DecidedBy, DecidedAt: r.DecidedAt, RejectReason: r.RejectReason,
@@ -348,7 +392,7 @@ func mapCorrectionFromList(r sqlcgen.ListCorrectionsRow) att.Correction {
 
 func mapCorrectionFromGet(r sqlcgen.GetCorrectionRow) att.Correction {
 	return mapCorrection(correctionCols{
-		ID: r.ID, AttendanceID: r.AttendanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
+		ID: r.ID, AttendanceID: r.AttendanceID, WorkDate: r.WorkDate, ApprovalInstanceID: r.ApprovalInstanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
 		Type: r.Type, ProposedCheckInAt: r.ProposedCheckInAt, ProposedCheckOutAt: r.ProposedCheckOutAt,
 		ProposedAttendanceCodeID: r.ProposedAttendanceCodeID, Reason: r.Reason, EvidenceFileID: r.EvidenceFileID,
 		Status: r.Status, DecidedBy: r.DecidedBy, DecidedAt: r.DecidedAt, RejectReason: r.RejectReason,
@@ -359,7 +403,7 @@ func mapCorrectionFromGet(r sqlcgen.GetCorrectionRow) att.Correction {
 
 func mapCorrectionFromForUpdate(r sqlcgen.GetCorrectionForUpdateRow) att.Correction {
 	return mapCorrection(correctionCols{
-		ID: r.ID, AttendanceID: r.AttendanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
+		ID: r.ID, AttendanceID: r.AttendanceID, WorkDate: r.WorkDate, ApprovalInstanceID: r.ApprovalInstanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
 		Type: r.Type, ProposedCheckInAt: r.ProposedCheckInAt, ProposedCheckOutAt: r.ProposedCheckOutAt,
 		ProposedAttendanceCodeID: r.ProposedAttendanceCodeID, Reason: r.Reason, EvidenceFileID: r.EvidenceFileID,
 		Status: r.Status, DecidedBy: r.DecidedBy, DecidedAt: r.DecidedAt, RejectReason: r.RejectReason,
@@ -370,7 +414,7 @@ func mapCorrectionFromForUpdate(r sqlcgen.GetCorrectionForUpdateRow) att.Correct
 
 func mapCorrectionFromApprove(r sqlcgen.ApproveCorrectionRow) att.Correction {
 	return mapCorrection(correctionCols{
-		ID: r.ID, AttendanceID: r.AttendanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
+		ID: r.ID, AttendanceID: r.AttendanceID, WorkDate: r.WorkDate, ApprovalInstanceID: r.ApprovalInstanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
 		Type: r.Type, ProposedCheckInAt: r.ProposedCheckInAt, ProposedCheckOutAt: r.ProposedCheckOutAt,
 		ProposedAttendanceCodeID: r.ProposedAttendanceCodeID, Reason: r.Reason, EvidenceFileID: r.EvidenceFileID,
 		Status: r.Status, DecidedBy: r.DecidedBy, DecidedAt: r.DecidedAt, RejectReason: r.RejectReason,
@@ -381,7 +425,7 @@ func mapCorrectionFromApprove(r sqlcgen.ApproveCorrectionRow) att.Correction {
 
 func mapCorrectionFromReject(r sqlcgen.RejectCorrectionRow) att.Correction {
 	return mapCorrection(correctionCols{
-		ID: r.ID, AttendanceID: r.AttendanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
+		ID: r.ID, AttendanceID: r.AttendanceID, WorkDate: r.WorkDate, ApprovalInstanceID: r.ApprovalInstanceID, RequesterID: r.RequesterID, CompanyID: r.CompanyID,
 		Type: r.Type, ProposedCheckInAt: r.ProposedCheckInAt, ProposedCheckOutAt: r.ProposedCheckOutAt,
 		ProposedAttendanceCodeID: r.ProposedAttendanceCodeID, Reason: r.Reason, EvidenceFileID: r.EvidenceFileID,
 		Status: r.Status, DecidedBy: r.DecidedBy, DecidedAt: r.DecidedAt, RejectReason: r.RejectReason,

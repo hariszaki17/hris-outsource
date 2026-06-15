@@ -7,7 +7,6 @@ import {
   ClipboardCheck,
   Fingerprint,
   Inbox,
-  LayoutDashboard,
   type LucideIcon,
   MapPin,
   Plane,
@@ -62,7 +61,6 @@ export function hasPermission(permissions: readonly Permission[], requires: Requ
  * anyone on an approval line (`approvals.act`) or who verifies attendance (`anyOf`).
  */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { to: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard, requires: 'dashboard.view' },
   {
     to: '/inbox',
     labelKey: 'nav.inbox',
@@ -217,7 +215,7 @@ export function activeSection(pathname: string): string | null {
   for (const [route, parent] of Object.entries(SECTION_ALIASES)) {
     if (pathname.startsWith(route)) return parent;
   }
-  // Primary items without a sub-nav (Dashboard, Inbox, Penempatan).
+  // Primary items without a sub-nav (Inbox, Penempatan).
   const direct = NAV_ITEMS.find((i) =>
     i.to === '/' ? pathname === '/' : pathname.startsWith(i.to),
   );
@@ -272,10 +270,9 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
 
 /**
  * Returns the capability required to view `pathname`, or `null` for auth-only routes.
- * `/` (dashboard) is gated on `dashboard.view`; unmatched routes are ungated.
+ * `/` is a pure redirect to the Kehadiran landing (router.tsx) — auth-only, never gated.
  */
 export function routeRequirement(pathname: string): Requirement | null {
-  if (pathname === '/') return 'dashboard.view';
   for (const [pattern, requires] of ROUTE_REQUIREMENTS) {
     if (pattern.test(pathname)) return requires;
   }

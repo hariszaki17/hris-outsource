@@ -12,17 +12,18 @@ import (
 const searchPositions = `-- name: SearchPositions :many
 
 SELECT DISTINCT position
-FROM placements
+FROM employees
 WHERE position ILIKE $1::text
   AND position <> ''
+  AND deleted_at IS NULL
 ORDER BY position
 LIMIT 30
 `
 
-// Position typeahead query (E2 GET /positions:search, backed by E3 placements).
+// Position typeahead query (E2 GET /positions:search, backed by employees).
 // Position is FREE-TEXT (no master, no FK, no ID) — the typeahead just surfaces
-// the DISTINCT existing labels already recorded across placements so admins can
-// reuse a consistent string or type a new one (decision 2026-06-12).
+// the DISTINCT existing labels already recorded across employees so admins can
+// reuse a consistent string or type a new one (position moved to employee 2026-06-15).
 // Distinct existing free-text position labels matching the (case-insensitive)
 // substring. The handler passes '%' || q || '%' so an empty q matches everything.
 func (q *Queries) SearchPositions(ctx context.Context, q_ string) ([]string, error) {

@@ -47,7 +47,8 @@ import {
   StateView,
   StatusBadge,
 } from '@swp/ui';
-import { AlertTriangle, RefreshCw, UserMinus, UserPlus } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { AlertTriangle, Plus, RefreshCw, UserMinus, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -98,6 +99,9 @@ function RosterTable({ clientCompanyId, includeHistory }: RosterTableProps) {
     cursor,
   };
 
+  const user = useCurrentUser();
+  const canManage = user?.role === 'super_admin' || user?.role === 'hr_admin';
+
   const query = useGetCompanyRoster(clientCompanyId, params);
   const rosterData = query.data?.data as CompanyRosterResponse | undefined;
   const rows = (rosterData?.placements ?? []) as Placement[];
@@ -142,12 +146,6 @@ function RosterTable({ clientCompanyId, includeHistory }: RosterTableProps) {
           </div>
         </div>
       ),
-    },
-    {
-      id: 'posisi',
-      header: t('rosterColPosisi'),
-      width: 190,
-      cell: (pl) => <span className="text-[13px] text-text-2">{pl.position_name ?? '—'}</span>,
     },
     {
       id: 'periode',
@@ -228,6 +226,18 @@ function RosterTable({ clientCompanyId, includeHistory }: RosterTableProps) {
               variant="fresh"
               title={t('rosterEmptyTitle')}
               description={t('rosterEmptyBody')}
+              action={
+                !includeHistory && canManage ? (
+                  <Link
+                    to="/placements/new"
+                    search={{ client_company_id: clientCompanyId }}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-[14px] py-[9px] text-[13px] font-semibold text-white hover:bg-primary/90"
+                  >
+                    <Plus className="size-4" aria-hidden />
+                    {t('createPlacement')}
+                  </Link>
+                ) : undefined
+              }
             />
           )
         }

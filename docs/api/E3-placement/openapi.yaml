@@ -234,7 +234,6 @@ paths:
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
                   site_id: SWP-SITE-501
-                  position: Petugas Parkir
                   start_date: '2026-06-03'
                   end_date: '2026-12-31'
                   notes: 'Replacement for Andi (resigned).'
@@ -247,7 +246,6 @@ paths:
                   employee_id: SWP-EMP-1042
                   client_company_id: SWP-CMP-014
                   site_id: SWP-SITE-501
-                  position: Petugas Parkir
                   start_date: '2026-06-09'
                   notes: 'Mulai bertugas; PKWT menyusul (perjanjian akan dilampirkan kemudian).'
               future:
@@ -257,7 +255,6 @@ paths:
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
                   site_id: SWP-SITE-501
-                  position: Petugas Parkir
                   start_date: '2026-07-01'
                   end_date: '2027-06-30'
               backdated:
@@ -267,7 +264,6 @@ paths:
                   agreement_id: SWP-AG-882
                   client_company_id: SWP-CMP-014
                   site_id: SWP-SITE-501
-                  position: Petugas Parkir
                   start_date: '2026-05-15'
                   end_date: '2026-12-31'
                   backdate_reason: 'Onboarding doc lost; agent has worked since 15 Mei per timesheets.'
@@ -504,8 +500,8 @@ paths:
         (`:transfer`, `:renew`, `:end`, `:terminate`, `:resign`) for
         anything that changes the chain or lifecycle.
 
-        Editable: `position` (free-text), `end_date` (within agreement /
-        BR-1b), `notes`.
+        Editable: `end_date` (within agreement / BR-1b), `notes`. (Position is
+        an employee attribute — edit it on the employee, not the placement.)
 
         Terminal-state placements (LC-1) reject all edits with
         `409 TERMINAL_STATE_IMMUTABLE` except via Super Admin override
@@ -549,12 +545,12 @@ paths:
     post:
       operationId: transferPlacement
       tags: [placements]
-      summary: Transfer agent to a new company / position (RT-1)
+      summary: Transfer agent to a new company (RT-1)
       description: |
         Atomically: (1) closes the current placement with
         `ended_reason = TRANSFERRED` and `ended_at = effective_date − 1 day`
         (1-day buffer, F3.1 BR-2); (2) creates a successor placement at the
-        new company/position with `predecessor_id` set; (3) if
+        new company with `predecessor_id` set; (3) if
         the agent was the shift leader of the **old** company, vacates that
         leadership (auto-end SLA with `vacated_reason = PLACEMENT_ENDED`)
         and raises a vacancy (SL-6).
@@ -564,9 +560,8 @@ paths:
         If the **new** company has no leader, the response includes
         `warnings: ["NO_SHIFT_LEADER_AT_DESTINATION"]` (TR-5).
 
-        If the destination is the same company *and* same position,
-        rejected `422 RULE_VIOLATION` (TR-1: must be an actual change —
-        use `:renew` instead).
+        If the destination is the same company, rejected `422 RULE_VIOLATION`
+        (TR-1: must be an actual company change — use `:renew` instead).
 
         Requires `Idempotency-Key`.
       parameters:
@@ -582,9 +577,6 @@ paths:
                 summary: Transfer Budi from Mall Kelapa Gading → Plaza Senayan
                 value:
                   new_client_company_id: SWP-CMP-014
-                  new_position: Teknisi Gedung
-                  new_start_date: '2026-07-01'
-                  new_end_date: '2027-06-30'
                   new_agreement_id: SWP-AG-882
                   transfer_reason: 'Rotasi rutin — pengembangan skill Building Mgmt.'
                   transfer_note: 'New office: Plaza Senayan tower B.'
@@ -617,255 +609,6 @@ paths:
         scope: global
       x-design-screens:
         - pFR79   # Transfer button on Detail
-      x-idempotent: true
-
-  /placements/{id}:renew:
-    parameters:
-      - $ref: '#/components/parameters/PlacementId'
-    post:
-      operationId: renewPlacement
-      tags: [placements]
-      summary: Renew (same company + position) via linked successor (PL-3)
-      description: |
-        F3.2 LC-7. Creates a **successor placement** with the same
-        `employee_id`, `client_company_id`, and `position`
-        (overridable in the request), and sets the prior
-        placement to `SUPERSEDED` effective the successor's `start_date`.
-        Honours the 1-day buffer (F3.1 BR-2).
-
-        If a PKWT agreement has been extended in E2, the successor may
-        extend up to the new agreement end (LC-8 / BR-1b auto-cap).
-
-        Requires `Idempotency-Key`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RenewRequest'
-            examples:
-              standardRenewal:
-                summary: Renew Budi at Plaza Senayan for 12 more months
-                value:
-                  new_start_date: '2027-01-01'
-                  new_end_date: '2027-12-31'
-                  new_agreement_id: SWP-AG-991
-                  notes: 'Renewal under new PKWT 2027.'
-      responses:
-        '201':
-          description: Successor placement created; predecessor → SUPERSEDED.
-          headers:
-            Location:
-              schema: { type: string }
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RenewResponse'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: |
-            `TERMINAL_STATE_IMMUTABLE` · `COMPANY_INACTIVE`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '422':
-          description: |
-            `PLACEMENT_PERIOD_OVERLAP` (1-day buffer hit) ·
-            `PLACEMENT_OUTSIDE_CONTRACT`.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - pFR79   # Perpanjang button on Detail
-      x-idempotent: true
-
-  /placements/{id}:end:
-    parameters:
-      - $ref: '#/components/parameters/PlacementId'
-    post:
-      operationId: endPlacement
-      tags: [placements]
-      summary: End placement (PL-4) — reason capture
-      description: |
-        Used for the "end of term / soft end" path (legacy ims-system EnabP
-        reason capture, Wave-1). Closes the placement with
-        `ended_reason = ENDED` (default) or one of the explicit reasons
-        listed below. The placement transitions to `ENDED`.
-
-        This is an **explicit HR-decision action** (taken at or after the
-        `EXPIRING` flag via the Inbox decision task), **not** a system
-        auto-end at `end_date`. Per F2.7, a PKWT placement reaching its
-        `end_date` with no HR decision stays `EXPIRING` (grace) — the
-        login also stays valid — until HR explicitly ends it here; there
-        is no auto-end of the placement (the former LC-4 auto-end is
-        removed). Ending a placement never revokes the agent's login;
-        only employment-end / offboarding (E2 F2.7) does that.
-
-        If the agent was the company's shift leader, the assignment
-        auto-vacates with `vacated_reason = PLACEMENT_ENDED` (SL-6) and a
-        vacancy is raised.
-
-        For a **hard, intentional early end with stronger confirmation**
-        (HR-driven termination with company-name typed confirmation), use
-        `:terminate` instead.
-
-        Requires `Idempotency-Key`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EndRequest'
-            examples:
-              endOfTerm:
-                value:
-                  reason: END_OF_TERM
-                  effective_date: '2026-12-31'
-                  notes: 'Kontrak selesai tepat waktu.'
-      responses:
-        '200':
-          description: Placement ended.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Placement' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: "`TERMINAL_STATE_IMMUTABLE`."
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - pFR79   # Akhiri button on Detail
-      x-idempotent: true
-
-  /placements/{id}:terminate:
-    parameters:
-      - $ref: '#/components/parameters/PlacementId'
-    post:
-      operationId: terminatePlacement
-      tags: [placements]
-      summary: Terminate placement (PL-5) — strong destructive
-      description: |
-        Hard early termination with **typed company-name confirmation**
-        (per Wave-1 V4LG8 destructive-confirm pattern). Closes the
-        placement with `ended_reason = TERMINATED`, mandatory reason text
-        for audit, optional effective_date (defaults to today). Transitions
-        to `TERMINATED`.
-
-        `type_company_name_confirm` MUST exactly match the
-        `client_company.name` (case-insensitive, trimmed); otherwise
-        `400 INVALID_REQUEST` with `fields.type_company_name_confirm`.
-
-        Side effects: leader vacancy if applicable (SL-6); E4 future
-        schedules for the agent cancelled (cache-invalidation).
-
-        Requires `Idempotency-Key`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TerminateRequest'
-            examples:
-              misconduct:
-                value:
-                  termination_reason: 'Pelanggaran SOP: meninggalkan pos parkir tanpa izin tiga kali (terdokumentasi).'
-                  effective_date: '2026-06-15'
-                  type_company_name_confirm: 'Plaza Senayan'
-      responses:
-        '200':
-          description: Placement terminated.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Placement' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: "`TERMINAL_STATE_IMMUTABLE`."
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - pFR79
-      x-idempotent: true
-
-  /placements/{id}:resign:
-    parameters:
-      - $ref: '#/components/parameters/PlacementId'
-    post:
-      operationId: resignPlacement
-      tags: [placements]
-      summary: Record agent resignation (LC-6)
-      description: |
-        Records an agent-initiated end. Closes the placement with
-        `ended_reason = RESIGNED` and sets `resign_at` (may be
-        future-dated — agent's last working day). Transitions to
-        `RESIGNED`. The associated employment agreement is **not** closed
-        here (that's E2); only the placement.
-
-        If the agent was the company's shift leader, auto-vacate (SL-6).
-
-        Requires `Idempotency-Key`.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ResignRequest'
-            examples:
-              immediate:
-                value:
-                  resign_at: '2026-06-30'
-                  resignation_reason: 'Pindah kerja — agen mengajukan resign 1 bulan sebelumnya.'
-                  notes: 'Surat resign diterima HR 30 Mei 2026.'
-      responses:
-        '200':
-          description: Placement marked RESIGNED.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Placement' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: "`TERMINAL_STATE_IMMUTABLE`."
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-      x-rbac:
-        roles: [hr_admin, super_admin]
-        scope: global
-      x-design-screens:
-        - pFR79
       x-idempotent: true
 
   /placements/expiring:
@@ -1694,7 +1437,6 @@ components:
         - employee_id
         - client_company_id
         - site_id
-        - position
         - start_date
         - lifecycle_status
         - awaiting_agreement
@@ -1765,19 +1507,6 @@ components:
           example: 'Plaza Senayan'
         site_geofence:
           $ref: '#/components/schemas/SiteGeofence'
-        position:
-          type: string
-          description: |
-            Free-text position label (per placement; may differ across
-            companies for the same agent, BR-9). No master, no FK, no ID —
-            typeahead is backed by E2 `GET /positions:search`.
-          example: 'Petugas Parkir'
-        position_name:
-          type: string
-          description: |
-            Denormalized display alias for `position` — same string value
-            (retained for backward-compatible consumers).
-          example: 'Petugas Parkir'
         start_date:
           type: string
           format: date
@@ -1858,8 +1587,6 @@ components:
         agreement_type: PKWT
         client_company_id: SWP-CMP-014
         client_company_name: 'Plaza Senayan'
-        position: 'Petugas Parkir'
-        position_name: 'Petugas Parkir'
         start_date: '2026-06-03'
         end_date: '2026-12-31'
         notes: 'Replacement for Andi (resigned).'
@@ -1886,7 +1613,6 @@ components:
         employee_id: { type: string, example: SWP-EMP-1042 }
         client_company_id: { type: string, example: SWP-CMP-009 }
         client_company_name: { type: string, example: 'Mall Kelapa Gading' }
-        position: { type: string, example: 'Petugas Parkir' }
         lifecycle_status:
           $ref: '#/components/schemas/PlacementLifecycleStatus'
         start_date: { type: string, format: date }
@@ -1894,12 +1620,18 @@ components:
 
     PlacementWriteRequest:
       type: object
+      description: |
+        Body for `POST /placements`. Placements are **decoupled from time**
+        (2026-06-15): a placement is an open-ended designation. `start_date` is
+        set server-side to the creation date (Asia/Jakarta) and the placement is
+        immediately `ACTIVE`; there is no `end_date` / `backdate_reason`. Ending
+        a placement is done by deactivating the employee (which cascades) or by
+        `:transfer`. Annual leave follows the employment agreement, not the
+        placement.
       required:
         - employee_id
         - client_company_id
         - site_id
-        - position
-        - start_date
       properties:
         employee_id:
           type: string
@@ -1910,17 +1642,11 @@ components:
           pattern: '^SWP-AG-\d+$'
           nullable: true
           description: |
-            **Optional** (EPICS §8 2026-06-11, supersedes the original BR-1
-            mandatory rule). If omitted, the placement is created *awaiting
-            agreement* (`awaiting_agreement: true`) — the agent can start work
-            before the PKWT/PKWTT is finalized; attach it later via
-            `POST /placements/{id}/agreement`. **No period / contract
-            validation runs when omitted.**
-            When supplied, must be an `ACTIVE` SWP-AG-* belonging to
-            `employee_id`; the placement period must lie within the agreement
-            validity (BR-1b); for PKWT, an out-of-range `end_date` is
-            auto-capped to the agreement end and surfaces as
-            `warnings: ["END_DATE_AUTO_CAPPED_TO_AGREEMENT"]`.
+            **Optional** (EPICS §8 2026-06-11). If omitted, the placement is
+            created *awaiting agreement* (`awaiting_agreement: true`); attach it
+            later via `POST /placements/{id}/agreement`. When supplied, must be
+            an `ACTIVE` SWP-AG-* belonging to `employee_id`. No period/contract
+            validation runs (placements are decoupled from time).
         client_company_id:
           type: string
           pattern: '^SWP-CMP-\d+$'
@@ -1932,30 +1658,6 @@ components:
             Must reference an `ACTIVE` Site (E2 F2.6) belonging to
             `client_company_id` (BR-3b). Defaults to the company's primary
             Main Site if the client offers a single location.
-        position:
-          type: string
-          maxLength: 100
-          description: |
-            Free-text position label (per-placement; may differ across
-            companies for the same agent, BR-9). No master / FK — typeahead
-            backed by E2 `GET /positions:search`.
-          example: Petugas Parkir
-        start_date:
-          type: string
-          format: date
-          description: |
-            Determines initial status (BR-5): `<= today` → ACTIVE,
-            `> today` → PENDING_START. Backdating requires `backdate_reason` (BR-6).
-        end_date:
-          type: string
-          format: date
-          nullable: true
-          description: Optional — null = open-ended (PKWTT). If set, must be `> start_date` (BR-4).
-        backdate_reason:
-          type: string
-          nullable: true
-          description: Required when `start_date < today` (BR-6).
-          maxLength: 1000
         notes:
           type: string
           nullable: true
@@ -1985,10 +1687,6 @@ components:
         Limited-field edit. Any read-only field present in the body is
         rejected with `INVALID_REQUEST`.
       properties:
-        position:
-          type: string
-          maxLength: 100
-          description: Free-text position label (no master / FK).
         end_date:
           type: string
           format: date
@@ -2069,43 +1767,29 @@ components:
     # ─────── Action requests ────────────────────────────────────────────
     TransferRequest:
       type: object
+      description: |
+        Body for `POST /placements/{id}:transfer`. Placements are decoupled from
+        time (2026-06-15): the successor starts on the transfer date (server-set,
+        Asia/Jakarta) and the predecessor is closed the same day. No dates are
+        accepted.
       required:
         - new_client_company_id
-        - new_position
-        - new_start_date
         - transfer_reason
       properties:
         new_client_company_id:
           type: string
           pattern: '^SWP-CMP-\d+$'
           description: |
-            Must differ from the current company **OR** `new_position`
-            must differ from current — see TR-1. Otherwise `422` (use `:renew`).
-        new_position:
-          type: string
-          maxLength: 100
-          description: Free-text destination position label (no master / FK).
-          example: Teknisi Gedung
-        new_start_date:
-          type: string
-          format: date
-          description: |
-            Effective date of the new placement. The predecessor's
-            `ended_at` is auto-set to `new_start_date − 1 day` (TR-2 /
-            BR-2 1-day buffer).
-        new_end_date:
-          type: string
-          format: date
-          nullable: true
+            Must differ from the current company (TR-1) — otherwise `422`.
+            Position follows the employee and is unchanged by a transfer.
         new_agreement_id:
           type: string
           pattern: '^SWP-AG-\d+$'
           description: |
-            Defaults to the predecessor's `agreement_id` if omitted (so if the
-            predecessor was *awaiting agreement* the successor is created
-            awaiting too — null propagates, no auto-cap; EPICS §8 2026-06-11).
-            Provide a value if the agent has moved to a new agreement (e.g.
-            PKWT renewed).
+            Defaults to the predecessor's `agreement_id` if omitted (null
+            propagates, so an awaiting-agreement predecessor yields an
+            awaiting successor). Provide a value if the agent moved to a new
+            agreement.
           nullable: true
         transfer_reason:
           type: string
@@ -2118,11 +1802,6 @@ components:
           description: |
             Optional free-text. Migration carries legacy `new_office`
             context here.
-        backdate_reason:
-          type: string
-          nullable: true
-          description: Required if `new_start_date < today` (BR-6).
-          maxLength: 1000
 
     TransferResponse:
       type: object
@@ -2147,133 +1826,10 @@ components:
             Soft warnings — e.g., `NO_SHIFT_LEADER_AT_DESTINATION` (TR-5).
           items: { type: string }
 
-    RenewRequest:
-      type: object
-      required:
-        - new_start_date
-      properties:
-        new_start_date:
-          type: string
-          format: date
-          description: |
-            Must be at least 1 day after the predecessor's `end_date` (BR-2).
-        new_end_date:
-          type: string
-          format: date
-          nullable: true
-          description: |
-            Optional — if omitted and the agreement is PKWTT, the new
-            placement is open-ended. For PKWT, auto-capped to the
-            agreement end if it exceeds it (BR-1b).
-        new_agreement_id:
-          type: string
-          pattern: '^SWP-AG-\d+$'
-          nullable: true
-          description: |
-            Defaults to the predecessor's `agreement_id`. If the predecessor
-            was *awaiting agreement*, the successor is created awaiting too
-            (null propagates, no auto-cap; EPICS §8 2026-06-11). Provide a new
-            one if PKWT was renewed in E2.
-        new_position:
-          type: string
-          maxLength: 100
-          nullable: true
-          description: |
-            Free-text position label (no master / FK). Defaults to the
-            predecessor's position.
-        notes:
-          type: string
-          nullable: true
-          maxLength: 2000
-
-    RenewResponse:
-      type: object
-      required: [predecessor, successor]
-      properties:
-        predecessor:
-          $ref: '#/components/schemas/Placement'
-          description: '`lifecycle_status = SUPERSEDED` effective successor.start_date.'
-        successor:
-          $ref: '#/components/schemas/Placement'
-        warnings:
-          type: array
-          items: { type: string }
-
-    EndRequest:
-      type: object
-      required: [reason, effective_date]
-      properties:
-        reason:
-          type: string
-          description: |
-            EnabP reason classification (Wave-1). Free-text-backed enum:
-            the request body sends a structured `reason` enum value;
-            `notes` carries the free-text detail.
-          enum:
-            - END_OF_TERM
-            - MUTUAL_AGREEMENT
-            - CLIENT_REQUEST
-            - OTHER
-        effective_date:
-          type: string
-          format: date
-          description: |
-            The placement's `ended_at`. May be backdated by HR Admin
-            (requires `backdate_reason`).
-        notes:
-          type: string
-          nullable: true
-          maxLength: 2000
-        backdate_reason:
-          type: string
-          nullable: true
-          description: Required if `effective_date < today` (BR-6 analog).
-          maxLength: 1000
-
-    TerminateRequest:
-      type: object
-      required: [termination_reason, type_company_name_confirm]
-      properties:
-        termination_reason:
-          type: string
-          minLength: 10
-          maxLength: 2000
-          description: |
-            Mandatory free-text reason (audit-quality). Must be ≥ 10 chars.
-        effective_date:
-          type: string
-          format: date
-          description: Defaults to today (Asia/Jakarta) if omitted.
-          nullable: true
-        type_company_name_confirm:
-          type: string
-          description: |
-            Client company name typed back by the HR admin — must match
-            `client_company.name` (case-insensitive, trimmed). Per Wave-1
-            V4LG8 destructive-confirm pattern.
-        backdate_reason:
-          type: string
-          nullable: true
-          maxLength: 1000
-
-    ResignRequest:
-      type: object
-      required: [resign_at, resignation_reason]
-      properties:
-        resign_at:
-          type: string
-          format: date
-          description: |
-            Effective resignation date (last working day). May be
-            future-dated (LC-6 / Open Q resolved as future-allowed).
-        resignation_reason:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        notes:
-          type: string
-          nullable: true
-          maxLength: 2000
+    # Placements are decoupled from time (2026-06-15): the :renew (extend), :end,
+    # :terminate, and :resign actions were removed. Ending employment is done via
+    # employee deactivation (E2 F2.7), which cascades to close placements; the
+    # only remaining lifecycle action is :transfer.
 
     # ─────── Shift Leader Assignment ────────────────────────────────────
     ShiftLeaderVacatedReason:

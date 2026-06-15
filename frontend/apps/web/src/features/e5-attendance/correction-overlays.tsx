@@ -1,23 +1,24 @@
 /**
- * E5 · Koreksi Kehadiran — overlay layer for correction detail drawer + reject modal.
+ * E5 · Koreksi Kehadiran — overlay layer for the (READ-ONLY) correction detail drawer.
  *
  * .pen frames implemented:
  *   sSKtK  HR · Koreksi · Detail  (CorrectionDetailDrawer)
- *   EnabP  comp/ModalReject        (RejectCorrectionModal)
+ *
+ * Approve/Reject moved to the E11 Kotak Masuk (approval inbox) — corrections route through the
+ * generic approval engine exactly like LEAVE / OVERTIME, so the HR/SL `/corrections` surface is
+ * now a read-only history. The drawer links to the correction's `approval_instance` for the live
+ * approval chain.
  *
  * ENGINEERING.md F5.4 · BR-1..BR-5 · INV-1.
  */
 
-import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { classifyError } from '@/lib/api-error.ts';
 import {
   type Correction,
   CorrectionStatus,
   CorrectionType,
   type GetCorrection200,
-  useApproveCorrection,
   useGetCorrection,
-  useRejectCorrection,
 } from '@swp/api-client/e5';
 import type { StatusTone } from '@swp/design-tokens';
 import {
@@ -27,27 +28,15 @@ import {
   DrawerBody,
   DrawerFooter,
   DrawerHeader,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
   StateView,
   StatusBadge,
-  useToast,
 } from '@swp/ui';
-import { AlertTriangle, CheckCircle2, FileText, XCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { AlertTriangle, CheckCircle2, ExternalLink, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function cx(...classes: (string | undefined | false | null)[]): string {
-  return classes.filter(Boolean).join(' ');
-}
 
 export function correctionStatusTone(status: CorrectionStatus): StatusTone {
   switch (status) {
@@ -75,6 +64,8 @@ export function correctionTypeLabel(type: CorrectionType, t: (key: string) => st
       return t('corrections.typeCode');
     case CorrectionType.OTHER:
       return t('corrections.typeOther');
+    case CorrectionType.NEW_ENTRY:
+      return t('corrections.typeNewEntry');
     default:
       return type;
   }
@@ -183,116 +174,9 @@ function DiffTable({ correction }: DiffTableProps) {
 }
 
 // ---------------------------------------------------------------------------
-// 2) RejectCorrectionModal  (.pen comp/ModalReject — EnabP)
-// ---------------------------------------------------------------------------
-
-const rejectSchema = z.object({
-  reason: z.string().min(5, 'corrections.rejectReasonMin').max(500, 'corrections.rejectReasonMax'),
-});
-type RejectFormValues = z.infer<typeof rejectSchema>;
-
-export interface RejectCorrectionModalProps {
-  open: boolean;
-  correctionId: string | null;
-  onOpenChange: (open: boolean) => void;
-  onDone: () => void;
-}
-
-export function RejectCorrectionModal({
-  open,
-  correctionId,
-  onOpenChange,
-  onDone,
-}: RejectCorrectionModalProps) {
-  const { t } = useTranslation();
-  const { toast } = useToast();
-
-  const rejectMutation = useRejectCorrection();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<RejectFormValues>({ resolver: zodResolver(rejectSchema) });
-
-  useEffect(() => {
-    if (!open) reset();
-  }, [open, reset]);
-
-  async function onSubmit(values: RejectFormValues) {
-    if (!correctionId) return;
-    try {
-      await rejectMutation.mutateAsync({ id: correctionId, data: { reason: values.reason } });
-      toast({ tone: 'success', title: t('corrections.rejectSuccess') });
-      onDone();
-    } catch (err) {
-      if (!applyFieldErrors(err, setError)) {
-        const { message } = classifyError(err);
-        toast({ tone: 'error', title: t(message) });
-      }
-    }
-  }
-
-  const reasonId = 'reject-reason';
-
-  return (
-    <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalHeader icon={XCircle} tone="danger" title={t('corrections.rejectTitle')} />
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <ModalBody>
-          <p className="mb-4 text-sm text-text-2">{t('corrections.rejectBody')}</p>
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={reasonId} className="text-sm font-semibold text-text">
-              {t('corrections.rejectReasonLabel')}
-              <span aria-hidden className="ml-0.5 text-error">
-                *
-              </span>
-            </label>
-            <textarea
-              id={reasonId}
-              {...register('reason')}
-              rows={4}
-              aria-describedby={errors.reason ? `${reasonId}-error` : undefined}
-              aria-invalid={Boolean(errors.reason)}
-              className={cx(
-                'w-full resize-none rounded-lg border px-3 py-2 text-sm text-text outline-none',
-                'border-border bg-surface placeholder:text-text-3',
-                'focus:border-primary focus:ring-1 focus:ring-primary',
-                errors.reason && 'border-error focus:border-error focus:ring-error',
-              )}
-              placeholder={t('corrections.rejectReasonPlaceholder')}
-            />
-            {errors.reason?.message && (
-              <p id={`${reasonId}-error`} role="alert" className="text-xs text-error">
-                {t(errors.reason.message)}
-              </p>
-            )}
-          </div>
-        </ModalBody>
-        <ModalFooter>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
-          >
-            {t('corrections.cancel')}
-          </Button>
-          <Button type="submit" variant="destructive" disabled={isSubmitting}>
-            <XCircle aria-hidden className="size-4" />
-            {isSubmitting ? t('corrections.rejecting') : t('corrections.rejectConfirm')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 3) CorrectionDetailDrawer  (.pen frame sSKtK — HR · Koreksi · Detail)
-//    Approve is inline; Reject opens RejectCorrectionModal.
+// 2) CorrectionDetailDrawer  (.pen frame sSKtK — HR · Koreksi · Detail)
+//    READ-ONLY: decisions are made in the E11 Kotak Masuk. The drawer surfaces a link to
+//    the correction's approval_instance (the live chain) instead of inline approve/reject.
 // ---------------------------------------------------------------------------
 
 export interface CorrectionDetailDrawerProps {
@@ -300,45 +184,28 @@ export interface CorrectionDetailDrawerProps {
   correctionId: string | null;
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
+  /**
+   * Optional: open the E11 approval-instance (chain) view. Integration wires it to the typed
+   * inbox/request-detail route. When omitted, the link is hidden.
+   */
+  onOpenInstance?: (instanceId: string) => void;
 }
 
 export function CorrectionDetailDrawer({
   open,
   correctionId,
   onOpenChange,
-  onDone,
+  onOpenInstance,
 }: CorrectionDetailDrawerProps) {
   const { t } = useTranslation();
-  const { toast } = useToast();
-
-  const [rejectOpen, setRejectOpen] = useState(false);
 
   const query = useGetCorrection(correctionId ?? '', {
     query: { enabled: open && Boolean(correctionId) },
   });
 
-  const approveMutation = useApproveCorrection();
-
-  async function handleApprove(id: string) {
-    try {
-      await approveMutation.mutateAsync({ id, data: {} });
-      toast({ tone: 'success', title: t('corrections.approveSuccess') });
-      onDone();
-    } catch (err) {
-      const { message } = classifyError(err);
-      toast({ tone: 'error', title: t(message) });
-    }
-  }
-
-  function handleRejectDone() {
-    setRejectOpen(false);
-    onDone();
-  }
-
   const page = query.data?.data as GetCorrection200 | undefined;
   const correction = page?.data;
   const isPending = correction?.status === CorrectionStatus.PENDING;
-  const isApproving = approveMutation.isPending;
 
   return (
     <>
@@ -477,47 +344,35 @@ export function CorrectionDetailDrawer({
                   </span>
                 </div>
               )}
+
+              {/* Pending decisions are made in the E11 Kotak Masuk — this surface is read-only. */}
+              {isPending && (
+                <div className="flex items-start gap-2 rounded-lg border border-border-soft bg-surface-2 p-3">
+                  <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-text-3" />
+                  <span className="text-sm text-text-2">{t('corrections.decideInInbox')}</span>
+                </div>
+              )}
             </div>
           )}
         </DrawerBody>
 
-        {correction && isPending && (
-          <DrawerFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              disabled={isApproving}
-            >
-              {t('corrections.cancel')}
-            </Button>
+        {/* Read-only footer: close + (optional) jump to the approval chain in the inbox. */}
+        <DrawerFooter>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            {t('corrections.close')}
+          </Button>
+          {correction?.approval_instance_id && onOpenInstance && (
             <Button
               type="button"
               variant="secondary"
-              onClick={() => setRejectOpen(true)}
-              disabled={isApproving}
+              onClick={() => onOpenInstance(correction.approval_instance_id as string)}
             >
-              <XCircle aria-hidden className="size-4" />
-              {t('corrections.reject')}
+              <ExternalLink aria-hidden className="size-4" />
+              {t('corrections.viewApproval')}
             </Button>
-            <Button
-              type="button"
-              disabled={isApproving}
-              onClick={() => handleApprove(correction.id)}
-            >
-              <CheckCircle2 aria-hidden className="size-4" />
-              {isApproving ? t('corrections.approving') : t('corrections.approve')}
-            </Button>
-          </DrawerFooter>
-        )}
+          )}
+        </DrawerFooter>
       </Drawer>
-
-      <RejectCorrectionModal
-        open={rejectOpen}
-        correctionId={correctionId}
-        onOpenChange={setRejectOpen}
-        onDone={handleRejectDone}
-      />
     </>
   );
 }

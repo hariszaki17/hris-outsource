@@ -54,7 +54,8 @@ func (r *CorrectionRepo) ListCorrections(ctx context.Context, f svc.CorrectionFi
 
 func (r *CorrectionRepo) CreateCorrection(ctx context.Context, tx pgx.Tx, p svc.CreateCorrectionParams) (string, error) {
 	id, err := r.q.WithTx(tx).CreateCorrection(ctx, sqlcgen.CreateCorrectionParams{
-		AttendanceID:             p.AttendanceID,
+		AttendanceID:             strPtrOrNil(p.AttendanceID),
+		WorkDate:                 timePtrToPgDate(p.WorkDate),
 		RequesterID:              p.RequesterID,
 		CompanyID:                p.CompanyID,
 		Type:                     p.Type,
@@ -71,8 +72,17 @@ func (r *CorrectionRepo) CreateCorrection(ctx context.Context, tx pgx.Tx, p svc.
 	return id, nil
 }
 
+// SetCorrectionApprovalInstance links the E11 instance to the correction (same tx
+// as CreateCorrection — mirrors leave SetApprovalInstanceID).
+func (r *CorrectionRepo) SetCorrectionApprovalInstance(ctx context.Context, tx pgx.Tx, id, instanceID string) error {
+	return r.q.WithTx(tx).SetCorrectionApprovalInstance(ctx, sqlcgen.SetCorrectionApprovalInstanceParams{
+		ApprovalInstanceID: &instanceID,
+		ID:                 id,
+	})
+}
+
 func (r *CorrectionRepo) GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (string, bool, error) {
-	id, err := r.q.GetPendingCorrectionForAttendance(ctx, attendanceID)
+	id, err := r.q.GetPendingCorrectionForAttendance(ctx, &attendanceID)
 	if err != nil {
 		if mapErr(err) == domain.ErrNotFound {
 			return "", false, nil
@@ -98,10 +108,11 @@ func (r *CorrectionRepo) GetCorrectionForUpdate(ctx context.Context, tx pgx.Tx, 
 	return mapCorrectionFromForUpdate(row), nil
 }
 
-func (r *CorrectionRepo) ApproveCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string) (att.Correction, int64, error) {
+func (r *CorrectionRepo) ApproveCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string, attendanceID *string) (att.Correction, int64, error) {
 	row, err := r.q.WithTx(tx).ApproveCorrection(ctx, sqlcgen.ApproveCorrectionParams{
-		DecidedBy: decidedBy,
-		ID:        id,
+		DecidedBy:    decidedBy,
+		AttendanceID: attendanceID,
+		ID:           id,
 	})
 	if err != nil {
 		if isNoRows(err) {

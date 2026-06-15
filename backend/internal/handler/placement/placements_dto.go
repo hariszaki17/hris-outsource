@@ -13,22 +13,20 @@ import (
 
 // --- request DTOs ---
 
+// placementWriteRequest is the body of POST /placements. Placements are decoupled
+// from time (2026-06-15): start_date is set server-side to the creation date and
+// there is no end_date / backdate.
 type placementWriteRequest struct {
 	EmployeeID      string  `json:"employee_id"`
 	AgreementID     *string `json:"agreement_id,omitempty"` // optional: nil/"" → pending agreement
 	ClientCompanyID string  `json:"client_company_id"`
 	SiteID          string  `json:"site_id"`
-	Position        string  `json:"position"` // free-text position label
-	StartDate       string  `json:"start_date"`
-	EndDate         *string `json:"end_date"`
-	BackdateReason  *string `json:"backdate_reason"`
 	Notes           *string `json:"notes"`
 }
 
 type placementPatchRequest struct {
-	Position *string `json:"position"` // free-text position label
-	EndDate  *string `json:"end_date"`
-	Notes    *string `json:"notes"`
+	EndDate *string `json:"end_date"`
+	Notes   *string `json:"notes"`
 	// Read-only fields — rejected if present.
 	EmployeeID      *string `json:"employee_id"`
 	AgreementID     *string `json:"agreement_id"`
@@ -44,40 +42,13 @@ type setAgreementRequest struct {
 	AgreementID string `json:"agreement_id"`
 }
 
+// transferRequest is the body of POST /placements/{id}:transfer. The successor
+// starts on the transfer date (set server-side); no dates are accepted.
 type transferRequest struct {
 	NewClientCompanyID string  `json:"new_client_company_id"`
-	NewPosition        string  `json:"new_position"` // free-text destination position label
-	NewStartDate       string  `json:"new_start_date"`
-	NewEndDate         *string `json:"new_end_date"`
 	NewAgreementID     *string `json:"new_agreement_id"`
 	TransferReason     string  `json:"transfer_reason"`
 	TransferNote       *string `json:"transfer_note"`
-}
-
-type renewRequest struct {
-	NewStartDate   string  `json:"new_start_date"`
-	NewEndDate     *string `json:"new_end_date"`
-	NewAgreementID *string `json:"new_agreement_id"`
-	NewPosition    *string `json:"new_position"` // free-text; nil/"" keeps predecessor's position
-	Notes          *string `json:"notes"`
-}
-
-type endRequest struct {
-	Reason        string  `json:"reason"`
-	EffectiveDate string  `json:"effective_date"`
-	Notes         *string `json:"notes"`
-}
-
-type resignRequest struct {
-	ResignAt          string  `json:"resign_at"`
-	ResignationReason string  `json:"resignation_reason"`
-	Notes             *string `json:"notes"`
-}
-
-type terminateRequest struct {
-	TerminationReason   string  `json:"termination_reason"`
-	EffectiveDate       *string `json:"effective_date"`
-	TypeCompanyNameConf string  `json:"type_company_name_confirm"`
 }
 
 // --- response DTOs ---
@@ -96,8 +67,6 @@ type placementResponse struct {
 	SiteID            string   `json:"site_id"`
 	SiteName          *string  `json:"site_name"`
 	SiteGeofence      *siteGeofenceResponse `json:"site_geofence"`
-	Position          string   `json:"position"`      // free-text position label
-	PositionName      string   `json:"position_name"` // denormalized alias — same value as Position
 	StartDate         string   `json:"start_date"`
 	EndDate           *string  `json:"end_date"`
 	Notes             *string  `json:"notes"`
@@ -149,7 +118,6 @@ type placementSummaryResponse struct {
 	EmployeeID        string  `json:"employee_id"`
 	ClientCompanyID   string  `json:"client_company_id"`
 	ClientCompanyName *string `json:"client_company_name"`
-	Position          string  `json:"position"` // free-text position label
 	LifecycleStatus   string  `json:"lifecycle_status"`
 	StartDate         string  `json:"start_date"`
 	EndDate           *string `json:"end_date"`
@@ -193,12 +161,6 @@ type transferResponse struct {
 	Warnings          []string                   `json:"warnings"`
 }
 
-type renewResponse struct {
-	Predecessor placementResponse `json:"predecessor"`
-	Successor   placementResponse `json:"successor"`
-	Warnings    []string          `json:"warnings"`
-}
-
 // --- mappers ---
 
 const expiringDeriveDays = 30
@@ -231,8 +193,6 @@ func toPlacementResponse(p domain.Placement, today time.Time) placementResponse 
 		SiteID:            p.SiteID,
 		SiteName:          p.SiteName,
 		SiteGeofence:      toSiteGeofence(p),
-		Position:          p.Position,
-		PositionName:      p.Position, // alias — same free-text value
 		StartDate:         p.StartDate.Format("2006-01-02"),
 		Notes:             p.Notes,
 		LifecycleStatus:   status,
@@ -272,7 +232,6 @@ func toPlacementSummaryResponse(p domain.Placement, today time.Time) placementSu
 		EmployeeID:        p.EmployeeID,
 		ClientCompanyID:   p.ClientCompanyID,
 		ClientCompanyName: p.ClientCompanyName,
-		Position:          p.Position,
 		LifecycleStatus:   full.LifecycleStatus,
 		StartDate:         full.StartDate,
 		EndDate:           full.EndDate,

@@ -18,7 +18,7 @@ func (h *placementHarness) seedRosterPlacement(id, companyID, status string) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: id, EmployeeID: "SWP-EMP-" + id, ClientCompanyID: companyID,
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: status, EmployeeName: strp("Emp " + id),
 	})

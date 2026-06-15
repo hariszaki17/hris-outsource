@@ -22,6 +22,7 @@ import {
 } from '@swp/api-client/e2';
 import type { StatusTone } from '@swp/design-tokens';
 import {
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -210,7 +211,6 @@ export function AgreementsScreen() {
     {
       id: 'karyawan',
       header: t('colKaryawan'),
-      width: 280,
       cell: (a) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[13px] font-medium text-text">{a.employee_name ?? '—'}</span>
@@ -262,6 +262,26 @@ export function AgreementsScreen() {
         <StatusBadge dot tone={statusTone[a.status]}>
           {t(`status.${a.status}`)}
         </StatusBadge>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (a) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            void navigate({
+              to: '/agreements/$agreementId' as const,
+              params: { agreementId: a.id },
+            })
+          }
+        >
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -446,12 +466,6 @@ export function AgreementsScreen() {
           getRowId={(a) => a.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(a) =>
-            void navigate({
-              to: '/agreements/$agreementId' as const,
-              params: { agreementId: a.id },
-            })
-          }
           empty={
             hasFilters ? (
               <EmptyState

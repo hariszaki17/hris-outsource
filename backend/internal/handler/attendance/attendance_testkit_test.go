@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	domain "github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	"github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
 	attendancehandler "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
@@ -483,6 +484,17 @@ func (r *fakeAttendanceRepo) CreateManualAttendance(_ context.Context, _ pgx.Tx,
 	return a, nil
 }
 
+func (r *fakeAttendanceRepo) SetAttendancePayable(_ context.Context, _ pgx.Tx, id string, payable bool) (att.Attendance, error) {
+	a, ok := r.records[id]
+	if !ok {
+		return att.Attendance{}, domain.ErrNotFound
+	}
+	p := payable
+	a.IsPayable = &p
+	r.records[id] = a
+	return a, nil
+}
+
 func (r *fakeAttendanceRepo) GetManualAutofillData(_ context.Context, employeeID string, refDate time.Time) (svc.ManualAutofillData, bool, error) {
 	if employeeID == empNoPlacement {
 		return svc.ManualAutofillData{}, false, nil
@@ -580,7 +592,7 @@ func (r *fakeCorrectionRepo) GetCorrectionForUpdate(_ context.Context, _ pgx.Tx,
 	return r.GetCorrection(context.Background(), id)
 }
 
-func (r *fakeCorrectionRepo) ApproveCorrection(_ context.Context, _ pgx.Tx, id string, decidedBy *string) (att.Correction, int64, error) {
+func (r *fakeCorrectionRepo) ApproveCorrection(_ context.Context, _ pgx.Tx, id string, decidedBy *string, attendanceID *string) (att.Correction, int64, error) {
 	c, ok := r.records[id]
 	if !ok {
 		return att.Correction{}, 0, domain.ErrNotFound
@@ -590,6 +602,9 @@ func (r *fakeCorrectionRepo) ApproveCorrection(_ context.Context, _ pgx.Tx, id s
 	}
 	c.Status = att.CorrectionStatusApplied
 	c.DecidedBy = decidedBy
+	if attendanceID != nil {
+		c.AttendanceID = *attendanceID
+	}
 	dt := fixedNow
 	c.DecidedAt = &dt
 	r.records[id] = c
@@ -639,6 +654,23 @@ func (r *fakeCorrectionRepo) GetPendingCorrectionForAttendance(_ context.Context
 	return id, n > 0, nil
 }
 
+func (r *fakeCorrectionRepo) SetCorrectionApprovalInstance(_ context.Context, _ pgx.Tx, id, instanceID string) error {
+	if c, ok := r.records[id]; ok {
+		c.ApprovalInstanceID = &instanceID
+		r.records[id] = c
+	}
+	return nil
+}
+
+// fakeApprovalEngine is a no-op approval.Engine: it stamps a deterministic instance id
+// at submit so the correction CREATE path links one. Decisions are driven directly in
+// tests via CorrectionService.OnApproved / OnRejected.
+type fakeApprovalEngine struct{}
+
+func (fakeApprovalEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approval.CreateInstanceInput) (string, error) {
+	return "SWP-APV-" + in.RequestID, nil
+}
+
 // countPending counts PENDING corrections on one attendance (the
 // CORRECTION_ALREADY_PENDING pre-check seam: the production create endpoint is
 // out of web scope, so this contract test drives the guard shape directly).
@@ -666,6 +698,7 @@ type harness struct {
 	router     *chi.Mux
 	attendance *fakeAttendanceRepo
 	correction *fakeCorrectionRepo
+	csvc       *svc.CorrectionService
 	idem       *stubIdempotency
 	principal  auth.Principal
 }
@@ -682,6 +715,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 	asvc.SetClock(func() time.Time { return fixedNow })
 	csvc := svc.NewCorrectionService(crepo, arepo, &fakeTxRunner{})
 	csvc.SetClock(func() time.Time { return fixedNow })
+	csvc.SetApprovalEngine(fakeApprovalEngine{})
 
 	handler := attendancehandler.NewHandler(asvc, csvc)
 	idem := newStubIdempotency()
@@ -689,6 +723,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 	h := &harness{
 		attendance: arepo,
 		correction: crepo,
+		csvc:       csvc,
 		idem:       idem,
 		principal: auth.Principal{
 			UserID:     "SWP-USR-0001",
@@ -724,13 +759,13 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 		r.With(idem.Handler).Post("/attendance/{id}:reject", handler.RejectAttendance)
 		r.With(idem.Handler).Post("/attendance:bulk-verify", handler.BulkVerify)
 		r.With(idem.Handler).Post("/attendance:bulk-reject", handler.BulkReject)
-		r.With(idem.Handler).Post("/corrections/{id}:approve", handler.ApproveCorrection)
-		r.With(idem.Handler).Post("/corrections/{id}:reject", handler.RejectCorrection)
-	// F5.6 Manual attendance (HR-only).
-	r.Get("/attendance:manual-autofill", handler.ManualAutofill)
-	r.With(idem.Handler).Post("/attendance:manual-create", handler.ManualCreate)
-})
-// Correction CREATE: agent-inclusive group (mirrors server.go).
+		// Correction approve/reject route through E11 — tests drive csvc.OnApproved/OnRejected directly.
+		// F5.6 Manual attendance (HR-only).
+		r.Get("/attendance:manual-autofill", handler.ManualAutofill)
+		r.With(idem.Handler).Post("/attendance:manual-create", handler.ManualCreate)
+		r.With(idem.Handler).Post("/attendance/{id}:set-payable", handler.SetAttendancePayable)
+	})
+	// Correction CREATE: agent-inclusive group (mirrors server.go).
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 		r.With(idem.Handler).Post("/corrections", handler.CreateCorrection)

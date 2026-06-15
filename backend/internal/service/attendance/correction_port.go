@@ -17,10 +17,15 @@ type CorrectionRepository interface {
 	ListCorrections(ctx context.Context, f CorrectionFilter) ([]att.Correction, error)
 	GetCorrection(ctx context.Context, id string) (att.Correction, error)
 	GetCorrectionForUpdate(ctx context.Context, tx pgx.Tx, id string) (att.Correction, error)
-	ApproveCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string) (att.Correction, int64, error)
+	// ApproveCorrection marks a PENDING correction APPLIED. attendanceID (non-nil for a
+	// NEW_ENTRY) attaches the just-created attendance record to the correction.
+	ApproveCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string, attendanceID *string) (att.Correction, int64, error)
 	RejectCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string, reason string) (att.Correction, int64, error)
 	// CreateCorrection inserts a new PENDING correction (in tx) and returns its id.
 	CreateCorrection(ctx context.Context, tx pgx.Tx, p CreateCorrectionParams) (string, error)
+	// SetCorrectionApprovalInstance links the E11 approval_instance opened at submit
+	// (same tx as CreateCorrection — mirrors leave SetApprovalInstanceID).
+	SetCorrectionApprovalInstance(ctx context.Context, tx pgx.Tx, id, instanceID string) error
 	// GetPendingCorrectionForAttendance returns the active PENDING correction id for
 	// a target attendance (found=false when none) — the CREATE-path dedupe guard.
 	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (id string, found bool, err error)
@@ -30,6 +35,7 @@ type CorrectionRepository interface {
 // (company_id + attendance_shift_date denormalized from the target attendance).
 type CreateCorrectionParams struct {
 	AttendanceID             string
+	WorkDate                 *time.Time
 	RequesterID              string
 	CompanyID                string
 	Type                     string

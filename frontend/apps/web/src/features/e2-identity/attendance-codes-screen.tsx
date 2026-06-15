@@ -431,7 +431,6 @@ export function AttendanceCodesScreen() {
     {
       id: 'label',
       header: t('masterData.attendanceCodes.colLabel'),
-      width: 240,
       cell: (row) => <span className="text-[13px] text-text">{row.label}</span>,
     },
     {

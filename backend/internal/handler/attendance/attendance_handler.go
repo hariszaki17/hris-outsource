@@ -145,7 +145,6 @@ func (h *Handler) BulkReject(w http.ResponseWriter, r *http.Request) {
 	writeBulk(w, result)
 }
 
-
 // ManualCreate handles POST /attendance:manual-create (F5.6, HR-only).
 func (h *Handler) ManualCreate(w http.ResponseWriter, r *http.Request) {
 	var req manualCreateRequest
@@ -217,17 +216,40 @@ func (h *Handler) ManualAutofill(w http.ResponseWriter, r *http.Request) {
 	}
 	position := data.Position
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[autofillResponse]{Data: autofillResponse{
-		EmployeeName: data.EmployeeName,
-		CompanyName:  data.CompanyName,
-		SiteName:     data.SiteName,
-		Position:     &position,
-		ScheduleID:   data.ScheduleID,
-		ShiftStartAt: rfc3339Ptr(data.ShiftStartAt),
-		ShiftEndAt:   rfc3339Ptr(data.ShiftEndAt),
+		EmployeeName:           data.EmployeeName,
+		CompanyName:            data.CompanyName,
+		SiteName:               data.SiteName,
+		Position:               &position,
+		ScheduleID:             data.ScheduleID,
+		ShiftStartAt:           rfc3339Ptr(data.ShiftStartAt),
+		ShiftEndAt:             rfc3339Ptr(data.ShiftEndAt),
 		ExistingAttendanceID:   data.ExistingAttendanceID,
 		ExistingAttendanceStat: data.ExistingAttendanceStat,
 		ExistingVerification:   data.ExistingVerification,
 	}})
+}
+
+// SetAttendancePayable handles POST /attendance/{id}:set-payable (F5.4 CR-13, SL/HR/super).
+// Flags a no-shift day payable/not; a shift-backed day returns 422 ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE.
+func (h *Handler) SetAttendancePayable(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Payable *bool `json:"payable"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if req.Payable == nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"payable": "Wajib diisi."}))
+		return
+	}
+	rec, err := h.attendance.SetAttendancePayable(r.Context(), id, *req.Payable)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, dataResponse[attendanceResponse]{Data: toAttendanceResponse(rec)})
 }
 
 // writeBulk writes the BulkActionResponse with 200 (≥1 succeeded) or 422 (all failed).

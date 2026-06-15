@@ -5,7 +5,14 @@
 // (Ajukan/Cuti Saya/Lembur/Koreksi). Replace with the framed design when one is added to the .pen.
 import { color } from '@swp/design-tokens';
 import { useRouter } from 'expo-router';
-import { CalendarPlus, ChevronRight, Plane, Timer } from 'lucide-react-native';
+import {
+  CalendarPlus,
+  ChevronRight,
+  ClipboardList,
+  PencilLine,
+  Plane,
+  Timer,
+} from 'lucide-react-native';
 import type { ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, View } from 'react-native';
@@ -66,6 +73,13 @@ export default function Pengajuan() {
           rows={[
             { icon: CalendarPlus, label: t('m:pengajuan.ajukanLembur'), route: '/overtime-new' },
             { icon: Timer, label: t('m:pengajuan.lemburSaya'), route: '/overtime' },
+          ]}
+        />
+        <Section
+          title={t('m:pengajuan.secKehadiran')}
+          rows={[
+            { icon: PencilLine, label: t('m:pengajuan.koreksi'), route: '/correction-tracker' },
+            { icon: ClipboardList, label: t('m:pengajuan.riwayat'), route: '/kehadiran' },
           ]}
         />
       </ScrollView>

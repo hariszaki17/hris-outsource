@@ -211,7 +211,6 @@ func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.Cr
 		AgreementID:     p.AgreementID,
 		ClientCompanyID: p.ClientCompanyID,
 		SiteID:          p.SiteID,
-		Position:        p.Position,
 		StartDate:       pgtype.Date{Time: p.StartDate, Valid: true},
 		EndDate:         ptrTimeToPgDate(p.EndDate),
 		Notes:           p.Notes,
@@ -228,10 +227,9 @@ func (r *PlacementRepo) CreatePlacement(ctx context.Context, tx pgx.Tx, p svc.Cr
 
 func (r *PlacementRepo) UpdatePlacementFields(ctx context.Context, tx pgx.Tx, p svc.UpdatePlacementParams) (domain.Placement, error) {
 	row, err := r.q.WithTx(tx).UpdatePlacementFields(ctx, sqlcgen.UpdatePlacementFieldsParams{
-		Position: p.Position,
-		EndDate:  ptrTimeToPgDate(p.EndDate),
-		Notes:    p.Notes,
-		ID:       p.ID,
+		EndDate: ptrTimeToPgDate(p.EndDate),
+		Notes:   p.Notes,
+		ID:      p.ID,
 	})
 	if err != nil {
 		return domain.Placement{}, mapErr(err)

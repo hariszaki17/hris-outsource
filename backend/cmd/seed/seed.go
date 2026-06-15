@@ -1664,14 +1664,14 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 
 	// Placements. Insert with explicit IDs (the column DEFAULT only fires when id
 	// is omitted; an explicit id is honoured) so E2E targets are deterministic.
-	// Position is now FREE-TEXT (no master/FK) — the old position NAMES are
-	// carried over verbatim (SWP-POS-014 → "Petugas Parkir", SWP-POS-015 →
-	// "Koordinator Lokasi") so the values match prior fixtures.
+	// Position is now a FREE-TEXT attribute of the EMPLOYEE (moved off placement
+	// 2026-06-15). The per-placement `position` fixture below is applied to the
+	// employee via an UPDATE in the loop.
 	const plQ = `
 		INSERT INTO placements
 			(id, employee_id, agreement_id, client_company_id, site_id,
-			 position, start_date, end_date, lifecycle_status, status_changed_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, now(), 'system-seed')
+			 start_date, end_date, lifecycle_status, status_changed_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, now(), 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	today := time.Now()
@@ -1693,9 +1693,15 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 	for _, p := range placements {
 		if _, err := pool.Pool.Exec(ctx, plQ,
 			p.id, p.employeeID, p.agreementID, p.companyID, p.siteID,
-			p.position, p.start, p.end, "ACTIVE",
+			p.start, p.end, "ACTIVE",
 		); err != nil {
 			return fmt.Errorf("seed placement %q: %w", p.id, err)
+		}
+		// Position now lives on the employee — set it from the fixture's label.
+		if _, err := pool.Pool.Exec(ctx,
+			`UPDATE employees SET position = $1 WHERE id = $2`, p.position, p.employeeID,
+		); err != nil {
+			return fmt.Errorf("seed employee position for %q: %w", p.employeeID, err)
 		}
 		slog.Info("seed: upserted placement", "id", p.id, "employee_id", p.employeeID)
 
@@ -1911,9 +1917,9 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 //   - SWP-ATT-9005  Budi  @ CMP-0022/PL-5002  PENDING, flags={LATE}  → cross-company OUT_OF_SCOPE target
 //   - SWP-ATT-9006  Rudi  @ CMP-0021/PL-5001  ESCALATED, flags={LATE,ESCALATED}  → VERIFY_OWN_RECORD target
 func seedAttendance(ctx context.Context, pool *db.Pool) error {
-	// site_id/position are denormalized from the row's placement (subqueries — keeps
-	// the positional param list stable). service_line is dropped entirely (2026-06-12)
-	// and position is now FREE-TEXT (copied from the placement's free-text position).
+	// site_id is denormalized from the row's placement; position is the clock-time
+	// snapshot copied from the EMPLOYEE's free-text position (moved off placement
+	// 2026-06-15). Subqueries keep the positional param list stable.
 	// schedule_id is per-row ($4) so the ABSENT fixture can carry a scheduled shift;
 	// check_in_at/lat_in/lng_in are nullable (a true ABSENT row has none).
 	const attQ = `
@@ -1928,7 +1934,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		VALUES
 			($1, $2, $3, $4, $5,
 			 (SELECT site_id FROM placements WHERE id = $3),
-			 (SELECT position FROM placements WHERE id = $3),
+			 (SELECT position FROM employees WHERE id = $2),
 			 $6, $7, $8, $9,
 			 $10, $11, $12, $13, true,
 			 $14, $15, $16, $17,

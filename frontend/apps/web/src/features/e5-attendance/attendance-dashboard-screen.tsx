@@ -27,6 +27,7 @@ import {
 import type { StatusTone } from '@swp/design-tokens';
 import { formatDate } from '@swp/shared';
 import {
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -266,7 +267,6 @@ export function AttendanceDashboardScreen() {
     {
       id: 'employee',
       header: t('colEmployee'),
-      width: 220,
       cell: (row) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[13px] font-medium text-text">
@@ -347,6 +347,33 @@ export function AttendanceDashboardScreen() {
         <StatusBadge dot tone={verificationStatusTone(row.verification_status)}>
           {t(`verificationStatus.${row.verification_status}`)}
         </StatusBadge>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (row) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            void (
+              navigate as (o: {
+                to: string;
+                search?: Record<string, unknown>;
+                params?: Record<string, unknown>;
+              }) => void
+            )({
+              to: '/attendance/$attendanceId',
+              params: { attendanceId: row.id },
+            })
+          }
+        >
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -556,19 +583,6 @@ export function AttendanceDashboardScreen() {
           getRowId={(r) => r.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(rec) =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            void (
-              navigate as (o: {
-                to: string;
-                search?: Record<string, unknown>;
-                params?: Record<string, unknown>;
-              }) => void
-            )({
-              to: '/attendance/$attendanceId',
-              params: { attendanceId: rec.id },
-            })
-          }
           empty={
             hasFilters ? (
               <EmptyState

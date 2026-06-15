@@ -12,7 +12,7 @@
 --   q (ILIKE over agent name / employee_id / company name / position),
 --   end_date__lte (expiring cutoff), include_history (exclude terminal states unless true).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -32,7 +32,7 @@ LEFT JOIN client_sites s          ON s.id   = p.site_id
 LEFT JOIN employment_agreements a ON a.id   = p.agreement_id
 WHERE p.deleted_at IS NULL
   AND (sqlc.narg(company_id)::text      IS NULL OR p.client_company_id = sqlc.narg(company_id)::text)
-  AND (sqlc.narg(position)::text        IS NULL OR p.position          = sqlc.narg(position)::text)
+  AND (sqlc.narg(position)::text        IS NULL OR e.position          = sqlc.narg(position)::text)
   AND (sqlc.narg(employee_id)::text     IS NULL OR p.employee_id       = sqlc.narg(employee_id)::text)
   AND (sqlc.narg(agreement_id)::text    IS NULL OR p.agreement_id      = sqlc.narg(agreement_id)::text)
   AND (sqlc.narg(status)::text          IS NULL OR p.lifecycle_status  = sqlc.narg(status)::text)
@@ -48,7 +48,7 @@ WHERE p.deleted_at IS NULL
         OR e.full_name   ILIKE '%' || sqlc.narg(q)::text || '%'
         OR p.employee_id ILIKE '%' || sqlc.narg(q)::text || '%'
         OR c.name        ILIKE '%' || sqlc.narg(q)::text || '%'
-        OR p.position    ILIKE '%' || sqlc.narg(q)::text || '%'
+        OR e.position    ILIKE '%' || sqlc.narg(q)::text || '%'
       )
   AND (
         sqlc.narg(cursor_status_changed_at)::timestamptz IS NULL
@@ -61,7 +61,7 @@ LIMIT sqlc.arg(row_limit);
 -- Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 -- @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -107,7 +107,7 @@ WHERE p.deleted_at IS NULL
 
 -- name: GetPlacementByID :one
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -141,7 +141,7 @@ WITH RECURSIVE chain AS (
     JOIN chain ch ON p1.id = ch.predecessor_id OR p1.id = ch.successor_id
 )
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -164,8 +164,11 @@ ORDER BY p.start_date ASC, p.id ASC;
 
 -- name: GetActivePlacementForEmployee :one
 -- INV-1 service pre-check (friendly 409 before hitting the partial unique index).
+-- position is sourced from the EMPLOYEE (moved off placement 2026-06-15) — the clock
+-- repo reads it to stamp the attendance snapshot.
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       e.position AS position,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -190,7 +193,7 @@ WHERE p.employee_id = sqlc.arg(employee_id)
 -- name: GetActivePlacementForEmployeeAtCompanyForUpdate :one
 -- INV-4 lock: the agent's active placement at a specific company, row-locked.
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -206,7 +209,7 @@ FOR UPDATE;
 -- name: LockEmployeePlacements :many
 -- INV-1 / period-overlap lock: all of the agent's placements, row-locked.
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -220,7 +223,7 @@ FOR UPDATE;
 -- name: CreatePlacement :one
 -- id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
 INSERT INTO placements (
-    employee_id, agreement_id, client_company_id, site_id, position,
+    employee_id, agreement_id, client_company_id, site_id,
     start_date, end_date, notes, lifecycle_status, predecessor_id,
     backdate_reason, created_by
 ) VALUES (
@@ -228,7 +231,6 @@ INSERT INTO placements (
     sqlc.narg(agreement_id),
     sqlc.arg(client_company_id),
     sqlc.arg(site_id),
-    sqlc.arg(position),
     sqlc.arg(start_date),
     sqlc.narg(end_date),
     sqlc.narg(notes),
@@ -238,7 +240,7 @@ INSERT INTO placements (
     sqlc.narg(created_by)
 )
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
-          position, start_date, end_date,
+          start_date, end_date,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
@@ -256,7 +258,7 @@ SET agreement_id = sqlc.arg(agreement_id),
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
-          position, start_date, end_date,
+          start_date, end_date,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
@@ -264,15 +266,14 @@ RETURNING id, employee_id, agreement_id, client_company_id, site_id,
           (agreement_id IS NULL)::boolean AS awaiting_agreement;
 
 -- name: UpdatePlacementFields :one
--- Limited-field PATCH (position, end_date, notes).
+-- Limited-field PATCH (end_date, notes). Position is an employee attribute now.
 UPDATE placements
-SET position                      = sqlc.arg(position),
-    end_date                      = sqlc.narg(end_date),
+SET end_date                      = sqlc.narg(end_date),
     notes                         = sqlc.narg(notes),
     updated_at                    = now()
 WHERE id = sqlc.arg(id)
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
-          position, start_date, end_date,
+          start_date, end_date,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
@@ -292,7 +293,7 @@ SET lifecycle_status   = sqlc.arg(lifecycle_status),
     updated_at         = now()
 WHERE id = sqlc.arg(id)
 RETURNING id, employee_id, agreement_id, client_company_id, site_id,
-          position, start_date, end_date,
+          start_date, end_date,
           notes,
           lifecycle_status, status_changed_at, ended_reason, ended_at,
           termination_reason, resign_at, predecessor_id, successor_id,
@@ -324,7 +325,7 @@ WHERE id = sqlc.arg(id);
 -- Company roster (RO-*). Filters: status (single), status__in (CSV),
 -- position (exact free-text), include_history. Keyset on (status_changed_at desc, id desc).
 SELECT p.id, p.employee_id, p.agreement_id, p.client_company_id, p.site_id,
-       p.position, p.start_date, p.end_date,
+       p.start_date, p.end_date,
        p.notes,
        p.lifecycle_status, p.status_changed_at, p.ended_reason, p.ended_at,
        p.termination_reason, p.resign_at, p.predecessor_id, p.successor_id,
@@ -344,7 +345,7 @@ LEFT JOIN client_sites s          ON s.id   = p.site_id
 LEFT JOIN employment_agreements a ON a.id   = p.agreement_id
 WHERE p.client_company_id = sqlc.arg(client_company_id)
   AND p.deleted_at IS NULL
-  AND (sqlc.narg(position)::text         IS NULL OR p.position         = sqlc.narg(position)::text)
+  AND (sqlc.narg(position)::text         IS NULL OR e.position         = sqlc.narg(position)::text)
   AND (sqlc.narg(status)::text          IS NULL OR p.lifecycle_status = sqlc.narg(status)::text)
   AND (sqlc.narg(status_in)::text[]     IS NULL OR p.lifecycle_status = ANY(sqlc.narg(status_in)::text[]))
   AND (sqlc.narg(awaiting_agreement)::boolean IS NULL OR (p.agreement_id IS NULL) = sqlc.narg(awaiting_agreement)::boolean)
@@ -369,11 +370,12 @@ GROUP BY p.lifecycle_status;
 
 -- name: RosterSummaryByPosition :many
 -- CompanyRosterSummary by_position counts (active placements only), grouped by the
--- free-text position label (service_line rollup dropped 2026-06-12).
-SELECT p.position AS position,
+-- employee's free-text position label (position moved to employee 2026-06-15).
+SELECT e.position AS position,
        COUNT(*)   AS count
 FROM placements p
+JOIN employees e ON e.id = p.employee_id
 WHERE p.client_company_id = sqlc.arg(client_company_id)
   AND p.deleted_at IS NULL
   AND p.lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START')
-GROUP BY p.position;
+GROUP BY e.position;

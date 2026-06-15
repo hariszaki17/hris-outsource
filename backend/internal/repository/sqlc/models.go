@@ -122,6 +122,7 @@ type Attendance struct {
 	SiteID             string
 	CreatedBy          *string
 	Position           string
+	IsPayable          *bool
 }
 
 type AttendanceCode struct {
@@ -142,7 +143,7 @@ type AttendanceCode struct {
 
 type AttendanceCorrection struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -160,6 +161,8 @@ type AttendanceCorrection struct {
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 	DeletedAt                *time.Time
+	WorkDate                 pgtype.Date
+	ApprovalInstanceID       *string
 }
 
 type AuditLog struct {
@@ -236,6 +239,7 @@ type Employee struct {
 	EmergencyContactPhone *string
 	AppLanguage           string
 	PhotoObjectKey        *string
+	Position              string
 }
 
 type EmployeeLeaveEntitlement struct {
@@ -551,7 +555,6 @@ type Placement struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
-	Position          string
 }
 
 type PlacementHistory struct {

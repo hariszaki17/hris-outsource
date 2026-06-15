@@ -386,9 +386,10 @@ func (h *employeeHarness) seedEmployee(n int) []domain.Employee {
 			FullName: "Employee " + itoa(i+1),
 			NIK:      nik,
 			NIP:      "EMP-" + itoa(i+1),
-			JoinAt:   joinAt,
-			Status:   "active",
-			Phone:    &phone,
+			JoinAt:          joinAt,
+			Status:          "active",
+			Phone:           &phone,
+			CurrentPosition: "Petugas Parkir",
 			BankAccount: domain.BankAccount{
 				BankName:          "BCA",
 				AccountNumber:     "123456789",
@@ -585,6 +586,7 @@ func TestCreateEmployee_201_WithBankAccount(t *testing.T) {
 		"nik":       "3201234567890001",
 		"join_at":   "2026-01-15",
 		"phone":     "081200000001", // required: login identifier (D2)
+		"position":  "Petugas Parkir",
 		"bank_account": map[string]any{
 			"bank_name":           "BCA",
 			"account_number":      "987654321",
@@ -670,6 +672,7 @@ func TestCreateEmployee_409_DuplicateNIK(t *testing.T) {
 		"nik":       existingNIK,
 		"join_at":   "2026-01-15",
 		"phone":     "081200000099", // required; NIK check fires before phone uniqueness
+		"position":  "Petugas Parkir",
 	})
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 DUPLICATE_NIK, got %d: %s", rr.Code, rr.Body.String())
@@ -695,6 +698,7 @@ func TestCreateEmployee_409_DuplicatePhone(t *testing.T) {
 		"nik":       "3209999999999999",
 		"join_at":   "2026-01-15",
 		"phone":     "081200000001", // normalizes to +6281200000001 → conflict
+		"position":  "Petugas Parkir",
 	})
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected 409 CONFLICT (phone), got %d: %s", rr.Code, rr.Body.String())

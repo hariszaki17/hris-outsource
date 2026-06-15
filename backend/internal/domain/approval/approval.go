@@ -30,8 +30,9 @@ import (
 type RequestType string
 
 const (
-	RequestTypeLeave    RequestType = "LEAVE"
-	RequestTypeOvertime RequestType = "OVERTIME"
+	RequestTypeLeave      RequestType = "LEAVE"
+	RequestTypeOvertime   RequestType = "OVERTIME"
+	RequestTypeCorrection RequestType = "CORRECTION"
 )
 
 // CreateInstanceInput is what a domain epic passes to Engine.CreateInstance when

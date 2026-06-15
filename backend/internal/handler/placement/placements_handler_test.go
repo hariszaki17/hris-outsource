@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,17 +163,12 @@ func (r *fakePlacementRepo) ListPlacements(_ context.Context, f domain.Placement
 }
 
 func (r *fakePlacementRepo) SearchPositions(_ context.Context, pattern string) ([]string, error) {
-	seen := map[string]struct{}{}
+	candidates := []string{"Petugas Parkir", "Koordinator Lokasi"}
 	var out []string
-	for _, p := range r.placements {
-		if p.Position == "" {
-			continue
+	for _, c := range candidates {
+		if pattern == "" || strings.Contains(strings.ToLower(c), strings.ToLower(pattern)) {
+			out = append(out, c)
 		}
-		if _, dup := seen[p.Position]; dup {
-			continue
-		}
-		seen[p.Position] = struct{}{}
-		out = append(out, p.Position)
 	}
 	sort.Strings(out)
 	return out, nil
@@ -318,7 +314,6 @@ func (r *fakePlacementRepo) CreatePlacement(_ context.Context, _ pgx.Tx, p svc.C
 		AwaitingAgreement: p.AgreementID == nil,
 		ClientCompanyID:   p.ClientCompanyID,
 		SiteID:            p.SiteID,
-		Position:          p.Position,
 		StartDate:         p.StartDate,
 		EndDate:           p.EndDate,
 		Notes:             p.Notes,
@@ -339,9 +334,6 @@ func (r *fakePlacementRepo) UpdatePlacementFields(_ context.Context, _ pgx.Tx, p
 	cur, ok := r.placements[p.ID]
 	if !ok {
 		return domain.Placement{}, domain.ErrNotFound
-	}
-	if p.Position != "" {
-		cur.Position = p.Position
 	}
 	if p.EndDate != nil {
 		cur.EndDate = p.EndDate
@@ -500,11 +492,7 @@ func newPlacementHarness(t *testing.T) *placementHarness {
 		r.Post("/placements", handler.CreatePlacement)
 		r.Post("/placements/{id}/agreement", handler.SetPlacementAgreement)
 		r.Patch("/placements/{id}", handler.UpdatePlacement)
-		r.Post("/placements/{id}:renew", handler.RenewPlacement)
 		r.Post("/placements/{id}:transfer", handler.TransferPlacement)
-		r.Post("/placements/{id}:end", handler.EndPlacement)
-		r.Post("/placements/{id}:resign", handler.ResignPlacement)
-		r.Post("/placements/{id}:terminate", handler.TerminatePlacement)
 		r.Post("/shift-leader-assignments", handler.CreateShiftLeaderAssignment)
 		r.Post("/shift-leader-assignments/{id}:replace", handler.ReplaceShiftLeaderAssignment)
 		r.Post("/shift-leader-assignments/{id}:end", handler.EndShiftLeaderAssignment)
@@ -587,7 +575,7 @@ func TestListPlacements_ShapeAndEnvelope(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	p := domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", AgreementID: strp("SWP-AG-7003"),
-		ClientCompanyID: "SWP-CMP-0021", SiteID: "SWP-SITE-0001", Position: "SWP-POS-014", StartDate: jktDate(2026, 1, 1), EndDate: &end,
+		ClientCompanyID: "SWP-CMP-0021", SiteID: "SWP-SITE-0001", StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 		EmployeeName:    strp("Rudi Wijaya"), SiteName: strp("Main Site"),
 	}
@@ -611,7 +599,7 @@ func TestListPlacements_ShapeAndEnvelope(t *testing.T) {
 	for _, k := range []string{
 		"id", "employee_id", "employee_name", "client_company_id", "client_company_name",
 		"site_id", "site_name",
-		"position_name", "lifecycle_status", "start_date", "end_date",
+		"lifecycle_status", "start_date", "end_date",
 	} {
 		if _, ok := first[k]; !ok {
 			t.Errorf("data[0] missing key: %s", k)
@@ -628,13 +616,13 @@ func TestListPlacements_SearchAndStatusFilterPassthrough(t *testing.T) {
 	endA := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5003", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-015",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &endA,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("Sari Hadi"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7003"), StartDate: jktDate(2026, 1, 1), EndDate: &endA,
 		LifecycleStatus: "ENDED", EmployeeName: strp("Rudi Wijaya"),
 	})
@@ -679,19 +667,19 @@ func TestListExpiringPlacements_WithinWindowSortedAscAndDefaults(t *testing.T) {
 	endFar := jktDate(2026, 12, 1)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-A25", EmployeeID: "SWP-EMP-A", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-1"), StartDate: jktDate(2026, 1, 1), EndDate: &end25,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("A"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-B15", EmployeeID: "SWP-EMP-B", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-2"), StartDate: jktDate(2026, 1, 1), EndDate: &end15,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("B"),
 	})
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-CFAR", EmployeeID: "SWP-EMP-C", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-3"), StartDate: jktDate(2026, 1, 1), EndDate: &endFar,
 		LifecycleStatus: "ACTIVE", EmployeeName: strp("C"),
 	})
@@ -735,7 +723,7 @@ func TestGetPlacement_DetailShape_200(t *testing.T) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-5001", EmployeeID: "SWP-EMP-1108", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7003"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -844,7 +832,7 @@ func TestCreatePlacement_INV1Violation_409_Details(t *testing.T) {
 	endX := jktDate(2026, 8, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-988", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0009",
-		SiteID: "SWP-SITE-0009", Position: "SWP-POS-021",
+		SiteID: "SWP-SITE-0009",
 		AgreementID: strp("SWP-AG-OLD"), StartDate: jktDate(2025, 9, 1), EndDate: &endX,
 		LifecycleStatus: "ACTIVE",
 	})
@@ -876,8 +864,8 @@ func TestCreatePlacement_INV1Violation_409_Details(t *testing.T) {
 	if !ok {
 		t.Fatalf("details.suggested_actions missing: %T", details["suggested_actions"])
 	}
-	if !containsAny(sa, "transfer") || !containsAny(sa, "end") {
-		t.Errorf("suggested_actions = %v, want to contain transfer + end", sa)
+	if !containsAny(sa, "transfer") {
+		t.Errorf("suggested_actions = %v, want to contain transfer", sa)
 	}
 }
 
@@ -898,55 +886,6 @@ func TestCreatePlacement_CompanyInactive_409(t *testing.T) {
 	}
 }
 
-func TestCreatePlacement_EndBeforeStart_400(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedFullCreateContext("SWP-CMP-0021", "SWP-SITE-0001", "SWP-EMP-1042", "SWP-AG-7002")
-
-	rr := h.doJSON("POST", "/placements",
-		placementCreateBody("SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "2026-06-03", "2026-06-01"))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
-	}
-	e := errObject(t, decodeBody(t, rr))
-	if e["code"] != "INVALID_REQUEST" {
-		t.Errorf("error.code = %v, want INVALID_REQUEST", e["code"])
-	}
-	fields, _ := e["fields"].(map[string]any)
-	if _, ok := fields["end_date"]; !ok {
-		t.Error("error.fields.end_date missing on end<=start 400")
-	}
-}
-
-func TestCreatePlacement_StartOutsideContract_422(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
-	h.seedSite("SWP-SITE-0001", "SWP-CMP-0021")
-	h.seedEmployee("SWP-EMP-1042")
-	// Agreement starts 2026-06-01; start placement 2026-05-15 (before) → 422.
-	h.seedAgreement("SWP-AG-7002", "SWP-EMP-1042", jktDate(2026, 6, 1), jktDate(2027, 5, 31))
-
-	rr := h.doJSON("POST", "/placements", map[string]any{
-		"employee_id":       "SWP-EMP-1042",
-		"agreement_id":      "SWP-AG-7002",
-		"client_company_id": "SWP-CMP-0021",
-		"site_id":           "SWP-SITE-0001",
-		"service_line_id":   "SWP-SVC-001",
-		"position_id":       "SWP-POS-014",
-		"start_date":        "2026-05-15",
-		"end_date":          "2026-12-31",
-		"backdate_reason":   "Onboarding doc lost.",
-	})
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 PLACEMENT_OUTSIDE_CONTRACT, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if errObject(t, decodeBody(t, rr))["code"] != "PLACEMENT_OUTSIDE_CONTRACT" {
-		t.Errorf("error.code != PLACEMENT_OUTSIDE_CONTRACT")
-	}
-}
-
-// Agreement is optional: omitting agreement_id creates a "pending agreement"
-// placement (awaiting_agreement=true) and the BR-1b period check is skipped, so an
-// out-of-any-contract start_date (with backdate reason) succeeds.
 func TestCreatePlacement_NoAgreement_PendingAwaiting_201(t *testing.T) {
 	h := newPlacementHarness(t)
 	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
@@ -989,7 +928,7 @@ func TestSetPlacementAgreement_Backfill_200(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-7700", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
 		AgreementID: nil, AwaitingAgreement: true,
 	})
@@ -1010,33 +949,6 @@ func TestSetPlacementAgreement_Backfill_200(t *testing.T) {
 }
 
 // Backfill rejects an agreement whose period does not contain the placement start.
-func TestSetPlacementAgreement_OutsideContract_422(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
-	h.seedSite("SWP-SITE-0001", "SWP-CMP-0021")
-	h.seedEmployee("SWP-EMP-1042")
-	// Agreement starts 2026-07-01; placement started 2026-06-01 (before) → 422.
-	h.seedAgreement("SWP-AG-7002", "SWP-EMP-1042", jktDate(2026, 7, 1), jktDate(2027, 6, 30))
-	end := jktDate(2026, 12, 31)
-	h.seedPlacement(domain.Placement{
-		ID: "SWP-PL-7701", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
-		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
-		AwaitingAgreement: true,
-	})
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-7701/agreement", map[string]any{
-		"agreement_id": "SWP-AG-7002",
-	})
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 PLACEMENT_OUTSIDE_CONTRACT, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if errObject(t, decodeBody(t, rr))["code"] != "PLACEMENT_OUTSIDE_CONTRACT" {
-		t.Errorf("error.code != PLACEMENT_OUTSIDE_CONTRACT")
-	}
-}
-
-// Backfill rejects an agreement owned by a different agent (422).
 func TestSetPlacementAgreement_NotOwned_422(t *testing.T) {
 	h := newPlacementHarness(t)
 	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
@@ -1047,7 +959,7 @@ func TestSetPlacementAgreement_NotOwned_422(t *testing.T) {
 	end := jktDate(2026, 12, 31)
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-7702", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		StartDate: jktDate(2026, 6, 1), EndDate: &end, LifecycleStatus: "ACTIVE",
 		AwaitingAgreement: true,
 	})
@@ -1099,7 +1011,7 @@ func TestUpdatePlacement_TerminalImmutable_409(t *testing.T) {
 	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
 	h.seedPlacement(domain.Placement{
 		ID: "SWP-PL-DEAD", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2025, 1, 1),
 		LifecycleStatus: "ENDED",
 	})
@@ -1122,87 +1034,11 @@ func (h *placementHarness) seedActivePlacement(id, empID, companyID string) {
 	end := jktDate(2027, 6, 30)
 	h.seedPlacement(domain.Placement{
 		ID: id, EmployeeID: empID, ClientCompanyID: companyID,
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
+		SiteID: "SWP-SITE-0001",
 		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
 		LifecycleStatus: "ACTIVE",
 	})
 }
-
-func TestEndPlacement_200_EndedReason(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedActivePlacement("SWP-PL-END", "SWP-EMP-1042", "SWP-CMP-0021")
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-END:end", map[string]any{
-		"reason": "END_OF_TERM", "effective_date": "2026-12-31",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := decodeBody(t, rr)
-	if body["lifecycle_status"] != "ENDED" {
-		t.Errorf("lifecycle_status = %v, want ENDED", body["lifecycle_status"])
-	}
-	if body["ended_reason"] != "ENDED" {
-		t.Errorf("ended_reason = %v, want ENDED", body["ended_reason"])
-	}
-}
-
-func TestResignPlacement_200_ResignAtSet(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedActivePlacement("SWP-PL-RES", "SWP-EMP-1042", "SWP-CMP-0021")
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-RES:resign", map[string]any{
-		"resign_at": "2026-06-30", "resignation_reason": "Pindah kerja.",
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := decodeBody(t, rr)
-	if body["lifecycle_status"] != "RESIGNED" {
-		t.Errorf("lifecycle_status = %v, want RESIGNED", body["lifecycle_status"])
-	}
-	if body["resign_at"] != "2026-06-30" {
-		t.Errorf("resign_at = %v, want 2026-06-30", body["resign_at"])
-	}
-}
-
-func TestTerminatePlacement_WrongCompanyNameConfirm_400(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedActivePlacement("SWP-PL-TRM", "SWP-EMP-1042", "SWP-CMP-0021")
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-TRM:terminate", map[string]any{
-		"termination_reason":        "Pelanggaran SOP berulang terdokumentasi.",
-		"type_company_name_confirm": "Wrong Name",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 on wrong company-name confirm, got %d: %s", rr.Code, rr.Body.String())
-	}
-	e := errObject(t, decodeBody(t, rr))
-	fields, _ := e["fields"].(map[string]any)
-	if _, ok := fields["type_company_name_confirm"]; !ok {
-		t.Error("error.fields.type_company_name_confirm missing")
-	}
-}
-
-func TestTerminatePlacement_Happy_200(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedActivePlacement("SWP-PL-TRM2", "SWP-EMP-1042", "SWP-CMP-0021")
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-TRM2:terminate", map[string]any{
-		"termination_reason":        "Pelanggaran SOP berulang terdokumentasi.",
-		"type_company_name_confirm": "Plaza Senayan", // matches seeded company name
-	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if decodeBody(t, rr)["lifecycle_status"] != "TERMINATED" {
-		t.Errorf("lifecycle_status != TERMINATED")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tests: :transfer
-// ---------------------------------------------------------------------------
 
 func TestTransferPlacement_Happy_201(t *testing.T) {
 	h := newPlacementHarness(t)
@@ -1260,61 +1096,6 @@ func TestTransferPlacement_SameCompanySameLine_422(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Tests: :renew
 // ---------------------------------------------------------------------------
-
-func TestRenewPlacement_Happy_201_PredecessorSuperseded(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
-	h.seedAgreement("SWP-AG-7002", "SWP-EMP-1042", jktDate(2026, 1, 1), jktDate(2028, 12, 31))
-	end := jktDate(2026, 12, 31)
-	h.seedPlacement(domain.Placement{
-		ID: "SWP-PL-RNW", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
-		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
-		LifecycleStatus: "ACTIVE",
-	})
-
-	rr := h.doJSON("POST", "/placements/SWP-PL-RNW:renew", map[string]any{
-		"new_start_date": "2027-01-01",
-		"new_end_date":   "2027-12-31",
-	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := decodeBody(t, rr)
-	pred, _ := body["predecessor"].(map[string]any)
-	if pred["lifecycle_status"] != "SUPERSEDED" {
-		t.Errorf("predecessor.lifecycle_status = %v, want SUPERSEDED", pred["lifecycle_status"])
-	}
-	succ, _ := body["successor"].(map[string]any)
-	if succ["predecessor_id"] != "SWP-PL-RNW" {
-		t.Errorf("successor.predecessor_id = %v, want SWP-PL-RNW", succ["predecessor_id"])
-	}
-}
-
-func TestRenewPlacement_BufferOverlap_422(t *testing.T) {
-	h := newPlacementHarness(t)
-	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
-	h.seedAgreement("SWP-AG-7002", "SWP-EMP-1042", jktDate(2026, 1, 1), jktDate(2028, 12, 31))
-	end := jktDate(2026, 12, 31)
-	h.seedPlacement(domain.Placement{
-		ID: "SWP-PL-OVL", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
-		SiteID: "SWP-SITE-0001", Position: "SWP-POS-014",
-		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
-		LifecycleStatus: "ACTIVE",
-	})
-
-	// new_start_date == predecessor.end_date violates the 1-day buffer.
-	rr := h.doJSON("POST", "/placements/SWP-PL-OVL:renew", map[string]any{
-		"new_start_date": "2026-12-31",
-		"new_end_date":   "2027-12-31",
-	})
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 PLACEMENT_PERIOD_OVERLAP, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if errObject(t, decodeBody(t, rr))["code"] != "PLACEMENT_PERIOD_OVERLAP" {
-		t.Errorf("error.code != PLACEMENT_PERIOD_OVERLAP")
-	}
-}
 
 func containsAny(arr []any, v string) bool {
 	for _, x := range arr {

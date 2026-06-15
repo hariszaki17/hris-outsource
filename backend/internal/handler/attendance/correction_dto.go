@@ -20,6 +20,7 @@ type approveRequest struct {
 // Times are RFC3339 (decoded into *time.Time by encoding/json).
 type correctionWriteRequest struct {
 	AttendanceID             string     `json:"attendance_id"`
+	WorkDate                 *string    `json:"work_date"` // YYYY-MM-DD; required iff type=NEW_ENTRY
 	Type                     string     `json:"type"`
 	ProposedCheckInAt        *time.Time `json:"proposed_check_in_at"`
 	ProposedCheckOutAt       *time.Time `json:"proposed_check_out_at"`
@@ -42,6 +43,8 @@ type diffRowResponse struct {
 type correctionResponse struct {
 	ID                       string            `json:"id"`
 	AttendanceID             string            `json:"attendance_id"`
+	WorkDate                 *string           `json:"work_date"`
+	ApprovalInstanceID       *string           `json:"approval_instance_id"`
 	RequesterID              string            `json:"requester_id"`
 	RequesterName            *string           `json:"requester_name,omitempty"`
 	CompanyID                string            `json:"company_id,omitempty"`
@@ -82,9 +85,16 @@ func toCorrectionResponse(c att.Correction) correctionResponse {
 			diff = append(diff, diffRowResponse{Field: d.Field, Before: d.Before, After: d.After})
 		}
 	}
+	var workDate *string
+	if c.WorkDate != nil {
+		wd := c.WorkDate.Format("2006-01-02")
+		workDate = &wd
+	}
 	return correctionResponse{
 		ID:                       c.ID,
 		AttendanceID:             c.AttendanceID,
+		WorkDate:                 workDate,
+		ApprovalInstanceID:       c.ApprovalInstanceID,
 		RequesterID:              c.RequesterID,
 		RequesterName:            c.RequesterName,
 		CompanyID:                c.CompanyID,

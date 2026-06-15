@@ -10,6 +10,10 @@ const (
 	CorrectionTypeCheckOut CorrectionType = "CHECK_OUT"
 	CorrectionTypeCode     CorrectionType = "CODE"
 	CorrectionTypeOther    CorrectionType = "OTHER"
+	// CorrectionTypeNewEntry creates an attendance record for a day with no existing
+	// record (and possibly no configured shift). Carries WorkDate instead of an
+	// AttendanceID; on approval the OnApproved hook inserts the attendance row.
+	CorrectionTypeNewEntry CorrectionType = "NEW_ENTRY"
 )
 
 // CorrectionStatus is the correction state machine (openapi CorrectionStatus):
@@ -37,11 +41,17 @@ type DiffRow struct {
 // Correction). Nullable openapi fields are pointers; OriginalSnapshot is the
 // frozen pre-application copy (CR-5); Diff is server-rendered on detail only.
 type Correction struct {
-	ID           string
+	ID string
+	// AttendanceID is the target record. Empty ("") for a still-PENDING NEW_ENTRY
+	// (no record exists yet); set to the created record once a NEW_ENTRY is APPLIED.
 	AttendanceID string
-	RequesterID  string
-	CompanyID    string // denormalized from attendance for leader-scope queries
-	Type         CorrectionType
+	// WorkDate is set for NEW_ENTRY corrections (the day the record is created for).
+	WorkDate    *time.Time
+	RequesterID string
+	CompanyID   string // denormalized from attendance (or active placement for NEW_ENTRY) for leader-scope queries
+	Type        CorrectionType
+	// ApprovalInstanceID is the E11 instance opened on submit (SWP-APV-*).
+	ApprovalInstanceID *string
 
 	ProposedCheckInAt        *time.Time
 	ProposedCheckOutAt       *time.Time

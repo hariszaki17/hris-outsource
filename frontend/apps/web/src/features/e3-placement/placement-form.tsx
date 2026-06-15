@@ -10,7 +10,7 @@
  *     AgentNote (ok-bg when no active placement; bad-bg on INV-1)
  *   Card: Penempatan
  *     Row: client_company_id | site_id
- *     Row: position (half-width, free-text typeahead)
+ *     (position is an employee attribute now — set on Tambah/Edit Karyawan)
  *   Card: Periode & Ketentuan
  *     Row: start_date | end_date
  *     CapNote (info-bg)
@@ -42,7 +42,7 @@ import {
   useCreatePlacement,
 } from '@swp/api-client/e3';
 import { Banner, Button, FormField, FormSection, Input, useToast } from '@swp/ui';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { ArrowLeft, CalendarClock, Check, CircleCheck, Info, X } from 'lucide-react';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -50,7 +50,6 @@ import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { ClientCompanyPicker } from '../e2-identity/pickers/client-company-picker.tsx';
 import { EmployeePicker } from '../e2-identity/pickers/employee-picker.tsx';
-import { PositionPicker } from '../e2-identity/pickers/position-picker.tsx';
 import { SitePicker } from '../e2-identity/pickers/site-picker.tsx';
 import { AgreementField } from './agreement-field.tsx';
 
@@ -58,55 +57,23 @@ import { AgreementField } from './agreement-field.tsx';
 // Zod schema (hand-written — F3.1 BR-1b, BR-4, BR-5, BR-6)
 // ---------------------------------------------------------------------------
 
-const placementSchema = z
-  .object({
-    employee_id: z.string().min(1, 'Agen wajib dipilih'),
-    // Optional (EPICS §8 2026-06-11): when omitted the placement is created
-    // "menunggu perjanjian" (awaiting_agreement) and the agreement is backfilled later.
-    agreement_id: z.string().optional(),
-    client_company_id: z.string().min(1, 'Perusahaan klien wajib dipilih'),
-    site_id: z.string().min(1, 'Site wajib dipilih'),
-    position: z.string().min(1, 'Posisi wajib diisi'),
-    start_date: z.string().min(1, 'Tanggal mulai wajib diisi'),
-    end_date: z.string().nullable().optional(),
-    backdate_reason: z.string().max(1000).nullable().optional(),
-    notes: z.string().max(2000).nullable().optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.end_date && data.start_date && data.end_date <= data.start_date) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Tanggal berakhir harus setelah tanggal mulai (BR-4)',
-        path: ['end_date'],
-      });
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    if (data.start_date && data.start_date < today && !data.backdate_reason) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Alasan backdating wajib diisi (BR-6)',
-        path: ['backdate_reason'],
-      });
-    }
-  });
+// Placements are decoupled from time (2026-06-15): no start/end dates. start_date
+// is set server-side to the creation date; the placement is immediately ACTIVE.
+const placementSchema = z.object({
+  employee_id: z.string().min(1, 'Agen wajib dipilih'),
+  // Optional (EPICS §8 2026-06-11): when omitted the placement is created
+  // "menunggu perjanjian" (awaiting_agreement) and the agreement is backfilled later.
+  agreement_id: z.string().optional(),
+  client_company_id: z.string().min(1, 'Perusahaan klien wajib dipilih'),
+  site_id: z.string().min(1, 'Site wajib dipilih'),
+  notes: z.string().max(2000).nullable().optional(),
+});
 
 type PlacementFormValues = z.infer<typeof placementSchema>;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function isBackdate(startDate: string | undefined): boolean {
-  if (!startDate) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return startDate < today;
-}
-
-function isFuture(startDate: string | undefined): boolean {
-  if (!startDate) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return startDate > today;
-}
 
 /** Extract INVViolationDetails from an ApiError's raw error details payload. */
 function extractINVDetails(error: unknown): INVViolationDetails | null {
@@ -172,6 +139,13 @@ export function CreatePlacementScreen() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Prefill the client company when arriving from a company's roster CTA
+  // (e.g. Penempatan Aktif tab → "Buat penempatan"). strict:false so the
+  // hook is safe even when the route carries no search params.
+  const { client_company_id: prefillCompanyId } = useSearch({ strict: false }) as {
+    client_company_id?: string;
+  };
+
   // INV-1 conflict state — set on a 409 INV_1_VIOLATION response.
   const [invConflict, setInvConflict] = useState<INVViolationDetails | null>(null);
   // Outside-contract warning — set when the server returns a 422 PLACEMENT_OUTSIDE_CONTRACT rule.
@@ -184,12 +158,8 @@ export function CreatePlacementScreen() {
     defaultValues: {
       employee_id: '',
       agreement_id: '',
-      client_company_id: '',
+      client_company_id: prefillCompanyId ?? '',
       site_id: '',
-      position: '',
-      start_date: '',
-      end_date: null,
-      backdate_reason: null,
       notes: null,
     },
   });
@@ -205,11 +175,6 @@ export function CreatePlacementScreen() {
 
   const watchedEmployeeId = watch('employee_id');
   const watchedAgreementId = watch('agreement_id');
-  const watchedPosition = watch('position');
-  const watchedStartDate = watch('start_date');
-
-  const showBackdateReason = isBackdate(watchedStartDate);
-  const previewStatus = isFuture(watchedStartDate) ? t('statusScheduled') : t('statusActive');
 
   // ---------------------------------------------------------------------------
   // Submit
@@ -227,10 +192,6 @@ export function CreatePlacementScreen() {
           agreement_id: values.agreement_id || null,
           client_company_id: values.client_company_id,
           site_id: values.site_id,
-          position: values.position,
-          start_date: values.start_date,
-          end_date: values.end_date ?? null,
-          backdate_reason: values.backdate_reason ?? null,
           notes: values.notes ?? null,
         },
       });
@@ -294,14 +255,6 @@ export function CreatePlacementScreen() {
           <h1 className="text-[30px] font-bold text-text">{t('title')}</h1>
           <p className="text-[14px] text-text-3">{t('subtitle')}</p>
         </div>
-        {watchedStartDate && (
-          <div className="flex items-center gap-[7px] rounded-full border border-info-bd bg-info-bg px-[14px] py-[7px]">
-            <CalendarClock className="size-[15px] text-info-tx" aria-hidden />
-            <span className="text-[13px] font-semibold text-info-tx">
-              {t('previewStatus', { status: previewStatus, date: watchedStartDate })}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* INV-1 conflict Banner — shown when 409 INV_1_VIOLATION */}
@@ -458,69 +411,17 @@ export function CreatePlacementScreen() {
                   </FormField>
                 </div>
               </FieldRow>
-
-              {/* Row: position (half-width per design — g3OzZz TcBbR Bhezi width:549).
-                  Free-text typeahead — no service-line gating. */}
-              <FieldRow>
-                <div className="flex-1 min-w-0" style={{ maxWidth: '50%' }}>
-                  <FormField
-                    label={t('fieldPosition')}
-                    htmlFor="position"
-                    required
-                    error={errors.position?.message}
-                  >
-                    <PositionPicker
-                      value={watchedPosition || null}
-                      onChange={(val) => setValue('position', val ?? '', { shouldValidate: true })}
-                      error={!!errors.position}
-                      placeholder={t('fieldPositionPlaceholder')}
-                    />
-                  </FormField>
-                </div>
-              </FieldRow>
             </FormSection>
           </SectionCard>
 
-          {/* Card: Periode & Ketentuan — g3OzZz q4vBQ */}
-          <SectionCard title={t('sectionPeriod')}>
+          {/* Card: Ketentuan — placements are open-ended (no period). Starts on the
+              creation date and is immediately active. */}
+          <SectionCard title={t('sectionTerms')}>
             <FormSection>
-              {/* Row: start_date + end_date — g3OzZz LVdWl */}
-              <FieldRow>
-                <div className="flex-1 min-w-0">
-                  <FormField
-                    label={t('fieldStartDate')}
-                    htmlFor="start_date"
-                    required
-                    error={errors.start_date?.message}
-                  >
-                    <Input
-                      id="start_date"
-                      type="date"
-                      {...register('start_date')}
-                      aria-invalid={!!errors.start_date}
-                    />
-                  </FormField>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <FormField
-                    label={t('fieldEndDate')}
-                    htmlFor="end_date"
-                    error={errors.end_date?.message}
-                  >
-                    <Input
-                      id="end_date"
-                      type="date"
-                      {...register('end_date')}
-                      aria-invalid={!!errors.end_date}
-                    />
-                  </FormField>
-                </div>
-              </FieldRow>
-
-              {/* CapNote (info) — g3OzZz KkMG9 */}
+              {/* Open-ended note — replaces the former Periode fields. */}
               <div className="flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-[14px] py-[9px]">
-                <Info className="mt-[1px] size-[15px] shrink-0 text-info-tx" aria-hidden />
-                <p className="text-[12px] leading-[1.4] text-info-tx">{t('capNote')}</p>
+                <CalendarClock className="mt-[1px] size-[15px] shrink-0 text-info-tx" aria-hidden />
+                <p className="text-[12px] leading-[1.4] text-info-tx">{t('openEndedNote')}</p>
               </div>
 
               {/* Leave-quota info — annual leave is an employment-agreement term; the quota
@@ -547,24 +448,6 @@ export function CreatePlacementScreen() {
                   aria-invalid={!!errors.notes}
                 />
               </FormField>
-
-              {/* Backdate reason — conditional BR-6 */}
-              {showBackdateReason && (
-                <FormField
-                  label={t('fieldBackdateReason')}
-                  htmlFor="backdate_reason"
-                  required
-                  hint={t('fieldBackdateReasonHint')}
-                  error={errors.backdate_reason?.message}
-                >
-                  <Input
-                    id="backdate_reason"
-                    placeholder={t('fieldBackdateReasonPlaceholder')}
-                    {...register('backdate_reason')}
-                    aria-invalid={!!errors.backdate_reason}
-                  />
-                </FormField>
-              )}
             </FormSection>
           </SectionCard>
 

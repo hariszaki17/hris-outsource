@@ -33,6 +33,7 @@ import {
 } from '@swp/api-client/e11';
 import {
   Avatar,
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -372,6 +373,24 @@ function ApprovalInboxScreenInner({
         );
       },
     },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (row) =>
+        onOpenInstance ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              onOpenInstance(row.id);
+            }}
+          >
+            {t('common.detail', { ns: 'translation' })}
+          </Button>
+        ) : null,
+    },
   ];
 
   // -------------------------------------------------------------------------
@@ -383,6 +402,7 @@ function ApprovalInboxScreenInner({
     { value: undefined, label: t('inbox.tabs.all') },
     { value: RequestType.LEAVE, label: t('inbox.tabs.leave') },
     { value: RequestType.OVERTIME, label: t('inbox.tabs.overtime') },
+    { value: RequestType.CORRECTION, label: t('inbox.tabs.correction') },
   ];
 
   // -------------------------------------------------------------------------
@@ -437,7 +457,6 @@ function ApprovalInboxScreenInner({
         getRowId={(r) => r.id}
         isLoading={query.isLoading}
         skeletonRows={8}
-        onRowClick={onOpenInstance ? (r) => onOpenInstance(r.id) : undefined}
         empty={
           hasFilters ? (
             <EmptyState

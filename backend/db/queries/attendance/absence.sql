@@ -20,13 +20,14 @@ SELECT
     se.placement_id                         AS placement_id,
     p.client_company_id                     AS company_id,
     p.site_id                               AS site_id,
-    p.position                              AS position,
+    e.position                              AS position,
     ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
     (((se.work_date + se.end_time::time)
         + (CASE WHEN se.cross_midnight THEN interval '1 day' ELSE interval '0' END))
         AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_end_at
 FROM schedule_entries se
 JOIN placements p      ON p.id = se.placement_id
+JOIN employees e       ON e.id = se.employee_id
 WHERE se.deleted_at IS NULL
   AND se.is_day_off = false
   AND se.status NOT IN ('CANCELLED_BY_LEAVE')

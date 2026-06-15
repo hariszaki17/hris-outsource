@@ -535,7 +535,6 @@ export function ShiftMastersScreen() {
     {
       id: 'name',
       header: t('col.name'),
-      width: 310,
       cell: (row) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[14px] font-medium text-text">{row.name}</span>

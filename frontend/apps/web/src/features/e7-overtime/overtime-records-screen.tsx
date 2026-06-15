@@ -212,7 +212,6 @@ function OvertimeRecordsScreenInner({
     {
       id: 'agent',
       header: t('rekap.colAgent'),
-      width: 300,
       cell: (r) => (
         <div className="flex items-center gap-2.5">
           <Avatar

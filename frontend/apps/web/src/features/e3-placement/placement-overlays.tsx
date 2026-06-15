@@ -2,21 +2,21 @@
  * E3 · Penempatan — overlay/modal layer for placement lifecycle actions +
  * shift-leader assignment flows.
  *
+ * Placements are decoupled from time (2026-06-15): the Renew (Perpanjang), End
+ * (Akhiri), Terminate (Pecat), and Resign (Undur diri) modals were removed.
+ * Ending employment is done via employee deactivation (E2 F2.7), which cascades
+ * to close placements; the only placement lifecycle action is Transfer.
+ *
  * .pen frames:
  *   BMENY  E3 · Overlay — Transfer Penempatan      (ModalTransfer)
  *   JSO5b  E3 · Overlay — Transfer + Replacement   (ModalReplacement)
- *   hwFaA  E3 · Overlay — Perpanjang Penempatan    (ModalRenew)
- *   comp/ModalDestructive V4LG8 via ConfirmDialog tone="danger"
  *
  * Exports:
- *   TransferModal        — useTransferPlacement     vars { id, data }
- *   RenewModal           — useRenewPlacement         vars { id, data }
- *   EndConfirm           — useEndPlacement           vars { id, data }
- *   TerminateConfirm     — useTerminatePlacement     vars { id, data } + company-name retype
- *   ResignModal          — useResignPlacement        vars { id, data }
- *   ShiftLeaderAssignModal   — useCreateShiftLeaderAssignment   vars { data }
- *   ShiftLeaderReplaceModal  — useReplaceShiftLeaderAssignment  vars { id, data }
- *   ShiftLeaderEndConfirm    — useEndShiftLeaderAssignment      vars { id, data }
+ *   TransferModal            — useTransferPlacement              vars { id, data }
+ *   BackfillAgreementModal   — useBackfillPlacementAgreement     vars { id, data }
+ *   ShiftLeaderAssignModal   — useCreateShiftLeaderAssignment    vars { data }
+ *   ShiftLeaderReplaceModal  — useReplaceShiftLeaderAssignment   vars { id, data }
+ *   ShiftLeaderEndConfirm    — useEndShiftLeaderAssignment       vars { id, data }
  *
  * INV-2/3/4 violations → inline Banner (kind 'invariant'|'conflict') via classifyError.
  * i18n namespace: placementDetail.
@@ -24,28 +24,18 @@
 
 import { ClientCompanyPicker } from '@/features/e2-identity/pickers/client-company-picker.tsx';
 import { CompanyLeaderCandidatePicker } from '@/features/e2-identity/pickers/company-leader-picker.tsx';
-import { PositionPicker } from '@/features/e2-identity/pickers/position-picker.tsx';
 import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { ApiError } from '@swp/api-client';
 import {
-  type EndRequest,
-  EndRequestReason,
   type PlacementAgreementBackfillRequest,
-  type RenewRequest,
-  type ResignRequest,
   type ShiftLeaderAssignmentEndRequest,
   type ShiftLeaderAssignmentReplaceRequest,
   type ShiftLeaderAssignmentWriteRequest,
-  type TerminateRequest,
   type TransferRequest,
   useBackfillPlacementAgreement,
   useCreateShiftLeaderAssignment,
-  useEndPlacement,
   useEndShiftLeaderAssignment,
-  useRenewPlacement,
   useReplaceShiftLeaderAssignment,
-  useResignPlacement,
-  useTerminatePlacement,
   useTransferPlacement,
 } from '@swp/api-client/e3';
 import {
@@ -60,15 +50,7 @@ import {
   ModalHeader,
   useToast,
 } from '@swp/ui';
-import {
-  ArrowLeftRight,
-  CheckCircle,
-  FileText,
-  RefreshCw,
-  SquareX,
-  UserMinus,
-  UserPlus,
-} from 'lucide-react';
+import { ArrowLeftRight, CheckCircle, FileText, UserMinus, UserPlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -85,7 +67,6 @@ export interface PlacementInfo {
   employee_name: string;
   client_company_id: string;
   client_company_name: string;
-  position_name: string;
   start_date: string;
   end_date?: string | null;
 }
@@ -102,9 +83,6 @@ export interface TransferModalProps {
 
 interface TransferFormValues {
   new_client_company_id: string;
-  new_position: string;
-  new_start_date: string;
-  new_end_date: string;
   transfer_reason: string;
 }
 
@@ -126,9 +104,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
   } = useForm<TransferFormValues>({
     defaultValues: {
       new_client_company_id: '',
-      new_position: '',
-      new_start_date: '',
-      new_end_date: '',
       transfer_reason: '',
     },
   });
@@ -150,9 +125,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
     setBannerMsg(null);
     const data: TransferRequest = {
       new_client_company_id: values.new_client_company_id,
-      new_position: values.new_position,
-      new_start_date: values.new_start_date,
-      new_end_date: values.new_end_date || null,
       transfer_reason: values.transfer_reason,
     };
     try {
@@ -195,7 +167,7 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
               <span className="text-[12px] font-semibold text-text">
                 {placement.client_company_name}
               </span>
-              <span className="text-[11px] text-text-3">{placement.position_name}</span>
+              <span className="text-[11px] text-text-3">{placement.employee_name}</span>
             </div>
           </div>
 
@@ -226,50 +198,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
               />
             </FormField>
             <FormField
-              label={t('transfer.newPosition')}
-              htmlFor="tf-pos"
-              required
-              error={errors.new_position?.message}
-            >
-              <Controller
-                control={control}
-                name="new_position"
-                rules={{ required: t('validation.required') }}
-                render={({ field }) => (
-                  <PositionPicker
-                    value={field.value || null}
-                    onChange={(v) => field.onChange(v ?? '')}
-                    error={!!errors.new_position}
-                  />
-                )}
-              />
-            </FormField>
-            <FormField
-              label={t('transfer.newStartDate')}
-              htmlFor="tf-start"
-              required
-              error={errors.new_start_date?.message}
-            >
-              <input
-                id="tf-start"
-                type="date"
-                className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-                {...register('new_start_date', { required: t('validation.required') })}
-              />
-            </FormField>
-            <FormField
-              label={t('transfer.newEndDate')}
-              htmlFor="tf-end"
-              error={errors.new_end_date?.message}
-            >
-              <input
-                id="tf-end"
-                type="date"
-                className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-                {...register('new_end_date')}
-              />
-            </FormField>
-            <FormField
               label={t('transfer.reason')}
               htmlFor="tf-reason"
               required
@@ -289,10 +217,10 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
             </FormField>
           </FormSection>
 
-          {/* 1-day buffer hint (.pen bgOHd) */}
+          {/* Transfer-timing hint — successor starts on the transfer date. */}
           <p className="flex items-center gap-1.5 text-xs text-text-3">
             <span aria-hidden="true">ⓘ</span>
-            {t('transfer.bufferHint')}
+            {t('transfer.timingHint')}
           </p>
         </ModalBody>
         <ModalFooter>
@@ -302,165 +230,6 @@ export function TransferModal({ open, onClose, placement }: TransferModalProps) 
           <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
             <ArrowLeftRight className="mr-1.5 size-4" aria-hidden="true" />
             {t('transfer.confirmBtn')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// RenewModal  (.pen hwFaA · ModalRenew)
-// ---------------------------------------------------------------------------
-
-export interface RenewModalProps {
-  open: boolean;
-  onClose: () => void;
-  placement: PlacementInfo;
-}
-
-interface RenewFormValues {
-  new_start_date: string;
-  new_end_date: string;
-  notes: string;
-}
-
-export function RenewModal({ open, onClose, placement }: RenewModalProps) {
-  const { t } = useTranslation('placementDetail');
-  const { toast } = useToast();
-  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
-  const [bannerTone, setBannerTone] = useState<'warn' | 'bad' | 'info'>('bad');
-
-  const mutation = useRenewPlacement();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<RenewFormValues>({
-    defaultValues: { new_start_date: '', new_end_date: '', notes: '' },
-  });
-
-  useEffect(() => {
-    if (!open) {
-      reset();
-      setBannerMsg(null);
-    }
-  }, [open, reset]);
-
-  function handleClose() {
-    reset();
-    setBannerMsg(null);
-    onClose();
-  }
-
-  async function onSubmit(values: RenewFormValues) {
-    setBannerMsg(null);
-    const data: RenewRequest = {
-      new_start_date: values.new_start_date,
-      new_end_date: values.new_end_date || null,
-      notes: values.notes || null,
-    };
-    try {
-      await mutation.mutateAsync({ id: placement.id, data });
-      toast({ tone: 'success', title: t('renew.successTitle') });
-      handleClose();
-    } catch (err) {
-      const classified = classifyError(err);
-      if (classified.kind === 'invariant' || classified.kind === 'conflict') {
-        setBannerTone('warn');
-        setBannerMsg(classified.message);
-      } else if (classified.kind === 'validation') {
-        applyFieldErrors(err, setError as Parameters<typeof applyFieldErrors>[1]);
-        setBannerTone('bad');
-        setBannerMsg(t('renew.overlapError'));
-      } else {
-        setBannerTone('bad');
-        setBannerMsg(classified.message);
-      }
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) handleClose();
-      }}
-      size="md"
-    >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalHeader icon={RefreshCw} tone="brand" title={t('renew.modalTitle')} />
-        <ModalBody>
-          {/* Current period card (.pen ySDMz) */}
-          <div className="flex items-center gap-2.5 rounded-xl border border-border-soft bg-surface-2 px-[14px] py-[10px]">
-            <RefreshCw className="size-4 shrink-0 text-text-2" aria-hidden="true" />
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[12px] font-semibold text-text">
-                {placement.client_company_name}
-              </span>
-              <span className="text-[11px] text-text-3">
-                {placement.start_date} – {placement.end_date ?? t('renew.openEnded')}
-              </span>
-            </div>
-          </div>
-
-          {bannerMsg != null && <Banner tone={bannerTone} title={bannerMsg} />}
-
-          <FormSection>
-            <FormField
-              label={t('renew.newStartDate')}
-              htmlFor="rn-start"
-              required
-              error={errors.new_start_date?.message}
-            >
-              <input
-                id="rn-start"
-                type="date"
-                className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-                {...register('new_start_date', { required: t('validation.required') })}
-              />
-            </FormField>
-            <FormField
-              label={t('renew.newEndDate')}
-              htmlFor="rn-end"
-              error={errors.new_end_date?.message}
-            >
-              <input
-                id="rn-end"
-                type="date"
-                className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-                {...register('new_end_date')}
-              />
-            </FormField>
-            <FormField
-              label={t('renew.notes')}
-              htmlFor="rn-notes"
-              error={errors.notes?.message}
-              span={2}
-            >
-              <textarea
-                id="rn-notes"
-                rows={3}
-                className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder={t('renew.notesPlaceholder')}
-                {...register('notes')}
-              />
-            </FormField>
-          </FormSection>
-
-          {/* Info banner (.pen P7QN3X) */}
-          <Banner tone="info" title={t('renew.infoHint')} />
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="secondary" onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
-            <CheckCircle className="mr-1.5 size-4" aria-hidden="true" />
-            {t('renew.confirmBtn')}
           </Button>
         </ModalFooter>
       </form>
@@ -598,415 +367,6 @@ export function BackfillAgreementModal({ open, onClose, placement }: BackfillAgr
           <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
             <CheckCircle className="mr-1.5 size-4" aria-hidden="true" />
             {t('backfill.confirmBtn')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// EndConfirm  (soft end, reason enum)
-// ---------------------------------------------------------------------------
-
-export interface EndConfirmProps {
-  open: boolean;
-  onClose: () => void;
-  placement: PlacementInfo;
-}
-
-interface EndFormValues {
-  reason: EndRequest['reason'];
-  effective_date: string;
-  notes: string;
-}
-
-const END_REASON_OPTIONS: Array<{ value: EndRequest['reason']; labelKey: string }> = [
-  { value: EndRequestReason.END_OF_TERM, labelKey: 'end.reasonEndOfTerm' },
-  { value: EndRequestReason.MUTUAL_AGREEMENT, labelKey: 'end.reasonMutual' },
-  { value: EndRequestReason.CLIENT_REQUEST, labelKey: 'end.reasonClient' },
-  { value: EndRequestReason.OTHER, labelKey: 'end.reasonOther' },
-];
-
-export function EndConfirm({ open, onClose, placement }: EndConfirmProps) {
-  const { t } = useTranslation('placementDetail');
-  const { toast } = useToast();
-  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
-
-  const mutation = useEndPlacement();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<EndFormValues>({
-    defaultValues: { reason: EndRequestReason.END_OF_TERM, effective_date: '', notes: '' },
-  });
-
-  useEffect(() => {
-    if (!open) {
-      reset();
-      setBannerMsg(null);
-    }
-  }, [open, reset]);
-
-  function handleClose() {
-    reset();
-    setBannerMsg(null);
-    onClose();
-  }
-
-  async function onSubmit(values: EndFormValues) {
-    setBannerMsg(null);
-    const data: EndRequest = {
-      reason: values.reason,
-      effective_date: values.effective_date,
-      notes: values.notes || null,
-    };
-    try {
-      await mutation.mutateAsync({ id: placement.id, data });
-      toast({ tone: 'success', title: t('end.successTitle') });
-      handleClose();
-    } catch (err) {
-      setBannerMsg(classifyError(err).message);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) handleClose();
-      }}
-      size="sm"
-    >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalHeader icon={SquareX} tone="warn" title={t('end.modalTitle')} />
-        <ModalBody>
-          {bannerMsg != null && <Banner tone="bad" title={bannerMsg} />}
-          <FormField
-            label={t('end.reason')}
-            htmlFor="end-reason"
-            required
-            error={errors.reason?.message}
-          >
-            <select
-              id="end-reason"
-              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-              {...register('reason', { required: t('validation.required') })}
-            >
-              {END_REASON_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {t(opt.labelKey as Parameters<typeof t>[0])}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <FormField
-            label={t('end.effectiveDate')}
-            htmlFor="end-date"
-            required
-            error={errors.effective_date?.message}
-          >
-            <input
-              id="end-date"
-              type="date"
-              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-              {...register('effective_date', { required: t('validation.required') })}
-            />
-          </FormField>
-          <FormField label={t('end.notes')} htmlFor="end-notes" error={errors.notes?.message}>
-            <textarea
-              id="end-notes"
-              rows={3}
-              className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={t('end.notesPlaceholder')}
-              {...register('notes')}
-            />
-          </FormField>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="secondary" onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
-            {t('end.confirmBtn')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// TerminateConfirm  (destructive, company-name retype — V4LG8 pattern)
-// ---------------------------------------------------------------------------
-
-export interface TerminateConfirmProps {
-  open: boolean;
-  onClose: () => void;
-  placement: PlacementInfo;
-}
-
-interface TerminateFormValues {
-  termination_reason: string;
-  effective_date: string;
-  type_company_name_confirm: string;
-}
-
-export function TerminateConfirm({ open, onClose, placement }: TerminateConfirmProps) {
-  const { t } = useTranslation('placementDetail');
-  const { toast } = useToast();
-  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
-
-  const mutation = useTerminatePlacement();
-
-  const {
-    register,
-    handleSubmit,
-    watch,
-    reset,
-    formState: { errors, isSubmitting },
-  } = useForm<TerminateFormValues>({
-    defaultValues: { termination_reason: '', effective_date: '', type_company_name_confirm: '' },
-  });
-
-  const confirmValue = watch('type_company_name_confirm');
-  const confirmMatch =
-    confirmValue.trim().toLowerCase() === placement.client_company_name.trim().toLowerCase();
-
-  useEffect(() => {
-    if (!open) {
-      reset();
-      setBannerMsg(null);
-    }
-  }, [open, reset]);
-
-  function handleClose() {
-    reset();
-    setBannerMsg(null);
-    onClose();
-  }
-
-  async function onSubmit(values: TerminateFormValues) {
-    setBannerMsg(null);
-    const data: TerminateRequest = {
-      termination_reason: values.termination_reason,
-      effective_date: values.effective_date || null,
-      type_company_name_confirm: values.type_company_name_confirm,
-    };
-    try {
-      await mutation.mutateAsync({ id: placement.id, data });
-      toast({ tone: 'success', title: t('terminate.successTitle') });
-      handleClose();
-    } catch (err) {
-      setBannerMsg(classifyError(err).message);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) handleClose();
-      }}
-      size="sm"
-    >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalHeader icon={SquareX} tone="danger" title={t('terminate.modalTitle')} />
-        <ModalBody>
-          {bannerMsg != null && <Banner tone="bad" title={bannerMsg} />}
-          <FormField
-            label={t('terminate.reason')}
-            htmlFor="term-reason"
-            required
-            error={errors.termination_reason?.message}
-          >
-            <textarea
-              id="term-reason"
-              rows={4}
-              className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={t('terminate.reasonPlaceholder')}
-              {...register('termination_reason', {
-                required: t('validation.required'),
-                minLength: { value: 10, message: t('validation.minLength10') },
-              })}
-            />
-          </FormField>
-          <FormField
-            label={t('terminate.effectiveDate')}
-            htmlFor="term-date"
-            error={errors.effective_date?.message}
-          >
-            <input
-              id="term-date"
-              type="date"
-              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-              {...register('effective_date')}
-            />
-          </FormField>
-          {/* Destructive retype guard (V4LG8 pattern) */}
-          <FormField
-            label={t('terminate.typeConfirmLabel', { company: placement.client_company_name })}
-            htmlFor="term-confirm"
-            required
-            error={errors.type_company_name_confirm?.message}
-          >
-            <input
-              id="term-confirm"
-              type="text"
-              autoComplete="off"
-              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={placement.client_company_name}
-              {...register('type_company_name_confirm', {
-                required: t('validation.required'),
-                validate: (v) =>
-                  v.trim().toLowerCase() === placement.client_company_name.trim().toLowerCase() ||
-                  t('terminate.confirmMismatch'),
-              })}
-            />
-          </FormField>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="secondary" onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            type="submit"
-            variant="destructive"
-            disabled={isSubmitting || mutation.isPending || !confirmMatch}
-          >
-            {t('terminate.confirmBtn')}
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ResignModal  (voluntary resign, LC-6)
-// ---------------------------------------------------------------------------
-
-export interface ResignModalProps {
-  open: boolean;
-  onClose: () => void;
-  placement: PlacementInfo;
-}
-
-interface ResignFormValues {
-  resign_at: string;
-  resignation_reason: string;
-  notes: string;
-}
-
-export function ResignModal({ open, onClose, placement }: ResignModalProps) {
-  const { t } = useTranslation('placementDetail');
-  const { toast } = useToast();
-  const [bannerMsg, setBannerMsg] = useState<string | null>(null);
-
-  const mutation = useResignPlacement();
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setError,
-    formState: { errors, isSubmitting },
-  } = useForm<ResignFormValues>({
-    defaultValues: { resign_at: '', resignation_reason: '', notes: '' },
-  });
-
-  useEffect(() => {
-    if (!open) {
-      reset();
-      setBannerMsg(null);
-    }
-  }, [open, reset]);
-
-  function handleClose() {
-    reset();
-    setBannerMsg(null);
-    onClose();
-  }
-
-  async function onSubmit(values: ResignFormValues) {
-    setBannerMsg(null);
-    const data: ResignRequest = {
-      resign_at: values.resign_at,
-      resignation_reason: values.resignation_reason,
-      notes: values.notes || null,
-    };
-    try {
-      await mutation.mutateAsync({ id: placement.id, data });
-      toast({ tone: 'success', title: t('resign.successTitle') });
-      handleClose();
-    } catch (err) {
-      const classified = classifyError(err);
-      if (classified.kind === 'validation') {
-        applyFieldErrors(err, setError as Parameters<typeof applyFieldErrors>[1]);
-      } else {
-        setBannerMsg(classified.message);
-      }
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(v) => {
-        if (!v) handleClose();
-      }}
-      size="sm"
-    >
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <ModalHeader icon={UserMinus} tone="warn" title={t('resign.modalTitle')} />
-        <ModalBody>
-          {bannerMsg != null && <Banner tone="bad" title={bannerMsg} />}
-          <FormField
-            label={t('resign.resignDate')}
-            htmlFor="resign-date"
-            required
-            error={errors.resign_at?.message}
-          >
-            <input
-              id="resign-date"
-              type="date"
-              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text focus:outline-none focus:ring-2 focus:ring-ring"
-              {...register('resign_at', { required: t('validation.required') })}
-            />
-          </FormField>
-          <FormField
-            label={t('resign.reason')}
-            htmlFor="resign-reason"
-            required
-            error={errors.resignation_reason?.message}
-          >
-            <textarea
-              id="resign-reason"
-              rows={3}
-              className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={t('resign.reasonPlaceholder')}
-              {...register('resignation_reason', { required: t('validation.required') })}
-            />
-          </FormField>
-          <FormField label={t('resign.notes')} htmlFor="resign-notes" error={errors.notes?.message}>
-            <textarea
-              id="resign-notes"
-              rows={2}
-              className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-text-3 focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder={t('resign.notesPlaceholder')}
-              {...register('notes')}
-            />
-          </FormField>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="secondary" onClick={handleClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" variant="primary" disabled={isSubmitting || mutation.isPending}>
-            {t('resign.confirmBtn')}
           </Button>
         </ModalFooter>
       </form>

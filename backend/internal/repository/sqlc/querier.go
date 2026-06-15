@@ -23,9 +23,9 @@ type Querier interface {
 	// late_minutes are RE-EVALUATED in Go (BR CR-9: a CHECK_IN correction that resolves
 	// an absence flips ABSENT→PRESENT/LATE) and passed in as nargs (NULL = leave as-is).
 	ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorrectionToAttendanceParams) (ApplyCorrectionToAttendanceRow, error)
-	// Mark a PENDING correction APPLIED (the proposed change is applied to the target
-	// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
-	// decidable; zero rows ⇒ terminal state (service emits 409).
+	// Mark a PENDING correction APPLIED (the OnApproved hook applies the proposed change to
+	// the target attendance row in the same tx). For a NEW_ENTRY, attendance_id is attached
+	// here via COALESCE(narg, existing). Only PENDING is decidable; zero rows ⇒ terminal.
 	ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error)
 	// Auto-close a STALE open record at clock-in time (F5.1 flexible check-in): the agent
 	// clocked in, never clocked out, and the checkout window has elapsed. check_out_at is
@@ -53,8 +53,9 @@ type Querier interface {
 	//   * billable_hours counts only billable-code minutes; worked_hours counts ALL
 	//     verified worked minutes in the group; the GROUP filter is applied per-variant.
 	//   * company name comes from a JOIN to placements -> client_companies. Position is
-	//     a FREE-TEXT column on placements (no master/FK; decision 2026-06-12) — the
-	//     report groups/filters on placements.position directly.
+	//     a FREE-TEXT clock-time snapshot stored on the attendance row (attendance.position;
+	//     position moved off placement to the employee 2026-06-15) — the report
+	//     groups/filters on attendance.position directly.
 	//   * shift date = check_in_at::date (no attendance_shift_date column exists).
 	//
 	// Four GROUP BY variants (employee / position / day / shift_master) are provided as
@@ -203,7 +204,9 @@ type Querier interface {
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
 	// Insert a new agent/leader-filed correction in PENDING. company_id +
-	// attendance_shift_date are denormalized from the target attendance by the service.
+	// attendance_shift_date are denormalized by the service. attendance_id is null for a
+	// NEW_ENTRY (work_date set instead); approval_instance_id is linked right after via
+	// SetCorrectionApprovalInstance (same tx).
 	CreateCorrection(ctx context.Context, arg CreateCorrectionParams) (string, error)
 	// Allocates the SWP-EMP id inline from the per-prefix sequence.
 	CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (CreateEmployeeRow, error)
@@ -291,6 +294,8 @@ type Querier interface {
 	// INV-2 site-scope lock: active leader of a site-scope unit, row-locked.
 	GetActiveLeaderForSiteForUpdate(ctx context.Context, siteID *string) (ShiftLeaderAssignment, error)
 	// INV-1 service pre-check (friendly 409 before hitting the partial unique index).
+	// position is sourced from the EMPLOYEE (moved off placement 2026-06-15) — the clock
+	// repo reads it to stamp the attendance snapshot.
 	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (GetActivePlacementForEmployeeRow, error)
 	// INV-4 lock: the agent's active placement at a specific company, row-locked.
 	GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Context, arg GetActivePlacementForEmployeeAtCompanyForUpdateParams) (GetActivePlacementForEmployeeAtCompanyForUpdateRow, error)
@@ -322,16 +327,16 @@ type Querier interface {
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
 	// Single correction with denormalized requester/company names.
 	GetCorrection(ctx context.Context, id string) (GetCorrectionRow, error)
-	// Row-lock for approve/reject: reads status/company_id/proposed_* for scope + state
-	// guards + apply (omits joins; service re-reads for DTO).
+	// Row-lock for the E11 OnApproved/OnRejected hooks: reads status/company_id/proposed_*
+	// for the apply (omits joins; service re-reads for DTO).
 	GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error)
 	// Members of an instance's CURRENT line — for the membership / self-approval check
 	// (INV-2 OR-set, INV-3). Resolves the live template's line at line_no = current_line.
 	GetCurrentLineMembers(ctx context.Context, instanceID string) ([]string, error)
-	// current_* come from the employee's single non-terminal placement (INV-1 → at most
-	// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
-	// employee still resolves (current_* null). current_position is the free-text
-	// placement label (no master / FK / ID; service_line dropped 2026-06-12).
+	// current_position is the employee's own free-text position (moved off placement
+	// 2026-06-15). current_client_company comes from the employee's single non-terminal
+	// placement (INV-1 → at most one); LEFT JOIN so an unplaced employee still resolves
+	// (current_client_company null).
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
@@ -397,7 +402,7 @@ type Querier interface {
 	GetPayslip(ctx context.Context, id string) (GetPayslipRow, error)
 	// Active-pending guard for the agent CREATE path (F5.4 / one open correction per
 	// attendance): returns the PENDING correction id for a target attendance, if any.
-	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (string, error)
+	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID *string) (string, error)
 	GetPlacementByID(ctx context.Context, id string) (GetPlacementByIDRow, error)
 	// All placements sharing a predecessor/successor chain with the given placement
 	// (for history_chain). Walks both directions from the seed via a recursive CTE.
@@ -561,8 +566,11 @@ type Querier interface {
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE name), status, has_leader. (service_line removed 2026-06-12.)
 	ListClientCompanies(ctx context.Context, arg ListClientCompaniesParams) ([]ListClientCompaniesRow, error)
-	// E5 corrections queries (F5.3 / SWP-COR-*). Cursor lists keyset on
+	// E5 corrections queries (F5.4 / SWP-COR-*). Cursor lists keyset on
 	// (created_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// Corrections route through the E11 approval engine (request_type=CORRECTION):
+	// approval_instance_id links the instance; the OnApproved hook marks APPLIED (and, for
+	// a NEW_ENTRY, attaches the created attendance_id). work_date carries a NEW_ENTRY's day.
 	// Corrections queue for a company over filters, newest first.
 	// Keyset cursor: pass cursor_created_at + cursor_id from the previous page tail.
 	//   status_in / type_in: text[] = ANY membership.
@@ -582,9 +590,10 @@ type Querier interface {
 	ListEmployeeLeaveBalances(ctx context.Context, arg ListEmployeeLeaveBalancesParams) ([]ListEmployeeLeaveBalancesRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
-	// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
-	// LEFT JOINs so unplaced employees still list (current_* null). current_position is
-	// the free-text placement label (no master / FK / ID; service_line dropped 2026-06-12).
+	// current_position is the employee's own free-text position (no master / FK / ID; moved
+	// off placement to the employee 2026-06-15). current_client_company comes from the
+	// employee's single non-terminal placement (INV-1 → at most one); LEFT JOIN so unplaced
+	// employees still list (current_client_company null).
 	ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error)
 	// Backs GET /placements/expiring. Keyset on (end_date asc, id asc).
 	// @cutoff = today(Asia/Jakarta) + within_days (computed in the service).
@@ -737,8 +746,7 @@ type Querier interface {
 	OpenQuotaWindow(ctx context.Context, arg OpenQuotaWindowParams) (LeaveQuota, error)
 	// org_rollups: per-position headcount (distinct placed employees) + active
 	// placement count, over non-terminal placements (mirrors CountActivePlacements).
-	// Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
-	// removed, position is a plain text column on placements — no master/enum).
+	// Grouped by the employee's FREE-TEXT position (position moved to employee 2026-06-15).
 	OrgRollupsByPosition(ctx context.Context) ([]OrgRollupsByPositionRow, error)
 	// Note-create / list 404 guard (CONVENTIONS §7 — hide existence behind 404).
 	PayslipExists(ctx context.Context, id string) (bool, error)
@@ -755,7 +763,7 @@ type Querier interface {
 	RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error
 	// Reject an exception record (reason required). Same PENDING/ESCALATED guard.
 	RejectAttendance(ctx context.Context, arg RejectAttendanceParams) (RejectAttendanceRow, error)
-	// Reject a PENDING correction (reason required). Same PENDING guard.
+	// Reject a PENDING correction (reason from the E11 approval action). Same PENDING guard.
 	RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error)
 	// Reject/withdraw: release the held reservation.
 	ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysParams) (LeaveQuota, error)
@@ -783,14 +791,14 @@ type Querier interface {
 	// position (exact free-text), include_history. Keyset on (status_changed_at desc, id desc).
 	RosterForCompany(ctx context.Context, arg RosterForCompanyParams) ([]RosterForCompanyRow, error)
 	// CompanyRosterSummary by_position counts (active placements only), grouped by the
-	// free-text position label (service_line rollup dropped 2026-06-12).
+	// employee's free-text position label (position moved to employee 2026-06-15).
 	RosterSummaryByPosition(ctx context.Context, clientCompanyID string) ([]RosterSummaryByPositionRow, error)
 	// CompanyRosterSummary by_status counts (non-deleted; non-terminal unless caller filters).
 	RosterSummaryByStatus(ctx context.Context, clientCompanyID string) ([]RosterSummaryByStatusRow, error)
-	// Position typeahead query (E2 GET /positions:search, backed by E3 placements).
+	// Position typeahead query (E2 GET /positions:search, backed by employees).
 	// Position is FREE-TEXT (no master, no FK, no ID) — the typeahead just surfaces
-	// the DISTINCT existing labels already recorded across placements so admins can
-	// reuse a consistent string or type a new one (decision 2026-06-12).
+	// the DISTINCT existing labels already recorded across employees so admins can
+	// reuse a consistent string or type a new one (position moved to employee 2026-06-15).
 	// Distinct existing free-text position labels matching the (case-insensitive)
 	// substring. The handler passes '%' || q || '%' so an empty q matches everything.
 	SearchPositions(ctx context.Context, q_ string) ([]string, error)
@@ -802,8 +810,14 @@ type Querier interface {
 	SetApprovedLeaveDayPayable(ctx context.Context, arg SetApprovedLeaveDayPayableParams) (SetApprovedLeaveDayPayableRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetAttendanceCodeStatus(ctx context.Context, arg SetAttendanceCodeStatusParams) (SetAttendanceCodeStatusRow, error)
+	// Flag a no-shift attendance day payable/not (SL/HR/super; F5.4 CR-13). The service
+	// guards that the day has no scheduled shift (a shift-backed day is auto-payable →
+	// 422 ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE) before calling. Returns the full row.
+	SetAttendancePayable(ctx context.Context, arg SetAttendancePayableParams) (SetAttendancePayableRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetClientCompanyStatus(ctx context.Context, arg SetClientCompanyStatusParams) (SetClientCompanyStatusRow, error)
+	// Link the E11 approval_instance created at submit (mirrors leave SetApprovalInstanceID).
+	SetCorrectionApprovalInstance(ctx context.Context, arg SetCorrectionApprovalInstanceParams) error
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusParams) (SetEmployeeStatusRow, error)
 	// EP-3: links a freshly provisioned E1 User to the employee (1:1). Flips
@@ -896,7 +910,7 @@ type Querier interface {
 	// Sets a new password hash after a reset/change (AU-4). The user has chosen their
 	// own password, so any temp-password rotation requirement is cleared.
 	UpdatePassword(ctx context.Context, arg UpdatePasswordParams) error
-	// Limited-field PATCH (position, end_date, notes).
+	// Limited-field PATCH (end_date, notes). Position is an employee attribute now.
 	UpdatePlacementFields(ctx context.Context, arg UpdatePlacementFieldsParams) (UpdatePlacementFieldsRow, error)
 	UpdateScheduleEntry(ctx context.Context, arg UpdateScheduleEntryParams) (UpdateScheduleEntryRow, error)
 	// Focused update of just the three snapshot time columns (start/end/cross), used

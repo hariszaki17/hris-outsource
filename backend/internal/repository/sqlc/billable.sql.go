@@ -17,7 +17,7 @@ SELECT
     (a.check_in_at::date)::text                                              AS group_label,
     min(p.client_company_id)::text                                           AS company_id,
     min(cc.name)::text                                                       AS company_name,
-    min(p.position)::text                                                    AS position,
+    min(a.position)::text                                                    AS position,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -29,7 +29,7 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status = 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
 GROUP BY (a.check_in_at::date)
 ORDER BY group_key
 `
@@ -94,7 +94,7 @@ SELECT
     COALESCE(e.full_name, a.employee_id)                                     AS group_label,
     min(p.client_company_id)::text                                           AS company_id,
     min(cc.name)::text                                                       AS company_name,
-    min(p.position)::text                                                    AS position,
+    min(a.position)::text                                                    AS position,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -107,7 +107,7 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status = 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
 GROUP BY a.employee_id, e.full_name
 ORDER BY group_label
 `
@@ -146,8 +146,9 @@ type BillableAggregateByEmployeeRow struct {
 //   - billable_hours counts only billable-code minutes; worked_hours counts ALL
 //     verified worked minutes in the group; the GROUP filter is applied per-variant.
 //   - company name comes from a JOIN to placements -> client_companies. Position is
-//     a FREE-TEXT column on placements (no master/FK; decision 2026-06-12) — the
-//     report groups/filters on placements.position directly.
+//     a FREE-TEXT clock-time snapshot stored on the attendance row (attendance.position;
+//     position moved off placement to the employee 2026-06-15) — the report
+//     groups/filters on attendance.position directly.
 //   - shift date = check_in_at::date (no attendance_shift_date column exists).
 //
 // Four GROUP BY variants (employee / position / day / shift_master) are provided as
@@ -191,11 +192,11 @@ func (q *Queries) BillableAggregateByEmployee(ctx context.Context, arg BillableA
 
 const billableAggregateByPosition = `-- name: BillableAggregateByPosition :many
 SELECT
-    p.position                                                               AS group_key,
-    p.position                                                               AS group_label,
+    a.position                                                               AS group_key,
+    a.position                                                               AS group_label,
     min(p.client_company_id)::text                                           AS company_id,
     min(cc.name)::text                                                       AS company_name,
-    p.position                                                               AS position,
+    a.position                                                               AS position,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -207,8 +208,8 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status = 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
-GROUP BY p.position
+  AND ($4::text IS NULL OR a.position = $4::text)
+GROUP BY a.position
 ORDER BY group_label
 `
 
@@ -271,7 +272,7 @@ SELECT
     COALESCE(sm.name, 'Tanpa Jadwal')                                        AS group_label,
     min(p.client_company_id)::text                                           AS company_id,
     min(cc.name)::text                                                       AS company_name,
-    min(p.position)::text                                                    AS position,
+    min(a.position)::text                                                    AS position,
     COALESCE(sum(a.worked_minutes), 0)::bigint                               AS worked_minutes,
     COALESCE(sum(a.worked_minutes) FILTER (WHERE ac.is_billable), 0)::bigint AS billable_minutes,
     count(*)::bigint                                                         AS verified_record_count
@@ -285,7 +286,7 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status = 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
 GROUP BY COALESCE(se.shift_master_id, 'UNSCHEDULED'), sm.name
 ORDER BY group_label
 `
@@ -354,7 +355,7 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status <> 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
 `
 
 type BillablePendingSummaryParams struct {
@@ -395,7 +396,7 @@ WHERE a.deleted_at IS NULL
   AND a.verification_status = 'VERIFIED'
   AND a.check_in_at::date BETWEEN $1::date AND $2::date
   AND ($3::text IS NULL OR a.company_id = $3::text)
-  AND ($4::text IS NULL OR p.position = $4::text)
+  AND ($4::text IS NULL OR a.position = $4::text)
 `
 
 type BillableSummaryParams struct {

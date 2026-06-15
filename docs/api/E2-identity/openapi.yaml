@@ -1578,12 +1578,12 @@ paths:
       summary: Position typeahead — distinct existing position strings
       description: |
         Position is **free-text** (no master entity, no FK, no ID). This
-        endpoint backs the position typeahead on the placement create/transfer
-        forms (E3): given a query `q`, it returns the **distinct** existing
+        endpoint backs the position typeahead on the employee create/edit
+        form (E2): given a query `q`, it returns the **distinct** existing
         position strings (case-insensitive substring match) already recorded
-        across placements, so admins can reuse a consistent label or type a new
+        across employees, so admins can reuse a consistent label or type a new
         one. There is no create/update/delete — values are persisted as the
-        free-text `position` on the placement (E3).
+        free-text `position` on the employee (set via EmployeeWriteRequest).
       x-rbac:
         roles: [hr_admin, super_admin, shift_leader]
         scope: company_or_global
@@ -2472,8 +2472,10 @@ components:
           type: string
           nullable: true
           description: |
-            Free-text position label from the agent's current placement (E3
-            read). Position is free-text — no master, no FK, no ID.
+            The agent's free-text job position/title (e.g. "Petugas Parkir").
+            Position is an attribute of the EMPLOYEE (moved off placement
+            2026-06-15) — free-text, no master, no FK, no ID. Set via the
+            `position` field on EmployeeWriteRequest; surfaced read-only here.
           example: Petugas Parkir
         current_client_company:
           type: object
@@ -2492,8 +2494,9 @@ components:
       description: |
         Used for both create (`POST /employees`) and patch
         (`PATCH /employees/{id}`). On create, `full_name`, `nik`, `join_at`,
-        and `phone` are required (phone is the login identifier — see below).
-        On patch, all fields are optional and only present fields are updated.
+        `phone` (the login identifier — see below), and `position` are required.
+        On patch, all fields are optional and only present fields are updated
+        (but `position`, when present, must be non-empty).
         Creating an employee always auto-provisions a 1:1 login (D1); there is
         no opt-out flag.
       properties:
@@ -2504,6 +2507,16 @@ components:
         gender: { $ref: '#/components/schemas/Gender' }
         birth_date: { type: string, format: date }
         birth_place: { type: string }
+        position:
+          type: string
+          maxLength: 100
+          description: |
+            The agent's free-text job position/title (e.g. "Petugas Parkir",
+            "Koordinator Lokasi"). Required on create. Position is an attribute
+            of the EMPLOYEE (moved off placement 2026-06-15) — free-text, no
+            master/FK. The `GET /positions:search` typeahead surfaces existing
+            labels for reuse.
+          example: Petugas Parkir
         phone:
           type: string
           description: |

@@ -57,8 +57,8 @@ test('AU-1/AU-3 · successful login lands on the dashboard and records last_logi
   // Drive the real login screen via the fixture.
   await loginAs(page, PERSONAS.hrAdmin);
 
-  // The router lands on '/' (index = DashboardScreen) — not /login.
-  await expect(page).toHaveURL(/^http:\/\/localhost:4173\/?$/);
+  // The router lands on the Kehadiran landing ('/' redirects to /attendance) — not /login.
+  await expect(page).toHaveURL(/^http:\/\/localhost:4173\/attendance\b/);
 
   // The shell renders the user's full name in the TopbarUser component.
   // "Sari Hadi" is the hrAdmin's full_name from seed.go.
@@ -228,12 +228,12 @@ test('AU-4 · password reset: request + use token sets a new password', async ({
     timeout: 10_000,
   });
 
-  // Step 7: Log in with the NEW password — should land on the dashboard.
+  // Step 7: Log in with the NEW password — should land on the Kehadiran landing.
   await page.goto('/login');
   await page.locator('#identifier').fill(hrAdminEmail);
   await page.locator('#password').fill(NEW_PASSWORD);
   await page.locator('button[type="submit"]').click();
-  await page.waitForURL(/^http:\/\/localhost:4173\/?$/, { timeout: 15_000 });
+  await page.waitForURL(/^http:\/\/localhost:4173\/attendance\b/, { timeout: 15_000 });
   await expect(page.getByText('Sari Hadi')).toBeVisible();
 });
 

@@ -63,7 +63,6 @@ type CreatePlacementParams struct {
 	AgreementID     *string
 	ClientCompanyID string
 	SiteID          string
-	Position        string // free-text position label
 	StartDate       time.Time
 	EndDate         *time.Time
 	Notes           *string
@@ -75,10 +74,9 @@ type CreatePlacementParams struct {
 
 // UpdatePlacementParams carries the limited-field PATCH columns.
 type UpdatePlacementParams struct {
-	ID       string
-	Position string // free-text position label
-	EndDate  *time.Time
-	Notes    *string
+	ID      string
+	EndDate *time.Time
+	Notes   *string
 }
 
 // SetAgreementParams carries the backfill of an agreement onto a pending placement.
@@ -194,7 +192,6 @@ type PlacementSummary struct {
 	EmployeeID        string  `json:"employee_id"`
 	ClientCompanyID   string  `json:"client_company_id"`
 	ClientCompanyName *string `json:"client_company_name,omitempty"`
-	Position          string  `json:"position"`
 	LifecycleStatus   string  `json:"lifecycle_status"`
 	StartDate         string  `json:"start_date"`
 	EndDate           *string `json:"end_date"`
@@ -232,7 +229,6 @@ func toPlacementSummary(p domain.Placement) PlacementSummary {
 		EmployeeID:        p.EmployeeID,
 		ClientCompanyID:   p.ClientCompanyID,
 		ClientCompanyName: p.ClientCompanyName,
-		Position:          p.Position,
 		LifecycleStatus:   p.LifecycleStatus,
 		StartDate:         p.StartDate.Format("2006-01-02"),
 	}
@@ -435,9 +431,7 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 	}
 
 	// Agreement is OPTIONAL. When present it must belong to the employee; when nil
-	// the placement is created "pending agreement" (awaiting_agreement) and the
-	// BR-1b period validation below is skipped.
-	var ag *AgreementRef
+	// the placement is created "pending agreement" (awaiting_agreement).
 	if p.AgreementID != nil && *p.AgreementID != "" {
 		fetched, agErr := s.repo.GetAgreement(ctx, *p.AgreementID)
 		if errors.Is(agErr, domain.ErrNotFound) {
@@ -449,48 +443,25 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		if fetched.EmployeeID != p.EmployeeID {
 			return domain.Placement{}, apperr.Invalid(map[string]string{"agreement_id": "Perjanjian bukan milik karyawan ini."})
 		}
-		ag = &fetched
 	} else {
 		// Normalize empty-string to nil so the column stores NULL (awaiting_agreement).
 		p.AgreementID = nil
 	}
 
-	today := s.today()
+	// Placement is no longer tied to a time period (2026-06-15): start_date is the
+	// creation date, there is no end_date, and the agreement-window check is dropped
+	// (annual leave follows the agreement, not the placement). A placement is ACTIVE
+	// the moment it is created.
+	p.StartDate = s.today()
+	p.EndDate = nil
+	p.BackdateReason = nil
+	p.LifecycleStatus = "ACTIVE"
 
-	// 2. Date validation (BR-4, BR-6).
-	if p.EndDate != nil && !p.EndDate.After(p.StartDate) {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"end_date": "Tanggal berakhir harus setelah tanggal mulai."})
-	}
-	if p.StartDate.Before(today) && (p.BackdateReason == nil || strings.TrimSpace(*p.BackdateReason) == "") {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"backdate_reason": "Alasan backdating wajib diisi."})
-	}
-
-	// 3. Agreement-period validation (BR-1b) — ONLY when an agreement is present.
-	// Out-of-range START → 422; PKWT end past the agreement end → auto-cap + warning.
-	// No agreement → skip the period check; end_date may be open-ended.
-	var warnings []string
-	if ag != nil {
-		if err := validateStartWithinAgreement(*ag, p.StartDate); err != nil {
-			return domain.Placement{}, err
-		}
-		if ag.EndDate != nil && p.EndDate != nil && p.EndDate.After(*ag.EndDate) {
-			capped := *ag.EndDate
-			p.EndDate = &capped
-			warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
-		}
-	}
-
-	// 4. INV-1 service pre-check.
+	// INV-1 service pre-check.
 	if existing, err := s.repo.GetActivePlacementForEmployee(ctx, p.EmployeeID); err == nil {
 		return domain.Placement{}, inv1Conflict(existing)
 	} else if !errors.Is(err, domain.ErrNotFound) {
 		return domain.Placement{}, apperr.Internal(err)
-	}
-
-	// 7. Lifecycle on create (BR-5).
-	p.LifecycleStatus = "PENDING_START"
-	if !p.StartDate.After(today) {
-		p.LifecycleStatus = "ACTIVE"
 	}
 
 	var created domain.Placement
@@ -541,8 +512,7 @@ func (s *PlacementService) CreatePlacement(ctx context.Context, p CreatePlacemen
 		return domain.Placement{}, asAppErr(err)
 	}
 
-	created.Warnings = append(created.Warnings, warnings...)
-	// 6. Soft warning: target company has no active leader.
+	// Soft warning: target company has no active leader.
 	if s.leader != nil {
 		if _, ok, lerr := s.leader.currentLeaderForCompany(ctx, created.ClientCompanyID); lerr == nil && !ok {
 			created.Warnings = append(created.Warnings, "NO_SHIFT_LEADER_AT_COMPANY")
@@ -581,19 +551,8 @@ func (s *PlacementService) SetAgreement(ctx context.Context, placementID, agreem
 		return domain.Placement{}, apperr.Rule("RULE_VIOLATION", map[string]string{"agreement_id": "Perjanjian bukan milik karyawan ini."})
 	}
 
-	// BR-1b period validation (422 PLACEMENT_OUTSIDE_CONTRACT on out-of-range start).
-	if err := validateStartWithinAgreement(ag, cur.StartDate); err != nil {
-		return domain.Placement{}, err
-	}
-	// PKWT auto-cap: clamp the placement end_date to the agreement end.
-	endDate := cur.EndDate
-	var warnings []string
-	if ag.EndDate != nil && endDate != nil && endDate.After(*ag.EndDate) {
-		capped := *ag.EndDate
-		endDate = &capped
-		warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
-	}
-
+	// Placement is decoupled from time (2026-06-15): no period/agreement-window
+	// validation and no end_date to cap. Backfill only attaches the agreement.
 	var updated domain.Placement
 	agID := agreementID
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -601,7 +560,7 @@ func (s *PlacementService) SetAgreement(ctx context.Context, placementID, agreem
 		updated, inErr = s.repo.SetPlacementAgreement(ctx, tx, SetAgreementParams{
 			ID:          placementID,
 			AgreementID: &agID,
-			EndDate:     endDate,
+			EndDate:     nil,
 		})
 		if inErr != nil {
 			return inErr
@@ -617,7 +576,6 @@ func (s *PlacementService) SetAgreement(ctx context.Context, placementID, agreem
 		return domain.Placement{}, asAppErr(err)
 	}
 
-	updated.Warnings = append(updated.Warnings, warnings...)
 	return updated, nil
 }
 
@@ -634,11 +592,6 @@ func (s *PlacementService) UpdatePlacement(ctx context.Context, p UpdatePlacemen
 	}
 	if isTerminal(cur.LifecycleStatus) {
 		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
-	}
-
-	// Default unset fields to current values (PATCH semantics).
-	if p.Position == "" {
-		p.Position = cur.Position
 	}
 
 	var updated domain.Placement
@@ -660,156 +613,9 @@ func (s *PlacementService) UpdatePlacement(ctx context.Context, p UpdatePlacemen
 			Action:     audit.Action("placement.update"),
 			EntityType: "placement",
 			EntityID:   updated.ID,
-			Before:     map[string]any{"position": cur.Position},
-			After:      map[string]any{"position": updated.Position},
+			Before:     map[string]any{"end_date": cur.EndDate, "notes": cur.Notes},
+			After:      map[string]any{"end_date": updated.EndDate, "notes": updated.Notes},
 		})
-	}); err != nil {
-		return domain.Placement{}, asAppErr(err)
-	}
-	return updated, nil
-}
-
-// --- lifecycle resolution: end / resign / terminate ---
-
-// EndParams / ResignParams / TerminateParams carry the resolution request fields.
-type EndParams struct {
-	ID            string
-	Reason        string // END_OF_TERM|MUTUAL_AGREEMENT|CLIENT_REQUEST|OTHER
-	EffectiveDate time.Time
-	Notes         *string
-	ActorUserID   *string
-}
-
-type ResignParams struct {
-	ID          string
-	ResignAt    time.Time
-	Reason      string
-	Notes       *string
-	ActorUserID *string
-}
-
-type TerminateParams struct {
-	ID                  string
-	TerminationReason   string
-	EffectiveDate       *time.Time
-	TypeCompanyNameConf string
-	ActorUserID         *string
-}
-
-// EndPlacement closes a placement with ended_reason=ENDED.
-func (s *PlacementService) EndPlacement(ctx context.Context, p EndParams) (domain.Placement, error) {
-	return s.resolve(ctx, p.ID, "ENDED", "ENDED", &p.EffectiveDate, nil, nil, p.Notes, p.ActorUserID, &p.Reason, nil)
-}
-
-// ResignPlacement closes a placement with ended_reason=RESIGNED + resign_at.
-func (s *PlacementService) ResignPlacement(ctx context.Context, p ResignParams) (domain.Placement, error) {
-	if strings.TrimSpace(p.Reason) == "" {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"resignation_reason": "Wajib diisi."})
-	}
-	reason := "RESIGNED"
-	return s.resolve(ctx, p.ID, "RESIGNED", reason, &p.ResignAt, nil, &p.ResignAt, p.Notes, p.ActorUserID, &p.Reason, nil)
-}
-
-// TerminatePlacement closes a placement with ended_reason=TERMINATED (strong confirm).
-func (s *PlacementService) TerminatePlacement(ctx context.Context, p TerminateParams) (domain.Placement, error) {
-	if len(strings.TrimSpace(p.TerminationReason)) < 10 {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"termination_reason": "Alasan minimal 10 karakter."})
-	}
-	cur, err := s.repo.GetPlacementByID(ctx, p.ID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.Placement{}, apperr.NotFound()
-	}
-	if err != nil {
-		return domain.Placement{}, apperr.Internal(err)
-	}
-	if isTerminal(cur.LifecycleStatus) {
-		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
-	}
-	// Company-name confirmation (case-insensitive, trimmed).
-	company, err := s.repo.GetClientCompany(ctx, cur.ClientCompanyID)
-	if err != nil {
-		return domain.Placement{}, apperr.Internal(err)
-	}
-	if !strings.EqualFold(strings.TrimSpace(p.TypeCompanyNameConf), strings.TrimSpace(company.Name)) {
-		return domain.Placement{}, apperr.Invalid(map[string]string{"type_company_name_confirm": "Nama perusahaan tidak cocok."})
-	}
-	eff := s.today()
-	if p.EffectiveDate != nil {
-		eff = *p.EffectiveDate
-	}
-	return s.resolveLoaded(ctx, cur, "TERMINATED", "TERMINATED", &eff, &eff, nil, nil, p.ActorUserID, nil, &p.TerminationReason)
-}
-
-// resolve loads the placement then delegates to resolveLoaded.
-func (s *PlacementService) resolve(ctx context.Context, id, status, endedReason string, effective, endedAt, resignAt *time.Time, notes, actor, reason, terminationReason *string) (domain.Placement, error) {
-	cur, err := s.repo.GetPlacementByID(ctx, id)
-	if errors.Is(err, domain.ErrNotFound) {
-		return domain.Placement{}, apperr.NotFound()
-	}
-	if err != nil {
-		return domain.Placement{}, apperr.Internal(err)
-	}
-	if isTerminal(cur.LifecycleStatus) {
-		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
-	}
-	if status == "ENDED" && endedAt == nil {
-		endedAt = effective
-	}
-	return s.resolveLoaded(ctx, cur, status, endedReason, effective, endedAt, resignAt, notes, actor, reason, terminationReason)
-}
-
-// resolveLoaded performs the shared end/resign/terminate write in one tx:
-// SetPlacementLifecycle + auto-vacate leadership + history + audit.
-func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placement, status, endedReason string, effective, endedAt, resignAt *time.Time, notes, actor, reason, terminationReason *string) (domain.Placement, error) {
-	// Scope guard: a lead may only end/resign/terminate placements at its
-	// assigned client companies (no-op for super/hr = global). Covers
-	// EndPlacement / ResignPlacement / TerminatePlacement, which all funnel here.
-	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
-		return domain.Placement{}, serr
-	}
-	before := cur.LifecycleStatus
-	var updated domain.Placement
-	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		var inErr error
-		updated, inErr = s.repo.SetPlacementLifecycle(ctx, tx, SetLifecycleParams{
-			ID:                cur.ID,
-			LifecycleStatus:   status,
-			EndedReason:       &endedReason,
-			EndedAt:           endedAt,
-			TerminationReason: terminationReason,
-			ResignAt:          resignAt,
-		})
-		if inErr != nil {
-			return inErr
-		}
-
-		// Auto-vacate leadership if the agent led this company (SL-6).
-		if s.leader != nil {
-			if inErr := s.leader.autoVacateForEmployeeAtCompany(ctx, tx, cur.EmployeeID, cur.ClientCompanyID); inErr != nil {
-				return inErr
-			}
-		}
-
-		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
-			PlacementID:   cur.ID,
-			Action:        strings.ToLower(status),
-			ActorUserID:   actor,
-			Reason:        reason,
-			EffectiveDate: effective,
-			StatusBefore:  &before,
-			StatusAfter:   &status,
-			Notes:         notes,
-		}); inErr != nil {
-			return inErr
-		}
-		return audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.Action("placement." + strings.ToLower(status)),
-			EntityType: "placement",
-			EntityID:   cur.ID,
-			Before:     map[string]any{"lifecycle_status": before},
-			After:      map[string]any{"lifecycle_status": status, "ended_reason": endedReason},
-		})
-		// TODO(Phase-11 notifications): enqueue NotificationArgs (placement resolved).
 	}); err != nil {
 		return domain.Placement{}, asAppErr(err)
 	}
@@ -818,13 +624,12 @@ func (s *PlacementService) resolveLoaded(ctx context.Context, cur domain.Placeme
 
 // --- transfer ---
 
-// TransferParams carries the transfer request fields.
+// TransferParams carries the transfer request fields. Placements are no longer
+// tied to a time period (2026-06-15): the successor starts on the transfer date,
+// so no start/end dates are accepted.
 type TransferParams struct {
 	ID                 string
 	NewClientCompanyID string
-	NewPosition        string // free-text destination position label
-	NewStartDate       time.Time
-	NewEndDate         *time.Time
 	NewAgreementID     *string
 	TransferReason     string
 	ActorUserID        *string
@@ -895,13 +700,11 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		siteID = cur.SiteID
 	}
 
-	today := s.today()
-	successorStatus := "PENDING_START"
-	if !p.NewStartDate.After(today) {
-		successorStatus = "ACTIVE"
-	}
-	// Predecessor ended_at = new_start_date − 1 day (BR-2 buffer).
-	endedAt := p.NewStartDate.AddDate(0, 0, -1)
+	// The successor starts today and is immediately ACTIVE; the predecessor closes
+	// the same day. No period/buffer math (placements are decoupled from time).
+	transferDate := s.today()
+	successorStatus := "ACTIVE"
+	endedAt := transferDate
 	reason := p.TransferReason
 
 	var result TransferResult
@@ -925,9 +728,8 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 			AgreementID:     agreementID,
 			ClientCompanyID: p.NewClientCompanyID,
 			SiteID:          siteID,
-			Position:        p.NewPosition,
-			StartDate:       p.NewStartDate,
-			EndDate:         p.NewEndDate,
+			StartDate:       transferDate,
+			EndDate:         nil,
 			Notes:           notesPtr,
 			LifecycleStatus: successorStatus,
 			PredecessorID:   &cur.ID,
@@ -956,14 +758,14 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		// 5. History rows for both + audit.
 		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
 			PlacementID: cur.ID, Action: "transfer_out", ActorUserID: p.ActorUserID,
-			Reason: &reason, EffectiveDate: &p.NewStartDate, StatusBefore: &before,
+			Reason: &reason, EffectiveDate: &transferDate, StatusBefore: &before,
 			StatusAfter: strPtr("TRANSFERRED"),
 		}); inErr != nil {
 			return inErr
 		}
 		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
 			PlacementID: succ.ID, Action: "transfer_in", ActorUserID: p.ActorUserID,
-			Reason: &reason, EffectiveDate: &p.NewStartDate, StatusAfter: &successorStatus,
+			Reason: &reason, EffectiveDate: &transferDate, StatusAfter: &successorStatus,
 		}); inErr != nil {
 			return inErr
 		}
@@ -992,159 +794,6 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 	return result, nil
 }
 
-// --- renew ---
-
-// RenewParams carries the renew request fields.
-type RenewParams struct {
-	ID             string
-	NewStartDate   time.Time
-	NewEndDate     *time.Time
-	NewAgreementID *string
-	NewPosition    *string // free-text; nil/"" keeps the predecessor's position
-	Notes          *string
-	ActorUserID    *string
-}
-
-// RenewResult bundles the superseded predecessor + new successor + warnings.
-type RenewResult struct {
-	Predecessor domain.Placement
-	Successor   domain.Placement
-	Warnings    []string
-}
-
-// RenewPlacement supersedes the predecessor (releasing the partial unique index)
-// then creates the successor — same company + position by default.
-func (s *PlacementService) RenewPlacement(ctx context.Context, p RenewParams) (RenewResult, error) {
-	cur, err := s.repo.GetPlacementByID(ctx, p.ID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return RenewResult{}, apperr.NotFound()
-	}
-	if err != nil {
-		return RenewResult{}, apperr.Internal(err)
-	}
-	if isTerminal(cur.LifecycleStatus) {
-		return RenewResult{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
-	}
-	// Scope guard: a lead may only renew placements at its assigned client
-	// companies (no-op for super/hr = global). A renewal keeps the same company.
-	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
-		return RenewResult{}, serr
-	}
-
-	// Destination company must still be ACTIVE.
-	company, err := s.repo.GetClientCompany(ctx, cur.ClientCompanyID)
-	if err != nil {
-		return RenewResult{}, apperr.Internal(err)
-	}
-	if !strings.EqualFold(company.Status, "active") {
-		return RenewResult{}, apperr.Conflict("COMPANY_INACTIVE")
-	}
-
-	// 1-day buffer (BR-2): new_start_date must be > predecessor.end_date.
-	if cur.EndDate != nil && !p.NewStartDate.After(*cur.EndDate) {
-		return RenewResult{}, apperr.Rule("PLACEMENT_PERIOD_OVERLAP", map[string]string{"new_start_date": "Tanggal mulai harus setelah penempatan sebelumnya berakhir."})
-	}
-
-	// Agreement: default to the predecessor's (may be nil = pending). nil propagates
-	// so the renewal of a pending placement stays pending.
-	agreementID := cur.AgreementID
-	if p.NewAgreementID != nil && *p.NewAgreementID != "" {
-		agreementID = p.NewAgreementID
-	}
-	position := cur.Position
-	if p.NewPosition != nil && *p.NewPosition != "" {
-		position = *p.NewPosition
-	}
-
-	// PKWT auto-cap on new_end_date — ONLY when an agreement is present.
-	var warnings []string
-	endDate := p.NewEndDate
-	if agreementID != nil {
-		if ag, agErr := s.repo.GetAgreement(ctx, *agreementID); agErr == nil {
-			if ag.EndDate != nil && endDate != nil && endDate.After(*ag.EndDate) {
-				capped := *ag.EndDate
-				endDate = &capped
-				warnings = append(warnings, "END_DATE_AUTO_CAPPED_TO_AGREEMENT")
-			}
-		}
-	}
-
-	today := s.today()
-	successorStatus := "PENDING_START"
-	if !p.NewStartDate.After(today) {
-		successorStatus = "ACTIVE"
-	}
-
-	var result RenewResult
-	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		before := cur.LifecycleStatus
-		// Supersede predecessor FIRST (release the index), effective successor start.
-		pred, inErr := s.repo.SetPlacementLifecycle(ctx, tx, SetLifecycleParams{
-			ID:              cur.ID,
-			LifecycleStatus: "SUPERSEDED",
-			EndedReason:     strPtr("SUPERSEDED"),
-			EndedAt:         &p.NewStartDate,
-		})
-		if inErr != nil {
-			return inErr
-		}
-
-		succ, inErr := s.repo.CreatePlacement(ctx, tx, CreatePlacementParams{
-			EmployeeID:      cur.EmployeeID,
-			AgreementID:     agreementID,
-			ClientCompanyID: cur.ClientCompanyID,
-			SiteID:          cur.SiteID,
-			Position:        position,
-			StartDate:       p.NewStartDate,
-			EndDate:         endDate,
-			Notes:           p.Notes,
-			LifecycleStatus: successorStatus,
-			PredecessorID:   &cur.ID,
-			CreatedBy:       p.ActorUserID,
-		})
-		if inErr != nil {
-			if isUniqueViolation(inErr) {
-				return apperr.Conflict("INV_1_VIOLATION")
-			}
-			return inErr
-		}
-
-		if inErr := s.repo.SetPlacementSuccessor(ctx, tx, cur.ID, &succ.ID); inErr != nil {
-			return inErr
-		}
-		pred.SuccessorID = &succ.ID
-
-		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
-			PlacementID: cur.ID, Action: "renew_out", ActorUserID: p.ActorUserID,
-			EffectiveDate: &p.NewStartDate, StatusBefore: &before, StatusAfter: strPtr("SUPERSEDED"), Notes: p.Notes,
-		}); inErr != nil {
-			return inErr
-		}
-		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
-			PlacementID: succ.ID, Action: "renew_in", ActorUserID: p.ActorUserID,
-			EffectiveDate: &p.NewStartDate, StatusAfter: &successorStatus, Notes: p.Notes,
-		}); inErr != nil {
-			return inErr
-		}
-		if inErr := audit.Record(ctx, tx, audit.Entry{
-			Action: audit.Action("placement.renew"), EntityType: "placement", EntityID: succ.ID,
-			Before: map[string]any{"predecessor_id": cur.ID, "predecessor_status": "SUPERSEDED"},
-			After:  map[string]any{"successor_id": succ.ID},
-		}); inErr != nil {
-			return inErr
-		}
-		// TODO(Phase-11 notifications): enqueue NotificationArgs (renew).
-
-		result.Predecessor = pred
-		result.Successor = succ
-		return nil
-	}); err != nil {
-		return RenewResult{}, asAppErr(err)
-	}
-	result.Warnings = warnings
-	return result, nil
-}
-
 // --- helpers ---
 
 func inv1Conflict(existing domain.Placement) error {
@@ -1154,7 +803,7 @@ func inv1Conflict(existing domain.Placement) error {
 		INVViolationDetails{
 			Invariant:        "INV_1",
 			CurrentPlacement: &sum,
-			SuggestedActions: []string{"transfer", "end"},
+			SuggestedActions: []string{"transfer"},
 		})
 }
 
@@ -1164,22 +813,6 @@ func isActiveLifecycle(status string) bool {
 		return true
 	}
 	return false
-}
-
-// validateStartWithinAgreement rejects a start_date before the agreement starts
-// (BR-1b out-of-range start). PKWT end overflow is auto-capped by the caller.
-func validateStartWithinAgreement(ag AgreementRef, start time.Time) error {
-	if start.Before(ag.StartDate) {
-		return apperr.Rule("PLACEMENT_OUTSIDE_CONTRACT", map[string]string{
-			"start_date": "Sebelum perjanjian dimulai.",
-		})
-	}
-	if ag.EndDate != nil && start.After(*ag.EndDate) {
-		return apperr.Rule("PLACEMENT_OUTSIDE_CONTRACT", map[string]string{
-			"start_date": "Setelah perjanjian berakhir.",
-		})
-	}
-	return nil
 }
 
 func strPtr(s string) *string { return &s }

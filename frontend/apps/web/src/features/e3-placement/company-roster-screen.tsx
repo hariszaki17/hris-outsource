@@ -29,6 +29,7 @@ import type { CompanyRosterResponse, Placement } from '@swp/api-client/e3';
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -212,12 +213,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
       },
     },
     {
-      id: 'posisi',
-      header: t('rosterColPosisi'),
-      width: 195,
-      cell: (pl) => <span className="text-[13px] text-text-2">{pl.position_name ?? '—'}</span>,
-    },
-    {
       id: 'periode',
       header: t('rosterColPeriode'),
       width: 230,
@@ -279,6 +274,27 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
         </div>
       );
     },
+  });
+
+  columns.push({
+    id: 'detail',
+    header: '',
+    width: 96,
+    align: 'right',
+    cell: (pl) => (
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() =>
+          void navigate({
+            to: '/placements/$placementId',
+            params: { placementId: pl.id },
+          })
+        }
+      >
+        {t('common.detail', { ns: 'translation' })}
+      </Button>
+    ),
   });
 
   // ---------------------------------------------------------------------------
@@ -467,12 +483,6 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
           getRowId={(p) => p.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(pl) =>
-            void navigate({
-              to: '/placements/$placementId',
-              params: { placementId: pl.id },
-            })
-          }
           empty={
             hasFilters ? (
               <EmptyState

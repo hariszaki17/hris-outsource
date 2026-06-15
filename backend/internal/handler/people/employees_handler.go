@@ -136,6 +136,7 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 		BankName:              bankName,
 		BankAccountNumber:     bankAccNum,
 		BankAccountHolderName: bankHolder,
+		Position:              derefString(req.Position),
 		LoginEmail:            derefString(req.LoginEmail),
 	}
 
@@ -224,6 +225,7 @@ func (h *Handler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		BankName:              bankName,
 		BankAccountNumber:     bankAccNum,
 		BankAccountHolderName: bankHolder,
+		Position:              coalesce(req.Position, current.CurrentPosition),
 	}
 
 	emp, err := h.svc.UpdateEmployee(r.Context(), params)

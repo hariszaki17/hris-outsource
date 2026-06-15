@@ -298,9 +298,13 @@ func run() error {
 	approvalSvc.RegisterHooks(approvaldom.RequestTypeOvertime, approvaldom.Hooks{
 		OnApproved: overtimeSvc.OnApproved, OnRejected: overtimeSvc.OnRejected,
 	})
-	// Inject the engine into leave/overtime so :submit / :confirm create the instance.
+	approvalSvc.RegisterHooks(approvaldom.RequestTypeCorrection, approvaldom.Hooks{
+		OnApproved: correctionSvc.OnApproved, OnRejected: correctionSvc.OnRejected,
+	})
+	// Inject the engine into leave/overtime/correction so :submit / create opens the instance.
 	leaveSvc.SetApprovalEngine(approvalSvc)
 	overtimeSvc.SetApprovalEngine(approvalSvc)
+	correctionSvc.SetApprovalEngine(approvalSvc)
 	approvalHandler := approvalhttp.NewHandler(approvalSvc)
 
 	// Payroll slice (10-02): E8 historical, read-only payslip archive + audit notes

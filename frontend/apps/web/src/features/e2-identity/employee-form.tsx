@@ -40,10 +40,11 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { TempPasswordModal } from './employee-overlays.tsx';
+import { PositionPicker } from './pickers/position-picker.tsx';
 
 // ---------------------------------------------------------------------------
 // Zod schema (hand-written — E2 Zod codegen deferred)
@@ -53,6 +54,8 @@ const employeeSchema = z.object({
   full_name: z.string().min(1).max(200),
   nik: z.string().min(16).max(16, 'NIK harus 16 digit'),
   nip: z.string().optional(),
+  // Position is the agent's free-text job title (required; moved off placement 2026-06-15).
+  position: z.string().min(1, 'Posisi wajib diisi'),
   join_at: z.string().min(1),
   // FilterSelect emits '' for the empty placeholder; coerce '' → undefined before enum check.
   gender: z.preprocess((v) => (v === '' ? undefined : v), z.nativeEnum(Gender).optional()),
@@ -187,6 +190,27 @@ function EmployeeFormBody({ form, isEdit }: EmployeeFormBodyProps) {
               type="date"
               {...register('join_at')}
               aria-invalid={!!errors.join_at}
+            />
+          </FormField>
+
+          <FormField
+            label={t('fieldPosition')}
+            htmlFor="position"
+            required
+            hint={t('fieldPositionHint')}
+            error={errors.position?.message}
+          >
+            <Controller
+              control={form.control}
+              name="position"
+              render={({ field, fieldState }) => (
+                <PositionPicker
+                  value={field.value ?? null}
+                  onChange={(v) => field.onChange(v ?? '')}
+                  error={!!fieldState.error}
+                  placeholder={t('fieldPositionPlaceholder')}
+                />
+              )}
             />
           </FormField>
         </FormSection>
@@ -361,6 +385,7 @@ export function CreateEmployeeScreen() {
       full_name: values.full_name,
       nik: values.nik,
       nip: values.nip || undefined,
+      position: values.position,
       join_at: values.join_at,
       gender: values.gender,
       birth_date: values.birth_date || undefined,
@@ -504,6 +529,7 @@ export function EditEmployeeScreen({
       full_name: emp.full_name,
       nik: emp.nik,
       nip: emp.nip ?? '',
+      position: emp.current_position ?? '',
       join_at: emp.join_at,
       gender: emp.gender,
       birth_date: emp.birth_date ?? '',
@@ -527,6 +553,7 @@ export function EditEmployeeScreen({
       full_name: values.full_name,
       nik: values.nik,
       nip: values.nip || undefined,
+      position: values.position,
       join_at: values.join_at,
       gender: values.gender,
       birth_date: values.birth_date || undefined,

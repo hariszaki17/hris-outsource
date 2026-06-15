@@ -24,6 +24,7 @@ import {
 } from '@swp/api-client/e2';
 import type { StatusTone } from '@swp/design-tokens';
 import {
+  Button,
   type Column,
   ConfirmDialog,
   CursorPagination,
@@ -158,13 +159,7 @@ export function ClientCompaniesScreen() {
             <Building2 size={18} className="text-text-2" aria-hidden />
           </div>
           <div className="flex flex-col gap-0.5 min-w-0">
-            <Link
-              to={'/client-companies/$clientCompanyId' as never}
-              params={{ clientCompanyId: row.id } as never}
-              className="text-[14px] font-semibold text-text hover:text-primary truncate"
-            >
-              {row.name}
-            </Link>
+            <span className="text-[14px] font-semibold text-text truncate">{row.name}</span>
             <span className="text-[11px] text-text-2 truncate">{row.address}</span>
           </div>
         </div>
@@ -222,36 +217,50 @@ export function ClientCompaniesScreen() {
         );
       },
     },
-  ];
-
-  // Deactivate/Reactivate are hr_admin/super_admin only — append the actions column only when
-  // the role can write, so read-only roles never get a row action that would 403.
-  if (canWrite) {
-    columns.push({
+    // Detail + Deactivate/Reactivate live in one right-aligned cell so the buttons sit
+    // adjacent (gap-2). Deactivate/Reactivate are hr_admin/super_admin only — gated by
+    // canWrite so read-only roles never get a row action that would 403.
+    {
       id: 'actions',
       header: '',
-      align: 'center',
-      flex: 0.6,
-      cell: (row) =>
-        row.status === ClientCompanyStatus.ACTIVE ? (
-          <button
-            type="button"
-            className="rounded-md px-3 py-1.5 text-[13px] font-medium bg-destructive text-destructive-foreground hover:opacity-90"
-            onClick={() => setDeactivateTarget(row)}
+      width: canWrite ? 230 : 110,
+      align: 'right',
+      cell: (row) => (
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              void navigate({
+                to: '/client-companies/$clientCompanyId' as never,
+                params: { clientCompanyId: row.id } as never,
+              })
+            }
           >
-            {t('actions.deactivate')}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="rounded-md px-3 py-1.5 text-[13px] font-medium text-ok-tx hover:bg-ok-bg"
-            onClick={() => setReactivateTarget(row)}
-          >
-            {t('actions.reactivate')}
-          </button>
-        ),
-    });
-  }
+            {t('common.detail', { ns: 'translation' })}
+          </Button>
+          {canWrite &&
+            (row.status === ClientCompanyStatus.ACTIVE ? (
+              <button
+                type="button"
+                className="rounded-md px-3 py-1.5 text-[13px] font-medium bg-destructive text-destructive-foreground hover:opacity-90"
+                onClick={() => setDeactivateTarget(row)}
+              >
+                {t('actions.deactivate')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rounded-md px-3 py-1.5 text-[13px] font-medium text-ok-tx hover:bg-ok-bg"
+                onClick={() => setReactivateTarget(row)}
+              >
+                {t('actions.reactivate')}
+              </button>
+            ))}
+        </div>
+      ),
+    },
+  ];
 
   const hasFilters = !!(search.q || search.status);
 

@@ -2,7 +2,7 @@
  * AgentPage — page wrapper for the agent self-service screens (/me/*).
  *
  * Matches the canonical web page layout used across the console (see e.g.
- * features/e8-payroll/payslip-archive-screen.tsx, features/e10-reporting/dashboard-screen.tsx):
+ * features/e8-payroll/payslip-archive-screen.tsx, features/e10-reporting/billable-report-screen.tsx):
  * a full-width `flex-col gap-[18px]` stack with a title band (`h1` + subtitle on the left,
  * optional actions on the right) followed by the screen body. NOT a narrow centered column —
  * agent screens are full-bleed in the shell content area like every other screen.

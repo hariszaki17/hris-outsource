@@ -1060,18 +1060,29 @@ paths:
     post:
       tags: [corrections]
       operationId: createCorrection
-      summary: File an attendance correction request.
+      summary: File an attendance correction request (routes through E11 on submit).
       description: |
-        Agent creates a correction for their own past attendance. Server validates:
+        Agent creates a correction for their own attendance. **Submitting opens an E11
+        `approval_instance`** (same engine as leave/overtime) bound to this correction
+        (`request_type=CORRECTION`); the correction starts `PENDING` and carries `approval_instance_id`.
+        Decisions happen via `POST /approval-instances/{id}:approve|:reject` — there are no
+        correction-native approve/reject endpoints. On final approval the `OnApproved` hook applies
+        the change (or **creates** the record for `NEW_ENTRY`) and sets `is_payable`.
+
+        Server validates:
 
           - `attendance.employee_id == caller.employee_id` for `agent` role (HR/leader may file on behalf
             with `on_behalf_of=true` semantics — server fills `requester_id` to the actual caller).
-          - **7-day window** for agents: `now - attendance.shift_date > 7 days` → `422 OUTSIDE_CORRECTION_WINDOW`
+          - **7-day window** for agents — measured against `attendance.shift_date` for existing records,
+            or against `work_date` for `NEW_ENTRY`: older → `422 OUTSIDE_CORRECTION_WINDOW`
             (HR exempt; older corrections by HR only — EPICS §8 lock).
           - **One active correction at a time per attendance:** an existing `PENDING` correction on the
             same `attendance_id` → `409 CORRECTION_ALREADY_PENDING`.
-          - **Evidence required** for `check_in` / `check_out` time corrections via `evidence_file_id`
-            (multipart-uploaded via `/attendance:photo-upload` or via the leave-style attachments endpoint).
+          - **`NEW_ENTRY` only:** if a record already exists for that `work_date` → `409 ATTENDANCE_ALREADY_EXISTS`
+            (use a `CHECK_IN`/`CHECK_OUT` correction on the existing record instead). The agent must have an
+            active placement on `work_date` (else `422 NO_ACTIVE_PLACEMENT`).
+          - **Evidence required** for `check_in` / `check_out` / `new_entry` time corrections via
+            `evidence_file_id` (multipart-uploaded via `/attendance:photo-upload` or the attachments endpoint).
 
         Requires `Idempotency-Key`.
       x-rbac:
@@ -1110,6 +1121,15 @@ paths:
                   type: CODE
                   proposed_attendance_code_id: SWP-AC-007
                   reason: "Hari ini WFO bantuan dari kantor pusat — kode harusnya `wfo_assist`."
+              new_entry_no_shift:
+                summary: Budi worked a day with no record/no shift; creates the record
+                value:
+                  type: NEW_ENTRY
+                  work_date: '2026-06-10'
+                  proposed_check_in_at: '2026-06-10T07:00:00Z'
+                  proposed_check_out_at: '2026-06-10T15:00:00Z'
+                  reason: "Diminta backup di lokasi lain, tidak ada jadwal & lupa absen."
+                  evidence_file_id: SWP-FILE-cor-3310
       responses:
         '201':
           description: Correction created (PENDING).
@@ -1165,6 +1185,16 @@ paths:
                       fields:
                         pending_correction_id: SWP-COR-2199
                       request_id: req_01J5XKDBCDEFG
+                attendance_exists:
+                  summary: NEW_ENTRY for a day that already has a record
+                  value:
+                    error:
+                      code: ATTENDANCE_ALREADY_EXISTS
+                      message: Sudah ada catatan kehadiran untuk tanggal ini. Ajukan koreksi pada catatan tersebut.
+                      fields:
+                        attendance_id: SWP-ATT-10720
+                        work_date: '2026-06-10'
+                      request_id: req_01J5XKDBCXEYZ
         '422':
           description: Outside correction window OR business rule.
           content:
@@ -1287,109 +1317,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /corrections/{id}:approve:
-    post:
-      tags: [corrections]
-      operationId: approveCorrection
-      summary: Approve a correction — applies diff to the attendance and re-evaluates.
-      description: |
-        Transitions the correction `PENDING → APPROVED → APPLIED` atomically (server-side):
-
-          1. `decided_by` / `decided_at` set; status flips to `APPROVED`.
-          2. `Attendance` record updated with proposed values; `original_snapshot` preserved on
-             the correction.
-          3. `Attendance` re-evaluated (F5.2 EV-7): `is_late`, `late_minutes`, `auto_closed`,
-             `status`, `verification_status`, `flags` recomputed. The `CORRECTED` flag is added.
-          4. Correction `status=APPLIED`.
-
-        Returns both the updated correction and a reference to the new attendance state.
-
-        **Leader-own escalation:** if the underlying attendance belongs to a leader at the same
-        company, only HR may approve.
-
-        **Downstream propagation (E7 OT, E10 billing):** noted in PRD F5.4 C-4 as open;
-        v1 emits a notification to recomputation listeners (no synchronous re-bill).
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - web-correction-detail
-      parameters:
-        - $ref: '#/components/parameters/CorrectionId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note:
-                  type: string
-                  maxLength: 500
-      responses:
-        '200':
-          description: Correction applied.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { $ref: '#/components/schemas/Correction' }
-                  attendance: { $ref: '#/components/schemas/Attendance' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Correction not in PENDING state.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
-
-  /corrections/{id}:reject:
-    post:
-      tags: [corrections]
-      operationId: rejectCorrection
-      summary: Reject a correction with a required reason.
-      x-rbac:
-        roles: [shift_leader, hr_admin, super_admin]
-        scope: company_or_global
-      x-design-screens:
-        - web-correction-detail
-        - reject-correction-modal  # P0 missing per E5-AUDIT §3
-      parameters:
-        - $ref: '#/components/parameters/CorrectionId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [reason]
-              properties:
-                reason: { type: string, minLength: 5, maxLength: 500 }
-            examples:
-              reject:
-                value: { reason: "Bukti yang dilampirkan tidak menunjukkan jam clock-in. Lampirkan ulang." }
-      responses:
-        '200':
-          description: Correction rejected.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data: { $ref: '#/components/schemas/Correction' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthenticated' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409':
-          description: Correction not in PENDING state.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  # NOTE (2026-06-15): correction-native :approve / :reject were REMOVED. Corrections now route
+  # through the E11 approval engine (request_type=CORRECTION) exactly like leave/overtime — decide
+  # via `POST /approval-instances/{id}:approve|:reject` (docs/api/E11-approvals). Final approval fires
+  # the correction's `OnApproved` hook (apply / create-record + set `is_payable`); rejection fires
+  # `OnRejected` (status → REJECTED). The requester withdraw path (`:cancel`) stays here.
 
   /corrections/{id}:cancel:
     post:
@@ -1428,6 +1360,70 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  /attendance/{id}:set-payable:
+    post:
+      tags: [attendance]
+      operationId: setAttendancePayable
+      summary: Flag a no-shift attendance day payable (SL/HR/super).
+      description: |
+        Sets `is_payable` for an attendance day that has **no scheduled shift** (mirrors the leave
+        per-day payable flag — E6 `setLeaveDayPayable`). Used for days created/applied via a
+        `NEW_ENTRY` correction (or any no-shift record) where payability isn't auto-decidable.
+
+          - A day that **had a scheduled shift** is auto-payable and is rejected here → `422 ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE`.
+          - The record should be an applied/verified outcome of an approved correction; payroll treats
+            `is_payable=null` as non-payable until flagged.
+
+        Audited. Requires `Idempotency-Key`.
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - web-correction-detail
+      parameters:
+        - $ref: '#/components/parameters/AttendanceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payable]
+              properties:
+                payable: { type: boolean }
+            examples:
+              mark_payable:
+                value: { payable: true }
+      responses:
+        '200':
+          description: Updated attendance record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Attendance' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Not a flaggable day (the day had a scheduled shift → auto-payable).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                has_shift:
+                  value:
+                    error:
+                      code: ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE
+                      message: Hari ini memiliki jadwal shift sehingga otomatis layak dibayar; tidak perlu ditandai manual.
+                      fields:
+                        attendance_id: SWP-ATT-10711
+                      request_id: req_01J5XKDBCPAYB
 
 # ===========================================================================
 # Components
@@ -1637,6 +1633,20 @@ components:
           description: |
             ID of the most-recently-applied correction, if any. The `CORRECTED` flag also appears
             in `flags[]`. Full correction history via `GET /corrections?employee_id=...&attendance_id=...`.
+        is_payable:
+          type: [boolean, "null"]
+          description: |
+            Whether this attendance day counts as payable for payroll (mirrors the leave per-day
+            payable model — E6 `LeaveDayPayability`). Set when an approved correction is applied:
+
+              - `true` — payable: the day **had a scheduled shift** (auto-payable), or an SL/HR/super
+                explicitly flagged a no-shift day payable via `:set-payable`.
+              - `null` — **pending**: an applied `NEW_ENTRY` (or correction) on a **no-shift** day,
+                awaiting an SL/HR/super decision. Payroll treats `null` as non-payable until flagged.
+              - `false` — explicitly marked non-payable.
+
+            `null`/absent on organic clock-in records that pre-date this feature; payroll's existing
+            `VERIFIED`/`worked_minutes` path is unaffected for shift-backed records.
         created_by:
           type: [string, "null"]
           pattern: '^SWP-EMP-[A-Za-z0-9]+$'
@@ -1925,7 +1935,6 @@ components:
       type: object
       required:
         - id
-        - attendance_id
         - requester_id
         - type
         - reason
@@ -1938,8 +1947,22 @@ components:
           type: string
           pattern: '^SWP-COR-[A-Za-z0-9]+$'
         attendance_id:
-          type: string
+          type: [string, "null"]
           pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+          description: |
+            Target attendance record. Null for a still-`PENDING` `NEW_ENTRY` (no record exists yet);
+            set to the newly-created record once a `NEW_ENTRY` correction is `APPLIED`.
+        work_date:
+          type: [string, "null"]
+          format: date
+          description: Set for `NEW_ENTRY` corrections (the day the record is created for); null otherwise.
+        approval_instance_id:
+          type: [string, "null"]
+          pattern: '^SWP-APV-[A-Za-z0-9]+$'
+          description: |
+            The E11 `approval_instance` opened on submit. Null only for a correction not yet submitted
+            (none in v1 — corrections submit on create). Clients follow it to `GET /approval-instances/{id}`
+            for the live approval chain.
         requester_id:
           type: string
           pattern: '^SWP-EMP-[A-Za-z0-9]+$'
@@ -2002,21 +2025,40 @@ components:
 
     CorrectionWriteRequest:
       type: object
-      required: [attendance_id, type, reason]
+      required: [type, reason]
+      description: |
+        **Conditional shape by `type`:**
+
+          - `CHECK_IN` / `CHECK_OUT` / `CODE` / `OTHER` (correct an existing record): `attendance_id`
+            is **required**; `work_date` is **forbidden**.
+          - `NEW_ENTRY` (create a record for a day with none): `work_date` is **required**;
+            `attendance_id` is **forbidden**; `proposed_check_in_at` is **required** (and must fall on
+            `work_date`); `proposed_check_out_at` is optional. The server resolves the agent's active
+            placement (company/site/position) for the new record; `schedule_id` is null (no shift) and
+            the record is flagged `UNSCHEDULED` + `CORRECTED`.
+
+        The **7-day self-correction window** (agents) is measured against `attendance.shift_date`
+        for existing records and against `work_date` for `NEW_ENTRY`.
       properties:
         attendance_id:
-          type: string
+          type: [string, "null"]
           pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+          description: Target record. Required for all types **except** `NEW_ENTRY`; forbidden for `NEW_ENTRY`.
+        work_date:
+          type: [string, "null"]
+          format: date
+          description: |
+            The day to create attendance for. **Required iff `type=NEW_ENTRY`**; forbidden otherwise.
         type:
           $ref: '#/components/schemas/CorrectionType'
         proposed_check_in_at:
           type: [string, "null"]
           format: date-time
-          description: Required iff `type=CHECK_IN`.
+          description: Required iff `type=CHECK_IN` or `type=NEW_ENTRY`.
         proposed_check_out_at:
           type: [string, "null"]
           format: date-time
-          description: Required iff `type=CHECK_OUT`.
+          description: Required iff `type=CHECK_OUT`; optional for `NEW_ENTRY`.
         proposed_attendance_code_id:
           type: [string, "null"]
           pattern: '^SWP-AC-[A-Za-z0-9]+$'
@@ -2027,21 +2069,34 @@ components:
           maxLength: 500
         evidence_file_id:
           type: [string, "null"]
-          description: Required for `CHECK_IN` / `CHECK_OUT`. Optional for `CODE` / `OTHER`.
+          description: Required for `CHECK_IN` / `CHECK_OUT` / `NEW_ENTRY`. Optional for `CODE` / `OTHER`.
 
     CorrectionType:
       type: string
-      enum: [CHECK_IN, CHECK_OUT, CODE, OTHER]
+      enum: [CHECK_IN, CHECK_OUT, CODE, OTHER, NEW_ENTRY]
+      description: |
+        - `CHECK_IN` / `CHECK_OUT` — fix the clock-in / clock-out time on an existing record.
+        - `CODE` — fix the attendance code on an existing record.
+        - `OTHER` — free-form correction on an existing record (reason-only).
+        - `NEW_ENTRY` — **create** an attendance record for a `work_date` that has **no existing
+          record** (forgot to clock in/out entirely, or a day with **no configured shift**).
+          Carries `work_date` (instead of `attendance_id`) + at least `proposed_check_in_at`.
 
     CorrectionStatus:
       type: string
       enum: [PENDING, APPROVED, APPLIED, REJECTED, CANCELLED]
       description: |
-        - `PENDING` — awaiting decision.
-        - `APPROVED` — leader/HR approved; about to apply (transient).
-        - `APPLIED` — applied to `Attendance` and re-evaluated; terminal.
-        - `REJECTED` — rejected with reason; terminal.
-        - `CANCELLED` — requester withdrew before decision; terminal.
+        Decisions are routed through the **E11 approval engine** (same as leave/overtime); the
+        correction carries `approval_instance_id` and is decided via
+        `POST /approval-instances/{id}:approve|:reject`. No correction-native approve/reject endpoints.
+
+        - `PENDING` — submitted; an E11 `approval_instance` is open and awaiting its line(s).
+        - `APPROVED` — engine reached final approval; about to apply (transient, set inside the
+          `OnApproved` hook before the attendance mutation).
+        - `APPLIED` — proposed values applied to (or a new record created on) `Attendance` and
+          re-evaluated; terminal.
+        - `REJECTED` — engine rejected (reason on the approval action); terminal.
+        - `CANCELLED` — requester withdrew before the engine decided (`:cancel`); terminal.
 
     # -----------------------------------------------------------------------
     # Errors
@@ -2067,6 +2122,8 @@ components:
               - `NOT_CLOCKED_IN` (409)
               - `OUTSIDE_CORRECTION_WINDOW` (422; `attendance_date` + `window_days` in `fields`)
               - `CORRECTION_ALREADY_PENDING` (409; `pending_correction_id` in `fields`)
+              - `ATTENDANCE_ALREADY_EXISTS` (409; NEW_ENTRY for a day that already has a record — `attendance_id` + `work_date` in `fields`)
+              - `ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE` (422; `:set-payable` on a shift-backed day — `attendance_id` in `fields`)
               - `VERIFY_OWN_RECORD` (403)
               - `OUT_OF_SCOPE` (403)
               - `NO_ACTIVE_PLACEMENT` (422)

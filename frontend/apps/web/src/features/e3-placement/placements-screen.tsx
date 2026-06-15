@@ -29,6 +29,7 @@ import type { Placement, PlacementStats } from '@swp/api-client/e3';
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -190,14 +191,6 @@ export function PlacementsScreen() {
       ),
     },
     {
-      id: 'posisi',
-      header: t('colPosisi'),
-      width: undefined,
-      cell: (pl) => (
-        <span className="text-[13px] text-text-2">{pl.position_name ?? pl.position ?? '—'}</span>
-      ),
-    },
-    {
       id: 'periode',
       header: t('colPeriode'),
       width: 220,
@@ -228,6 +221,26 @@ export function PlacementsScreen() {
             </StatusBadge>
           )}
         </div>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (pl) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            void navigate({
+              to: '/placements/$placementId',
+              params: { placementId: pl.id },
+            })
+          }
+        >
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -406,12 +419,6 @@ export function PlacementsScreen() {
           getRowId={(p) => p.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(pl) =>
-            void navigate({
-              to: '/placements/$placementId',
-              params: { placementId: pl.id },
-            })
-          }
           empty={
             expiringOn ? (
               <EmptyState

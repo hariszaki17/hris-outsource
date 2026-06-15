@@ -22,8 +22,9 @@ SET check_in_at        = COALESCE($1::timestamptz, check_in_at),
     late_minutes       = COALESCE($6::integer, late_minutes),
     flags              = array_remove(flags, 'CORRECTED') || ARRAY['CORRECTED'],
     last_correction_id = $7,
+    is_payable         = COALESCE($8::boolean, is_payable),
     updated_at         = now()
-WHERE id = $8
+WHERE id = $9
   AND deleted_at IS NULL
 RETURNING id, employee_id, placement_id, schedule_id, company_id,
           site_id, position, attendance_code_id, shift_start_at, shift_end_at,
@@ -32,7 +33,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          created_at, updated_at
+          is_payable, created_at, updated_at
 `
 
 type ApplyCorrectionToAttendanceParams struct {
@@ -43,6 +44,7 @@ type ApplyCorrectionToAttendanceParams struct {
 	IsLate           *bool
 	LateMinutes      *int32
 	LastCorrectionID *string
+	IsPayable        *bool
 	ID               string
 }
 
@@ -84,6 +86,7 @@ type ApplyCorrectionToAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -102,6 +105,7 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 		arg.IsLate,
 		arg.LateMinutes,
 		arg.LastCorrectionID,
+		arg.IsPayable,
 		arg.ID,
 	)
 	var i ApplyCorrectionToAttendanceRow
@@ -143,6 +147,7 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -159,6 +164,7 @@ INSERT INTO attendance (
     wfo, is_late, late_minutes, worked_minutes,
     in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
     status, verification_status, flags,
+    is_payable,
     created_by,
     created_at, updated_at
 ) VALUES (
@@ -171,6 +177,7 @@ INSERT INTO attendance (
     $20, $21, $22, $23, $24,
     $25, $26, $27::text[],
     $28,
+    $29,
     now(), now()
 ) RETURNING id, employee_id, placement_id, schedule_id, company_id,
             site_id, position, attendance_code_id, shift_start_at, shift_end_at,
@@ -179,6 +186,7 @@ INSERT INTO attendance (
             in_geofence, in_distance_m, out_geofence, out_distance_m,
             geofence_radius_m, status, verification_status, flags, verified_by,
             verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+            is_payable,
             created_by,
             created_at, updated_at
 `
@@ -211,6 +219,7 @@ type CreateManualAttendanceParams struct {
 	Status             string
 	VerificationStatus string
 	Flags              []string
+	IsPayable          *bool
 	CreatedBy          *string
 }
 
@@ -252,6 +261,7 @@ type CreateManualAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedBy          *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -291,6 +301,7 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		arg.Status,
 		arg.VerificationStatus,
 		arg.Flags,
+		arg.IsPayable,
 		arg.CreatedBy,
 	)
 	var i CreateManualAttendanceRow
@@ -332,6 +343,7 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -349,6 +361,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
+       a.is_payable,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -399,6 +412,7 @@ type GetAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	EmployeeName       *string
@@ -448,6 +462,7 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.EmployeeName,
@@ -467,6 +482,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
+       a.is_payable,
        a.created_at, a.updated_at
 FROM attendance a
 WHERE a.id = $1
@@ -512,6 +528,7 @@ type GetAttendanceForUpdateRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -559,6 +576,7 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -570,7 +588,7 @@ SELECT
     p.id       AS placement_id,
     p.client_company_id,
     p.site_id,
-    p.position AS position,
+    e.position AS position,
     e.full_name AS employee_name,
     cc.name      AS company_name,
     cs.name      AS site_name,
@@ -678,6 +696,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
+       a.is_payable,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -758,6 +777,7 @@ type ListAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	EmployeeName       *string
@@ -844,6 +864,7 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.RejectedAt,
 			&i.RejectReason,
 			&i.LastCorrectionID,
+			&i.IsPayable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.EmployeeName,
@@ -877,7 +898,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          created_at, updated_at
+          is_payable, created_at, updated_at
 `
 
 type RejectAttendanceParams struct {
@@ -924,6 +945,7 @@ type RejectAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -970,6 +992,122 @@ func (q *Queries) RejectAttendance(ctx context.Context, arg RejectAttendancePara
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setAttendancePayable = `-- name: SetAttendancePayable :one
+UPDATE attendance
+SET is_payable = $1,
+    updated_at = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+RETURNING id, employee_id, placement_id, schedule_id, company_id,
+          site_id, position, attendance_code_id, shift_start_at, shift_end_at,
+          check_in_at, check_out_at, lat_in, lng_in, lat_out, lng_out, photo_in_id,
+          photo_out_id, wfo, is_late, late_minutes, worked_minutes, auto_closed,
+          in_geofence, in_distance_m, out_geofence, out_distance_m,
+          geofence_radius_m, status, verification_status, flags, verified_by,
+          verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
+          is_payable, created_at, updated_at
+`
+
+type SetAttendancePayableParams struct {
+	IsPayable *bool
+	ID        string
+}
+
+type SetAttendancePayableRow struct {
+	ID                 string
+	EmployeeID         string
+	PlacementID        string
+	ScheduleID         *string
+	CompanyID          string
+	SiteID             string
+	Position           string
+	AttendanceCodeID   *string
+	ShiftStartAt       *time.Time
+	ShiftEndAt         *time.Time
+	CheckInAt          *time.Time
+	CheckOutAt         *time.Time
+	LatIn              *float64
+	LngIn              *float64
+	LatOut             *float64
+	LngOut             *float64
+	PhotoInID          *string
+	PhotoOutID         *string
+	Wfo                bool
+	IsLate             bool
+	LateMinutes        int32
+	WorkedMinutes      *int32
+	AutoClosed         bool
+	InGeofence         *bool
+	InDistanceM        *int32
+	OutGeofence        *bool
+	OutDistanceM       *int32
+	GeofenceRadiusM    int32
+	Status             string
+	VerificationStatus string
+	Flags              []string
+	VerifiedBy         *string
+	VerifiedAt         *time.Time
+	RejectedBy         *string
+	RejectedAt         *time.Time
+	RejectReason       *string
+	LastCorrectionID   *string
+	IsPayable          *bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// Flag a no-shift attendance day payable/not (SL/HR/super; F5.4 CR-13). The service
+// guards that the day has no scheduled shift (a shift-backed day is auto-payable →
+// 422 ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE) before calling. Returns the full row.
+func (q *Queries) SetAttendancePayable(ctx context.Context, arg SetAttendancePayableParams) (SetAttendancePayableRow, error) {
+	row := q.db.QueryRow(ctx, setAttendancePayable, arg.IsPayable, arg.ID)
+	var i SetAttendancePayableRow
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.PlacementID,
+		&i.ScheduleID,
+		&i.CompanyID,
+		&i.SiteID,
+		&i.Position,
+		&i.AttendanceCodeID,
+		&i.ShiftStartAt,
+		&i.ShiftEndAt,
+		&i.CheckInAt,
+		&i.CheckOutAt,
+		&i.LatIn,
+		&i.LngIn,
+		&i.LatOut,
+		&i.LngOut,
+		&i.PhotoInID,
+		&i.PhotoOutID,
+		&i.Wfo,
+		&i.IsLate,
+		&i.LateMinutes,
+		&i.WorkedMinutes,
+		&i.AutoClosed,
+		&i.InGeofence,
+		&i.InDistanceM,
+		&i.OutGeofence,
+		&i.OutDistanceM,
+		&i.GeofenceRadiusM,
+		&i.Status,
+		&i.VerificationStatus,
+		&i.Flags,
+		&i.VerifiedBy,
+		&i.VerifiedAt,
+		&i.RejectedBy,
+		&i.RejectedAt,
+		&i.RejectReason,
+		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -992,7 +1130,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          created_at, updated_at
+          is_payable, created_at, updated_at
 `
 
 type VerifyAttendanceParams struct {
@@ -1038,6 +1176,7 @@ type VerifyAttendanceRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -1085,6 +1224,7 @@ func (q *Queries) VerifyAttendance(ctx context.Context, arg VerifyAttendancePara
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1112,7 +1252,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          created_at, updated_at
+          is_payable, created_at, updated_at
 `
 
 type VerifyAttendanceWithTimesParams struct {
@@ -1163,6 +1303,7 @@ type VerifyAttendanceWithTimesRow struct {
 	RejectedAt         *time.Time
 	RejectReason       *string
 	LastCorrectionID   *string
+	IsPayable          *bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -1220,6 +1361,7 @@ func (q *Queries) VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAtten
 		&i.RejectedAt,
 		&i.RejectReason,
 		&i.LastCorrectionID,
+		&i.IsPayable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

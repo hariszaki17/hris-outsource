@@ -27,7 +27,6 @@ const labels = (role: Role) =>
 describe('visibleNav (permission-keyed)', () => {
   it('the sidebar holds the domain modules in canvas order', () => {
     expect(NAV_ITEMS.map((i) => i.labelKey)).toEqual([
-      'nav.dashboard',
       'nav.inbox',
       'nav.employees',
       'nav.placements',
@@ -51,7 +50,6 @@ describe('visibleNav (permission-keyed)', () => {
   it('shift_leader is scoped: operational modules + inbox, not clients/payroll/reports/settings', () => {
     const sl = labels('shift_leader');
     expect(sl).toEqual([
-      'nav.dashboard',
       'nav.inbox',
       'nav.employees',
       'nav.placements',

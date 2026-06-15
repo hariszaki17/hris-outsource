@@ -8,6 +8,7 @@ import {
 import type { StatusTone } from '@swp/design-tokens';
 import {
   Avatar,
+  Button,
   type Column,
   CursorPagination,
   DataTable,
@@ -197,6 +198,17 @@ export function AuditLogScreen() {
         </span>
       ),
     },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (row) => (
+        <Button variant="secondary" size="sm" onClick={() => openDrawer(row.id)}>
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
+      ),
+    },
   ];
 
   // Title band — shared across error + normal paths.
@@ -285,7 +297,7 @@ export function AuditLogScreen() {
         */}
       </div>
 
-      {/* Data table — rows are clickable (no row actions; append-only log) */}
+      {/* Data table — detail opens via the trailing Detail button (append-only log) */}
       <DataTable
         aria-label={t('auditLog.title')}
         columns={columns}
@@ -293,7 +305,6 @@ export function AuditLogScreen() {
         getRowId={(row) => row.id}
         isLoading={query.isLoading}
         skeletonRows={8}
-        onRowClick={(row) => openDrawer(row.id)}
         empty={
           hasFilters ? (
             <EmptyState

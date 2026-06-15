@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	domain "github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	"github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
@@ -55,6 +56,7 @@ type CorrectionService struct {
 	attRepo AttendanceRepository
 	txm     TxRunner
 	now     Clock
+	engine  approval.Engine
 }
 
 // NewCorrectionService wires the correction service. It needs the attendance repo
@@ -65,6 +67,10 @@ func NewCorrectionService(repo CorrectionRepository, attRepo AttendanceRepositor
 
 // SetClock overrides the time source (tests only).
 func (s *CorrectionService) SetClock(c Clock) { s.now = c }
+
+// SetApprovalEngine injects the E11 engine (corrections route through it on submit;
+// the OnApproved/OnRejected hooks fire on the engine's terminal transition).
+func (s *CorrectionService) SetApprovalEngine(e approval.Engine) { s.engine = e }
 
 // --- list / get ---
 
@@ -128,6 +134,7 @@ func (s *CorrectionService) Get(ctx context.Context, id string) (att.Correction,
 // CorrectionWriteRequest). Times are RFC3339-parsed at the handler boundary.
 type CreateCorrectionInput struct {
 	AttendanceID             string
+	WorkDate                 *time.Time // required iff Type == NEW_ENTRY
 	Type                     string
 	ProposedCheckInAt        *time.Time
 	ProposedCheckOutAt       *time.Time
@@ -148,54 +155,6 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 		return att.Correction{}, apperr.Unauthenticated()
 	}
 
-	rec, err := s.attRepo.GetAttendance(ctx, in.AttendanceID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return att.Correction{}, apperr.NotFound()
-	}
-	if err != nil {
-		return att.Correction{}, apperr.Internal(err)
-	}
-
-	// Scope. Agent: own-record only (else 404, no leak). Leader: company-scoped.
-	// HR/super: global (GuardCompany passes them through).
-	switch principal.Role {
-	case auth.RoleAgent:
-		if principal.EmployeeID == "" || principal.EmployeeID != rec.EmployeeID {
-			return att.Correction{}, apperr.NotFound()
-		}
-	default:
-		if serr := rbac.GuardCompany(ctx, rec.CompanyID); serr != nil {
-			return att.Correction{}, serr // OUT_OF_SCOPE 403
-		}
-	}
-
-	// 7-day window (HR/super exempt). Basis: the target shift date, falling back to
-	// the clock-in, then now() for an unscheduled record.
-	isHR := principal.Role == auth.RoleHRAdmin || principal.Role == auth.RoleSuperAdmin
-	var shiftDate time.Time
-	switch {
-	case rec.ShiftStartAt != nil:
-		shiftDate = *rec.ShiftStartAt
-	case rec.CheckInAt != nil:
-		shiftDate = *rec.CheckInAt
-	default:
-		shiftDate = s.now()
-	}
-	if werr := CheckCorrectionWindow(shiftDate, isHR, s.now()); werr != nil {
-		return att.Correction{}, werr
-	}
-
-	// One active PENDING correction per attendance (409 with the open correction id).
-	if pid, found, perr := s.repo.GetPendingCorrectionForAttendance(ctx, in.AttendanceID); perr != nil {
-		return att.Correction{}, apperr.Internal(perr)
-	} else if found {
-		return att.Correction{}, apperr.ConflictWithDetails(
-			"CORRECTION_ALREADY_PENDING",
-			map[string]string{"correction_id": pid},
-			nil,
-		)
-	}
-
 	// Per-type field validation (openapi CorrectionWriteRequest). evidence_file_id is
 	// intentionally OPTIONAL for this MVP — see TODO below.
 	if verr := validateCorrectionInput(in); verr != nil {
@@ -203,13 +162,95 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 	}
 	// TODO(CLOCK-03): enforce evidence_file_id for CHECK_IN/CHECK_OUT once photo-upload lands.
 
+	isHR := principal.Role == auth.RoleHRAdmin || principal.Role == auth.RoleSuperAdmin
+	isNewEntry := att.CorrectionType(in.Type) == att.CorrectionTypeNewEntry
+
+	// companyID drives the E11 template + leader scope; shiftDate is the window basis +
+	// the denormalized attendance_shift_date. Both resolved per branch below.
+	var companyID string
+	var shiftDate time.Time
+
+	if isNewEntry {
+		// NEW_ENTRY: no target record. Resolve the requester's active placement on
+		// work_date (company/site/position) and ensure no record already exists that day.
+		workDate := *in.WorkDate
+		af, found, aerr := s.attRepo.GetManualAutofillData(ctx, principal.EmployeeID, workDate)
+		if aerr != nil {
+			return att.Correction{}, apperr.Internal(aerr)
+		}
+		if !found {
+			return att.Correction{}, apperr.Rule("NO_ACTIVE_PLACEMENT", nil)
+		}
+		if af.ExistingAttendanceID != nil && *af.ExistingAttendanceID != "" {
+			return att.Correction{}, apperr.ConflictWithDetails(
+				"ATTENDANCE_ALREADY_EXISTS",
+				map[string]string{"attendance_id": *af.ExistingAttendanceID, "work_date": workDate.Format("2006-01-02")},
+				nil,
+			)
+		}
+		// Non-agent filers (SL/HR on behalf) are company-scoped; agents file their own.
+		if principal.Role != auth.RoleAgent {
+			if serr := rbac.GuardCompany(ctx, af.CompanyID); serr != nil {
+				return att.Correction{}, serr
+			}
+		}
+		companyID = af.CompanyID
+		shiftDate = workDate
+	} else {
+		rec, err := s.attRepo.GetAttendance(ctx, in.AttendanceID)
+		if errors.Is(err, domain.ErrNotFound) {
+			return att.Correction{}, apperr.NotFound()
+		}
+		if err != nil {
+			return att.Correction{}, apperr.Internal(err)
+		}
+		// Scope. Agent: own-record only (else 404, no leak). Leader: company-scoped.
+		// HR/super: global (GuardCompany passes them through).
+		switch principal.Role {
+		case auth.RoleAgent:
+			if principal.EmployeeID == "" || principal.EmployeeID != rec.EmployeeID {
+				return att.Correction{}, apperr.NotFound()
+			}
+		default:
+			if serr := rbac.GuardCompany(ctx, rec.CompanyID); serr != nil {
+				return att.Correction{}, serr // OUT_OF_SCOPE 403
+			}
+		}
+		// One active PENDING correction per attendance (409 with the open correction id).
+		if pid, found, perr := s.repo.GetPendingCorrectionForAttendance(ctx, in.AttendanceID); perr != nil {
+			return att.Correction{}, apperr.Internal(perr)
+		} else if found {
+			return att.Correction{}, apperr.ConflictWithDetails(
+				"CORRECTION_ALREADY_PENDING",
+				map[string]string{"correction_id": pid},
+				nil,
+			)
+		}
+		companyID = rec.CompanyID
+		switch {
+		case rec.ShiftStartAt != nil:
+			shiftDate = *rec.ShiftStartAt
+		case rec.CheckInAt != nil:
+			shiftDate = *rec.CheckInAt
+		default:
+			shiftDate = s.now()
+		}
+	}
+
+	// 7-day window (HR/super exempt). Basis: the target shift date for existing records,
+	// or work_date for NEW_ENTRY.
+	if werr := CheckCorrectionWindow(shiftDate, isHR, s.now()); werr != nil {
+		return att.Correction{}, werr
+	}
+
 	shiftDateOnly := time.Date(shiftDate.Year(), shiftDate.Month(), shiftDate.Day(), 0, 0, 0, 0, time.UTC)
 	var newID string
-	err = s.txm.InTx(ctx, func(tx pgx.Tx) error {
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		id, cerr := s.repo.CreateCorrection(ctx, tx, CreateCorrectionParams{
 			AttendanceID:             in.AttendanceID,
+			WorkDate:                 in.WorkDate,
 			RequesterID:              principal.EmployeeID,
-			CompanyID:                rec.CompanyID,
+			CompanyID:                companyID,
 			Type:                     in.Type,
 			ProposedCheckInAt:        in.ProposedCheckInAt,
 			ProposedCheckOutAt:       in.ProposedCheckOutAt,
@@ -222,15 +263,37 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 			return cerr
 		}
 		newID = id
+
+		// Route the correction through the E11 approval engine (request_type=CORRECTION):
+		// open an ApprovalInstance on the same tx and link it. Decisions then happen via
+		// POST /approval-instances/{id}:approve|:reject — the OnApproved/OnRejected hooks
+		// fire on the terminal transition (mirrors leave/overtime).
+		if s.engine == nil {
+			return apperr.Rule("RULE_VIOLATION", map[string]string{"approval": "Approval engine tidak aktif."})
+		}
+		instanceID, ierr := s.engine.CreateInstance(ctx, tx, approval.CreateInstanceInput{
+			RequestType: approval.RequestTypeCorrection,
+			RequestID:   id,
+			CompanyID:   companyID,
+			RequesterID: principal.EmployeeID,
+		})
+		if ierr != nil {
+			return ierr
+		}
+		if lerr := s.repo.SetCorrectionApprovalInstance(ctx, tx, id, instanceID); lerr != nil {
+			return lerr
+		}
+
 		return audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionCreate,
 			EntityType: "attendance_correction",
 			EntityID:   id,
 			After: map[string]any{
-				"attendance_id": in.AttendanceID,
-				"type":          in.Type,
-				"status":        "PENDING",
-				"requester_id":  principal.EmployeeID,
+				"attendance_id":        in.AttendanceID,
+				"type":                 in.Type,
+				"status":               "PENDING",
+				"requester_id":         principal.EmployeeID,
+				"approval_instance_id": instanceID,
 			},
 		})
 	})
@@ -273,8 +336,17 @@ func validateCorrectionInput(in CreateCorrectionInput) error {
 		if in.ProposedAttendanceCodeID == nil || *in.ProposedAttendanceCodeID == "" {
 			fields["proposed_attendance_code_id"] = "Wajib diisi untuk koreksi kode kehadiran."
 		}
+	case att.CorrectionTypeNewEntry:
+		if in.WorkDate == nil {
+			fields["work_date"] = "Wajib diisi untuk koreksi tanpa catatan (NEW_ENTRY)."
+		}
+		if in.ProposedCheckInAt == nil {
+			fields["proposed_check_in_at"] = "Wajib diisi untuk koreksi tanpa catatan (jam masuk)."
+		}
+	case att.CorrectionTypeOther:
+		// reason-only.
 	default:
-		fields["type"] = "Tidak valid (CHECK_IN, CHECK_OUT, atau CODE)."
+		fields["type"] = "Tidak valid (CHECK_IN, CHECK_OUT, CODE, OTHER, atau NEW_ENTRY)."
 	}
 	if len([]rune(in.Reason)) < 5 {
 		fields["reason"] = "Wajib diisi (minimum 5 karakter)."
@@ -287,35 +359,95 @@ func validateCorrectionInput(in CreateCorrectionInput) error {
 
 // --- approve / reject ---
 
-// Approve applies a PENDING correction: scope guard (OUT_OF_SCOPE), terminal
-// guard (409 if !PENDING), window guard (OUTSIDE_CORRECTION_WINDOW, HR-exempt),
-// then ApplyCorrectionToAttendance (COALESCE whitelist + CORRECTED flag) and
-// ApproveCorrection (status→APPLIED). Returns the updated correction + attendance.
-func (s *CorrectionService) Approve(ctx context.Context, id string, note string) (att.Correction, att.Attendance, error) {
+// OnApproved is the E11 terminal-APPROVED hook for request_type=CORRECTION. It runs
+// INSIDE the engine's tx (the approver's auth/line-clearing already happened in the
+// engine). Applies the proposed change to the target attendance (ApplyCorrectionToAttendance
+// COALESCE whitelist + CORRECTED flag, BR CR-9 re-eval) and flips the correction APPLIED.
+// Idempotent: a re-fired hook on an already-APPLIED correction is a no-op.
+func (s *CorrectionService) OnApproved(ctx context.Context, tx pgx.Tx, requestID string) error {
 	actor := actorEmployeeID(ctx)
-	isHR := callerIsHR(ctx)
-	var outCor att.Correction
-	var outAtt att.Attendance
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		cor, lerr := s.repo.GetCorrectionForUpdate(ctx, tx, id)
-		if errors.Is(lerr, domain.ErrNotFound) {
-			return apperr.NotFound()
-		}
-		if lerr != nil {
-			return lerr
-		}
-		if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
-			return serr // OUT_OF_SCOPE 403
-		}
-		if cor.Status != att.CorrectionStatusPending {
-			return correctionTerminalConflict(cor.Status)
-		}
-		if werr := CheckCorrectionWindow(cor.AttendanceShiftDate, isHR, s.now()); werr != nil {
-			return werr
-		}
+	cor, lerr := s.repo.GetCorrectionForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
+	}
+	if lerr != nil {
+		return lerr
+	}
+	if cor.Status == att.CorrectionStatusApplied {
+		return nil // idempotent
+	}
+	if cor.Status != att.CorrectionStatusPending {
+		return correctionTerminalConflict(cor.Status)
+	}
 
-		// Read the target attendance (locked) for the BR CR-9 re-eval inputs:
-		// shift_start_at + the pre-correction status / check_in.
+	boolTrue := true
+	// attachID is the created record's id for a NEW_ENTRY (attached to the correction on
+	// APPLIED); nil for an existing-record correction.
+	var attachID *string
+
+	if cor.Type == att.CorrectionTypeNewEntry {
+		// NEW_ENTRY: create the attendance record for the no-shift day (CR-10). Resolve the
+		// requester's active placement + (possible) schedule for work_date.
+		workDate := s.now()
+		if cor.WorkDate != nil {
+			workDate = *cor.WorkDate
+		}
+		af, found, aerr := s.attRepo.GetManualAutofillData(ctx, cor.RequesterID, workDate)
+		if aerr != nil {
+			return aerr
+		}
+		if !found {
+			return apperr.Rule("NO_ACTIVE_PLACEMENT", nil)
+		}
+		if cor.ProposedCheckInAt == nil {
+			return apperr.Invalid(map[string]string{"proposed_check_in_at": "Wajib diisi."})
+		}
+		hadShift := af.ScheduleID != nil
+		var shiftStart, shiftEnd *time.Time
+		if hadShift {
+			shiftStart, shiftEnd = af.ShiftStartAt, af.ShiftEndAt
+		}
+		status, isLate, lateMin := reevalCheckIn(*cor.ProposedCheckInAt, shiftStart)
+		var workedMin *int
+		if cor.ProposedCheckOutAt != nil {
+			wm := int(cor.ProposedCheckOutAt.Sub(*cor.ProposedCheckInAt).Minutes())
+			if wm < 0 {
+				wm = 0
+			}
+			workedMin = &wm
+		}
+		// Payable (CR-12): had a scheduled shift → auto-payable; no shift → nil (pending flag).
+		var payable *bool
+		if hadShift {
+			payable = &boolTrue
+		}
+		created, cerr := s.attRepo.CreateManualAttendance(ctx, tx, CreateManualAttendanceParams{
+			EmployeeID:         cor.RequesterID,
+			PlacementID:        af.PlacementID,
+			ScheduleID:         af.ScheduleID,
+			CompanyID:          af.CompanyID,
+			SiteID:             af.SiteID,
+			Position:           af.Position,
+			ShiftStartAt:       shiftStart,
+			ShiftEndAt:         shiftEnd,
+			CheckInAt:          *cor.ProposedCheckInAt,
+			CheckOutAt:         cor.ProposedCheckOutAt,
+			WFO:                true,
+			IsLate:             isLate,
+			LateMinutes:        lateMin,
+			WorkedMinutes:      workedMin,
+			Status:             status,
+			VerificationStatus: string(att.VerificationPending),
+			Flags:              []string{string(att.FlagUnscheduled), string(att.FlagCorrected)},
+			IsPayable:          payable,
+			CreatedBy:          &cor.RequesterID,
+		})
+		if cerr != nil {
+			return cerr
+		}
+		attachID = &created.ID
+	} else {
+		// Existing-record correction: apply whitelisted proposed_* + BR CR-9 re-eval.
 		attRec, arerr := s.attRepo.GetAttendanceForUpdate(ctx, tx, cor.AttendanceID)
 		if arerr != nil {
 			if errors.Is(arerr, domain.ErrNotFound) {
@@ -323,7 +455,6 @@ func (s *CorrectionService) Approve(ctx context.Context, id string, note string)
 			}
 			return arerr
 		}
-
 		params := ApplyCorrectionParams{
 			ID:               cor.AttendanceID,
 			CheckInAt:        cor.ProposedCheckInAt,
@@ -331,113 +462,85 @@ func (s *CorrectionService) Approve(ctx context.Context, id string, note string)
 			AttendanceCodeID: cor.ProposedAttendanceCodeID,
 			LastCorrectionID: &cor.ID,
 		}
-		// BR CR-9: a CHECK_IN correction that resolves an absence (record was ABSENT
-		// or had no clock-in) re-evaluates status/is_late/late_minutes from
-		// shift_start_at + the 15-min grace. Recomputed in Go and applied in the same tx.
 		if cor.ProposedCheckInAt != nil && (attRec.Status == att.StatusAbsent || attRec.CheckInAt == nil) {
 			status, isLate, lateMin := reevalCheckIn(*cor.ProposedCheckInAt, attRec.ShiftStartAt)
 			params.Status = &status
 			params.IsLate = &isLate
 			params.LateMinutes = &lateMin
 		}
-
-		applied, aerr := s.attRepo.ApplyCorrectionToAttendance(ctx, tx, params)
-		if aerr != nil {
+		// Payable (CR-12): a shift-backed day becomes auto-payable on apply; a no-shift day
+		// is left pending (nil → COALESCE keeps the existing value).
+		if attRec.ScheduleID != nil || attRec.ShiftStartAt != nil {
+			params.IsPayable = &boolTrue
+		}
+		if _, aerr := s.attRepo.ApplyCorrectionToAttendance(ctx, tx, params); aerr != nil {
 			if errors.Is(aerr, domain.ErrNotFound) {
 				return apperr.NotFound()
 			}
 			return aerr
 		}
-		outAtt = applied
+	}
 
-		updatedCor, n, cerr := s.repo.ApproveCorrection(ctx, tx, id, actor)
-		if cerr != nil {
-			return cerr
-		}
-		if n == 0 {
-			return correctionTerminalConflict(cor.Status)
-		}
-		outCor = updatedCor
+	_, n, cerr := s.repo.ApproveCorrection(ctx, tx, requestID, actor, attachID)
+	if cerr != nil {
+		return cerr
+	}
+	if n == 0 {
+		return correctionTerminalConflict(cor.Status)
+	}
 
-		// TODO(Phase-11): enqueue NotificationArgs ("correction approved" + E7/E10
-		// recompute listeners) in this tx (PRD F5.4 C-4 downstream propagation).
-		if aerr := audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.ActionUpdate,
-			EntityType: "attendance_correction",
-			EntityID:   id,
-			Before:     map[string]any{"status": string(cor.Status)},
-			After:      map[string]any{"status": "APPLIED", "decided_by": ptrStr(actor), "note": note},
-		}); aerr != nil {
-			return aerr
-		}
-		return audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.ActionUpdate,
-			EntityType: "attendance",
-			EntityID:   cor.AttendanceID,
-			After:      map[string]any{"last_correction_id": cor.ID, "applied_correction": cor.ID},
-		})
+	// TODO(Phase-11): enqueue NotificationArgs ("correction approved" + E7/E10
+	// recompute listeners) in this tx (PRD F5.4 C-4 downstream propagation).
+	if aerr := audit.Record(ctx, tx, audit.Entry{
+		Action:     audit.ActionUpdate,
+		EntityType: "attendance_correction",
+		EntityID:   requestID,
+		Before:     map[string]any{"status": string(cor.Status)},
+		After:      map[string]any{"status": "APPLIED", "decided_by": ptrStr(actor)},
+	}); aerr != nil {
+		return aerr
+	}
+	return audit.Record(ctx, tx, audit.Entry{
+		Action:     audit.ActionUpdate,
+		EntityType: "attendance",
+		EntityID:   cor.AttendanceID,
+		After:      map[string]any{"last_correction_id": cor.ID, "applied_correction": cor.ID},
 	})
-	if err != nil {
-		return att.Correction{}, att.Attendance{}, asAppErr(err)
-	}
-	// Re-read both for denormalized names on the DTO.
-	if full, gerr := s.repo.GetCorrection(ctx, outCor.ID); gerr == nil {
-		full.Diff = buildDiff(full)
-		outCor = full
-	}
-	if fullAtt, gerr := s.attRepo.GetAttendance(ctx, outAtt.ID); gerr == nil {
-		outAtt = fullAtt
-	}
-	return outCor, outAtt, nil
 }
 
-// Reject rejects a PENDING correction (reason required, user-visible). Scope +
-// terminal guards; audit + notify stub.
-func (s *CorrectionService) Reject(ctx context.Context, id string, reason string) (att.Correction, error) {
-	if len([]rune(reason)) < 5 {
-		return att.Correction{}, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."})
-	}
+// OnRejected is the E11 terminal-REJECTED hook for request_type=CORRECTION. Runs INSIDE
+// the engine's tx: flips the correction REJECTED (the user-visible reason lives on the
+// E11 approval action, not the correction). Idempotent on an already-REJECTED correction.
+func (s *CorrectionService) OnRejected(ctx context.Context, tx pgx.Tx, requestID string) error {
 	actor := actorEmployeeID(ctx)
-	var out att.Correction
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		cor, lerr := s.repo.GetCorrectionForUpdate(ctx, tx, id)
-		if errors.Is(lerr, domain.ErrNotFound) {
-			return apperr.NotFound()
-		}
-		if lerr != nil {
-			return lerr
-		}
-		if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
-			return serr
-		}
-		if cor.Status != att.CorrectionStatusPending {
-			return correctionTerminalConflict(cor.Status)
-		}
-		updated, n, rerr := s.repo.RejectCorrection(ctx, tx, id, actor, reason)
-		if rerr != nil {
-			return rerr
-		}
-		if n == 0 {
-			return correctionTerminalConflict(cor.Status)
-		}
-		out = updated
-		// TODO(Phase-11): enqueue NotificationArgs ("correction rejected") in this tx.
-		return audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.ActionUpdate,
-			EntityType: "attendance_correction",
-			EntityID:   id,
-			Before:     map[string]any{"status": string(cor.Status)},
-			After:      map[string]any{"status": "REJECTED", "decided_by": ptrStr(actor), "reject_reason": reason},
-		})
+	cor, lerr := s.repo.GetCorrectionForUpdate(ctx, tx, requestID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
+	}
+	if lerr != nil {
+		return lerr
+	}
+	if cor.Status == att.CorrectionStatusRejected {
+		return nil // idempotent
+	}
+	if cor.Status != att.CorrectionStatusPending {
+		return correctionTerminalConflict(cor.Status)
+	}
+	_, n, rerr := s.repo.RejectCorrection(ctx, tx, requestID, actor, "")
+	if rerr != nil {
+		return rerr
+	}
+	if n == 0 {
+		return correctionTerminalConflict(cor.Status)
+	}
+	// TODO(Phase-11): enqueue NotificationArgs ("correction rejected") in this tx.
+	return audit.Record(ctx, tx, audit.Entry{
+		Action:     audit.ActionUpdate,
+		EntityType: "attendance_correction",
+		EntityID:   requestID,
+		Before:     map[string]any{"status": string(cor.Status)},
+		After:      map[string]any{"status": "REJECTED", "decided_by": ptrStr(actor)},
 	})
-	if err != nil {
-		return att.Correction{}, asAppErr(err)
-	}
-	if full, gerr := s.repo.GetCorrection(ctx, out.ID); gerr == nil {
-		full.Diff = buildDiff(full)
-		return full, nil
-	}
-	return out, nil
 }
 
 // --- window guard (exported for the 07-03 contract test seam) ---

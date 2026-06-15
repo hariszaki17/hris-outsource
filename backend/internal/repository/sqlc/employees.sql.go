@@ -17,7 +17,7 @@ INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
     bank_name, bank_account_number, bank_account_holder_name,
-    emergency_contact_name, emergency_contact_phone, created_by
+    emergency_contact_name, emergency_contact_phone, position, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     $1,
@@ -39,12 +39,14 @@ INSERT INTO employees (
     $17,
     $18,
     $19,
-    $20
+    $20,
+    $21
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          position AS current_position,
           status, created_by, created_at, updated_at
 `
 
@@ -68,6 +70,7 @@ type CreateEmployeeParams struct {
 	BankAccountHolderName *string
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
+	Position              string
 	CreatedBy             *string
 }
 
@@ -94,6 +97,7 @@ type CreateEmployeeRow struct {
 	EmergencyContactPhone *string
 	AppLanguage           string
 	PhotoObjectKey        *string
+	CurrentPosition       string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -122,6 +126,7 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		arg.BankAccountHolderName,
 		arg.EmergencyContactName,
 		arg.EmergencyContactPhone,
+		arg.Position,
 		arg.CreatedBy,
 	)
 	var i CreateEmployeeRow
@@ -148,6 +153,7 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		&i.EmergencyContactPhone,
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
+		&i.CurrentPosition,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -162,12 +168,12 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       COALESCE(cp.position, '') AS current_position,
+       e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position, p.client_company_id
+    SELECT p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -212,10 +218,10 @@ type GetEmployeeByIDRow struct {
 	CurrentClientCompanyName *string
 }
 
-// current_* come from the employee's single non-terminal placement (INV-1 → at most
-// one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
-// employee still resolves (current_* null). current_position is the free-text
-// placement label (no master / FK / ID; service_line dropped 2026-06-12).
+// current_position is the employee's own free-text position (moved off placement
+// 2026-06-15). current_client_company comes from the employee's single non-terminal
+// placement (INV-1 → at most one); LEFT JOIN so an unplaced employee still resolves
+// (current_client_company null).
 func (q *Queries) GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error) {
 	row := q.db.QueryRow(ctx, getEmployeeByID, id)
 	var i GetEmployeeByIDRow
@@ -334,12 +340,12 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       COALESCE(cp.position, '') AS current_position,
+       e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position, p.client_company_id
+    SELECT p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -434,9 +440,10 @@ type ListEmployeesRow struct {
 
 // Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 // Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
-// current_* come from the employee's single non-terminal placement (INV-1 → at most one);
-// LEFT JOINs so unplaced employees still list (current_* null). current_position is
-// the free-text placement label (no master / FK / ID; service_line dropped 2026-06-12).
+// current_position is the employee's own free-text position (no master / FK / ID; moved
+// off placement to the employee 2026-06-15). current_client_company comes from the
+// employee's single non-terminal placement (INV-1 → at most one); LEFT JOIN so unplaced
+// employees still list (current_client_company null).
 func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([]ListEmployeesRow, error) {
 	rows, err := q.db.Query(ctx, listEmployees,
 		arg.Status,
@@ -618,13 +625,15 @@ SET full_name                = $1,
     bank_account_holder_name = $16,
     emergency_contact_name   = $17,
     emergency_contact_phone  = $18,
+    position                 = $19,
     updated_at               = now()
-WHERE id = $19
+WHERE id = $20
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          position AS current_position,
           status, created_by, created_at, updated_at
 `
 
@@ -647,6 +656,7 @@ type UpdateEmployeeParams struct {
 	BankAccountHolderName *string
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
+	Position              string
 	ID                    string
 }
 
@@ -673,6 +683,7 @@ type UpdateEmployeeRow struct {
 	EmergencyContactPhone *string
 	AppLanguage           string
 	PhotoObjectKey        *string
+	CurrentPosition       string
 	Status                string
 	CreatedBy             *string
 	CreatedAt             time.Time
@@ -699,6 +710,7 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		arg.BankAccountHolderName,
 		arg.EmergencyContactName,
 		arg.EmergencyContactPhone,
+		arg.Position,
 		arg.ID,
 	)
 	var i UpdateEmployeeRow
@@ -725,6 +737,7 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		&i.EmergencyContactPhone,
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
+		&i.CurrentPosition,
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,

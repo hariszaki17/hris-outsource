@@ -359,8 +359,12 @@ components:
   schemas:
     RequestType:
       type: string
-      enum: [LEAVE, OVERTIME]
-      description: Request types routed through the engine in v1. Generic — new types opt in.
+      enum: [LEAVE, OVERTIME, CORRECTION]
+      description: |
+        Request types routed through the engine. Generic — new types opt in. `CORRECTION`
+        (added 2026-06-15) covers E5 attendance corrections, including `NEW_ENTRY` records for
+        no-shift days; on final approval the correction's `OnApproved` hook applies the change and
+        sets attendance payability.
 
     InstanceStatus:
       type: string

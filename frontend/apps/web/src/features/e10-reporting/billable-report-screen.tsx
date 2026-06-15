@@ -291,7 +291,6 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
     {
       id: 'group',
       header: groupByLabel,
-      width: 250,
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-semibold text-text">{r.group_label}</span>

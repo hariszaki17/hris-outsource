@@ -170,6 +170,11 @@ type Attendance struct {
 	RejectReason     *string
 	LastCorrectionID *string
 
+	// IsPayable mirrors approved_leave_days.is_payable (migr. 00066): true payable ·
+	// false not · nil pending an SL/HR/super flag (no-shift day, e.g. a NEW_ENTRY
+	// correction). Set on correction apply; flagged via POST /attendance/{id}:set-payable.
+	IsPayable *bool
+
 	CreatedBy *string // SWP-EMP-* of who created the record (nil = system)
 
 	CreatedAt time.Time

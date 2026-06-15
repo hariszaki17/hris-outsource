@@ -14,27 +14,30 @@ import (
 
 const approveCorrection = `-- name: ApproveCorrection :one
 UPDATE attendance_corrections
-SET status     = 'APPLIED',
-    decided_by = $1,
-    decided_at = now(),
-    updated_at = now()
-WHERE id = $2
+SET status        = 'APPLIED',
+    attendance_id = COALESCE($1::text, attendance_id),
+    decided_by    = $2,
+    decided_at    = now(),
+    updated_at    = now()
+WHERE id = $3
   AND deleted_at IS NULL
   AND status = 'PENDING'
-RETURNING id, attendance_id, requester_id, company_id, type,
+RETURNING id, attendance_id, work_date, requester_id, company_id, type,
           proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
-          reason, evidence_file_id, status, decided_by, decided_at, reject_reason,
-          original_snapshot, attendance_shift_date, created_at, updated_at
+          reason, evidence_file_id, status, approval_instance_id, decided_by, decided_at,
+          reject_reason, original_snapshot, attendance_shift_date, created_at, updated_at
 `
 
 type ApproveCorrectionParams struct {
-	DecidedBy *string
-	ID        string
+	AttendanceID *string
+	DecidedBy    *string
+	ID           string
 }
 
 type ApproveCorrectionRow struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -44,6 +47,7 @@ type ApproveCorrectionRow struct {
 	Reason                   string
 	EvidenceFileID           *string
 	Status                   string
+	ApprovalInstanceID       *string
 	DecidedBy                *string
 	DecidedAt                *time.Time
 	RejectReason             *string
@@ -53,15 +57,16 @@ type ApproveCorrectionRow struct {
 	UpdatedAt                time.Time
 }
 
-// Mark a PENDING correction APPLIED (the proposed change is applied to the target
-// attendance row in the same tx via ApplyCorrectionToAttendance). Only PENDING is
-// decidable; zero rows ⇒ terminal state (service emits 409).
+// Mark a PENDING correction APPLIED (the OnApproved hook applies the proposed change to
+// the target attendance row in the same tx). For a NEW_ENTRY, attendance_id is attached
+// here via COALESCE(narg, existing). Only PENDING is decidable; zero rows ⇒ terminal.
 func (q *Queries) ApproveCorrection(ctx context.Context, arg ApproveCorrectionParams) (ApproveCorrectionRow, error) {
-	row := q.db.QueryRow(ctx, approveCorrection, arg.DecidedBy, arg.ID)
+	row := q.db.QueryRow(ctx, approveCorrection, arg.AttendanceID, arg.DecidedBy, arg.ID)
 	var i ApproveCorrectionRow
 	err := row.Scan(
 		&i.ID,
 		&i.AttendanceID,
+		&i.WorkDate,
 		&i.RequesterID,
 		&i.CompanyID,
 		&i.Type,
@@ -71,6 +76,7 @@ func (q *Queries) ApproveCorrection(ctx context.Context, arg ApproveCorrectionPa
 		&i.Reason,
 		&i.EvidenceFileID,
 		&i.Status,
+		&i.ApprovalInstanceID,
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.RejectReason,
@@ -84,19 +90,20 @@ func (q *Queries) ApproveCorrection(ctx context.Context, arg ApproveCorrectionPa
 
 const createCorrection = `-- name: CreateCorrection :one
 INSERT INTO attendance_corrections (
-    attendance_id, requester_id, company_id, type,
+    attendance_id, work_date, requester_id, company_id, type,
     proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
     reason, evidence_file_id, attendance_shift_date, status
 ) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7,
-    $8, $9, $10, 'PENDING'
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, $11, 'PENDING'
 )
 RETURNING id
 `
 
 type CreateCorrectionParams struct {
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -109,10 +116,13 @@ type CreateCorrectionParams struct {
 }
 
 // Insert a new agent/leader-filed correction in PENDING. company_id +
-// attendance_shift_date are denormalized from the target attendance by the service.
+// attendance_shift_date are denormalized by the service. attendance_id is null for a
+// NEW_ENTRY (work_date set instead); approval_instance_id is linked right after via
+// SetCorrectionApprovalInstance (same tx).
 func (q *Queries) CreateCorrection(ctx context.Context, arg CreateCorrectionParams) (string, error) {
 	row := q.db.QueryRow(ctx, createCorrection,
 		arg.AttendanceID,
+		arg.WorkDate,
 		arg.RequesterID,
 		arg.CompanyID,
 		arg.Type,
@@ -129,11 +139,11 @@ func (q *Queries) CreateCorrection(ctx context.Context, arg CreateCorrectionPara
 }
 
 const getCorrection = `-- name: GetCorrection :one
-SELECT co.id, co.attendance_id, co.requester_id, co.company_id, co.type,
+SELECT co.id, co.attendance_id, co.work_date, co.requester_id, co.company_id, co.type,
        co.proposed_check_in_at, co.proposed_check_out_at,
        co.proposed_attendance_code_id, co.reason, co.evidence_file_id, co.status,
-       co.decided_by, co.decided_at, co.reject_reason, co.original_snapshot,
-       co.attendance_shift_date, co.created_at, co.updated_at,
+       co.approval_instance_id, co.decided_by, co.decided_at, co.reject_reason,
+       co.original_snapshot, co.attendance_shift_date, co.created_at, co.updated_at,
        e.full_name AS requester_name,
        c.name      AS company_name
 FROM attendance_corrections co
@@ -145,7 +155,8 @@ WHERE co.id = $1
 
 type GetCorrectionRow struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -155,6 +166,7 @@ type GetCorrectionRow struct {
 	Reason                   string
 	EvidenceFileID           *string
 	Status                   string
+	ApprovalInstanceID       *string
 	DecidedBy                *string
 	DecidedAt                *time.Time
 	RejectReason             *string
@@ -173,6 +185,7 @@ func (q *Queries) GetCorrection(ctx context.Context, id string) (GetCorrectionRo
 	err := row.Scan(
 		&i.ID,
 		&i.AttendanceID,
+		&i.WorkDate,
 		&i.RequesterID,
 		&i.CompanyID,
 		&i.Type,
@@ -182,6 +195,7 @@ func (q *Queries) GetCorrection(ctx context.Context, id string) (GetCorrectionRo
 		&i.Reason,
 		&i.EvidenceFileID,
 		&i.Status,
+		&i.ApprovalInstanceID,
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.RejectReason,
@@ -196,11 +210,11 @@ func (q *Queries) GetCorrection(ctx context.Context, id string) (GetCorrectionRo
 }
 
 const getCorrectionForUpdate = `-- name: GetCorrectionForUpdate :one
-SELECT co.id, co.attendance_id, co.requester_id, co.company_id, co.type,
+SELECT co.id, co.attendance_id, co.work_date, co.requester_id, co.company_id, co.type,
        co.proposed_check_in_at, co.proposed_check_out_at,
        co.proposed_attendance_code_id, co.reason, co.evidence_file_id, co.status,
-       co.decided_by, co.decided_at, co.reject_reason, co.original_snapshot,
-       co.attendance_shift_date, co.created_at, co.updated_at
+       co.approval_instance_id, co.decided_by, co.decided_at, co.reject_reason,
+       co.original_snapshot, co.attendance_shift_date, co.created_at, co.updated_at
 FROM attendance_corrections co
 WHERE co.id = $1
   AND co.deleted_at IS NULL
@@ -209,7 +223,8 @@ FOR UPDATE
 
 type GetCorrectionForUpdateRow struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -219,6 +234,7 @@ type GetCorrectionForUpdateRow struct {
 	Reason                   string
 	EvidenceFileID           *string
 	Status                   string
+	ApprovalInstanceID       *string
 	DecidedBy                *string
 	DecidedAt                *time.Time
 	RejectReason             *string
@@ -228,14 +244,15 @@ type GetCorrectionForUpdateRow struct {
 	UpdatedAt                time.Time
 }
 
-// Row-lock for approve/reject: reads status/company_id/proposed_* for scope + state
-// guards + apply (omits joins; service re-reads for DTO).
+// Row-lock for the E11 OnApproved/OnRejected hooks: reads status/company_id/proposed_*
+// for the apply (omits joins; service re-reads for DTO).
 func (q *Queries) GetCorrectionForUpdate(ctx context.Context, id string) (GetCorrectionForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getCorrectionForUpdate, id)
 	var i GetCorrectionForUpdateRow
 	err := row.Scan(
 		&i.ID,
 		&i.AttendanceID,
+		&i.WorkDate,
 		&i.RequesterID,
 		&i.CompanyID,
 		&i.Type,
@@ -245,6 +262,7 @@ func (q *Queries) GetCorrectionForUpdate(ctx context.Context, id string) (GetCor
 		&i.Reason,
 		&i.EvidenceFileID,
 		&i.Status,
+		&i.ApprovalInstanceID,
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.RejectReason,
@@ -267,7 +285,7 @@ LIMIT 1
 
 // Active-pending guard for the agent CREATE path (F5.4 / one open correction per
 // attendance): returns the PENDING correction id for a target attendance, if any.
-func (q *Queries) GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (string, error) {
+func (q *Queries) GetPendingCorrectionForAttendance(ctx context.Context, attendanceID *string) (string, error) {
 	row := q.db.QueryRow(ctx, getPendingCorrectionForAttendance, attendanceID)
 	var id string
 	err := row.Scan(&id)
@@ -276,11 +294,11 @@ func (q *Queries) GetPendingCorrectionForAttendance(ctx context.Context, attenda
 
 const listCorrections = `-- name: ListCorrections :many
 
-SELECT co.id, co.attendance_id, co.requester_id, co.company_id, co.type,
+SELECT co.id, co.attendance_id, co.work_date, co.requester_id, co.company_id, co.type,
        co.proposed_check_in_at, co.proposed_check_out_at,
        co.proposed_attendance_code_id, co.reason, co.evidence_file_id, co.status,
-       co.decided_by, co.decided_at, co.reject_reason, co.original_snapshot,
-       co.attendance_shift_date, co.created_at, co.updated_at,
+       co.approval_instance_id, co.decided_by, co.decided_at, co.reject_reason,
+       co.original_snapshot, co.attendance_shift_date, co.created_at, co.updated_at,
        e.full_name AS requester_name,
        c.name      AS company_name
 FROM attendance_corrections co
@@ -316,7 +334,8 @@ type ListCorrectionsParams struct {
 
 type ListCorrectionsRow struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -326,6 +345,7 @@ type ListCorrectionsRow struct {
 	Reason                   string
 	EvidenceFileID           *string
 	Status                   string
+	ApprovalInstanceID       *string
 	DecidedBy                *string
 	DecidedAt                *time.Time
 	RejectReason             *string
@@ -337,8 +357,11 @@ type ListCorrectionsRow struct {
 	CompanyName              *string
 }
 
-// E5 corrections queries (F5.3 / SWP-COR-*). Cursor lists keyset on
+// E5 corrections queries (F5.4 / SWP-COR-*). Cursor lists keyset on
 // (created_at DESC, id). `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+// Corrections route through the E11 approval engine (request_type=CORRECTION):
+// approval_instance_id links the instance; the OnApproved hook marks APPLIED (and, for
+// a NEW_ENTRY, attaches the created attendance_id). work_date carries a NEW_ENTRY's day.
 // Corrections queue for a company over filters, newest first.
 // Keyset cursor: pass cursor_created_at + cursor_id from the previous page tail.
 //
@@ -367,6 +390,7 @@ func (q *Queries) ListCorrections(ctx context.Context, arg ListCorrectionsParams
 		if err := rows.Scan(
 			&i.ID,
 			&i.AttendanceID,
+			&i.WorkDate,
 			&i.RequesterID,
 			&i.CompanyID,
 			&i.Type,
@@ -376,6 +400,7 @@ func (q *Queries) ListCorrections(ctx context.Context, arg ListCorrectionsParams
 			&i.Reason,
 			&i.EvidenceFileID,
 			&i.Status,
+			&i.ApprovalInstanceID,
 			&i.DecidedBy,
 			&i.DecidedAt,
 			&i.RejectReason,
@@ -406,10 +431,10 @@ SET status        = 'REJECTED',
 WHERE id = $3
   AND deleted_at IS NULL
   AND status = 'PENDING'
-RETURNING id, attendance_id, requester_id, company_id, type,
+RETURNING id, attendance_id, work_date, requester_id, company_id, type,
           proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
-          reason, evidence_file_id, status, decided_by, decided_at, reject_reason,
-          original_snapshot, attendance_shift_date, created_at, updated_at
+          reason, evidence_file_id, status, approval_instance_id, decided_by, decided_at,
+          reject_reason, original_snapshot, attendance_shift_date, created_at, updated_at
 `
 
 type RejectCorrectionParams struct {
@@ -420,7 +445,8 @@ type RejectCorrectionParams struct {
 
 type RejectCorrectionRow struct {
 	ID                       string
-	AttendanceID             string
+	AttendanceID             *string
+	WorkDate                 pgtype.Date
 	RequesterID              string
 	CompanyID                string
 	Type                     string
@@ -430,6 +456,7 @@ type RejectCorrectionRow struct {
 	Reason                   string
 	EvidenceFileID           *string
 	Status                   string
+	ApprovalInstanceID       *string
 	DecidedBy                *string
 	DecidedAt                *time.Time
 	RejectReason             *string
@@ -439,13 +466,14 @@ type RejectCorrectionRow struct {
 	UpdatedAt                time.Time
 }
 
-// Reject a PENDING correction (reason required). Same PENDING guard.
+// Reject a PENDING correction (reason from the E11 approval action). Same PENDING guard.
 func (q *Queries) RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error) {
 	row := q.db.QueryRow(ctx, rejectCorrection, arg.DecidedBy, arg.RejectReason, arg.ID)
 	var i RejectCorrectionRow
 	err := row.Scan(
 		&i.ID,
 		&i.AttendanceID,
+		&i.WorkDate,
 		&i.RequesterID,
 		&i.CompanyID,
 		&i.Type,
@@ -455,6 +483,7 @@ func (q *Queries) RejectCorrection(ctx context.Context, arg RejectCorrectionPara
 		&i.Reason,
 		&i.EvidenceFileID,
 		&i.Status,
+		&i.ApprovalInstanceID,
 		&i.DecidedBy,
 		&i.DecidedAt,
 		&i.RejectReason,
@@ -464,4 +493,23 @@ func (q *Queries) RejectCorrection(ctx context.Context, arg RejectCorrectionPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setCorrectionApprovalInstance = `-- name: SetCorrectionApprovalInstance :exec
+UPDATE attendance_corrections
+SET approval_instance_id = $1,
+    updated_at           = now()
+WHERE id = $2
+  AND deleted_at IS NULL
+`
+
+type SetCorrectionApprovalInstanceParams struct {
+	ApprovalInstanceID *string
+	ID                 string
+}
+
+// Link the E11 approval_instance created at submit (mirrors leave SetApprovalInstanceID).
+func (q *Queries) SetCorrectionApprovalInstance(ctx context.Context, arg SetCorrectionApprovalInstanceParams) error {
+	_, err := q.db.Exec(ctx, setCorrectionApprovalInstance, arg.ApprovalInstanceID, arg.ID)
+	return err
 }

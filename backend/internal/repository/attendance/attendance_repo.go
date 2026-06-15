@@ -48,7 +48,7 @@ func intPtrToI32Ptr(v *int) *int32 {
 	return &n
 }
 
-func boolPtr(b bool) *bool { return &b }
+func boolPtr(b bool) *bool    { return &b }
 func int32Ptr(n int32) *int32 { return &n }
 
 func (r *AttendanceRepo) ListAttendance(ctx context.Context, f svc.AttendanceFilter) ([]att.Attendance, error) {
@@ -156,6 +156,7 @@ func (r *AttendanceRepo) ApplyCorrectionToAttendance(ctx context.Context, tx pgx
 		IsLate:           p.IsLate,
 		LateMinutes:      intPtrToI32Ptr(p.LateMinutes),
 		LastCorrectionID: p.LastCorrectionID,
+		IsPayable:        p.IsPayable,
 		ID:               p.ID,
 	})
 	if err != nil {
@@ -200,6 +201,7 @@ func (r *AttendanceRepo) CreateManualAttendance(ctx context.Context, tx pgx.Tx, 
 		Status:             p.Status,
 		VerificationStatus: p.VerificationStatus,
 		Flags:              p.Flags,
+		IsPayable:          p.IsPayable,
 		CreatedBy:          p.CreatedBy,
 	})
 	if err != nil {
@@ -208,7 +210,19 @@ func (r *AttendanceRepo) CreateManualAttendance(ctx context.Context, tx pgx.Tx, 
 	return mapAttendanceFromCreate(row), nil
 }
 
-
+// SetAttendancePayable flags a day payable/not (F5.4 CR-13). The no-shift guard is
+// enforced in the service before this call.
+func (r *AttendanceRepo) SetAttendancePayable(ctx context.Context, tx pgx.Tx, id string, payable bool) (att.Attendance, error) {
+	p := payable
+	row, err := r.q.WithTx(tx).SetAttendancePayable(ctx, sqlcgen.SetAttendancePayableParams{
+		IsPayable: &p,
+		ID:        id,
+	})
+	if err != nil {
+		return att.Attendance{}, mapErr(err)
+	}
+	return mapAttendanceFromSetPayable(row), nil
+}
 
 func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID string, refDate time.Time) (svc.ManualAutofillData, bool, error) {
 	refPG := pgtype.Date{Time: refDate, Valid: true}
@@ -266,8 +280,17 @@ func (r *AttendanceRepo) GetActivePlacement(ctx context.Context, employeeID stri
 		PlacementID: row.ID,
 		CompanyID:   row.ClientCompanyID,
 		SiteID:      row.SiteID,
-		Position:    row.Position,
+		Position:    strOrEmpty(row.Position),
 	}, true, nil
+}
+
+// strOrEmpty derefs a *string from a nullable join column (e.position via LEFT JOIN),
+// returning "" when null — the placement always has an employee so this is rarely hit.
+func strOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (r *AttendanceRepo) GetTodaySchedule(ctx context.Context, employeeID string, now time.Time) (string, time.Time, time.Time, bool, error) {

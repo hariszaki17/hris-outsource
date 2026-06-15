@@ -234,44 +234,55 @@ export function EmployeesScreen() {
         </StatusBadge>
       ),
     },
-  ];
-
-  // Row click opens the detail screen (all roles); fuller management lives there.
-  // The kebab was removed — its View/Edit both just navigated to detail (redundant).
-  // A single inline lifecycle action remains (offboard active / reactivate inactive),
-  // the one action not reachable by row-click. Non-SL only (SL is read-only).
-  if (!isShiftLeader) {
-    columns.push({
+    // Detail + lifecycle (offboard/reactivate) share one right-aligned cell so the buttons
+    // sit adjacent (gap-2). SL is read-only → Detail only; non-SL also gets the lifecycle
+    // action (the one action not reachable by row-click).
+    {
       id: 'actions',
       header: '',
-      flex: 0.6,
+      width: isShiftLeader ? 96 : 240,
+      align: 'right',
       cell: (emp) => {
         const active = emp.status === EmployeeStatus.ACTIVE;
         const label = active ? t('menuOffboard') : t('menuReactivate');
         return (
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-2">
             <Button
-              variant={active ? 'destructive' : 'secondary'}
+              variant="secondary"
               size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setLifecycleTarget(emp);
-                if (active) setShowOffboard(true);
-                else setShowReactivate(true);
-              }}
+              onClick={() =>
+                void navigate({
+                  to: '/employees/$employeeId' as const,
+                  params: { employeeId: emp.id },
+                })
+              }
             >
-              {active ? (
-                <UserMinus className="size-3.5" aria-hidden />
-              ) : (
-                <UserCheck className="size-3.5" aria-hidden />
-              )}
-              {label}
+              {t('common.detail', { ns: 'translation' })}
             </Button>
+            {!isShiftLeader && (
+              <Button
+                variant={active ? 'destructive' : 'secondary'}
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLifecycleTarget(emp);
+                  if (active) setShowOffboard(true);
+                  else setShowReactivate(true);
+                }}
+              >
+                {active ? (
+                  <UserMinus className="size-3.5" aria-hidden />
+                ) : (
+                  <UserCheck className="size-3.5" aria-hidden />
+                )}
+                {label}
+              </Button>
+            )}
           </div>
         );
       },
-    });
-  }
+    },
+  ];
 
   // ---------------------------------------------------------------------------
   // Role note text
@@ -365,7 +376,6 @@ export function EmployeesScreen() {
         <StatCard
           label={t('statTotal')}
           value={query.isLoading ? '—' : String(rows.length)}
-          sub={t('statThisPage')}
           icon={Users}
           tone="brand"
         />
@@ -376,7 +386,6 @@ export function EmployeesScreen() {
               ? '—'
               : String(rows.filter((e) => e.status === EmployeeStatus.ACTIVE).length)
           }
-          sub={t('statThisPage')}
           icon={CircleCheck}
           tone="ok"
         />
@@ -387,7 +396,6 @@ export function EmployeesScreen() {
               ? '—'
               : String(rows.filter((e) => e.status === EmployeeStatus.INACTIVE).length)
           }
-          sub={t('statThisPage')}
           icon={UserX}
           tone="bad"
         />
@@ -471,12 +479,6 @@ export function EmployeesScreen() {
           getRowId={(e) => e.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(emp) =>
-            void navigate({
-              to: '/employees/$employeeId' as const,
-              params: { employeeId: emp.id },
-            })
-          }
           empty={
             hasFilters ? (
               <EmptyState

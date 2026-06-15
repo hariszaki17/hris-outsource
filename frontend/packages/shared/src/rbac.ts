@@ -45,7 +45,6 @@ export type WebRole = (typeof WEB_ROLES)[number];
 // ---------------------------------------------------------------------------
 
 export const PERMISSIONS = [
-  'dashboard.view',
   // E2 — Identity & reference
   'employees.read',
   'employees.write',
@@ -132,7 +131,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // server-side). No clients, contracts, payroll, reports, master data, or settings. Its company
   // set is resolved read-time from lead_assignments into Principal.CompanyIDs.
   lead: [
-    'dashboard.view',
     'employees.read',
     'placements.read',
     'placements.write',
@@ -148,7 +146,6 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // On-site supervisor: their site's daily operation only. No clients, contracts, payroll,
   // reports, master data, or settings. Scope (their one company) is enforced server-side.
   shift_leader: [
-    'dashboard.view',
     'employees.read',
     'placements.read',
     'schedule.read',

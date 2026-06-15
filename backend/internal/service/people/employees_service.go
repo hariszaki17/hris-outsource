@@ -77,6 +77,7 @@ type CreateEmployeeParams struct {
 	BankName              string
 	BankAccountNumber     string
 	BankAccountHolderName string
+	Position              string // free-text job position/title (required; moved off placement 2026-06-15)
 	CreatedBy             string
 	// Login provisioning is AUTOMATIC at create (D1): a linked agent User is always
 	// created in the same tx with a temporary password (show-once). The login
@@ -106,6 +107,7 @@ type UpdateEmployeeParams struct {
 	BankAccountHolderName string
 	EmergencyContactName  string
 	EmergencyContactPhone string
+	Position              string // free-text job position/title (required)
 }
 
 // TxRunner is a thin interface over db.TxManager (injectable for tests).
@@ -209,6 +211,9 @@ func (s *Service) CreateEmployee(ctx context.Context, p CreateEmployeeParams) (d
 	}
 	if p.JoinAt.IsZero() {
 		fields["join_at"] = "Wajib diisi."
+	}
+	if strings.TrimSpace(p.Position) == "" {
+		fields["position"] = "Wajib diisi."
 	}
 	// D2: phone is the required login identifier — every employee auto-provisions
 	// a login (D1), and phone is the universal identifier (agents often lack email).
@@ -433,6 +438,10 @@ func (s *Service) UpdateEmployee(ctx context.Context, p UpdateEmployeeParams) (d
 	}
 	if err != nil {
 		return domain.Employee{}, apperr.Internal(err)
+	}
+
+	if strings.TrimSpace(p.Position) == "" {
+		return domain.Employee{}, apperr.Invalid(map[string]string{"position": "Wajib diisi."})
 	}
 
 	// EP-2: if NIK changed, re-run duplicate check.

@@ -63,6 +63,8 @@ func summaryFor(rt dom.RequestType) string {
 		return "Pengajuan cuti"
 	case dom.RequestTypeOvertime:
 		return "Pengajuan lembur"
+	case dom.RequestTypeCorrection:
+		return "Koreksi kehadiran"
 	default:
 		return string(rt)
 	}

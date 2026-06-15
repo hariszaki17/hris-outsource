@@ -194,28 +194,16 @@ func (h *Handler) CreatePlacement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	startDate, err := parseDate(req.StartDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"start_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	endDate, err := parseOptDate(req.EndDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"end_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
 
+	// Placements are decoupled from time (2026-06-15): start_date is set to the
+	// creation date by the service; no end_date / backdate is accepted.
 	actor := actorPtr(r)
 	created, err := h.placements.CreatePlacement(r.Context(), svc.CreatePlacementParams{
 		EmployeeID:      req.EmployeeID,
 		AgreementID:     req.AgreementID, // nil/"" → pending agreement (normalized in the service)
 		ClientCompanyID: req.ClientCompanyID,
 		SiteID:          req.SiteID,
-		Position:        req.Position,
-		StartDate:       startDate,
-		EndDate:         endDate,
 		Notes:           req.Notes,
-		BackdateReason:  req.BackdateReason,
 		CreatedBy:       actor,
 	})
 	if err != nil {
@@ -291,9 +279,6 @@ func (h *Handler) UpdatePlacement(w http.ResponseWriter, r *http.Request) {
 		ID:    id,
 		Notes: req.Notes,
 	}
-	if req.Position != nil {
-		params.Position = *req.Position
-	}
 	if req.EndDate != nil && *req.EndDate != "" {
 		ed, derr := parseDate(*req.EndDate)
 		if derr != nil {
@@ -321,23 +306,11 @@ func (h *Handler) TransferPlacement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	startDate, err := parseDate(req.NewStartDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"new_start_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	endDate, err := parseOptDate(req.NewEndDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"new_end_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
 
+	// Successor starts on the transfer date (set in the service); no dates accepted.
 	res, err := h.placements.TransferPlacement(r.Context(), svc.TransferParams{
 		ID:                 id,
 		NewClientCompanyID: req.NewClientCompanyID,
-		NewPosition:        req.NewPosition,
-		NewStartDate:       startDate,
-		NewEndDate:         endDate,
 		NewAgreementID:     req.NewAgreementID,
 		TransferReason:     req.TransferReason,
 		ActorUserID:        actorPtr(r),
@@ -361,125 +334,6 @@ func (h *Handler) TransferPlacement(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/api/v1/placements/"+res.Successor.ID)
 	httpx.WriteJSON(w, http.StatusCreated, resp)
-}
-
-// RenewPlacement handles POST /placements/{id}:renew (201).
-func (h *Handler) RenewPlacement(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req renewRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	startDate, err := parseDate(req.NewStartDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"new_start_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	endDate, err := parseOptDate(req.NewEndDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"new_end_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	params := svc.RenewParams{
-		ID:             id,
-		NewStartDate:   startDate,
-		NewEndDate:     endDate,
-		NewAgreementID: req.NewAgreementID,
-		NewPosition:    req.NewPosition,
-		Notes:          req.Notes,
-		ActorUserID:    actorPtr(r),
-	}
-
-	res, err := h.placements.RenewPlacement(r.Context(), params)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	today := jakartaToday()
-	resp := renewResponse{
-		Predecessor: toPlacementResponse(res.Predecessor, today),
-		Successor:   toPlacementResponse(res.Successor, today),
-		Warnings:    res.Warnings,
-	}
-	if resp.Warnings == nil {
-		resp.Warnings = []string{}
-	}
-	w.Header().Set("Location", "/api/v1/placements/"+res.Successor.ID)
-	httpx.WriteJSON(w, http.StatusCreated, resp)
-}
-
-// EndPlacement handles POST /placements/{id}:end (200).
-func (h *Handler) EndPlacement(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req endRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	eff, err := parseDate(req.EffectiveDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"effective_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	updated, err := h.placements.EndPlacement(r.Context(), svc.EndParams{
-		ID: id, Reason: req.Reason, EffectiveDate: eff, Notes: req.Notes, ActorUserID: actorPtr(r),
-	})
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, toPlacementResponse(updated, jakartaToday()))
-}
-
-// ResignPlacement handles POST /placements/{id}:resign (200).
-func (h *Handler) ResignPlacement(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req resignRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	resignAt, err := parseDate(req.ResignAt)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"resign_at": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	updated, err := h.placements.ResignPlacement(r.Context(), svc.ResignParams{
-		ID: id, ResignAt: resignAt, Reason: req.ResignationReason, Notes: req.Notes, ActorUserID: actorPtr(r),
-	})
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, toPlacementResponse(updated, jakartaToday()))
-}
-
-// TerminatePlacement handles POST /placements/{id}:terminate (200).
-func (h *Handler) TerminatePlacement(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req terminateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	effPtr, err := parseOptDate(req.EffectiveDate)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"effective_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
-		return
-	}
-	updated, err := h.placements.TerminatePlacement(r.Context(), svc.TerminateParams{
-		ID:                  id,
-		TerminationReason:   req.TerminationReason,
-		EffectiveDate:       effPtr,
-		TypeCompanyNameConf: req.TypeCompanyNameConf,
-		ActorUserID:         actorPtr(r),
-	})
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, toPlacementResponse(updated, jakartaToday()))
 }
 
 // --- shared helpers ---

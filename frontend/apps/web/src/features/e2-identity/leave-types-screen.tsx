@@ -402,7 +402,6 @@ export function LeaveTypesScreen() {
     {
       id: 'name',
       header: t('masterData.leaveTypes.colName'),
-      width: 280,
       cell: (row) => (
         <div className="flex items-center gap-[10px]">
           {/* Data-driven swatch — inline style is the one allowed dynamic color per spec */}

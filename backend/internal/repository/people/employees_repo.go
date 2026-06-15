@@ -230,6 +230,7 @@ func (r *Repository) CreateEmployee(ctx context.Context, tx pgx.Tx, p svc.Create
 		BankName:              nullStr(p.BankName),
 		BankAccountNumber:     nullStr(p.BankAccountNumber),
 		BankAccountHolderName: nullStr(p.BankAccountHolderName),
+		Position:              p.Position,
 		CreatedBy:             nullStr(p.CreatedBy),
 	})
 	if err != nil {
@@ -266,6 +267,7 @@ func (r *Repository) UpdateEmployee(ctx context.Context, tx pgx.Tx, p svc.Update
 		BankAccountHolderName: nullStr(p.BankAccountHolderName),
 		EmergencyContactName:  nullStr(p.EmergencyContactName),
 		EmergencyContactPhone: nullStr(p.EmergencyContactPhone),
+		Position:              p.Position,
 	})
 	if err != nil {
 		return domain.Employee{}, mapErr(err)
@@ -419,11 +421,12 @@ func mapEmployeeFromCreate(row sqlcgen.CreateEmployeeRow) domain.Employee {
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		Status:          row.Status,
+		HasLogin:        row.UserID != nil,
+		CurrentPosition: row.CurrentPosition,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+		CreatedBy:       row.CreatedBy,
 	}
 }
 
@@ -449,11 +452,12 @@ func mapEmployeeFromUpdate(row sqlcgen.UpdateEmployeeRow) domain.Employee {
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		Status:          row.Status,
+		HasLogin:        row.UserID != nil,
+		CurrentPosition: row.CurrentPosition,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+		CreatedBy:       row.CreatedBy,
 	}
 }
 

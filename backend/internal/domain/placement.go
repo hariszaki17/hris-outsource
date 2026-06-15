@@ -17,7 +17,6 @@ type Placement struct {
 	AgreementID       *string // nil = pending agreement (awaiting_agreement = true)
 	ClientCompanyID   string
 	SiteID            string // INV-5: required
-	Position          string // free-text position label (no master / FK); per-placement
 	StartDate         time.Time
 	EndDate           *time.Time // nil = open-ended (PKWTT)
 	Notes             *string

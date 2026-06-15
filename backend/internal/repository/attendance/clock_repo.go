@@ -48,7 +48,7 @@ func (r *ClockRepo) GetActivePlacement(ctx context.Context, employeeID string) (
 		PlacementID: row.ID,
 		CompanyID:   row.ClientCompanyID,
 		SiteID:      row.SiteID,
-		Position:    row.Position,
+		Position:    strOrEmpty(row.Position),
 	}, true, nil
 }
 

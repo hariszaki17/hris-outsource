@@ -164,17 +164,17 @@ WHERE deleted_at IS NULL
 -- name: OrgRollupsByPosition :many
 -- org_rollups: per-position headcount (distinct placed employees) + active
 -- placement count, over non-terminal placements (mirrors CountActivePlacements).
--- Grouped by the FREE-TEXT placement position (decision 2026-06-12: service_line
--- removed, position is a plain text column on placements — no master/enum).
+-- Grouped by the employee's FREE-TEXT position (position moved to employee 2026-06-15).
 SELECT
-    p.position                                AS position,
+    e.position                                AS position,
     count(DISTINCT p.employee_id)::bigint     AS headcount,
     count(*)::bigint                          AS active_placements
 FROM placements p
+JOIN employees e ON e.id = p.employee_id
 WHERE p.deleted_at IS NULL
   AND p.lifecycle_status IN ('ACTIVE','EXTENDED','EXPIRING','PENDING_START')
-GROUP BY p.position
-ORDER BY p.position;
+GROUP BY e.position
+ORDER BY e.position;
 
 -- name: CountBankApprovalsPending :one
 -- pending_grants.bank_approvals: DEPRECATED by E11 (2026-06-14). The profile

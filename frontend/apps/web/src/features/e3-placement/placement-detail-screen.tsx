@@ -66,20 +66,11 @@ import {
   Briefcase,
   CalendarCheck,
   FileText,
-  RefreshCw,
-  SquareX,
   Users,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  BackfillAgreementModal,
-  EndConfirm,
-  RenewModal,
-  ResignModal,
-  TerminateConfirm,
-  TransferModal,
-} from './placement-overlays.tsx';
+import { BackfillAgreementModal, TransferModal } from './placement-overlays.tsx';
 import type { PlacementInfo } from './placement-overlays.tsx';
 
 // ---------------------------------------------------------------------------
@@ -124,26 +115,6 @@ function isTerminal(state: ActiveState): boolean {
 function canShowActions(state: ActiveState): boolean {
   return state === 'active-like' || state === 'expiring';
 }
-
-// Lifecycle step display (.pen AiyOw ILsx8) — 4-step rail
-const LIFECYCLE_STEPS: Array<{ forStatuses: PlacementLifecycleStatus[]; label: string }> = [
-  { forStatuses: [PlacementLifecycleStatus.PENDING_START], label: 'Draft' },
-  {
-    forStatuses: [PlacementLifecycleStatus.ACTIVE, PlacementLifecycleStatus.EXTENDED],
-    label: 'Aktif',
-  },
-  { forStatuses: [PlacementLifecycleStatus.EXPIRING], label: 'Akan berakhir' },
-  {
-    forStatuses: [
-      PlacementLifecycleStatus.ENDED,
-      PlacementLifecycleStatus.TRANSFERRED,
-      PlacementLifecycleStatus.TERMINATED,
-      PlacementLifecycleStatus.RESIGNED,
-      PlacementLifecycleStatus.SUPERSEDED,
-    ],
-    label: 'Berakhir',
-  },
-];
 
 // Bahasa display labels per status
 const STATUS_LABEL: Record<PlacementLifecycleStatus, string> = {
@@ -228,12 +199,10 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
   // The leader-management link targets /client-companies/$id, which needs clients.read.
   const canManageOnCompany = currentUser?.permissions.includes('clients.read') ?? false;
 
-  // Overlay state
+  // Overlay state — placements are decoupled from time (2026-06-15): the only
+  // lifecycle action is Transfer; ending employment is done via employee
+  // deactivation (which cascades to close placements).
   const [showTransfer, setShowTransfer] = useState(false);
-  const [showRenew, setShowRenew] = useState(false);
-  const [showEnd, setShowEnd] = useState(false);
-  const [showTerminate, setShowTerminate] = useState(false);
-  const [showResign, setShowResign] = useState(false);
   const [showBackfill, setShowBackfill] = useState(false);
 
   // Data — `query.data?.data` is `PlacementDetailResponse`
@@ -299,7 +268,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
     employee_name: placement.employee_name ?? placement.employee_id,
     client_company_id: placement.client_company_id,
     client_company_name: placement.client_company_name ?? placement.client_company_id,
-    position_name: placement.position_name ?? '',
     start_date: placement.start_date,
     end_date: placement.end_date,
   };
@@ -357,99 +325,26 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
               )}
             </div>
             <span className="text-[13px] text-text-2">
-              {[placement.client_company_name, placement.position_name, placement.id]
+              {[placement.client_company_name, placement.employee_name, placement.id]
                 .filter(Boolean)
                 .join(' · ')}
             </span>
           </div>
         </div>
 
-        {/* Action buttons (.pen waTmo) — Perpanjang · Transfer · Akhiri.
-            HR/Admin-only (placements.write); hidden for shift_leader. */}
+        {/* Action button (.pen waTmo) — Transfer only. HR/Admin-only
+            (placements.write); hidden for shift_leader. */}
         {showActions && canEdit && (
           <div className="flex items-center gap-2.5">
-            <Button type="button" variant="primary" size="sm" onClick={() => setShowRenew(true)}>
-              <RefreshCw className="mr-1.5 size-4" aria-hidden="true" />
-              {t('action.renew')}
-            </Button>
             <Button
               type="button"
-              variant="secondary"
+              variant="primary"
               size="sm"
               onClick={() => setShowTransfer(true)}
             >
               <ArrowLeftRight className="mr-1.5 size-4" aria-hidden="true" />
               {t('action.transfer')}
             </Button>
-            <Button type="button" variant="destructive" size="sm" onClick={() => setShowEnd(true)}>
-              <SquareX className="mr-1.5 size-4" aria-hidden="true" />
-              {t('action.end')}
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* Lifecycle tracker (.pen AiyOw) */}
-      <div className="flex items-center justify-between gap-8 rounded-xl border border-border bg-surface px-6 py-[18px]">
-        <div className="flex flex-1 items-center">
-          {LIFECYCLE_STEPS.map((step, idx) => {
-            const currentStepIdx = LIFECYCLE_STEPS.findIndex((s) =>
-              s.forStatuses.includes(placement.lifecycle_status),
-            );
-            const stepIdx = idx;
-            const isPast = currentStepIdx > stepIdx;
-            const isCurrent = currentStepIdx === stepIdx;
-
-            return (
-              <div key={step.label} className="flex flex-1 items-center">
-                {idx > 0 && (
-                  <div
-                    className={[
-                      'h-[2px] flex-1 rounded-full',
-                      isPast || isCurrent ? 'bg-primary' : 'bg-border',
-                    ].join(' ')}
-                    aria-hidden="true"
-                  />
-                )}
-                <div className="flex shrink-0 items-center gap-2">
-                  <div
-                    className={[
-                      'flex shrink-0 items-center justify-center rounded-full',
-                      isCurrent
-                        ? 'size-[18px] border-[3px] border-primary bg-primary'
-                        : isPast
-                          ? 'size-4 bg-primary'
-                          : 'size-4 border border-border bg-surface-2',
-                    ].join(' ')}
-                    aria-hidden="true"
-                  />
-                  <span
-                    className={[
-                      'text-[13px]',
-                      isCurrent
-                        ? 'font-bold text-text'
-                        : isPast
-                          ? 'font-semibold text-text'
-                          : 'font-medium text-text-3',
-                    ].join(' ')}
-                  >
-                    {step.label}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* End-date note (.pen YKkQB) */}
-        {placement.end_date && (
-          <div className="flex shrink-0 flex-col items-end gap-[2px]">
-            <span className="text-[13px] font-semibold text-text">
-              {t('lifecycle.endsOn')} <DateText kind="date" value={placement.end_date} />
-            </span>
-            {placement.lifecycle_status === PlacementLifecycleStatus.EXPIRING && (
-              <span className="text-[12px] text-warn-tx">{t('lifecycle.expiringSoon')}</span>
-            )}
           </div>
         )}
       </div>
@@ -473,30 +368,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
         />
       )}
 
-      {/* Secondary actions (Terminate / Resign) — ghost links, active-like +
-          expiring only. HR/Admin-only (placements.write). */}
-      {showActions && canEdit && (
-        <div className="flex items-center justify-end gap-3">
-          <button
-            type="button"
-            className="text-[13px] font-semibold text-text-3 underline-offset-2 hover:text-bad-tx hover:underline"
-            onClick={() => setShowTerminate(true)}
-          >
-            {t('action.terminate')}
-          </button>
-          <span className="text-text-3" aria-hidden="true">
-            ·
-          </span>
-          <button
-            type="button"
-            className="text-[13px] font-semibold text-text-3 underline-offset-2 hover:text-warn-tx hover:underline"
-            onClick={() => setShowResign(true)}
-          >
-            {t('action.resign')}
-          </button>
-        </div>
-      )}
-
       {/* 2-column body (.pen JSKXn) */}
       <div className="flex min-h-0 items-start gap-6">
         {/* Left column — 760px wide (.pen K6g53) */}
@@ -508,16 +379,9 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
           >
             <div className="grid grid-cols-2 gap-x-10">
               <KvRow label={t('field.company')} value={placement.client_company_name} />
-              <KvRow label={t('field.position')} value={placement.position_name} />
-              <KvRow label={t('field.period')}>
+              <KvRow label={t('field.placedSince')}>
                 <span className="text-[13px] font-semibold text-text">
                   <DateText kind="date" value={placement.start_date} />
-                  {' – '}
-                  {placement.end_date ? (
-                    <DateText kind="date" value={placement.end_date} />
-                  ) : (
-                    t('field.openEnded')
-                  )}
                 </span>
               </KvRow>
               <KvRow label={t('field.createdBy')} value={placement.created_by ?? '—'} />
@@ -585,13 +449,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
                     <span className="text-[13px] text-text-3">—</span>
                   )}
                 </KvRow>
-                {/* Info note: placement period sits within agreement (.pen Fpre6) */}
-                <div className="mt-3 flex items-start gap-2 rounded-lg border border-info-bd bg-info-bg px-3 py-2">
-                  <span className="mt-0.5 text-[11px] text-info-tx" aria-hidden="true">
-                    ⓘ
-                  </span>
-                  <p className="text-[12px] text-info-tx">{t('agreement.periodNote')}</p>
-                </div>
               </>
             )}
           </DetailCard>
@@ -613,18 +470,6 @@ export function PlacementDetailScreen({ placementId }: PlacementDetailScreenProp
       <TransferModal
         open={showTransfer}
         onClose={() => setShowTransfer(false)}
-        placement={placementInfo}
-      />
-      <RenewModal open={showRenew} onClose={() => setShowRenew(false)} placement={placementInfo} />
-      <EndConfirm open={showEnd} onClose={() => setShowEnd(false)} placement={placementInfo} />
-      <TerminateConfirm
-        open={showTerminate}
-        onClose={() => setShowTerminate(false)}
-        placement={placementInfo}
-      />
-      <ResignModal
-        open={showResign}
-        onClose={() => setShowResign(false)}
         placement={placementInfo}
       />
       <BackfillAgreementModal

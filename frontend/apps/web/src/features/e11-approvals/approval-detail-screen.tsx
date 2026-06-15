@@ -265,7 +265,9 @@ export default function ApprovalDetailScreen({ instanceId }: ApprovalDetailScree
   const requestTypeLabel =
     instance.request_type === RequestType.LEAVE
       ? t('approvals.detail.typeLeave')
-      : t('approvals.detail.typeOvertime');
+      : instance.request_type === RequestType.CORRECTION
+        ? t('approvals.detail.typeCorrection')
+        : t('approvals.detail.typeOvertime');
 
   const acting = approve.isPending || reject.isPending || bypass.isPending;
 

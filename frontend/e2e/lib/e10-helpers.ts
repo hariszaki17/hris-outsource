@@ -1,17 +1,11 @@
 /**
  * lib/e10-helpers.ts
  *
- * Shared UI/API helpers for the E10 reporting / dashboard / notifications / export
- * E2E specs (Phase-11, the milestone capstone). Every selector is anchored on the
- * REAL rendered e10-reporting + dashboard component DOM (NOT assumptions):
+ * Shared UI/API helpers for the E10 reporting / notifications / export E2E specs
+ * (Phase-11, the milestone capstone). Every selector is anchored on the REAL rendered
+ * e10-reporting component DOM (NOT assumptions). (The staff dashboard screen was
+ * removed 2026-06-15; the landing page is now Kehadiran/attendance.)
  *
- *   - dashboard-screen.tsx (/, role-branched): HrDashboardView renders a TitleBand
- *     <h1>t('title')="Dashboard"</h1> + the `data.role_label` span ("HR Admin" /
- *     "Super Admin"), 4× StatCard (KPI labels), and an ApprovalInboxPanel (right,
- *     w-392) whose rows deep-link into E5/E6/E7. LeaderDashboardView renders the SAME
- *     <h1> + a subtitle "{company.name} · …", 4× today StatCard (total/clocked-in/
- *     late/absent), pending-count chips, schedule-alerts, and the ApprovalInboxPanel.
- *     Agent → AgentFallback (no-permission EmptyState).
  *   - billable-report-screen.tsx (/reports): TitleBand <h1>t('report.title')</h1> +
  *     "Ekspor" primary button (t('report.exportBtn')); period date inputs aria-label
  *     t('report.filterPeriodFrom')/filterPeriodTo; 4× StatCard (Jam Billable/Payable/

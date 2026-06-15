@@ -5,9 +5,11 @@ package attendance
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	att "github.com/hariszaki17/hris-outsource/backend/internal/domain/attendance"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
@@ -23,12 +25,17 @@ func (h *Handler) CreateCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Cheap required-field gate (full per-type validation lives in the service).
+	// NEW_ENTRY carries work_date instead of attendance_id; other types need attendance_id.
+	isNewEntry := att.CorrectionType(req.Type) == att.CorrectionTypeNewEntry
 	fields := map[string]string{}
-	if req.AttendanceID == "" {
-		fields["attendance_id"] = "Wajib diisi."
-	}
 	if req.Type == "" {
 		fields["type"] = "Wajib diisi."
+	}
+	if !isNewEntry && req.AttendanceID == "" {
+		fields["attendance_id"] = "Wajib diisi."
+	}
+	if isNewEntry && (req.WorkDate == nil || *req.WorkDate == "") {
+		fields["work_date"] = "Wajib diisi untuk koreksi tanpa catatan (NEW_ENTRY)."
 	}
 	if req.Reason == "" {
 		fields["reason"] = "Wajib diisi."
@@ -38,8 +45,19 @@ func (h *Handler) CreateCorrection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var workDate *time.Time
+	if req.WorkDate != nil && *req.WorkDate != "" {
+		wd, perr := time.Parse("2006-01-02", *req.WorkDate)
+		if perr != nil {
+			httpx.WriteError(w, r, apperr.Invalid(map[string]string{"work_date": "Format tanggal tidak valid (YYYY-MM-DD)."}))
+			return
+		}
+		workDate = &wd
+	}
+
 	cor, err := h.corrections.Create(r.Context(), svc.CreateCorrectionInput{
 		AttendanceID:             req.AttendanceID,
+		WorkDate:                 workDate,
 		Type:                     req.Type,
 		ProposedCheckInAt:        req.ProposedCheckInAt,
 		ProposedCheckOutAt:       req.ProposedCheckOutAt,
@@ -103,42 +121,7 @@ func (h *Handler) GetCorrection(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[correctionResponse]{Data: toCorrectionResponse(cor)})
 }
 
-// ApproveCorrection handles POST /corrections/{id}:approve. Applies the proposed
-// change to the target attendance + flips status to APPLIED; returns { data, attendance }.
-func (h *Handler) ApproveCorrection(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req approveRequest
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	cor, attn, err := h.corrections.Approve(r.Context(), id, req.Note)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, approveCorrectionResponse{
-		Data:       toCorrectionResponse(cor),
-		Attendance: toAttendanceResponse(attn),
-	})
-}
-
-// RejectCorrection handles POST /corrections/{id}:reject (reason required, minLen 5).
-func (h *Handler) RejectCorrection(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req rejectRequest
-	if err := decodeJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	if len([]rune(req.Reason)) < 5 {
-		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"reason": "Wajib diisi (minimum 5 karakter)."}))
-		return
-	}
-	cor, err := h.corrections.Reject(r.Context(), id, req.Reason)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, dataResponse[correctionResponse]{Data: toCorrectionResponse(cor)})
-}
+// NOTE: correction approve/reject are no longer correction-native endpoints. A correction
+// opens an E11 approval_instance on submit (request_type=CORRECTION); decisions go through
+// POST /approval-instances/{id}:approve|:reject, which fire CorrectionService.OnApproved /
+// OnRejected on the engine's terminal transition.

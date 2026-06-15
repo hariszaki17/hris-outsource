@@ -33,13 +33,12 @@ type bulkRejectRequest struct {
 	Reason string   `json:"reason"`
 }
 
-
 // manualCreateRequest is the openapi ManualCreateRequest (F5.6).
 type manualCreateRequest struct {
-	EmployeeID  string  `json:"employee_id"`
-	CheckInAt   string  `json:"check_in_at"`
-	CheckOutAt  *string `json:"check_out_at"`
-	Note        string  `json:"note,omitempty"`
+	EmployeeID string  `json:"employee_id"`
+	CheckInAt  string  `json:"check_in_at"`
+	CheckOutAt *string `json:"check_out_at"`
+	Note       string  `json:"note,omitempty"`
 }
 
 // autofillResponse is the response for GET /attendance:manual-autofill.
@@ -59,6 +58,7 @@ type autofillResponse struct {
 	ExistingAttendanceStat *string `json:"existing_attendance_status"`
 	ExistingVerification   *string `json:"existing_verification_status"`
 }
+
 // clockInRequest is the openapi ClockInRequest. wfo is a *bool so an omitted value
 // applies the spec default (true); employee_id is intentionally omitted — the agent is
 // always self (server fills from token).
@@ -148,6 +148,9 @@ type attendanceResponse struct {
 	RejectedAt       *string `json:"rejected_at"`
 	RejectReason     *string `json:"reject_reason"`
 	LastCorrectionID *string `json:"last_correction_id"`
+
+	// IsPayable: true payable · false not · null pending an SL/HR/super flag (no-shift day).
+	IsPayable *bool `json:"is_payable"`
 
 	CreatedBy *string `json:"created_by"`
 
@@ -256,6 +259,7 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		RejectedAt:         rfc3339Ptr(a.RejectedAt),
 		RejectReason:       a.RejectReason,
 		LastCorrectionID:   a.LastCorrectionID,
+		IsPayable:          a.IsPayable,
 		CreatedBy:          a.CreatedBy,
 		CreatedAt:          rfc3339(a.CreatedAt),
 		UpdatedAt:          rfc3339(a.UpdatedAt),

@@ -31,6 +31,7 @@ import {
 } from '@swp/api-client/e5';
 import type { StatusTone } from '@swp/design-tokens';
 import {
+  Button,
   Checkbox,
   type Column,
   ConfirmDialog,
@@ -291,7 +292,6 @@ export function AttendanceVerificationScreen() {
     {
       id: 'employee',
       header: t('colEmployee'),
-      width: 200,
       cell: (row) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[13px] font-medium text-text">
@@ -382,6 +382,33 @@ export function AttendanceVerificationScreen() {
             {t('rejectBtn')}
           </button>
         </div>
+      ),
+    },
+    {
+      id: 'detail',
+      header: '',
+      width: 96,
+      align: 'right',
+      cell: (row) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            void (
+              navigate as (o: {
+                to: string;
+                search?: Record<string, unknown>;
+                params?: Record<string, unknown>;
+              }) => void
+            )({
+              to: '/attendance/$attendanceId',
+              params: { attendanceId: row.id },
+            })
+          }
+        >
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
@@ -560,19 +587,6 @@ export function AttendanceVerificationScreen() {
           getRowId={(r) => r.id}
           isLoading={query.isLoading}
           skeletonRows={6}
-          onRowClick={(rec) =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            void (
-              navigate as (o: {
-                to: string;
-                search?: Record<string, unknown>;
-                params?: Record<string, unknown>;
-              }) => void
-            )({
-              to: '/attendance/$attendanceId',
-              params: { attendanceId: rec.id },
-            })
-          }
           empty={
             hasFilters ? (
               <EmptyState

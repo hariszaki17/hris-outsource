@@ -76,8 +76,8 @@ type AttendanceRepository interface {
 	VerifyAttendanceWithTimes(ctx context.Context, tx pgx.Tx, id string, checkInAt time.Time, checkOutAt *time.Time, status string, isLate bool, lateMinutes int, verifiedBy *string) (att.Attendance, int64, error)
 	RejectAttendance(ctx context.Context, tx pgx.Tx, id string, rejectedBy *string, reason string) (att.Attendance, int64, error)
 	ApplyCorrectionToAttendance(ctx context.Context, tx pgx.Tx, p ApplyCorrectionParams) (att.Attendance, error)
-		// CreateManualAttendance inserts a manually-created record (F5.6).
-		// GetActivePlacement resolves the employee's single active placement for
+	// CreateManualAttendance inserts a manually-created record (F5.6).
+	// GetActivePlacement resolves the employee's single active placement for
 	// manual attendance (maps to ClockRepo.GetActivePlacement).
 	GetActivePlacement(ctx context.Context, employeeID string) (PlacementInfo, bool, error)
 	// GetTodaySchedule resolves today's schedule entry for lateness evaluation.
@@ -85,6 +85,8 @@ type AttendanceRepository interface {
 	CreateManualAttendance(ctx context.Context, tx pgx.Tx, p CreateManualAttendanceParams) (att.Attendance, error)
 	// GetManualAutofillData resolves placement + schedule for manual form (F5.6).
 	GetManualAutofillData(ctx context.Context, employeeID string, refDate time.Time) (ManualAutofillData, bool, error)
+	// SetAttendancePayable flags a no-shift day payable/not (F5.4 CR-13).
+	SetAttendancePayable(ctx context.Context, tx pgx.Tx, id string, payable bool) (att.Attendance, error)
 }
 
 // ApplyCorrectionParams carries the whitelisted COALESCE update for apply-on-approve.
@@ -114,6 +116,7 @@ type CreateManualAttendanceParams struct {
 	Status             string
 	VerificationStatus string
 	Flags              []string
+	IsPayable          *bool
 	CreatedBy          *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -128,6 +131,7 @@ type ApplyCorrectionParams struct {
 	IsLate           *bool
 	LateMinutes      *int
 	LastCorrectionID *string
+	IsPayable        *bool
 }
 
 // AttendanceService implements the verification business logic.
@@ -467,25 +471,25 @@ func (s *AttendanceService) GetManualAutofillData(ctx context.Context, employeeI
 
 // ManualCreateRequest is the decoded body for POST /attendance:manual-create.
 type ManualCreateRequest struct {
-	EmployeeID       string
-	CheckInAt        time.Time
-	CheckOutAt       *time.Time
-	Note             string
-	CreatedBy        string // SWP-EMP-* of the creating HR/admin
+	EmployeeID string
+	CheckInAt  time.Time
+	CheckOutAt *time.Time
+	Note       string
+	CreatedBy  string // SWP-EMP-* of the creating HR/admin
 }
 
 // ManualAutofillData is the response for GET /attendance:manual-autofill.
 type ManualAutofillData struct {
-	PlacementID     string
-	CompanyID       string
-	SiteID          string
-	Position        string
-	EmployeeName    string
-	CompanyName     string
-	SiteName        *string
-	ScheduleID      *string
-	ShiftStartAt    *time.Time
-	ShiftEndAt      *time.Time
+	PlacementID  string
+	CompanyID    string
+	SiteID       string
+	Position     string
+	EmployeeName string
+	CompanyName  string
+	SiteName     *string
+	ScheduleID   *string
+	ShiftStartAt *time.Time
+	ShiftEndAt   *time.Time
 	// Existing attendance for this employee+date (cron auto-creates ABSENT rows for
 	// missed scheduled shifts). nil when none — otherwise the manual form steers the
 	// admin to verify/correct it instead of creating a duplicate.
@@ -516,18 +520,18 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 			return att.Attendance{}, apperr.Rule("OUT_OF_SCOPE", nil)
 		}
 	}
-	
+
 	// Validate check_out >= check_in.
 	if req.CheckOutAt != nil && req.CheckOutAt.Before(req.CheckInAt) {
 		return att.Attendance{}, apperr.Invalid(map[string]string{"check_out_at": "Jam keluar harus setelah jam masuk."})
 	}
-	
+
 	// Resolve schedule for the employee on check-in date.
 	schedID, shiftStart, shiftEnd, schedFound, serr := s.repo.GetTodaySchedule(ctx, req.EmployeeID, now)
 	if serr != nil {
 		return att.Attendance{}, apperr.Internal(serr)
 	}
-	
+
 	var (
 		flags         []string
 		isLate        bool
@@ -538,17 +542,17 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 		shiftEndPtr   *time.Time
 		workedMin     *int
 	)
-	
+
 	// Always set MANUAL_ENTRY flag.
 	flags = append(flags, string(att.FlagManualEntry))
-	
+
 	if schedFound {
 		ss := shiftStart
 		se := shiftEnd
 		schedulePtr = &schedID
 		shiftStartPtr = &ss
 		shiftEndPtr = &se
-		
+
 		// Lateness evaluation (same logic as clock_service.go).
 		if diff := req.CheckInAt.Sub(shiftStart); diff > 15*time.Minute {
 			isLate = true
@@ -556,7 +560,7 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 			flags = append(flags, string(att.FlagLate))
 			status = string(att.StatusLate)
 		}
-		
+
 		// Early checkout evaluation.
 		if req.CheckOutAt != nil && shiftEnd.After(*req.CheckOutAt) {
 			if diff := shiftEnd.Sub(*req.CheckOutAt); diff > 15*time.Minute {
@@ -564,7 +568,7 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 			}
 		}
 	}
-	
+
 	// Compute worked_minutes if check_out is provided.
 	if req.CheckOutAt != nil {
 		wm := int(req.CheckOutAt.Sub(req.CheckInAt).Minutes())
@@ -573,9 +577,9 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 		}
 		workedMin = &wm
 	}
-	
+
 	verification := string(att.VerificationPending)
-	
+
 	p := CreateManualAttendanceParams{
 		EmployeeID:         req.EmployeeID,
 		PlacementID:        pl.PlacementID,
@@ -597,7 +601,7 @@ func (s *AttendanceService) ManualCreate(ctx context.Context, req ManualCreateRe
 		Flags:              flags,
 		CreatedBy:          &req.CreatedBy,
 	}
-	
+
 	var out att.Attendance
 	txErr := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		rec, cerr := s.repo.CreateManualAttendance(ctx, tx, p)
@@ -693,6 +697,49 @@ func ptrStr(p *string) any {
 		return nil
 	}
 	return *p
+}
+
+// SetAttendancePayable flags a no-shift attendance day payable/not (F5.4 CR-13). A day
+// that had a scheduled shift is auto-payable and cannot be manually flagged → 422
+// ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE. Scope-guarded to the record's company; audited.
+func (s *AttendanceService) SetAttendancePayable(ctx context.Context, id string, payable bool) (att.Attendance, error) {
+	var out att.Attendance
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		rec, gerr := s.repo.GetAttendanceForUpdate(ctx, tx, id)
+		if errors.Is(gerr, domain.ErrNotFound) {
+			return apperr.NotFound()
+		}
+		if gerr != nil {
+			return gerr
+		}
+		if serr := rbac.GuardCompany(ctx, rec.CompanyID); serr != nil {
+			return serr
+		}
+		// Only no-shift days are manually flaggable; a shift-backed day is auto-payable.
+		if rec.ScheduleID != nil || rec.ShiftStartAt != nil {
+			return &apperr.Error{
+				Code:       "ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE",
+				HTTPStatus: 422,
+				Message:    "Hari ini memiliki jadwal shift sehingga otomatis layak dibayar; tidak perlu ditandai manual.",
+				Fields:     map[string]string{"attendance_id": id},
+			}
+		}
+		updated, uerr := s.repo.SetAttendancePayable(ctx, tx, id, payable)
+		if uerr != nil {
+			return uerr
+		}
+		out = updated
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionUpdate,
+			EntityType: "attendance",
+			EntityID:   id,
+			After:      map[string]any{"is_payable": payable},
+		})
+	})
+	if err != nil {
+		return att.Attendance{}, asAppErr(err)
+	}
+	return out, nil
 }
 
 // clampLimit applies the documented default(50)/max(200).

@@ -74,7 +74,7 @@ export function CompanyLeaderCandidatePicker({
       opts.push({
         value: p.employee_id,
         label,
-        sublabel: p.position_name || undefined,
+        sublabel: p.employee_id,
       });
     }
     return opts;

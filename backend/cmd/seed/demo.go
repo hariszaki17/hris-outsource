@@ -496,9 +496,9 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 	const plQ = `
 		INSERT INTO placements
 			(id, employee_id, agreement_id, client_company_id, site_id,
-			 position, start_date, end_date, lifecycle_status,
+			 start_date, end_date, lifecycle_status,
 			 status_changed_at, ended_reason, ended_at, resign_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, now(), $10, $11, $12, 'system-seed')
+		VALUES ($1, $2, $3, $4, $5, $6::date, $7, $8, now(), $9, $10, $11, 'system-seed')
 		ON CONFLICT (id) DO NOTHING`
 
 	const histQ = `
@@ -569,10 +569,16 @@ func seedDemoPlacements(ctx context.Context, pool *db.Pool, d *demoData) error {
 		}
 
 		if _, err := pool.Pool.Exec(ctx, plQ,
-			plID, a.empID, a.agID, a.companyID, a.siteID, a.position,
+			plID, a.empID, a.agID, a.companyID, a.siteID,
 			startStr, endStr, lifecycle, endedReason, endedAt, resignAt,
 		); err != nil {
 			return fmt.Errorf("seed demo placement %q: %w", plID, err)
+		}
+		// Position is an employee attribute now — set it from the agent's label.
+		if _, err := pool.Pool.Exec(ctx,
+			`UPDATE employees SET position = $1 WHERE id = $2`, a.position, a.empID,
+		); err != nil {
+			return fmt.Errorf("seed demo employee position for %q: %w", a.empID, err)
 		}
 		a.plID = plID
 		d.placementCount++
@@ -758,7 +764,7 @@ func seedDemoAttendance(ctx context.Context, pool *db.Pool, d *demoData) error {
 		VALUES
 			($1, $2, $3, NULL, $4,
 			 (SELECT site_id FROM placements WHERE id = $3),
-			 (SELECT position FROM placements WHERE id = $3),
+			 (SELECT position FROM employees WHERE id = $2),
 			 $5,
 			 $6, $7, $8, $9,
 			 $10, $11, $12, $13, true,

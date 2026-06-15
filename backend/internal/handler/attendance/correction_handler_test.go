@@ -15,6 +15,7 @@
 package attendance_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -146,43 +147,44 @@ func TestGetCorrection_WithDiff(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /corrections/{id}:approve
+// CorrectionService.OnApproved — the E11 terminal-APPROVED hook (corrections now
+// route through POST /approval-instances/{id}:approve, which fires this hook). The
+// transport is the E11 engine; here we drive the hook directly over the fakes.
 // ---------------------------------------------------------------------------
 
-func TestApproveCorrection_AppliesAndApplied(t *testing.T) {
+// hookCtx builds a request context carrying the harness principal (the E11 approver).
+func hookCtx(h *harness) context.Context {
+	return auth.WithPrincipal(context.Background(), h.principal)
+}
+
+// asAppErrCode type-asserts the hook error to the platform apperr and returns its code.
+func asAppErrCode(t *testing.T, err error) string {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected an error, got nil")
+	}
+	ae, ok := err.(*apperr.Error)
+	if !ok {
+		t.Fatalf("expected *apperr.Error, got %T: %v", err, err)
+	}
+	return ae.Code
+}
+
+func TestCorrectionOnApproved_AppliesAndApplied(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	// The target attendance must exist for ApplyCorrectionToAttendance.
 	h.seedAttendance("SWP-ATT-9004", cmpLed, empOther, att.VerificationPending, ymd(2026, 6, 3), att.FlagAutoClosed)
 	seedCheckOutCorrection(h, "SWP-COR-8001", "SWP-ATT-9004", cmpLed, att.CorrectionStatusPending, shiftRecent, corCreatedA)
 
-	rr := h.do("POST", "/corrections/SWP-COR-8001:approve", map[string]any{"note": "ok"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if err := h.csvc.OnApproved(hookCtx(h), &fakeTx{}, "SWP-COR-8001"); err != nil {
+		t.Fatalf("OnApproved: %v", err)
 	}
-	body := decodeBody(t, rr)
-	data, ok := body["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("data missing/not object")
+	if got := h.correction.records["SWP-COR-8001"].Status; got != att.CorrectionStatusApplied {
+		t.Errorf("correction status = %v, want APPLIED", got)
 	}
-	if data["status"] != "APPLIED" {
-		t.Errorf("data.status = %v, want APPLIED", data["status"])
-	}
-	attn, ok := body["attendance"].(map[string]any)
-	if !ok {
-		t.Fatalf("attendance missing/not object (approve returns {data, attendance})")
-	}
-	flags, ok := attn["flags"].([]any)
-	if !ok {
-		t.Fatalf("attendance.flags missing/not array: %T", attn["flags"])
-	}
-	var corrected bool
-	for _, f := range flags {
-		if f == "CORRECTED" {
-			corrected = true
-		}
-	}
-	if !corrected {
-		t.Errorf("attendance.flags missing CORRECTED: %v", flags)
+	attn := h.attendance.records["SWP-ATT-9004"]
+	if !hasFlag(attn.Flags, att.FlagCorrected) {
+		t.Errorf("attendance.flags missing CORRECTED: %v", attn.Flags)
 	}
 }
 
@@ -208,150 +210,91 @@ func seedAbsentWithCheckInCorrection(h *harness, attID, corID string, shiftStart
 	h.correction.records[corID] = c
 }
 
-func TestApproveCorrection_CheckIn_FlipsAbsentToPresent_OnTime(t *testing.T) {
+func TestCorrectionOnApproved_CheckIn_FlipsAbsentToPresent_OnTime(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	shiftStart := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC) // 07:00 WIB
 	// Proposed clock-in within the 15-min grace → on-time.
 	seedAbsentWithCheckInCorrection(h, "SWP-ATT-9009", "SWP-COR-8009", shiftStart, shiftStart.Add(10*time.Minute))
 
-	rr := h.do("POST", "/corrections/SWP-COR-8009:approve", map[string]any{"note": "bukti absen diterima"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if err := h.csvc.OnApproved(hookCtx(h), &fakeTx{}, "SWP-COR-8009"); err != nil {
+		t.Fatalf("OnApproved: %v", err)
 	}
-	attn := decodeBody(t, rr)["attendance"].(map[string]any)
-	if attn["status"] != "PRESENT" {
-		t.Errorf("status = %v, want PRESENT (ABSENT resolved on-time)", attn["status"])
+	attn := h.attendance.records["SWP-ATT-9009"]
+	if attn.Status != att.StatusPresent {
+		t.Errorf("status = %v, want PRESENT (ABSENT resolved on-time)", attn.Status)
 	}
-	if lm, _ := attn["late_minutes"].(float64); lm != 0 {
-		t.Errorf("late_minutes = %v, want 0", attn["late_minutes"])
+	if attn.LateMinutes != 0 {
+		t.Errorf("late_minutes = %d, want 0", attn.LateMinutes)
 	}
-	if ci := attn["check_in_at"]; ci == nil {
+	if attn.CheckInAt == nil {
 		t.Errorf("check_in_at still null after CHECK_IN correction applied")
 	}
 }
 
-func TestApproveCorrection_CheckIn_FlipsAbsentToLate(t *testing.T) {
+func TestCorrectionOnApproved_CheckIn_FlipsAbsentToLate(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	shiftStart := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC) // 07:00 WIB
 	// Proposed clock-in 30 min after start → past grace → LATE, late_minutes=30.
 	seedAbsentWithCheckInCorrection(h, "SWP-ATT-9009", "SWP-COR-8009", shiftStart, shiftStart.Add(30*time.Minute))
 
-	rr := h.do("POST", "/corrections/SWP-COR-8009:approve", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if err := h.csvc.OnApproved(hookCtx(h), &fakeTx{}, "SWP-COR-8009"); err != nil {
+		t.Fatalf("OnApproved: %v", err)
 	}
-	attn := decodeBody(t, rr)["attendance"].(map[string]any)
-	if attn["status"] != "LATE" {
-		t.Errorf("status = %v, want LATE (clock-in past grace)", attn["status"])
+	attn := h.attendance.records["SWP-ATT-9009"]
+	if attn.Status != att.StatusLate {
+		t.Errorf("status = %v, want LATE (clock-in past grace)", attn.Status)
 	}
-	if lm, _ := attn["late_minutes"].(float64); lm != 30 {
-		t.Errorf("late_minutes = %v, want 30", attn["late_minutes"])
+	if attn.LateMinutes != 30 {
+		t.Errorf("late_minutes = %d, want 30", attn.LateMinutes)
 	}
 }
 
-func TestApproveCorrection_NonPending_Conflict_409(t *testing.T) {
+func TestCorrectionOnApproved_NonPending_Conflict(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	h.seedAttendance("SWP-ATT-9004", cmpLed, empOther, att.VerificationVerified, ymd(2026, 6, 3))
 	seedCheckOutCorrection(h, "SWP-COR-8001", "SWP-ATT-9004", cmpLed, att.CorrectionStatusApplied, shiftRecent, corCreatedA)
 
-	rr := h.do("POST", "/corrections/SWP-COR-8001:approve", nil)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	err := h.csvc.OnApproved(hookCtx(h), &fakeTx{}, "SWP-COR-8001")
+	if err != nil {
+		t.Fatalf("OnApproved on an already-APPLIED correction must be idempotent, got: %v", err)
 	}
-	e := errObject(t, decodeBody(t, rr))
-	if e["code"] != "CONFLICT" {
-		t.Fatalf("error.code = %v, want CONFLICT", e["code"])
-	}
-	fields, ok := e["fields"].(map[string]any)
-	if !ok || fields["status"] != "APPLIED" {
-		t.Errorf("error.fields.status = %v, want APPLIED", e["fields"])
+	if got := h.correction.records["SWP-COR-8001"].Status; got != att.CorrectionStatusApplied {
+		t.Errorf("status drifted from APPLIED: %v", got)
 	}
 }
 
-func TestApproveCorrection_OutsideWindow_422(t *testing.T) {
-	// Leader (non-HR) approving a correction whose shift date is > 7 days old → 422.
-	h := newHarness(t, auth.RoleShiftLeader, cmpLed, empLeader)
-	h.seedAttendance("SWP-ATT-9007", cmpLed, empOther, att.VerificationPending, shiftStale)
-	seedCheckOutCorrection(h, "SWP-COR-8003", "SWP-ATT-9007", cmpLed, att.CorrectionStatusPending, shiftStale, corCreatedB)
-
-	rr := h.do("POST", "/corrections/SWP-COR-8003:approve", nil)
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
-	}
-	e := errObject(t, decodeBody(t, rr))
-	if e["code"] != "OUTSIDE_CORRECTION_WINDOW" {
-		t.Fatalf("error.code = %v, want OUTSIDE_CORRECTION_WINDOW", e["code"])
-	}
-	fields, ok := e["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("error.fields missing: %T", e["fields"])
-	}
-	if fields["attendance_date"] != "2026-05-01" {
-		t.Errorf("fields.attendance_date = %v, want 2026-05-01", fields["attendance_date"])
-	}
-	if fields["window_days"] != "7" {
-		t.Errorf("fields.window_days = %v, want \"7\"", fields["window_days"])
-	}
-}
-
-func TestApproveCorrection_HRExemptFromWindow(t *testing.T) {
-	// Same stale correction, but HR is window-exempt → applies successfully.
+func TestCorrectionOnApproved_Cancelled_Conflict(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
-	h.seedAttendance("SWP-ATT-9007", cmpLed, empOther, att.VerificationPending, shiftStale, att.FlagAutoClosed)
-	seedCheckOutCorrection(h, "SWP-COR-8003", "SWP-ATT-9007", cmpLed, att.CorrectionStatusPending, shiftStale, corCreatedB)
+	h.seedAttendance("SWP-ATT-9004", cmpLed, empOther, att.VerificationVerified, ymd(2026, 6, 3))
+	seedCheckOutCorrection(h, "SWP-COR-8001", "SWP-ATT-9004", cmpLed, att.CorrectionStatusCancelled, shiftRecent, corCreatedA)
 
-	rr := h.do("POST", "/corrections/SWP-COR-8003:approve", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("HR window-exempt: expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if decodeBody(t, rr)["data"].(map[string]any)["status"] != "APPLIED" {
-		t.Errorf("HR approve did not reach APPLIED")
+	if code := asAppErrCode(t, h.csvc.OnApproved(hookCtx(h), &fakeTx{}, "SWP-COR-8001")); code != "CONFLICT" {
+		t.Errorf("error.code = %q, want CONFLICT (non-PENDING, non-terminal-APPLIED)", code)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// POST /corrections/{id}:reject
+// CorrectionService.OnRejected — the E11 terminal-REJECTED hook. The user-visible
+// reason lives on the E11 approval action, not on the correction record.
 // ---------------------------------------------------------------------------
 
-func TestRejectCorrection_Success(t *testing.T) {
+func TestCorrectionOnRejected_Success(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
 	h.seedCorrection("SWP-COR-8002", "SWP-ATT-9002", cmpLed, att.CorrectionStatusPending, shiftRecent, att.CorrectionTypeCheckIn)
 
-	rr := h.do("POST", "/corrections/SWP-COR-8002:reject", map[string]any{"reason": "Bukti tidak menunjukkan jam clock-in."})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if err := h.csvc.OnRejected(hookCtx(h), &fakeTx{}, "SWP-COR-8002"); err != nil {
+		t.Fatalf("OnRejected: %v", err)
 	}
-	data := decodeBody(t, rr)["data"].(map[string]any)
-	if data["status"] != "REJECTED" {
-		t.Errorf("status = %v, want REJECTED", data["status"])
-	}
-	if data["reject_reason"] != "Bukti tidak menunjukkan jam clock-in." {
-		t.Errorf("reject_reason = %v, want the supplied reason", data["reject_reason"])
+	if got := h.correction.records["SWP-COR-8002"].Status; got != att.CorrectionStatusRejected {
+		t.Errorf("status = %v, want REJECTED", got)
 	}
 }
 
-func TestRejectCorrection_MissingReason_400(t *testing.T) {
+func TestCorrectionOnRejected_NonPending_Conflict(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", "")
-	h.seedCorrection("SWP-COR-8002", "SWP-ATT-9002", cmpLed, att.CorrectionStatusPending, shiftRecent, att.CorrectionTypeCheckIn)
+	h.seedCorrection("SWP-COR-8002", "SWP-ATT-9002", cmpLed, att.CorrectionStatusApplied, shiftRecent, att.CorrectionTypeCheckIn)
 
-	rr := h.do("POST", "/corrections/SWP-COR-8002:reject", map[string]any{"reason": "x"})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if code := errCode(t, rr); code != "INVALID_REQUEST" {
-		t.Errorf("error.code = %q, want INVALID_REQUEST", code)
-	}
-}
-
-func TestRejectCorrection_NonPending_Conflict_409(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "", "")
-	h.seedCorrection("SWP-COR-8002", "SWP-ATT-9002", cmpLed, att.CorrectionStatusRejected, shiftRecent, att.CorrectionTypeCheckIn)
-
-	rr := h.do("POST", "/corrections/SWP-COR-8002:reject", map[string]any{"reason": "Sudah diputuskan sebelumnya."})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if code := errCode(t, rr); code != "CONFLICT" {
+	if code := asAppErrCode(t, h.csvc.OnRejected(hookCtx(h), &fakeTx{}, "SWP-COR-8002")); code != "CONFLICT" {
 		t.Errorf("error.code = %q, want CONFLICT", code)
 	}
 }

@@ -74,7 +74,6 @@ import { OvertimeRulesScreen as OvertimeRulesHolidaysScreen } from '@/features/e
 import { PayslipArchiveScreen } from '@/features/e8-payroll/payslip-archive-screen.tsx';
 import { PayslipDetailRoute as PayslipDetailRouteView } from '@/features/e8-payroll/payslip-detail-route.tsx';
 import { BillableReportScreen } from '@/features/e10-reporting/billable-report-screen.tsx';
-import { DashboardScreen } from '@/features/e10-reporting/dashboard-screen.tsx';
 import { NotificationsScreen } from '@/features/e10-reporting/notifications-screen.tsx';
 import ApprovalDetailScreen from '@/features/e11-approvals/approval-detail-screen.tsx';
 import ApprovalInboxScreen from '@/features/e11-approvals/approval-inbox-screen.tsx';
@@ -185,11 +184,6 @@ const authedRoute = createRoute({
     // the user object is still loading (token present, /me in flight) — the shell handles that.
     const user = auth.getUser();
     if (user) {
-      // Agents have no staff dashboard — send them to their self-service home (/me).
-      // docs/eng/AGENT-WEB-ACCESS.md (AW-2/AW-4).
-      if (user.role === 'agent' && location.pathname === '/') {
-        throw redirect({ to: '/me' });
-      }
       const requires = routeRequirement(location.pathname);
       if (requires && !hasPermission(user.permissions, requires)) {
         throw redirect({ to: '/forbidden' });
@@ -199,10 +193,16 @@ const authedRoute = createRoute({
   component: AppShell,
 });
 
+// The staff dashboard was removed (2026-06-15): the landing page is now Kehadiran
+// (attendance). Agents still go to their self-service home (/me; AGENT-WEB-ACCESS.md
+// AW-2/AW-4). '/' is a pure redirect — it never renders a screen.
 const indexRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/',
-  component: DashboardScreen,
+  beforeLoad: () => {
+    const user = auth.getUser();
+    throw redirect({ to: user?.role === 'agent' ? '/me' : '/attendance' });
+  },
 });
 
 // E1 Settings section: a sub-layout (left SettingsSubnav rail) over its sub-pages.
@@ -402,6 +402,10 @@ const placementsRoute = createRoute({
 const placementNewRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/placements/new',
+  validateSearch: (search: Record<string, unknown>): { client_company_id?: string } =>
+    typeof search.client_company_id === 'string' && search.client_company_id
+      ? { client_company_id: search.client_company_id }
+      : {},
   component: CreatePlacementScreen,
 });
 

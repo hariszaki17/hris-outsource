@@ -353,7 +353,6 @@ function PayslipPanel() {
     {
       id: 'period',
       header: t('payslipPeriodCol', { defaultValue: 'Periode' }),
-      width: 160,
       cell: (r) => <span className="font-medium text-text">{formatPeriod(r.period)}</span>,
     },
     {

@@ -1,20 +1,21 @@
 -- name: ListEmployees :many
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 -- Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
--- current_* come from the employee's single non-terminal placement (INV-1 → at most one);
--- LEFT JOINs so unplaced employees still list (current_* null). current_position is
--- the free-text placement label (no master / FK / ID; service_line dropped 2026-06-12).
+-- current_position is the employee's own free-text position (no master / FK / ID; moved
+-- off placement to the employee 2026-06-15). current_client_company comes from the
+-- employee's single non-terminal placement (INV-1 → at most one); LEFT JOIN so unplaced
+-- employees still list (current_client_company null).
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       COALESCE(cp.position, '') AS current_position,
+       e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position, p.client_company_id
+    SELECT p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -64,21 +65,21 @@ ORDER BY e.created_at DESC, e.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: GetEmployeeByID :one
--- current_* come from the employee's single non-terminal placement (INV-1 → at most
--- one), resolved with the same LATERAL as ListEmployees. LEFT JOINs so an unplaced
--- employee still resolves (current_* null). current_position is the free-text
--- placement label (no master / FK / ID; service_line dropped 2026-06-12).
+-- current_position is the employee's own free-text position (moved off placement
+-- 2026-06-15). current_client_company comes from the employee's single non-terminal
+-- placement (INV-1 → at most one); LEFT JOIN so an unplaced employee still resolves
+-- (current_client_company null).
 SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_date, e.birth_place,
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
        e.status, e.created_by, e.created_at, e.updated_at,
-       COALESCE(cp.position, '') AS current_position,
+       e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
 FROM employees e
 LEFT JOIN LATERAL (
-    SELECT p.position, p.client_company_id
+    SELECT p.client_company_id
     FROM placements p
     WHERE p.employee_id = e.id
       AND p.deleted_at IS NULL
@@ -107,7 +108,7 @@ INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
     bank_name, bank_account_number, bank_account_holder_name,
-    emergency_contact_name, emergency_contact_phone, created_by
+    emergency_contact_name, emergency_contact_phone, position, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     sqlc.narg(user_id),
@@ -129,12 +130,14 @@ INSERT INTO employees (
     sqlc.narg(bank_account_holder_name),
     sqlc.narg(emergency_contact_name),
     sqlc.narg(emergency_contact_phone),
+    sqlc.arg(position),
     sqlc.narg(created_by)
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          position AS current_position,
           status, created_by, created_at, updated_at;
 
 -- name: UpdateEmployee :one
@@ -157,6 +160,7 @@ SET full_name                = sqlc.arg(full_name),
     bank_account_holder_name = sqlc.narg(bank_account_holder_name),
     emergency_contact_name   = sqlc.narg(emergency_contact_name),
     emergency_contact_phone  = sqlc.narg(emergency_contact_phone),
+    position                 = sqlc.arg(position),
     updated_at               = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
@@ -164,6 +168,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
+          position AS current_position,
           status, created_by, created_at, updated_at;
 
 -- name: SetEmployeeStatus :one

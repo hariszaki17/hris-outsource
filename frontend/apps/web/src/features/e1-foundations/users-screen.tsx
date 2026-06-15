@@ -138,7 +138,6 @@ export function UsersScreen() {
     {
       id: 'user',
       header: t('users.colUser'),
-      width: 310,
       cell: (u) => (
         <div className="flex items-center gap-2.5">
           <Avatar initials={initials(u.full_name)} size={34} />

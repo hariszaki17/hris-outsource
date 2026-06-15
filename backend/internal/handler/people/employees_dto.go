@@ -26,6 +26,7 @@ type employeeWriteRequest struct {
 	NPWP                *string         `json:"npwp"`
 	BPJSKesehatan       *string         `json:"bpjs_kesehatan"`
 	BPJSKetenagakerjaan *string         `json:"bpjs_ketenagakerjaan"`
+	Position            *string         `json:"position"` // free-text job position/title (required)
 	BankAccount         *bankAccountReq `json:"bank_account"`
 	// LoginEmail is the optional secondary login identifier (D2). The primary
 	// identifier is Phone (required); a login is always auto-provisioned (D1).

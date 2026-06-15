@@ -334,11 +334,11 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleLead))
 				r.With(d.Idempotency.Handler).Post("/placements", d.Placement.CreatePlacement)
-				r.With(d.Idempotency.Handler).Post("/placements/{id}:renew", d.Placement.RenewPlacement)
+				// Placements are decoupled from time (2026-06-15): :renew (extend) is
+				// gone, and ending employment is handled by employee deactivation
+				// (which cascades to close placements), so :end / :resign / :terminate
+				// are removed. Cross-company moves remain via :transfer.
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:transfer", d.Placement.TransferPlacement)
-				r.With(d.Idempotency.Handler).Post("/placements/{id}:end", d.Placement.EndPlacement)
-				r.With(d.Idempotency.Handler).Post("/placements/{id}:resign", d.Placement.ResignPlacement)
-				r.With(d.Idempotency.Handler).Post("/placements/{id}:terminate", d.Placement.TerminatePlacement)
 			})
 
 			// Placement edit + agreement backfill + shift-leader-assignment (SLA)
@@ -448,11 +448,13 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/attendance/{id}:reject", d.Attendance.RejectAttendance)
 				r.With(d.Idempotency.Handler).Post("/attendance:bulk-verify", d.Attendance.BulkVerify)
 				r.With(d.Idempotency.Handler).Post("/attendance:bulk-reject", d.Attendance.BulkReject)
-				r.With(d.Idempotency.Handler).Post("/corrections/{id}:approve", d.Attendance.ApproveCorrection)
-				r.With(d.Idempotency.Handler).Post("/corrections/{id}:reject", d.Attendance.RejectCorrection)
+				// Correction approve/reject route through the E11 engine
+				// (POST /approval-instances/{id}:approve|:reject) — no correction-native action endpoints.
 				// F5.6 — Manual attendance (HR-only).
 				r.Get("/attendance:manual-autofill", d.Attendance.ManualAutofill)
 				r.With(d.Idempotency.Handler).Post("/attendance:manual-create", d.Attendance.ManualCreate)
+				// F5.4 CR-13 — flag a no-shift attendance day payable (SL/HR/super).
+				r.With(d.Idempotency.Handler).Post("/attendance/{id}:set-payable", d.Attendance.SetAttendancePayable)
 			})
 			// ATTENDANCE slice end (07-02 + F5.1 clock). Phase 7+ appends after this line.
 

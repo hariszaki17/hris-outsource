@@ -197,7 +197,6 @@ function PayslipArchiveInner({
     {
       id: 'employee',
       header: t('archive.colEmployee'),
-      width: 250,
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-text">{r.employee_name ?? r.employee_id}</span>
@@ -259,17 +258,20 @@ function PayslipArchiveInner({
       ),
     },
     {
-      id: 'action',
+      id: 'detail',
       header: '',
-      width: 56,
-      cell: (r) => (
-        <button
-          type="button"
-          className="text-sm font-medium text-primary hover:underline"
-          onClick={() => onRowClick?.(r.id)}
+      width: 96,
+      align: 'right',
+      cell: (row) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            onRowClick?.(row.id);
+          }}
         >
-          {t('archive.viewDetail')}
-        </button>
+          {t('common.detail', { ns: 'translation' })}
+        </Button>
       ),
     },
   ];
