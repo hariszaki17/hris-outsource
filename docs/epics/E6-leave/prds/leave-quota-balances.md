@@ -3,6 +3,7 @@
 > **Epic:** E6 Leave Management · **Feature:** F6.1 · **Status:** Draft v1
 > **Parent:** [FEATURE.md](../FEATURE.md) · **Owner:** _TBD_
 > **Model:** **per-type entitlement ledger** *(resolved 2026-06-12 — supersedes the 2026-06-08 grant-lot/one-pool model; see [EPICS.md §8](../../../EPICS.md) "E6 — Leave" + FEATURE §4/§7)*. Each `leave_type` carries its own `cap_basis`; entitlement is metered **per type, in its own window**.
+> ✅ **Shipped 2026-06-15:** entitlement is now **HR-assigned per employee** (not auto-applied to all) and the **eligibility gates (LQ-15)** are **dropped** — see [`leave-entitlement-assignment.md`](./leave-entitlement-assignment.md). The **cap_basis window + reset** mechanics (LQ-13 / LQ-14 / LQ-4) are **kept** (cap_basis = reset cadence); `entitled` comes from the new `employee_leave_entitlements` table (falling back to `cap_value` when no row exists, for transition safety). The balance view + picker show **only assigned types** (ELE-1).
 
 ---
 
@@ -65,7 +66,7 @@ System (annual auto-grant, window auto-open, year/month rollover), HR/Super Admi
 | LQ-8 | **Pro-rate** the `ANNUAL_POOL` grant for probation (first 12 months) and mid-year joiners — `entitled ≈ entitlement × remaining_months / 12` (half-up). Other windows are not pro-rated (statutory caps apply in full). |
 | LQ-13 | **`cap_basis` metering.** `ANNUAL_POOL`/`PER_MONTH`/`SERVICE_UNPAID` charge **days** against the window; `PER_YEAR_COUNT` charges **1 occurrence** per request (and still records `duration_days` on the request); `LIFETIME_ONCE` charges the days and **exhausts** on first approval; `PER_EVENT` enforces `duration_days ≤ cap_value` per occurrence with **no** standing row; `UNCAPPED` enforces only the document gate. |
 | LQ-14 | **Auto-open windows.** When a request targets a quota-bearing window with no row yet, the system **opens** it at `entitled = cap_value` (`source = AUTO`), then reserves. `ANNUAL_POOL` is the exception — its `entitled` comes from E2 (LQ-1), not `cap_value`. |
-| LQ-15 | **Eligibility gates (INV-7).** Block at request time unless: `gender = ANY` **or** matches `employee.gender`; `start_date − today ≥ notice_days`; employee tenure `≥ min_service_years`; for `LIFETIME_ONCE`/`SERVICE_UNPAID` **no prior approved request** of that type. The failing gate is returned as the block reason. |
+| LQ-15 | ✅ **Superseded 2026-06-15 (INV-7 retired).** Leave **no longer auto-applies** to every active type for every employee, and the **eligibility gates** (gender / notice / min-service / lifetime-once) **no longer block** a request — both dropped under [`leave-entitlement-assignment.md`](./leave-entitlement-assignment.md). HR now **assigns per-employee entitlements**; a type is requestable only if it has an active `employee_leave_entitlement` (**ELE-1**), and the balance view + picker show **only assigned types**. The per-type `cap_basis` window + reset (LQ-13 / LQ-14 / LQ-4) are **kept**. |
 | LQ-16 | **Paid flag.** `LeaveType.paid = false` (e.g. `CLTP`) marks the approved days **unpaid** — surfaced to payroll (E8); does not change metering. |
 | LQ-12 | **Reservation lifecycle.** Submit → **reserve** (`pending_days += d` on the window). Approve → **commit** (LQ-2). Reject/withdraw → **release** (`pending_days -= d`). Reservations count against `remaining` so the agent's pre-check matches approval. |
 

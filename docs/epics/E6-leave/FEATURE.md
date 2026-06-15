@@ -3,6 +3,8 @@
 > **Epic:** E6 Leave Management · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
 > A **per-type** leave ledger (each leave type carries its own entitlement/cap mechanics), agent leave requests with documents, **approval via the E11 configurable engine** (per-company chain), and integration with scheduling/attendance.
 
+> ✅ **MODEL CHANGE SHIPPED 2026-06-15 (EPICS §8):** moved to **HR-assigned per-employee entitlement** — see [`prds/leave-entitlement-assignment.md`](./prds/leave-entitlement-assignment.md). It **drops the eligibility gates** (`INV-7` gender / notice / min-service / lifetime — now **superseded/retired**, see INV-7 below) and makes leave types **assigned per employee** (ELE-1), not auto-applied to all. The gate language that remains below is **historical** — the gates are no longer enforced.
+
 ---
 
 ## 1. Goal & outcome
@@ -89,7 +91,7 @@ erDiagram
 - **INV-4:** **`ANNUAL_POOL` quota expires at its `period_key` year-end — no carryover.** `PER_MONTH` quotas reset each calendar month; `PER_YEAR_COUNT` each year; `LIFETIME_ONCE`/`SERVICE_UNPAID` never reset (one-time per employment). The annual entitlement sources `employment_agreements.annual_leave_entitlement_days` (E2), pro-rated for probation/mid-year joiners.
 - **INV-5:** leave types flagged `requires_document` (E2) require a document upload before submission. `leave_type` is the **entitlement/cap axis** (`cap_basis` + gates), not merely a label.
 - **INV-6:** balance **never goes negative** — a request only ever charges available entitlement in the window; the over-cap path is block-then-(HR adjusts the quota), never a negative remaining.
-- **INV-7:** **request-time eligibility gates** — `gender ≠ ANY` requires a matching `employee.gender`; `notice_days` requires `start_date − today ≥ notice_days`; `min_service_years` requires sufficient tenure; `LIFETIME_ONCE` requires no prior approved request of that type; `paid = false` (e.g. `CLTP`) marks the days **unpaid** for payroll (E8).
+- **INV-7:** ~~**request-time eligibility gates** — `gender ≠ ANY` requires a matching `employee.gender`; `notice_days` requires `start_date − today ≥ notice_days`; `min_service_years` requires sufficient tenure; `LIFETIME_ONCE` requires no prior approved request of that type~~. ✅ **SUPERSEDED / RETIRED 2026-06-15** — the eligibility gates (gender / notice / min-service / lifetime-once) are **dropped from the request path**; HR's **per-employee entitlement assignment** is now the eligibility control (PRD [`prds/leave-entitlement-assignment.md`](./prds/leave-entitlement-assignment.md) **ELE-8**). The new rule is: **a leave type is requestable only if HR has assigned it** (an active `employee_leave_entitlement` row — **ELE-1**). "Once per employment" now emerges naturally from a `LIFETIME_ONCE` window (opens once, never resets → exhausts), not an explicit gate. The gate **columns** survive as **unenforced metadata** only. Still in force: `paid = false` (e.g. `CLTP`) marks the days **unpaid** for payroll (E8).
 
 ## 5. Features
 

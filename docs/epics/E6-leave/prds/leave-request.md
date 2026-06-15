@@ -2,6 +2,7 @@
 
 > **Epic:** E6 Leave Management · **Feature:** F6.2 · **Status:** Draft v1
 > **Parent:** [FEATURE.md](../FEATURE.md) · **Owner:** _TBD_
+> ✅ **Shipped 2026-06-15:** the **eligibility gates** (LR-3b — gender / notice / min-service / lifetime) are **dropped** under [`leave-entitlement-assignment.md`](./leave-entitlement-assignment.md) (ELE-8). Entitlement is now **HR-assigned per employee** (ELE-1) — the picker shows only an employee's assigned types. Remaining submit checks: `INVALID_DATE_RANGE`, `OVERLAPPING_LEAVE`, `BACKDATED_LEAVE`, `QUOTA_EXCEEDED` (and `MISSING_REQUIRED_DOCUMENT` once upload lands).
 
 ---
 
@@ -39,7 +40,7 @@ Agent (requester, mobile), Shift Leader/HR (may file on behalf), System (validat
 | LR-1 | A request requires: leave type (E2), start/end date, reason. `duration_days` is computed from the range (counting rule per FEATURE §7 Q1). |
 | LR-2 | If the leave type `requires_document` (E2), a **document upload is mandatory** before submit (INV-5). |
 | LR-3 | The request must fit the type's **`cap_basis` window** (F6.1 LQ-13): quota-bearing types need `duration_days` (or 1 occurrence for `PER_YEAR_COUNT`) ≤ the window's `remaining` — else **blocked** (INV-1); the system **reserves** `pending_days` on that window (F6.1 LQ-12). `PER_EVENT` types need `duration_days ≤ cap_value`; `UNCAPPED` types impose no day cap (document gate only). A request **never** charges another type's entitlement. |
-| LR-3b | **Eligibility gates (INV-7, F6.1 LQ-15)** checked at submit: `gender` match, `start_date − today ≥ notice_days`, tenure `≥ min_service_years`, and no prior approved request for `LIFETIME_ONCE`/`SERVICE_UNPAID` types. The failing gate is the block reason. |
+| LR-3b | ✅ **Gates dropped 2026-06-15** (INV-7 retired, F6.1 LQ-15). The eligibility gates — `GENDER_MISMATCH`, `INSUFFICIENT_NOTICE`, `INSUFFICIENT_SERVICE`, `ALREADY_USED_LIFETIME` — **no longer block a request** (dropped under [`leave-entitlement-assignment.md`](./leave-entitlement-assignment.md) **ELE-8**; gate columns remain as unenforced metadata). **New precondition:** a leave type is requestable **only if HR has assigned it** — an active `employee_leave_entitlement` for `(employee, type)` (**ELE-1**); the picker lists only assigned types. Retained request-time checks: `INVALID_DATE_RANGE`, `OVERLAPPING_LEAVE` (LR-5), `BACKDATED_LEAVE`, `QUOTA_EXCEEDED` (and `MISSING_REQUIRED_DOCUMENT` once upload lands). |
 | LR-4 | An optional **delegate** (another agent) may be named to cover. |
 | LR-5 | A request cannot **overlap** an existing non-rejected leave for the same agent. |
 | LR-6 | A request starts `Pending` and notifies the **shift leader** (F6.3). |
