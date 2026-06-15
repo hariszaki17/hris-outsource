@@ -2199,10 +2199,12 @@ export const id = {
       'Penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6). Klik baris untuk rincian kuota per jenis cuti.',
     status: {
       unconfigured: 'Belum dikonfigurasi',
+      configured: '{{count}} jenis cuti aktif',
     },
     actions: {
       addQuota: 'Tambah Kuota',
       configureRights: 'Atur Hak Cuti',
+      manageRights: 'Kelola',
       adjust: 'Sesuaikan',
       cancel: 'Batal',
       back: 'Kembali',
@@ -2215,6 +2217,7 @@ export const id = {
     // Directory table (one row per employee — annual CT inline)
     table: {
       employee: 'Karyawan',
+      leaveRights: 'Hak Cuti',
       quotaCt: 'Kuota CT',
       used: 'Terpakai',
       pending: 'Pending',

@@ -2181,10 +2181,12 @@ export const en: Messages = {
       'Manual adjustments must include a remark and are recorded in the audit log (LQ-6). Click a row for the per-type quota breakdown.',
     status: {
       unconfigured: 'Not configured',
+      configured: '{{count}} active leave types',
     },
     actions: {
       addQuota: 'Add Quota',
       configureRights: 'Set Leave Rights',
+      manageRights: 'Manage',
       adjust: 'Adjust',
       cancel: 'Cancel',
       back: 'Back',
@@ -2196,6 +2198,7 @@ export const en: Messages = {
     },
     table: {
       employee: 'Employee',
+      leaveRights: 'Leave Rights',
       quotaCt: 'CT Quota',
       used: 'Used',
       pending: 'Pending',

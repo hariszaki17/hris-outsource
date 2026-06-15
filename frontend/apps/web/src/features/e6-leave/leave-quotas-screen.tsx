@@ -65,7 +65,6 @@ export type LeaveQuotasSearch = {
 };
 
 const PAGE_SIZE = 25;
-const CAP_ANNUAL = 'ANNUAL_POOL';
 /** Any date inside the current window — the server resolves the window by cap_basis. */
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -393,16 +392,6 @@ function QuotaModal({
 // Directory row — fetches the employee's per-type balances; renders the CT line
 // ---------------------------------------------------------------------------
 
-const COL = {
-  emp: 300,
-  ct: 110,
-  used: 100,
-  pending: 90,
-  remaining: 90,
-  special: 90,
-  expiry: 160,
-} as const;
-
 function initials(name: string): string {
   return name
     .split(/\s+/)
@@ -426,111 +415,38 @@ function EmployeeQuotaRow({
   // "Configured" = HR has assigned ≥1 leave type (the balance endpoint is entitlement-scoped, ELE-1).
   // Unconfigured rows route to the employee's "Hak Cuti" tab instead of the per-type quota drill-in.
   const configured = balances.length > 0;
-  const ct = balances.find((b) => b.cap_basis === CAP_ANNUAL);
-  const specialUsed = balances.filter(
-    (b) => b.cap_basis !== CAP_ANNUAL && (b.used_days > 0 || b.pending_days > 0),
-  ).length;
-
-  const cell = (w: number, node: React.ReactNode, align: 'left' | 'right' = 'right') => (
-    <div
-      style={{ width: w }}
-      className={`shrink-0 flex items-center ${align === 'right' ? 'justify-end' : ''}`}
-    >
-      {node}
-    </div>
-  );
-  const mono = 'font-mono text-[14px]';
-  const dash = <span className="text-[14px] text-text-3">—</span>;
+  const typeCount = balances.length;
 
   return (
     <button
       type="button"
       onClick={configured ? onSelect : onConfigure}
-      className="flex items-center w-full text-left py-[12px] px-[18px] border-b border-border-subtle bg-surface hover:bg-surface-2 transition-colors"
+      className="flex items-center justify-between gap-4 w-full text-left py-[12px] px-[18px] border-b border-border-subtle bg-surface hover:bg-surface-2 transition-colors"
     >
-      {cell(
-        COL.emp,
-        <div className="flex items-center gap-[10px] min-w-0">
-          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-surface-2 text-[13px] font-semibold text-text-2">
-            {initials(emp.full_name)}
-          </span>
-          <div className="flex flex-col gap-[1px] min-w-0">
-            <span className="text-[14px] font-semibold text-text truncate">{emp.full_name}</span>
-            <span className="text-[11px] font-mono text-text-3">{emp.id}</span>
-          </div>
-        </div>,
-        'left',
-      )}
+      {/* Employee */}
+      <div className="flex items-center gap-[10px] min-w-0">
+        <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-surface-2 text-[13px] font-semibold text-text-2">
+          {initials(emp.full_name)}
+        </span>
+        <div className="flex flex-col gap-[1px] min-w-0">
+          <span className="text-[14px] font-semibold text-text truncate">{emp.full_name}</span>
+          <span className="text-[11px] font-mono text-text-3">{emp.id}</span>
+        </div>
+      </div>
+
+      {/* Status + action */}
       {balQuery.isLoading ? (
-        [COL.ct, COL.used, COL.pending, COL.remaining, COL.special, COL.expiry].map((w, i) =>
-          cell(
-            w,
-            <span className="h-[12px] w-[28px] rounded bg-surface-2 animate-pulse" />,
-            i === 5 ? 'left' : 'right',
-          ),
-        )
-      ) : !configured ? (
-        // Not yet configured — prompt HR/super-admin to set up the employee's leave rights.
-        <div className="flex flex-1 items-center justify-between gap-3 pl-2">
-          <StatusBadge dot tone="warn">
-            {t('status.unconfigured')}
+        <span className="h-[14px] w-[160px] shrink-0 rounded bg-surface-2 animate-pulse" />
+      ) : (
+        <div className="flex items-center gap-3 shrink-0">
+          <StatusBadge dot tone={configured ? 'ok' : 'warn'}>
+            {configured ? t('status.configured', { count: typeCount }) : t('status.unconfigured')}
           </StatusBadge>
           <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
-            {t('actions.configureRights')}
+            {configured ? t('actions.manageRights') : t('actions.configureRights')}
             <ArrowRight aria-hidden className="h-[14px] w-[14px]" />
           </span>
         </div>
-      ) : ct ? (
-        [
-          cell(
-            COL.ct,
-            <span className={`${mono} font-semibold text-text`}>
-              {ct.entitled_days ?? ct.cap_value ?? 0}
-            </span>,
-          ),
-          cell(COL.used, <span className={`${mono} text-text-2`}>{ct.used_days}</span>),
-          cell(
-            COL.pending,
-            <span
-              className={`${mono} ${ct.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
-            >
-              {ct.pending_days}
-            </span>,
-          ),
-          cell(
-            COL.remaining,
-            <span
-              className={`${mono} font-semibold ${(ct.remaining_days ?? 0) <= 0 ? 'text-text-3' : 'text-ok-tx'}`}
-            >
-              {ct.remaining_days ?? 0}
-            </span>,
-          ),
-          cell(
-            COL.special,
-            specialUsed > 0 ? <span className="text-[13px] text-text-2">{specialUsed}</span> : dash,
-          ),
-          cell(
-            COL.expiry,
-            ct.expires_at ? (
-              <DateText kind="date" value={ct.expires_at} className="text-[13px] text-text-2" />
-            ) : (
-              dash
-            ),
-            'left',
-          ),
-        ]
-      ) : (
-        [
-          cell(COL.ct, dash),
-          cell(COL.used, dash),
-          cell(COL.pending, dash),
-          cell(COL.remaining, dash),
-          cell(
-            COL.special,
-            specialUsed > 0 ? <span className="text-[13px] text-text-2">{specialUsed}</span> : dash,
-          ),
-          cell(COL.expiry, dash, 'left'),
-        ]
       )}
     </button>
   );
@@ -823,28 +739,13 @@ export function LeaveQuotasScreen() {
       ) : (
         <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
           {/* Header */}
-          <div className="flex items-center py-[11px] px-[18px] bg-surface-2 border-b border-border">
-            {(
-              [
-                [COL.emp, t('table.employee'), 'left'],
-                [COL.ct, t('table.quotaCt'), 'right'],
-                [COL.used, t('table.used'), 'right'],
-                [COL.pending, t('table.pending'), 'right'],
-                [COL.remaining, t('table.remaining'), 'right'],
-                [COL.special, t('table.special'), 'right'],
-                [COL.expiry, t('table.ctExpiry'), 'left'],
-              ] as const
-            ).map(([w, label, align]) => (
-              <div
-                key={label}
-                style={{ width: w }}
-                className={`shrink-0 flex ${align === 'right' ? 'justify-end' : ''}`}
-              >
-                <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
-                  {label}
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between py-[11px] px-[18px] bg-surface-2 border-b border-border">
+            <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
+              {t('table.employee')}
+            </span>
+            <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
+              {t('table.leaveRights')}
+            </span>
           </div>
 
           {isLoading ? (
