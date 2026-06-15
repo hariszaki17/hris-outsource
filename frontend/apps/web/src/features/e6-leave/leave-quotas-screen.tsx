@@ -543,27 +543,32 @@ function EmployeeTypeDetail({
       header: '',
       width: 120,
       align: 'right',
-      cell: (b) => (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() =>
-            onAdjust({
-              employeeId: emp.id,
-              employeeName: emp.full_name,
-              leaveTypeId: b.leave_type_id,
-              code: b.code,
-              name: b.name,
-              entitled: b.entitled_days ?? b.cap_value ?? 0,
-              used: b.used_days,
-              remaining: b.remaining_days ?? 0,
-            })
-          }
-        >
-          {t('actions.adjust')}
-        </Button>
-      ),
+      // Only quota-bearing types have an adjustable window. UNCAPPED / PER_EVENT types are
+      // "sesuai ketentuan" (no standing quota) — the server would 422, so no adjust action.
+      cell: (b) =>
+        isQuotaBearing(b.cap_basis) ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              onAdjust({
+                employeeId: emp.id,
+                employeeName: emp.full_name,
+                leaveTypeId: b.leave_type_id,
+                code: b.code,
+                name: b.name,
+                entitled: b.entitled_days ?? b.cap_value ?? 0,
+                used: b.used_days,
+                remaining: b.remaining_days ?? 0,
+              })
+            }
+          >
+            {t('actions.adjust')}
+          </Button>
+        ) : (
+          <span className="text-[12px] text-text-3">{t('detail.perRule')}</span>
+        ),
     },
   ];
 
