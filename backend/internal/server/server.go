@@ -46,7 +46,7 @@ type Deps struct {
 	// Siblings 04-03 (agreements) and 04-04 (change-requests) append their own
 	// Deps fields here — see 04-02-SUMMARY.md for the coordination contract.
 	People           *peoplehttp.Handler
-	PeopleAgreements *peoplehttp.AgreementHandler   // 04-03: agreements + attachments + file download
+	PeopleAgreements *peoplehttp.AgreementHandler // 04-03: agreements + attachments + file download
 	// E11 (decision A): profile change-requests are HARD-DELETED — profile edits are
 	// now instant self-edit via PATCH /me/profile (PeopleSelfProfile below).
 	PeopleSelfProfile *peoplehttp.SelfProfileHandler // E2 F2.1: agent self-service profile (instant edit + photo upload)
@@ -508,6 +508,13 @@ func New(d Deps) http.Handler {
 				// Grant-lot writes + deprecated /leave-quotas{:adjust,:bulk-grant}
 				// retired here; handlers deleted with GrantService (Phase 8 code removal).
 				r.With(d.Idempotency.Handler).Post("/leave-quotas:adjust-entitled", d.Leave.AdjustTypeQuota)
+				// HR-assigned per-employee leave entitlements (PRD leave-entitlement-
+				// assignment, 2026-06-15): HR enrols each employee into the leave types
+				// they get + a per-period quota. Write = hr_admin, super_admin.
+				r.Get("/employees/{employee_id}/leave-entitlements", d.Leave.ListEmployeeLeaveEntitlements)
+				r.With(d.Idempotency.Handler).Post("/employees/{employee_id}/leave-entitlements", d.Leave.AssignEmployeeLeaveEntitlement)
+				r.Patch("/employees/{employee_id}/leave-entitlements/{leave_type_id}", d.Leave.UpdateEmployeeLeaveEntitlement)
+				r.Delete("/employees/{employee_id}/leave-entitlements/{leave_type_id}", d.Leave.RemoveEmployeeLeaveEntitlement)
 			})
 			// LEAVE slice end (08-02). Phase 8+ appends after this line.
 

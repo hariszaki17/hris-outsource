@@ -39,11 +39,16 @@ type QuotaMeterStore interface {
 	CountApprovedRequestsForType(ctx context.Context, employeeID, leaveTypeID string, from, to time.Time) (int, error)
 }
 
-// QuotaMeterReader is the read side (cap mechanics + gate inputs + annual entitlement).
+// QuotaMeterReader is the read side (cap mechanics + the HR-assigned entitlement +
+// annual entitlement transition fallback).
 type QuotaMeterReader interface {
 	GetLeaveTypeCap(ctx context.Context, leaveTypeID string) (dom.LeaveTypeCap, error)
 	GetEmployeeGateInfo(ctx context.Context, employeeID string) (dom.EmployeeGateInfo, error)
 	GetAnnualEntitlement(ctx context.Context, employeeID string) (*int, error)
+	// GetEmployeeEntitlement returns the HR-assigned per-type entitlement (ELE-2), or
+	// nil (no error) when the type is not assigned — the window auto-opens from this
+	// row's entitled_days; nil falls back to cap_value (transition safety).
+	GetEmployeeEntitlement(ctx context.Context, employeeID, leaveTypeID string) (*dom.LeaveEntitlement, error)
 }
 
 // QuotaMeter meters leave against per-type cap_basis windows.
@@ -66,14 +71,12 @@ type GateError struct {
 
 func (e *GateError) Error() string { return fmt.Sprintf("leave gate %s: %s", e.Reason, e.Message) }
 
-// Gate reason codes.
+// Gate reason codes. The eligibility gates (gender / notice / min-service /
+// lifetime-once) were DROPPED with the HR-assigned entitlement model (ELE-8); only
+// the quota/per-event cap rejections remain.
 const (
-	GateGenderMismatch     = "GENDER_MISMATCH"
-	GateInsufficientNotice = "INSUFFICIENT_NOTICE"
-	GateInsufficientSvc    = "INSUFFICIENT_SERVICE"
-	GateAlreadyUsed        = "ALREADY_USED_LIFETIME"
-	GateOverCap            = "OVER_CAP"
-	GateOverEventCap       = "OVER_EVENT_CAP"
+	GateOverCap      = "OVER_CAP"
+	GateOverEventCap = "OVER_EVENT_CAP"
 )
 
 // ReserveInput is one submit-time metering request.
@@ -93,32 +96,19 @@ type ReserveResult struct {
 	Paid    bool
 }
 
-// Reserve applies the eligibility gates and holds the reservation for a submit.
+// Reserve holds the reservation for a submit. Eligibility gates (gender / notice /
+// min-service / lifetime-once) are DROPPED (PRD leave-entitlement-assignment, ELE-8):
+// HR's per-employee assignment is the eligibility control. "Once per employment" now
+// emerges naturally from a LIFETIME_ONCE window (opens once, never resets → exhausts).
+// Retained request-time checks: per-event cap + remaining quota (QUOTA_EXCEEDED);
+// date-range / overlap / backdate are enforced upstream in LeaveService.
 func (m *QuotaMeter) Reserve(ctx context.Context, tx pgx.Tx, in ReserveInput) (ReserveResult, error) {
 	cap, err := m.reader.GetLeaveTypeCap(ctx, in.LeaveTypeID)
 	if err != nil {
 		return ReserveResult{}, err
 	}
-	emp, err := m.reader.GetEmployeeGateInfo(ctx, in.EmployeeID)
-	if err != nil {
-		return ReserveResult{}, err
-	}
-	if gerr := evaluateGates(cap, emp, in.StartDate, in.Now); gerr != nil {
-		return ReserveResult{}, gerr
-	}
 
 	charge := chargeFor(cap, in.Days)
-
-	// Lifetime/service-unpaid: enforce once per employment.
-	if cap.CapBasis == dom.CapBasisLifetimeOnce || cap.CapBasis == dom.CapBasisServiceUnpaid {
-		prior, err := m.store.CountApprovedRequestsForType(ctx, in.EmployeeID, in.LeaveTypeID, lifetimeFrom(emp), farFuture())
-		if err != nil {
-			return ReserveResult{}, err
-		}
-		if prior > 0 {
-			return ReserveResult{}, &GateError{Reason: GateAlreadyUsed, Message: "Jenis cuti ini hanya dapat digunakan sekali selama masa kerja."}
-		}
-	}
 
 	// Non-quota-bearing: no standing window.
 	if !cap.CapBasis.QuotaBearing() {
@@ -274,14 +264,36 @@ func (m *QuotaMeter) resolveOrOpen(ctx context.Context, tx pgx.Tx, cap dom.Leave
 	})
 }
 
+// entitlementFor sizes a fresh window's entitled_days (ELE-2). The HR-assigned
+// employee_leave_entitlement is the source of truth; when no row exists it falls back
+// to the legacy sources (annual agreement for ANNUAL_POOL, then cap_value) so the
+// system keeps working through the transition / before backfill (PRD §9).
 func (m *QuotaMeter) entitlementFor(ctx context.Context, cap dom.LeaveTypeCap, employeeID string) (int, error) {
-	if cap.CapBasis == dom.CapBasisAnnualPool {
-		ent, err := m.reader.GetAnnualEntitlement(ctx, employeeID)
-		if err != nil {
-			return 0, err
+	ent, err := m.reader.GetEmployeeEntitlement(ctx, employeeID, cap.ID)
+	if err != nil {
+		return 0, err
+	}
+	if ent != nil {
+		// Assigned: a fixed quota opens the window at that number; a NULL quota
+		// (event/uncapped toggle on a quota-bearing type) falls to the type's
+		// cap_value, else the non-binding sentinel.
+		if ent.EntitledDays != nil {
+			return *ent.EntitledDays, nil
 		}
-		if ent != nil {
-			return *ent, nil
+		if cap.CapValue != nil {
+			return *cap.CapValue, nil
+		}
+		return noDayCapEntitlement, nil
+	}
+
+	// --- no entitlement row: transition fallback (pre-backfill safety) ---
+	if cap.CapBasis == dom.CapBasisAnnualPool {
+		annual, aerr := m.reader.GetAnnualEntitlement(ctx, employeeID)
+		if aerr != nil {
+			return 0, aerr
+		}
+		if annual != nil {
+			return *annual, nil
 		}
 		if cap.CapValue != nil {
 			return *cap.CapValue, nil
@@ -337,50 +349,8 @@ func windowFor(basis dom.LeaveTypeCapBasis, start time.Time) (key string, period
 	}
 }
 
-// evaluateGates applies gender / advance-notice / minimum-service gates (INV-7).
-func evaluateGates(cap dom.LeaveTypeCap, emp dom.EmployeeGateInfo, start, now time.Time) *GateError {
-	if cap.Gender != "" && cap.Gender != "ANY" {
-		if emp.Gender == nil || *emp.Gender != cap.Gender {
-			return &GateError{Reason: GateGenderMismatch, Message: "Jenis cuti ini tidak berlaku untuk gender Anda."}
-		}
-	}
-	if cap.NoticeDays > 0 {
-		if daysBetween(now, start) < cap.NoticeDays {
-			return &GateError{Reason: GateInsufficientNotice, Message: fmt.Sprintf("Pengajuan minimal %d hari sebelum tanggal mulai.", cap.NoticeDays)}
-		}
-	}
-	if cap.MinServiceYears > 0 {
-		if fullYearsBetween(emp.JoinAt, now) < cap.MinServiceYears {
-			return &GateError{Reason: GateInsufficientSvc, Message: fmt.Sprintf("Minimal %d tahun masa kerja.", cap.MinServiceYears)}
-		}
-	}
-	return nil
-}
-
-func daysBetween(from, to time.Time) int {
-	return int(truncDay(to).Sub(truncDay(from)).Hours() / 24)
-}
-
-func fullYearsBetween(from, to time.Time) int {
-	y := to.Year() - from.Year()
-	if to.Month() < from.Month() || (to.Month() == from.Month() && to.Day() < from.Day()) {
-		y--
-	}
-	if y < 0 {
-		y = 0
-	}
-	return y
-}
-
-func truncDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
-}
-
-func lifetimeFrom(emp dom.EmployeeGateInfo) time.Time {
-	if !emp.JoinAt.IsZero() {
-		return emp.JoinAt
-	}
-	return time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
-}
-
-func farFuture() time.Time { return time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC) }
+// Eligibility gates (evaluateGates + the lifetime CountApprovedRequestsForType
+// pre-check) were removed 2026-06-15 — HR's per-employee entitlement assignment is
+// the eligibility control (PRD leave-entitlement-assignment §6, ELE-8). The gate
+// columns (gender / notice_days / min_service_years) remain on leave_types as
+// unenforced metadata.

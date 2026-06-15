@@ -2,7 +2,7 @@
 -- Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 -- Filters: status, is_annual.
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, color, status, created_at, updated_at
+       requires_document, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE deleted_at IS NULL
   AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
@@ -16,7 +16,7 @@ LIMIT sqlc.arg(row_limit);
 
 -- name: GetLeaveTypeByID :one
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, color, status, created_at, updated_at
+       requires_document, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
@@ -36,7 +36,7 @@ VALUES (
     sqlc.arg(color)
 )
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, created_at, updated_at;
+          requires_document, color, status, applies_to, common, created_at, updated_at;
 
 -- name: UpdateLeaveType :one
 UPDATE leave_types
@@ -51,7 +51,7 @@ SET name                 = sqlc.arg(name),
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, created_at, updated_at;
+          requires_document, color, status, applies_to, common, created_at, updated_at;
 
 -- name: SetLeaveTypeStatus :one
 -- Drives :deactivate (status='inactive') and :reactivate (status='active').
@@ -61,7 +61,7 @@ SET status     = sqlc.arg(status),
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, created_at, updated_at;
+          requires_document, color, status, applies_to, common, created_at, updated_at;
 
 -- name: SoftDeleteLeaveType :exec
 UPDATE leave_types

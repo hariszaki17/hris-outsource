@@ -58,6 +58,8 @@ func (r *MasterDataRepository) ListLeaveTypes(ctx context.Context, f domain.Leav
 			RequiresDocument:   row.RequiresDocument,
 			Color:              row.Color,
 			Status:             row.Status,
+			AppliesTo:          row.AppliesTo,
+			Common:             row.Common,
 			CreatedAt:          row.CreatedAt,
 			UpdatedAt:          row.UpdatedAt,
 		})
@@ -81,6 +83,8 @@ func (r *MasterDataRepository) GetLeaveTypeByID(ctx context.Context, id string) 
 		RequiresDocument:   row.RequiresDocument,
 		Color:              row.Color,
 		Status:             row.Status,
+		AppliesTo:          row.AppliesTo,
+		Common:             row.Common,
 		CreatedAt:          row.CreatedAt,
 		UpdatedAt:          row.UpdatedAt,
 	}, nil
@@ -110,6 +114,8 @@ func (r *MasterDataRepository) CreateLeaveType(ctx context.Context, tx pgx.Tx, p
 		RequiresDocument:   row.RequiresDocument,
 		Color:              row.Color,
 		Status:             row.Status,
+		AppliesTo:          row.AppliesTo,
+		Common:             row.Common,
 		CreatedAt:          row.CreatedAt,
 		UpdatedAt:          row.UpdatedAt,
 	}, nil
@@ -140,6 +146,8 @@ func (r *MasterDataRepository) UpdateLeaveType(ctx context.Context, tx pgx.Tx, p
 		RequiresDocument:   row.RequiresDocument,
 		Color:              row.Color,
 		Status:             row.Status,
+		AppliesTo:          row.AppliesTo,
+		Common:             row.Common,
 		CreatedAt:          row.CreatedAt,
 		UpdatedAt:          row.UpdatedAt,
 	}, nil

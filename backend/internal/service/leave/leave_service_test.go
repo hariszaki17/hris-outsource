@@ -20,6 +20,7 @@ import (
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
+	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
 // --- fakeTx (only Exec needed for audit.Record) ---
@@ -156,6 +157,9 @@ func (f *fakeSchedule) InsertApprovedLeaveDay(context.Context, pgx.Tx, string, t
 }
 func (f *fakeSchedule) CountLeaveDuration(_ context.Context, _ string, start, end time.Time) (int, error) {
 	return int(end.Sub(start).Hours()/24) + 1, nil
+}
+func (f *fakeSchedule) FindActivePlacementForAgentDate(_ context.Context, _ string, _ time.Time) (schedulingsvc.PlacementCover, error) {
+	return schedulingsvc.PlacementCover{PlacementID: "SWP-PL-0001", CompanyID: "SWP-CMP-0001"}, nil
 }
 
 // --- helpers ---

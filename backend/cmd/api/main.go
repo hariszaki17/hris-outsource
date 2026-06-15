@@ -16,8 +16,6 @@ import (
 
 	approvaldom "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	approvalhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/approval"
-	approvalrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/approval"
-	approvalsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/approval"
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
@@ -38,6 +36,7 @@ import (
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/obs"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/storage"
+	approvalrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/approval"
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
 	foundationsrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/foundations"
 	identityrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/identity"
@@ -50,6 +49,7 @@ import (
 	reportingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/reporting"
 	schedulingrepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/scheduling"
 	"github.com/hariszaki17/hris-outsource/backend/internal/server"
+	approvalsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/approval"
 	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 	foundationssvc "github.com/hariszaki17/hris-outsource/backend/internal/service/foundations"
 	identitysvc "github.com/hariszaki17/hris-outsource/backend/internal/service/identity"
@@ -261,7 +261,10 @@ func run() error {
 	leaveSvc.SetNotifier(jobsClient)                     // E10 (11-02): real notify on approve-final/reject
 	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm) // per-type balances (F6.5) + HR adjust-entitled
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
-	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc)
+	// HR-assigned per-employee leave entitlements (PRD leave-entitlement-assignment).
+	entitlementRepo := leaverepo.NewEntitlementRepo(pool)
+	entitlementSvc := leavesvc.NewEntitlementService(entitlementRepo, txm)
+	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc, entitlementSvc)
 
 	// Leave-expiry sweep (F6.1) moved to cmd/cron (see note above).
 
@@ -328,28 +331,28 @@ func run() error {
 	reportingHandler := reportinghttp.NewHandler(reportingNotifSvc, reportingDashboardSvc, reportingBillableSvc, reportingExportSvc)
 
 	handler := server.New(server.Deps{
-		AllowedOrigins:       cfg.HTTP.AllowedOrigins,
-		RatePerMinute:        cfg.Rate.PerMinute,
-		RateBurst:            cfg.Rate.Burst,
-		Auth:                 idHandler,
-		Foundations:          fndHandler,
-		OrgCompanies:         orgCompaniesHandler,
-		OrgMasterData:        orgMasterDataHandler,
-		People:               peopleHandler,
-		PeopleAgreements:     agreementsHandler,
-		Approval:             approvalHandler,
-		PeopleSelfProfile:    selfProfileHandler,
-		Placement:            placementHandler,
-		Scheduling:           schedulingHandler,
-		Attendance:           attendanceHandler,
-		Clock:                clockHandler,
-		Leave:                leaveHandler,
-		Overtime:             overtimeHandler,
-		Payroll:              payrollHandler,
-		Reporting:            reportingHandler,
-		Authn:                authn,
-		Idempotency:          idempotency.New(pool),
-		Obs:                  observ,
+		AllowedOrigins:    cfg.HTTP.AllowedOrigins,
+		RatePerMinute:     cfg.Rate.PerMinute,
+		RateBurst:         cfg.Rate.Burst,
+		Auth:              idHandler,
+		Foundations:       fndHandler,
+		OrgCompanies:      orgCompaniesHandler,
+		OrgMasterData:     orgMasterDataHandler,
+		People:            peopleHandler,
+		PeopleAgreements:  agreementsHandler,
+		Approval:          approvalHandler,
+		PeopleSelfProfile: selfProfileHandler,
+		Placement:         placementHandler,
+		Scheduling:        schedulingHandler,
+		Attendance:        attendanceHandler,
+		Clock:             clockHandler,
+		Leave:             leaveHandler,
+		Overtime:          overtimeHandler,
+		Payroll:           payrollHandler,
+		Reporting:         reportingHandler,
+		Authn:             authn,
+		Idempotency:       idempotency.New(pool),
+		Obs:               observ,
 	})
 
 	srv := &http.Server{

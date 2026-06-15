@@ -17,6 +17,7 @@ type fakeReader struct {
 	cap    dom.LeaveTypeCap
 	emp    dom.EmployeeGateInfo
 	annual *int
+	ent    *dom.LeaveEntitlement // nil = no HR assignment (fall back to annual/cap_value)
 }
 
 func (f fakeReader) GetLeaveTypeCap(context.Context, string) (dom.LeaveTypeCap, error) {
@@ -26,6 +27,9 @@ func (f fakeReader) GetEmployeeGateInfo(context.Context, string) (dom.EmployeeGa
 	return f.emp, nil
 }
 func (f fakeReader) GetAnnualEntitlement(context.Context, string) (*int, error) { return f.annual, nil }
+func (f fakeReader) GetEmployeeEntitlement(context.Context, string, string) (*dom.LeaveEntitlement, error) {
+	return f.ent, nil
+}
 
 type fakeStore struct {
 	win        dom.LeaveQuota
@@ -104,28 +108,9 @@ func TestChargeFor(t *testing.T) {
 	}
 }
 
-func TestEvaluateGates(t *testing.T) {
-	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	female := "FEMALE"
-	join := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) // ~2.4y service
-
-	// gender mismatch
-	if e := evaluateGates(dom.LeaveTypeCap{Gender: "FEMALE"}, dom.EmployeeGateInfo{Gender: nil}, now, now); e == nil || e.Reason != GateGenderMismatch {
-		t.Errorf("gender gate not raised: %v", e)
-	}
-	// gender ok
-	if e := evaluateGates(dom.LeaveTypeCap{Gender: "FEMALE"}, dom.EmployeeGateInfo{Gender: &female}, now.AddDate(0, 0, 40), now); e != nil {
-		t.Errorf("gender ok but errored: %v", e)
-	}
-	// notice insufficient (start in 10 days, need 30)
-	if e := evaluateGates(dom.LeaveTypeCap{NoticeDays: 30}, dom.EmployeeGateInfo{}, now.AddDate(0, 0, 10), now); e == nil || e.Reason != GateInsufficientNotice {
-		t.Errorf("notice gate not raised: %v", e)
-	}
-	// service insufficient (2.4y < 5)
-	if e := evaluateGates(dom.LeaveTypeCap{MinServiceYears: 5}, dom.EmployeeGateInfo{JoinAt: join}, now, now); e == nil || e.Reason != GateInsufficientSvc {
-		t.Errorf("service gate not raised: %v", e)
-	}
-}
+// Eligibility gates (gender / notice / min-service / lifetime-once) were dropped
+// 2026-06-15 (ELE-8) — their TestEvaluateGates / TestReserve_Lifetime_AlreadyUsed
+// cases were removed with the code.
 
 // --- reserve flows ---
 
@@ -196,12 +181,15 @@ func TestReserve_Annual_AutoOpensWindow(t *testing.T) {
 	}
 }
 
-func TestReserve_Lifetime_AlreadyUsed(t *testing.T) {
-	st := &fakeStore{prior: 1}
+// TestReserve_Lifetime_OnceExhausts: a LIFETIME_ONCE type with its window already at
+// entitled=used exhausts on the next request (the once-per-employment guarantee now
+// emerges from the window, not a gate). prior is unused by the meter post-2026-06-15.
+func TestReserve_Lifetime_OnceExhausts(t *testing.T) {
+	st := &fakeStore{win: dom.LeaveQuota{ID: "SWP-LQ-CM", EntitledDays: 3, UsedDays: 3, PendingDays: 0}}
 	m := NewQuotaMeter(st, fakeReader{cap: dom.LeaveTypeCap{CapBasis: dom.CapBasisLifetimeOnce, CapValue: iptr(3), CapUnit: "DAYS"}})
 	_, err := m.Reserve(context.Background(), nil, reserveIn("CM", 3))
-	if ge, ok := err.(*GateError); !ok || ge.Reason != GateAlreadyUsed {
-		t.Fatalf("want ALREADY_USED_LIFETIME, got %v", err)
+	if ge, ok := err.(*GateError); !ok || ge.Reason != GateOverCap {
+		t.Fatalf("want OVER_CAP (window exhausted), got %v", err)
 	}
 }
 

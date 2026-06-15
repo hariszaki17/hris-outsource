@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
+	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
 // TxRunner runs a closure inside a DB transaction (db.TxManager satisfies it).
@@ -164,6 +165,30 @@ type QuotaRepository interface {
 	ListEmployeeTypeBalances(ctx context.Context, employeeID, curYear, curMonth string) ([]dom.TypeBalance, error)
 }
 
+// --- entitlement repository port (HR-assigned per-employee leave) ---
+
+// EntitlementWrite carries one assign/update (POST/PATCH) of an employee leave
+// entitlement. EntitledDays is nil for event/uncapped types (toggle-on, no fixed
+// quota). Note is the create value; NotePtr is the PATCH value (nil = leave as-is).
+type EntitlementWrite struct {
+	EmployeeID   string
+	LeaveTypeID  string
+	EntitledDays *int
+	Note         string
+	NotePtr      *string
+	AssignedBy   *string
+}
+
+// EntitlementRepository is the data dependency for the HR leave-entitlement CRUD
+// (PRD leave-entitlement-assignment). Mutations take a tx so the audit row commits
+// atomically with the change (CONVENTIONS §16.1).
+type EntitlementRepository interface {
+	ListEntitlements(ctx context.Context, employeeID string) ([]dom.LeaveEntitlement, error)
+	UpsertEntitlement(ctx context.Context, tx pgx.Tx, p EntitlementWrite) (dom.LeaveEntitlement, error)
+	UpdateEntitlement(ctx context.Context, tx pgx.Tx, p EntitlementWrite) (dom.LeaveEntitlement, error)
+	DeactivateEntitlement(ctx context.Context, tx pgx.Tx, employeeID, leaveTypeID string, assignedBy *string) (dom.LeaveEntitlement, error)
+}
+
 // --- scheduling INV-3 port (satisfied by the existing scheduling repo) ---
 
 // ScheduleImpact is one cancelled E4 schedule entry returned by the loop-closer
@@ -187,4 +212,11 @@ type SchedulePort interface {
 	// entries) MINUS public holidays (E7). Reuses the scheduling repo's schedule_entries
 	// + holidays access, so the leave service never re-implements a naive day-count.
 	CountLeaveDuration(ctx context.Context, employeeID string, start, end time.Time) (int, error)
+
+	// FindActivePlacementForAgentDate resolves the agent's ACTIVE/EXPIRING placement
+	// covering the given date. Its company denormalizes onto the leave_request and
+	// selects the E11 approval template (CreateInstance requires a non-empty company);
+	// the placement_id is denormalized too. Returns domain.ErrNotFound when no active
+	// placement covers the date (INV-2 OUTSIDE_PLACEMENT_PERIOD).
+	FindActivePlacementForAgentDate(ctx context.Context, employeeID string, date time.Time) (schedulingsvc.PlacementCover, error)
 }

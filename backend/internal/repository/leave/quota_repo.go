@@ -70,6 +70,8 @@ func (r *QuotaRepo) ListEmployeeTypeBalances(ctx context.Context, employeeID, cu
 			Gender:           row.Gender,
 			RequiresDocument: row.RequiresDocument,
 			Color:            row.Color,
+			AppliesTo:        row.AppliesTo,
+			Common:           row.Common,
 			HasWindow:        row.QuotaID != nil,
 			Entitled:         derefI32(row.EntitledDays),
 			Used:             derefI32(row.UsedDays),
@@ -106,6 +108,32 @@ func (r *QuotaRepo) GetLeaveTypeCap(ctx context.Context, leaveTypeID string) (do
 		MinServiceYears:  int(row.MinServiceYears),
 		LeadDays:         int(row.LeadDays),
 		TrailDays:        int(row.TrailDays),
+	}, nil
+}
+
+// GetEmployeeEntitlement reads the HR-assigned per-type entitlement (QuotaMeterReader,
+// ELE-2). Returns nil (no error) when the type is not assigned — the meter then falls
+// back to cap_value for transition safety.
+func (r *QuotaRepo) GetEmployeeEntitlement(ctx context.Context, employeeID, leaveTypeID string) (*dom.LeaveEntitlement, error) {
+	row, err := r.q.GetEmployeeEntitlement(ctx, sqlcgen.GetEmployeeEntitlementParams{
+		EmployeeID: employeeID, LeaveTypeID: leaveTypeID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, mapErr(err)
+	}
+	return &dom.LeaveEntitlement{
+		ID:           row.ID,
+		EmployeeID:   row.EmployeeID,
+		LeaveTypeID:  row.LeaveTypeID,
+		EntitledDays: i32ptrToIntPtr(row.EntitledDays),
+		Active:       row.Active,
+		Note:         row.Note,
+		AssignedBy:   row.AssignedBy,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
 	}, nil
 }
 

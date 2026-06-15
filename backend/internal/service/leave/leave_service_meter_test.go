@@ -91,6 +91,7 @@ type memReader struct {
 	cap    dom.LeaveTypeCap
 	gender *string
 	annual *int
+	ent    *dom.LeaveEntitlement // nil = no HR assignment (fall back to annual/cap_value)
 }
 
 func (r memReader) GetLeaveTypeCap(context.Context, string) (dom.LeaveTypeCap, error) {
@@ -100,6 +101,9 @@ func (r memReader) GetEmployeeGateInfo(context.Context, string) (dom.EmployeeGat
 	return dom.EmployeeGateInfo{Gender: r.gender, JoinAt: time.Date(2018, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
 }
 func (r memReader) GetAnnualEntitlement(context.Context, string) (*int, error) { return r.annual, nil }
+func (r memReader) GetEmployeeEntitlement(context.Context, string, string) (*dom.LeaveEntitlement, error) {
+	return r.ent, nil
+}
 
 func maxInt(a, b int) int {
 	if a > b {
@@ -181,13 +185,6 @@ func TestMeter_PerEvent_NoWindow(t *testing.T) {
 	}
 }
 
-func TestMeter_GenderGate_Blocked(t *testing.T) {
-	lr := &fakeLeaveRepo{req: newReq(dom.LeaveStatusDraft, "SWP-CMP-0021", "SWP-EMP-3001", 1)}
-	store := newMemStore()
-	cap := dom.LeaveTypeCap{ID: "SWP-LT-001", CapBasis: dom.CapBasisPerMonth, CapValue: iptr(2), CapUnit: "DAYS", Gender: "FEMALE"}
-	s := newMeterSvc(lr, &fakeSchedule{}, store, memReader{cap: cap, gender: ptr("MALE")})
-
-	if _, err := s.Submit(hrCtx(), "SWP-LR-8001"); err == nil {
-		t.Fatal("expected gender-gate block")
-	}
-}
+// TestMeter_GenderGate_Blocked removed 2026-06-15: the gender gate was dropped
+// (ELE-8). A female-only type is simply not assigned to a male employee — eligibility
+// is HR's assignment decision, not a runtime gate.

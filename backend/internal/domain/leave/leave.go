@@ -160,7 +160,7 @@ type LeaveTypeCap struct {
 	Code             string
 	Name             string
 	CapBasis         LeaveTypeCapBasis
-	CapValue         *int // nil = uncapped / variable
+	CapValue         *int   // nil = uncapped / variable
 	CapUnit          string // DAYS | COUNT
 	Paid             bool
 	Gender           string // ANY | FEMALE | MALE
@@ -191,6 +191,8 @@ type TypeBalance struct {
 	Gender           string
 	RequiresDocument bool
 	Color            string
+	AppliesTo        string // AGENT | HEAD_OFFICE | ALL (migr. 00062)
+	Common           bool
 
 	HasWindow bool
 	Entitled  int
@@ -214,6 +216,35 @@ func (b TypeBalance) Remaining() *int {
 		return &r
 	}
 	return nil // quota-bearing but no day cap (e.g. hajj)
+}
+
+// LeaveEntitlement is one HR-assigned per-employee leave assignment (the base
+// policy: which type + how many days per period). PRD leave-entitlement-assignment
+// (2026-06-15). EntitledDays is nil for event/uncapped types HR toggles on (the
+// per-event cap then comes from the type). The *Type* display fields are denormalized
+// via the leave_types JOIN (populated only on the list read).
+type LeaveEntitlement struct {
+	ID           string
+	EmployeeID   string
+	LeaveTypeID  string
+	EntitledDays *int
+	Active       bool
+	Note         string
+	AssignedBy   *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+
+	// Denormalized leave-type metadata (list read only).
+	Code             string
+	Name             string
+	CapBasis         LeaveTypeCapBasis
+	CapValue         *int
+	CapUnit          string
+	Paid             bool
+	RequiresDocument bool
+	Color            string
+	AppliesTo        string
+	Common           bool
 }
 
 // QuotaWindowSpec opens (or upserts) a per-type quota window keyed by PeriodKey.
@@ -242,12 +273,12 @@ const (
 type LeaveTypeCapBasis string
 
 const (
-	CapBasisAnnualPool   LeaveTypeCapBasis = "ANNUAL_POOL"    // accruing yearly pool, expires year-end, no carryover
-	CapBasisPerEvent     LeaveTypeCapBasis = "PER_EVENT"      // fixed days per occurrence, no standing row
-	CapBasisPerMonth     LeaveTypeCapBasis = "PER_MONTH"      // resets each calendar month
-	CapBasisPerYearCount LeaveTypeCapBasis = "PER_YEAR_COUNT" // max occurrences per year
-	CapBasisUncapped     LeaveTypeCapBasis = "UNCAPPED"       // doc-bounded, no standing row
-	CapBasisLifetimeOnce LeaveTypeCapBasis = "LIFETIME_ONCE"  // once per employment
+	CapBasisAnnualPool    LeaveTypeCapBasis = "ANNUAL_POOL"    // accruing yearly pool, expires year-end, no carryover
+	CapBasisPerEvent      LeaveTypeCapBasis = "PER_EVENT"      // fixed days per occurrence, no standing row
+	CapBasisPerMonth      LeaveTypeCapBasis = "PER_MONTH"      // resets each calendar month
+	CapBasisPerYearCount  LeaveTypeCapBasis = "PER_YEAR_COUNT" // max occurrences per year
+	CapBasisUncapped      LeaveTypeCapBasis = "UNCAPPED"       // doc-bounded, no standing row
+	CapBasisLifetimeOnce  LeaveTypeCapBasis = "LIFETIME_ONCE"  // once per employment
 	CapBasisServiceUnpaid LeaveTypeCapBasis = "SERVICE_UNPAID" // eligibility-gated, unpaid, once
 )
 

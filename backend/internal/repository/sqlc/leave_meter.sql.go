@@ -98,7 +98,7 @@ func (q *Queries) GetLeaveTypeCap(ctx context.Context, id string) (GetLeaveTypeC
 
 const listEmployeeLeaveBalances = `-- name: ListEmployeeLeaveBalances :many
 SELECT lt.id, lt.code, lt.name, lt.cap_basis, lt.cap_value, lt.cap_unit, lt.paid,
-       lt.gender, lt.requires_document, lt.color,
+       lt.gender, lt.requires_document, lt.color, lt.applies_to, lt.common,
        lq.id           AS quota_id,
        lq.entitled_days,
        lq.used_days,
@@ -106,6 +106,11 @@ SELECT lt.id, lt.code, lt.name, lt.cap_basis, lt.cap_value, lt.cap_unit, lt.paid
        lq.expires_at,
        lq.period_key
 FROM leave_types lt
+JOIN employee_leave_entitlements ele
+  ON ele.leave_type_id = lt.id
+ AND ele.employee_id   = $1
+ AND ele.active
+ AND ele.deleted_at IS NULL
 LEFT JOIN leave_quotas lq
   ON lq.leave_type_id = lt.id
  AND lq.employee_id   = $1
@@ -136,6 +141,8 @@ type ListEmployeeLeaveBalancesRow struct {
 	Gender           string
 	RequiresDocument bool
 	Color            string
+	AppliesTo        string
+	Common           bool
 	QuotaID          *string
 	EntitledDays     *int32
 	UsedDays         *int32
@@ -144,9 +151,12 @@ type ListEmployeeLeaveBalancesRow struct {
 	PeriodKey        *string
 }
 
-// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): every active
-// leave type, LEFT JOINed to the employee's quota row for the CURRENT window of that
-// type's cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no row.
+// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): only the leave
+// types HR has ASSIGNED to the employee (active employee_leave_entitlements, ELE-1),
+// LEFT JOINed to the employee's quota row for the CURRENT window of that type's
+// cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no quota row.
+// The INNER JOIN on the entitlement scopes the list to assigned types only — the
+// picker + balance grid never show a type the employee was not granted.
 func (q *Queries) ListEmployeeLeaveBalances(ctx context.Context, arg ListEmployeeLeaveBalancesParams) ([]ListEmployeeLeaveBalancesRow, error) {
 	rows, err := q.db.Query(ctx, listEmployeeLeaveBalances, arg.EmployeeID, arg.CurMonth, arg.CurYear)
 	if err != nil {
@@ -167,6 +177,8 @@ func (q *Queries) ListEmployeeLeaveBalances(ctx context.Context, arg ListEmploye
 			&i.Gender,
 			&i.RequiresDocument,
 			&i.Color,
+			&i.AppliesTo,
+			&i.Common,
 			&i.QuotaID,
 			&i.EntitledDays,
 			&i.UsedDays,

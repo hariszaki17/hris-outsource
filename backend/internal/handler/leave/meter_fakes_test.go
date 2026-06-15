@@ -130,4 +130,10 @@ func (r *fakeMeterReader) GetAnnualEntitlement(_ context.Context, emp string) (*
 	return nil, nil
 }
 
+// GetEmployeeEntitlement: handler fakes don't assign per-type entitlements — return
+// nil so the meter falls back to the annual/cap_value transition path.
+func (r *fakeMeterReader) GetEmployeeEntitlement(_ context.Context, _, _ string) (*dom.LeaveEntitlement, error) {
+	return nil, nil
+}
+
 var _ svc.QuotaMeterReader = (*fakeMeterReader)(nil)

@@ -238,6 +238,8 @@ type Querier interface {
 	// Allocates the SWP-USR id inline from the per-prefix sequence. Phone is the
 	// required login identifier (D2); email is optional.
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
+	// Remove a type from an employee (DELETE) — soft on/off, keeps the row + history.
+	DeactivateEmployeeEntitlement(ctx context.Context, arg DeactivateEmployeeEntitlementParams) (DeactivateEmployeeEntitlementRow, error)
 	// Clears a template's lines (members cascade) before re-inserting on edit.
 	DeleteApprovalLinesByTemplate(ctx context.Context, templateID string) error
 	// Drops the template; lines + members cascade.
@@ -332,6 +334,13 @@ type Querier interface {
 	GetEmployeeByID(ctx context.Context, id string) (GetEmployeeByIDRow, error)
 	// Used for duplicate-NIK pre-check (EP-2) before insert/update.
 	GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployeeByNIKRow, error)
+	// E6 HR-assigned leave entitlements (PRD leave-entitlement-assignment, 2026-06-15).
+	// The base policy: which leave types an employee is entitled to + the per-period
+	// quota. The QuotaMeter reads GetEmployeeEntitlement to auto-open windows (ELE-2);
+	// HR CRUDs assignments via the list/upsert/update/deactivate queries.
+	// The active entitlement for one (employee, leave_type) — the entitlementFor source.
+	// Returns no rows when the type is not assigned (caller falls back to cap_value).
+	GetEmployeeEntitlement(ctx context.Context, arg GetEmployeeEntitlementParams) (GetEmployeeEntitlementRow, error)
 	// Gender (nullable) + tenure source (join_at) for the request-time gates.
 	GetEmployeeGateInfo(ctx context.Context, id string) (GetEmployeeGateInfoRow, error)
 	GetExportJob(ctx context.Context, id string) (GetExportJobRow, error)
@@ -557,9 +566,16 @@ type Querier interface {
 	//   employee_id maps to requester_id.
 	//   date_from/date_to: bound on attendance_shift_date.
 	ListCorrections(ctx context.Context, arg ListCorrectionsParams) ([]ListCorrectionsRow, error)
-	// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): every active
-	// leave type, LEFT JOINed to the employee's quota row for the CURRENT window of that
-	// type's cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no row.
+	// An employee's active assignments + the leave-type display/cap metadata (HR "Hak
+	// Cuti" grid + the agent picker scope). Only active, non-deleted rows whose type is
+	// still in the catalog. Ordered by type code for a stable grid.
+	ListEmployeeEntitlements(ctx context.Context, employeeID string) ([]ListEmployeeEntitlementsRow, error)
+	// Per-type balance for an employee (F6.5 / mobile "Saldo per jenis"): only the leave
+	// types HR has ASSIGNED to the employee (active employee_leave_entitlements, ELE-1),
+	// LEFT JOINed to the employee's quota row for the CURRENT window of that type's
+	// cap_basis (year | year-month | EMP). PER_EVENT/UNCAPPED types have no quota row.
+	// The INNER JOIN on the entitlement scopes the list to assigned types only — the
+	// picker + balance grid never show a type the employee was not granted.
 	ListEmployeeLeaveBalances(ctx context.Context, arg ListEmployeeLeaveBalancesParams) ([]ListEmployeeLeaveBalancesRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: q (ILIKE over full_name/nik/nip ONLY — not email/phone), status.
@@ -840,6 +856,9 @@ type Querier interface {
 	UpdateAttendanceCode(ctx context.Context, arg UpdateAttendanceCodeParams) (UpdateAttendanceCodeRow, error)
 	UpdateClientCompany(ctx context.Context, arg UpdateClientCompanyParams) (UpdateClientCompanyRow, error)
 	UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) (UpdateEmployeeRow, error)
+	// Edit the base entitled_days / reactivate (PATCH). Targets the active-or-inactive
+	// live row for (employee, type); reactivates if it was removed (ELE-4/ELE-6).
+	UpdateEmployeeEntitlement(ctx context.Context, arg UpdateEmployeeEntitlementParams) (UpdateEmployeeEntitlementRow, error)
 	// EP-5 agent self-service instant apply (PATCH /me/profile). E11 removed the
 	// change-request approval queue: phone / emergency contact / bank fields are now
 	// instant self-edit too (alongside address, app_language, photo_object_key).
@@ -884,6 +903,9 @@ type Querier interface {
 	UpdateSite(ctx context.Context, arg UpdateSiteParams) (UpdateSiteRow, error)
 	// PATCH /users/{id} non-role update (email only per UpdateUserRequest). Returns the full row.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) (UpdateUserEmailRow, error)
+	// Assign a type to an employee (POST). Inserts a fresh SWP-ELE row, or reactivates
+	// + re-quotas an existing (employee, type) assignment (ELE-6 add/reactivate).
+	UpsertEmployeeEntitlement(ctx context.Context, arg UpsertEmployeeEntitlementParams) (UpsertEmployeeEntitlementRow, error)
 	// Approve an exception record. Only PENDING/ESCALATED are verifiable; zero rows
 	// returned ⇒ terminal state (service emits 409 ALREADY_VERIFIED/REJECTED).
 	VerifyAttendance(ctx context.Context, arg VerifyAttendanceParams) (VerifyAttendanceRow, error)

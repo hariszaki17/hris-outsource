@@ -111,7 +111,6 @@ type leaveRequestResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-
 // --- response: LeaveQuota ---
 
 type quotaAdjustmentResponse struct {
@@ -314,6 +313,8 @@ type typeBalanceResponse struct {
 	Gender           string  `json:"gender"`
 	RequiresDocument bool    `json:"requires_document"`
 	Color            string  `json:"color"`
+	AppliesTo        string  `json:"applies_to"`
+	Common           bool    `json:"common"`
 	HasWindow        bool    `json:"has_window"`
 	EntitledDays     *int    `json:"entitled_days,omitempty"`
 	UsedDays         int     `json:"used_days"`
@@ -334,6 +335,8 @@ func toTypeBalanceResponse(b dom.TypeBalance) typeBalanceResponse {
 		Gender:           b.Gender,
 		RequiresDocument: b.RequiresDocument,
 		Color:            b.Color,
+		AppliesTo:        b.AppliesTo,
+		Common:           b.Common,
 		HasWindow:        b.HasWindow,
 		UsedDays:         b.Used,
 		PendingDays:      b.Pending,
@@ -349,6 +352,77 @@ func toTypeBalanceResponse(b dom.TypeBalance) typeBalanceResponse {
 	if b.ExpiresAt != nil {
 		s := b.ExpiresAt.Format("2006-01-02")
 		out.ExpiresAt = &s
+	}
+	return out
+}
+
+// --- HR-assigned leave entitlement (PRD leave-entitlement-assignment) ---
+
+// assignEntitlementRequest is the POST /employees/{id}/leave-entitlements body.
+// entitled_days is null for event/uncapped types HR toggles on (no fixed quota).
+type assignEntitlementRequest struct {
+	LeaveTypeID  string `json:"leave_type_id"`
+	EntitledDays *int   `json:"entitled_days"`
+	Note         string `json:"note"`
+}
+
+// updateEntitlementRequest is the PATCH .../{leave_type_id} body (edit base quota /
+// reactivate). note is COALESCEd server-side (nil = leave as-is).
+type updateEntitlementRequest struct {
+	EntitledDays *int    `json:"entitled_days"`
+	Note         *string `json:"note"`
+}
+
+// leaveEntitlementResponse is one assignment (openapi LeaveEntitlement) — the base
+// policy + the leave-type display/cap metadata (on the list read).
+type leaveEntitlementResponse struct {
+	ID           string  `json:"id"`
+	EmployeeID   string  `json:"employee_id"`
+	LeaveTypeID  string  `json:"leave_type_id"`
+	EntitledDays *int    `json:"entitled_days"`
+	Active       bool    `json:"active"`
+	Note         string  `json:"note,omitempty"`
+	AssignedBy   *string `json:"assigned_by,omitempty"`
+	CreatedAt    string  `json:"created_at,omitempty"`
+	UpdatedAt    string  `json:"updated_at,omitempty"`
+	// Denormalized leave-type metadata (populated on the list read).
+	Code             string `json:"code,omitempty"`
+	Name             string `json:"name,omitempty"`
+	CapBasis         string `json:"cap_basis,omitempty"`
+	CapValue         *int   `json:"cap_value,omitempty"`
+	CapUnit          string `json:"cap_unit,omitempty"`
+	Paid             bool   `json:"paid"`
+	RequiresDocument bool   `json:"requires_document"`
+	Color            string `json:"color,omitempty"`
+	AppliesTo        string `json:"applies_to,omitempty"`
+	Common           bool   `json:"common"`
+}
+
+func toLeaveEntitlementResponse(e dom.LeaveEntitlement) leaveEntitlementResponse {
+	out := leaveEntitlementResponse{
+		ID:               e.ID,
+		EmployeeID:       e.EmployeeID,
+		LeaveTypeID:      e.LeaveTypeID,
+		EntitledDays:     e.EntitledDays,
+		Active:           e.Active,
+		Note:             e.Note,
+		AssignedBy:       e.AssignedBy,
+		Code:             e.Code,
+		Name:             e.Name,
+		CapBasis:         string(e.CapBasis),
+		CapValue:         e.CapValue,
+		CapUnit:          e.CapUnit,
+		Paid:             e.Paid,
+		RequiresDocument: e.RequiresDocument,
+		Color:            e.Color,
+		AppliesTo:        e.AppliesTo,
+		Common:           e.Common,
+	}
+	if !e.CreatedAt.IsZero() {
+		out.CreatedAt = rfc3339(e.CreatedAt)
+	}
+	if !e.UpdatedAt.IsZero() {
+		out.UpdatedAt = rfc3339(e.UpdatedAt)
 	}
 	return out
 }

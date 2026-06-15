@@ -749,6 +749,44 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 	year := monday.Year()
 	periodEnd := fmt.Sprintf("%d-12-31", year)
 
+	// --- employee_leave_entitlements (HR-assigned per-employee leave; 2026-06-15) ---
+	// Only ASSIGNED types are requestable + appear in the picker/balance grid (ELE-1),
+	// so demo agents need entitlement rows or their pickers go empty. CT (SWP-LT-001)
+	// is required (the leave fixtures key off it); a few statutory types round out the
+	// demo. entitled_days NULL = event/uncapped toggle (per-event cap from the type).
+	const eleQ = `
+		INSERT INTO employee_leave_entitlements
+			(id, employee_id, leave_type_id, entitled_days, active, note, assigned_by)
+		VALUES
+			('SWP-ELE-' || swp_next_id('ELE'), $1, $2, $3, true, $4, NULL)
+		ON CONFLICT (employee_id, leave_type_id) WHERE deleted_at IS NULL DO NOTHING`
+	type ele struct {
+		employeeID, leaveTypeID string
+		entitledDays            *int // nil = no fixed quota (event/uncapped)
+		note                    string
+	}
+	d12 := 12
+	d5 := 5
+	d2 := 2
+	entitlements := []ele{
+		// Dewi (SWP-EMP-3001, female agent): CT + statutory set.
+		{"SWP-EMP-3001", "SWP-LT-001", &d12, "Cuti tahunan PKWT."},        // CT  ANNUAL_POOL
+		{"SWP-EMP-3001", "SWP-LT-002", nil, "Sakit dengan surat dokter."}, // SDSKD UNCAPPED
+		{"SWP-EMP-3001", "SWP-LT-004", &d5, "Sakit tanpa surat dokter."},  // STSD PER_YEAR_COUNT
+		{"SWP-EMP-3001", "SWP-LT-005", &d2, "Cuti haid."},                 // CH PER_MONTH (female)
+		{"SWP-EMP-3001", "SWP-LT-011", nil, "Kematian keluarga inti."},    // CKM PER_EVENT
+		// Budi (SWP-EMP-2891): CT + sick.
+		{"SWP-EMP-2891", "SWP-LT-001", &d12, "Cuti tahunan PKWT."},
+		{"SWP-EMP-2891", "SWP-LT-002", nil, "Sakit dengan surat dokter."},
+		{"SWP-EMP-2891", "SWP-LT-004", &d5, "Sakit tanpa surat dokter."},
+	}
+	for _, e := range entitlements {
+		if _, err := pool.Pool.Exec(ctx, eleQ, e.employeeID, e.leaveTypeID, e.entitledDays, e.note); err != nil {
+			return fmt.Errorf("seed leave entitlement %s/%s: %w", e.employeeID, e.leaveTypeID, err)
+		}
+	}
+	slog.Info("seed: upserted leave entitlements", "count", len(entitlements))
+
 	// --- leave_quotas (per-type ledger; the live balance model) ---
 	// ANNUAL_POOL (CT = SWP-LT-001) window per demo agent so
 	// GET /leave-balances/by-employee/{id}/types is non-trivial. expires_at = year-end;
@@ -1343,6 +1381,25 @@ func seedMasterData(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: upserted leave type", "id", lt.id, "code", lt.code)
 	}
 
+	// Audience + surface classification (migr. 00062). Columns default to ALL/false on
+	// insert; set the exceptions here. CT = outsourced agents (PKWT); CTHO + unpaid long
+	// leave (CLTP) = internal Head-Office staff; everything else is universal statutory.
+	// `common` = the everyday types surfaced by default on the agent quick views.
+	for _, u := range []struct {
+		sql   string
+		codes []string
+	}{
+		{"UPDATE leave_types SET applies_to = 'AGENT' WHERE code = ANY($1)", []string{"CT"}},
+		{"UPDATE leave_types SET applies_to = 'HEAD_OFFICE' WHERE code = ANY($1)", []string{"CTHO", "CLTP"}},
+		{"UPDATE leave_types SET common = true WHERE code = ANY($1)", []string{
+			"CT", "CTHO", "SDSKD", "STSD", "CH", "CKM", "CRM", "CM", "CIM", "CKA", "CMA", "KGD",
+		}},
+	} {
+		if _, err := pool.Pool.Exec(ctx, u.sql, u.codes); err != nil {
+			return fmt.Errorf("seed leave_type classification: %w", err)
+		}
+	}
+
 	// --- Attendance codes ---
 	type attendanceCode struct {
 		id                string
@@ -1906,7 +1963,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9001", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021",
-			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "AUTO_APPROVED", flags: "{}",
@@ -1915,7 +1972,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9002", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021",
-			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "PENDING", flags: "{LATE}",
@@ -1924,7 +1981,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9003", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
 			companyID: "SWP-CMP-0021",
-			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inFalse, inDistanceM: &dFar, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "PENDING", flags: "{OUTSIDE_GEOFENCE}",
@@ -1933,7 +1990,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9004", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021",
-			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: nil, latOut: nil, lngOut: nil,
+			checkIn:   &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: nil, latOut: nil, lngOut: nil,
 			isLate: false, lateMinutes: 0, workedMinutes: nil, autoClosed: true,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: nil, outDistanceM: nil,
 			status: "INCOMPLETE", verification: "PENDING", flags: "{AUTO_CLOSED}",
@@ -1942,7 +1999,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9005", employeeID: "SWP-EMP-2891", placementID: "SWP-PL-5002",
 			companyID: "SWP-CMP-0022",
-			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "PENDING", flags: "{LATE}",
@@ -1951,7 +2008,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9006", employeeID: "SWP-EMP-1108", placementID: "SWP-PL-5001",
 			companyID: "SWP-CMP-0021",
-			checkIn: &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &lateInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: true, lateMinutes: 18, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "LATE", verification: "ESCALATED", flags: "{LATE,ESCALATED}",
@@ -1962,7 +2019,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9007", employeeID: "SWP-EMP-3001", placementID: "SWP-PL-5004",
 			companyID: "SWP-CMP-0021",
-			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",
@@ -1970,7 +2027,7 @@ func seedAttendance(ctx context.Context, pool *db.Pool) error {
 		{
 			id: "SWP-ATT-9008", employeeID: "SWP-EMP-1042", placementID: "SWP-PL-5003",
 			companyID: "SWP-CMP-0021",
-			checkIn: &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
+			checkIn:   &onTimeInP, latIn: &latInP, lngIn: &lngInP, checkOut: &out, latOut: &latOut, lngOut: &lngOut,
 			isLate: false, lateMinutes: 0, workedMinutes: &worked, autoClosed: false,
 			inGeofence: &inTrue, inDistanceM: &d32, outGeofence: &inTrue, outDistanceM: &d32,
 			status: "PRESENT", verification: "VERIFIED", flags: "{VERIFIED}",

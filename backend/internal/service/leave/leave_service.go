@@ -401,9 +401,22 @@ func (s *LeaveService) Create(ctx context.Context, in CreateLeaveInput) (dom.Lea
 			return derr
 		}
 
+		// 5b. Resolve the agent's active placement covering the start date — its company
+		// denormalizes onto the request and selects the E11 approval template (the engine
+		// rejects an empty company). No active placement on the date → OUTSIDE_PLACEMENT_PERIOD.
+		cover, perr := s.schedule.FindActivePlacementForAgentDate(ctx, employeeID, in.StartDate)
+		if errors.Is(perr, domain.ErrNotFound) {
+			return apperr.Rule("OUTSIDE_PLACEMENT_PERIOD", map[string]string{"start_date": "Tidak ada penempatan aktif pada tanggal cuti ini."})
+		}
+		if perr != nil {
+			return perr
+		}
+
 		// 6. insert the DRAFT.
 		created, cerr := s.repo.CreateLeaveRequest(ctx, tx, CreateLeaveRequestParams{
 			EmployeeID:     employeeID,
+			PlacementID:    strOrNil(cover.PlacementID),
+			CompanyID:      strOrNil(cover.CompanyID),
 			LeaveTypeID:    in.LeaveTypeID,
 			StartDate:      in.StartDate,
 			EndDate:        in.EndDate,

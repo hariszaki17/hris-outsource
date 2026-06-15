@@ -236,6 +236,19 @@ type Employee struct {
 	PhotoObjectKey        *string
 }
 
+type EmployeeLeaveEntitlement struct {
+	ID           string
+	EmployeeID   string
+	LeaveTypeID  string
+	EntitledDays *int32
+	Active       bool
+	Note         string
+	AssignedBy   *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
 type EmploymentAgreement struct {
 	ID                         string
 	EmployeeID                 string
@@ -391,6 +404,8 @@ type LeaveType struct {
 	MinServiceYears    int32
 	LeadDays           int32
 	TrailDays          int32
+	AppliesTo          string
+	Common             bool
 }
 
 type Notification struct {

@@ -42,6 +42,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
+	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
 
 // ---------------------------------------------------------------------------
@@ -343,26 +344,26 @@ func (r *fakeLeaveRepo) CreateLeaveRequest(_ context.Context, _ pgx.Tx, p svc.Cr
 	r.createSeq++
 	id := "SWP-LR-" + itoa(9000+r.createSeq)
 	req := dom.LeaveRequest{
-		ID:             id,
-		EmployeeID:     p.EmployeeID,
-		PlacementID:    p.PlacementID,
-		CompanyID:      p.CompanyID,
-		LeaveTypeID:    p.LeaveTypeID,
-		StartDate:      p.StartDate,
-		EndDate:        p.EndDate,
-		DurationDays:   p.DurationDays,
-		Reason:         p.Reason,
-		Notes:          p.Notes,
-		Status:         p.Status,
-		DelegateID:     p.DelegateID,
-		DocumentFileID: p.DocumentFileID,
+		ID:               id,
+		EmployeeID:       p.EmployeeID,
+		PlacementID:      p.PlacementID,
+		CompanyID:        p.CompanyID,
+		LeaveTypeID:      p.LeaveTypeID,
+		StartDate:        p.StartDate,
+		EndDate:          p.EndDate,
+		DurationDays:     p.DurationDays,
+		Reason:           p.Reason,
+		Notes:            p.Notes,
+		Status:           p.Status,
+		DelegateID:       p.DelegateID,
+		DocumentFileID:   p.DocumentFileID,
 		Backdated:        p.Backdated,
 		NoLeader:         p.NoLeader,
 		AssignedLeaderID: p.AssignedLeaderID,
 		CreatedBy:        p.CreatedBy,
-		CreatedAt:      fixedNow,
-		UpdatedAt:      fixedNow,
-		EmployeeName:   strp("Agent " + p.EmployeeID),
+		CreatedAt:        fixedNow,
+		UpdatedAt:        fixedNow,
+		EmployeeName:     strp("Agent " + p.EmployeeID),
 	}
 	r.requests[id] = req
 	return req, nil
@@ -532,8 +533,11 @@ func (r *fakeScheduleRepo) CountLeaveDuration(_ context.Context, _ string, start
 	return int(end.Sub(start).Hours()/24) + 1, nil
 }
 
-var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
+func (r *fakeScheduleRepo) FindActivePlacementForAgentDate(_ context.Context, _ string, _ time.Time) (schedulingsvc.PlacementCover, error) {
+	return schedulingsvc.PlacementCover{PlacementID: "SWP-PL-0001", CompanyID: "SWP-CMP-0001"}, nil
+}
 
+var _ svc.SchedulePort = (*fakeScheduleRepo)(nil)
 
 // ---------------------------------------------------------------------------
 // harness — mounts the REAL services + handler over the fakes.
@@ -572,7 +576,9 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 	csvc := svc.NewCalendarService(lrepo)
 	csvc.SetClock(func() time.Time { return fixedNow })
 
-	handler := leavehandler.NewHandler(lsvc, qsvc, csvc)
+	// Entitlement service is unused by these harness tests (no entitlement endpoints
+	// exercised here); a nil service is safe — the routes are covered separately.
+	handler := leavehandler.NewHandler(lsvc, qsvc, csvc, nil)
 	idem := newStubIdempotency()
 
 	h := &harness{

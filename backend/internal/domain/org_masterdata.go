@@ -18,6 +18,8 @@ type LeaveType struct {
 	RequiresDocument   bool
 	Color              string
 	Status             string
+	AppliesTo          string // AGENT | HEAD_OFFICE | ALL (migr. 00062)
+	Common             bool   // surface on agent quick views by default
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

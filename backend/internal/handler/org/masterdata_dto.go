@@ -45,6 +45,8 @@ type leaveTypeResponse struct {
 	RequiresDocument   bool   `json:"requires_document"`
 	Color              string `json:"color"`
 	Status             string `json:"status"` // ACTIVE | INACTIVE
+	AppliesTo          string `json:"applies_to"` // AGENT | HEAD_OFFICE | ALL
+	Common             bool   `json:"common"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
 }
@@ -60,6 +62,8 @@ func toLeaveTypeResponse(lt domain.LeaveType) leaveTypeResponse {
 		RequiresDocument:   lt.RequiresDocument,
 		Color:              lt.Color,
 		Status:             strings.ToUpper(lt.Status),
+		AppliesTo:          lt.AppliesTo,
+		Common:             lt.Common,
 		CreatedAt:          lt.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:          lt.UpdatedAt.UTC().Format(time.RFC3339),
 	}

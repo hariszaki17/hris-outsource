@@ -13,16 +13,17 @@ import (
 )
 
 // Handler holds the E6 services (one struct serves requests + per-type quota
-// balances/adjust + calendar).
+// balances/adjust + calendar + HR-assigned entitlements).
 type Handler struct {
-	leave    *svc.LeaveService
-	quota    *svc.QuotaService // per-type balances (F6.5) + HR adjust-entitled
-	calendar *svc.CalendarService
+	leave       *svc.LeaveService
+	quota       *svc.QuotaService // per-type balances (F6.5) + HR adjust-entitled
+	calendar    *svc.CalendarService
+	entitlement *svc.EntitlementService // HR-assigned per-employee leave entitlements
 }
 
 // NewHandler wires the handler to its services.
-func NewHandler(l *svc.LeaveService, q *svc.QuotaService, c *svc.CalendarService) *Handler {
-	return &Handler{leave: l, quota: q, calendar: c}
+func NewHandler(l *svc.LeaveService, q *svc.QuotaService, c *svc.CalendarService, e *svc.EntitlementService) *Handler {
+	return &Handler{leave: l, quota: q, calendar: c, entitlement: e}
 }
 
 // --- shared helpers ---
