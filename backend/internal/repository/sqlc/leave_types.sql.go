@@ -24,7 +24,7 @@ VALUES (
     $7
 )
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, applies_to, common, created_at, updated_at
+          requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
 `
 
 type CreateLeaveTypeParams struct {
@@ -45,6 +45,9 @@ type CreateLeaveTypeRow struct {
 	DefaultAnnualQuota int32
 	IsAnnual           bool
 	RequiresDocument   bool
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -73,6 +76,9 @@ func (q *Queries) CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams
 		&i.DefaultAnnualQuota,
 		&i.IsAnnual,
 		&i.RequiresDocument,
+		&i.CapBasis,
+		&i.CapValue,
+		&i.CapUnit,
 		&i.Color,
 		&i.Status,
 		&i.AppliesTo,
@@ -85,7 +91,7 @@ func (q *Queries) CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams
 
 const getLeaveTypeByID = `-- name: GetLeaveTypeByID :one
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, color, status, applies_to, common, created_at, updated_at
+       requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE id = $1
   AND deleted_at IS NULL
@@ -99,6 +105,9 @@ type GetLeaveTypeByIDRow struct {
 	DefaultAnnualQuota int32
 	IsAnnual           bool
 	RequiresDocument   bool
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -118,6 +127,9 @@ func (q *Queries) GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveType
 		&i.DefaultAnnualQuota,
 		&i.IsAnnual,
 		&i.RequiresDocument,
+		&i.CapBasis,
+		&i.CapValue,
+		&i.CapUnit,
 		&i.Color,
 		&i.Status,
 		&i.AppliesTo,
@@ -130,7 +142,7 @@ func (q *Queries) GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveType
 
 const listLeaveTypes = `-- name: ListLeaveTypes :many
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, color, status, applies_to, common, created_at, updated_at
+       requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE deleted_at IS NULL
   AND ($1::text IS NULL OR status = $1::text)
@@ -159,6 +171,9 @@ type ListLeaveTypesRow struct {
 	DefaultAnnualQuota int32
 	IsAnnual           bool
 	RequiresDocument   bool
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -192,6 +207,9 @@ func (q *Queries) ListLeaveTypes(ctx context.Context, arg ListLeaveTypesParams) 
 			&i.DefaultAnnualQuota,
 			&i.IsAnnual,
 			&i.RequiresDocument,
+			&i.CapBasis,
+			&i.CapValue,
+			&i.CapUnit,
 			&i.Color,
 			&i.Status,
 			&i.AppliesTo,
@@ -216,7 +234,7 @@ SET status     = $1,
 WHERE id = $2
   AND deleted_at IS NULL
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, applies_to, common, created_at, updated_at
+          requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
 `
 
 type SetLeaveTypeStatusParams struct {
@@ -232,6 +250,9 @@ type SetLeaveTypeStatusRow struct {
 	DefaultAnnualQuota int32
 	IsAnnual           bool
 	RequiresDocument   bool
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -252,6 +273,9 @@ func (q *Queries) SetLeaveTypeStatus(ctx context.Context, arg SetLeaveTypeStatus
 		&i.DefaultAnnualQuota,
 		&i.IsAnnual,
 		&i.RequiresDocument,
+		&i.CapBasis,
+		&i.CapValue,
+		&i.CapUnit,
 		&i.Color,
 		&i.Status,
 		&i.AppliesTo,
@@ -288,7 +312,7 @@ SET name                 = $1,
 WHERE id = $8
   AND deleted_at IS NULL
 RETURNING id, name, code, description, default_annual_quota, is_annual,
-          requires_document, color, status, applies_to, common, created_at, updated_at
+          requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
 `
 
 type UpdateLeaveTypeParams struct {
@@ -310,6 +334,9 @@ type UpdateLeaveTypeRow struct {
 	DefaultAnnualQuota int32
 	IsAnnual           bool
 	RequiresDocument   bool
+	CapBasis           string
+	CapValue           *int32
+	CapUnit            string
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -338,6 +365,9 @@ func (q *Queries) UpdateLeaveType(ctx context.Context, arg UpdateLeaveTypeParams
 		&i.DefaultAnnualQuota,
 		&i.IsAnnual,
 		&i.RequiresDocument,
+		&i.CapBasis,
+		&i.CapValue,
+		&i.CapUnit,
 		&i.Color,
 		&i.Status,
 		&i.AppliesTo,

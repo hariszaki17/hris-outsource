@@ -2865,6 +2865,24 @@ components:
         requires_document:
           type: boolean
           description: If true, leave request must attach a document (LT-3).
+        cap_basis:
+          type: string
+          enum: [ANNUAL_POOL, PER_EVENT, PER_MONTH, PER_YEAR_COUNT, UNCAPPED, LIFETIME_ONCE, SERVICE_UNPAID]
+          description: >-
+            How the type meters its entitlement (E6 per-type ledger). Drives the
+            HR entitlement-assign picker's quota prefill + reset-cadence label.
+        cap_value:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: >-
+            Standing day/occurrence cap for the type; null = uncapped ("sesuai
+            ketentuan"). The entitlement-assign picker prefills the per-employee
+            quota from this (HR may override).
+        cap_unit:
+          type: string
+          enum: [DAYS, COUNT]
+          description: Whether cap_value counts days or occurrences.
         color:
           type: string
           description: Hex color used by calendar UIs (E6). Tokenized — DESIGN-SYSTEM §2.

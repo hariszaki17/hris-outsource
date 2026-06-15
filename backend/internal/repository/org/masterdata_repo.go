@@ -30,6 +30,15 @@ func NewMasterDataRepo(pool *db.Pool) *MasterDataRepository {
 	return &MasterDataRepository{pool: pool, q: sqlcgen.New(pool.Pool)}
 }
 
+// i32pToIntp converts a nullable sqlc *int32 to a *int (nil-preserving).
+func i32pToIntp(p *int32) *int {
+	if p == nil {
+		return nil
+	}
+	v := int(*p)
+	return &v
+}
+
 // =============================================================================
 // Leave Types
 // =============================================================================
@@ -56,6 +65,9 @@ func (r *MasterDataRepository) ListLeaveTypes(ctx context.Context, f domain.Leav
 			DefaultAnnualQuota: int(row.DefaultAnnualQuota),
 			IsAnnual:           row.IsAnnual,
 			RequiresDocument:   row.RequiresDocument,
+			CapBasis:           row.CapBasis,
+			CapValue:           i32pToIntp(row.CapValue),
+			CapUnit:            row.CapUnit,
 			Color:              row.Color,
 			Status:             row.Status,
 			AppliesTo:          row.AppliesTo,

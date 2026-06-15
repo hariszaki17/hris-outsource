@@ -43,8 +43,11 @@ type leaveTypeResponse struct {
 	DefaultAnnualQuota int    `json:"default_annual_quota"`
 	IsAnnual           bool   `json:"is_annual"`
 	RequiresDocument   bool   `json:"requires_document"`
+	CapBasis           string `json:"cap_basis"`
+	CapValue           *int   `json:"cap_value"`
+	CapUnit            string `json:"cap_unit"`
 	Color              string `json:"color"`
-	Status             string `json:"status"` // ACTIVE | INACTIVE
+	Status             string `json:"status"`     // ACTIVE | INACTIVE
 	AppliesTo          string `json:"applies_to"` // AGENT | HEAD_OFFICE | ALL
 	Common             bool   `json:"common"`
 	CreatedAt          string `json:"created_at"`
@@ -60,6 +63,9 @@ func toLeaveTypeResponse(lt domain.LeaveType) leaveTypeResponse {
 		DefaultAnnualQuota: lt.DefaultAnnualQuota,
 		IsAnnual:           lt.IsAnnual,
 		RequiresDocument:   lt.RequiresDocument,
+		CapBasis:           lt.CapBasis,
+		CapValue:           lt.CapValue,
+		CapUnit:            lt.CapUnit,
 		Color:              lt.Color,
 		Status:             strings.ToUpper(lt.Status),
 		AppliesTo:          lt.AppliesTo,

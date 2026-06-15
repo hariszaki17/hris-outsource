@@ -16,12 +16,17 @@ type LeaveType struct {
 	DefaultAnnualQuota int
 	IsAnnual           bool
 	RequiresDocument   bool
-	Color              string
-	Status             string
-	AppliesTo          string // AGENT | HEAD_OFFICE | ALL (migr. 00062)
-	Common             bool   // surface on agent quick views by default
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// Metering mechanics (leave_types.cap_*) — surfaced so the entitlement-assign
+	// picker can prefill the standing quota per type (CapValue) and label the cadence.
+	CapBasis  string // ANNUAL_POOL | PER_EVENT | PER_MONTH | PER_YEAR_COUNT | UNCAPPED | LIFETIME_ONCE | SERVICE_UNPAID
+	CapValue  *int   // standing day/occurrence cap; nil = uncapped ("sesuai ketentuan")
+	CapUnit   string // DAYS | COUNT
+	Color     string
+	Status    string
+	AppliesTo string // AGENT | HEAD_OFFICE | ALL (migr. 00062)
+	Common    bool   // surface on agent quick views by default
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // LeaveTypeFilter carries the cursor-pagination and filter parameters for
