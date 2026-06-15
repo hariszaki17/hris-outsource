@@ -14,6 +14,7 @@ export const id = {
     empty: 'Tidak ada data',
     close: 'Tutup',
     menu: 'Menu',
+    detail: 'Detail',
     logout: 'Keluar',
     prev: 'Sebelumnya',
     next: 'Berikutnya',
@@ -2093,8 +2094,9 @@ export const id = {
     },
     approvals: {
       title: 'Persetujuan Cuti',
-      subtitleHR: 'Pengajuan cuti yang menunggu persetujuan akhir HR.',
-      subtitleSL: 'Pengajuan cuti agen di perusahaan Anda yang menunggu persetujuan Anda.',
+      subtitleHR: 'Semua pengajuan cuti — yang menunggu persetujuan tampil paling atas.',
+      subtitleSL:
+        'Pengajuan cuti agen di perusahaan Anda — yang menunggu persetujuan tampil paling atas.',
       export: 'Ekspor',
       searchPlaceholder: 'Cari agen',
       filterStatus: 'Semua status',

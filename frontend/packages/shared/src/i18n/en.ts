@@ -13,6 +13,7 @@ export const en: Messages = {
     empty: 'No data',
     close: 'Close',
     menu: 'Menu',
+    detail: 'Detail',
     logout: 'Sign out',
     prev: 'Previous',
     next: 'Next',
@@ -2075,8 +2076,8 @@ export const en: Messages = {
     },
     approvals: {
       title: 'Leave Approvals',
-      subtitleHR: 'Leave requests awaiting final HR approval.',
-      subtitleSL: 'Agent leave requests at your company awaiting your approval.',
+      subtitleHR: 'All leave requests — those awaiting approval are shown first.',
+      subtitleSL: 'Agent leave requests at your company — those awaiting approval are shown first.',
       export: 'Export',
       searchPlaceholder: 'Search agent',
       filterStatus: 'All statuses',

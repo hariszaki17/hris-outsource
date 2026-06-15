@@ -38,7 +38,7 @@ import {
   StateView,
   StatusBadge,
 } from '@swp/ui';
-import { Link } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 // Link not used until route is registered; use plain anchor for now to avoid route type mismatch
 import { Download, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -89,22 +89,22 @@ function LeaveApprovalsScreenInner({
   onPrevCursorsChange,
 }: LeaveApprovalsScreenProps) {
   const { t } = useTranslation('leave');
+  const navigate = useNavigate();
   const user = useCurrentUser();
 
   const isHR = user?.role === 'hr_admin' || user?.role === 'super_admin';
   const isSL = user?.role === 'shift_leader';
   void isSL; // scoping used in column render (employee_company_name)
 
-  // E11: approval sub-states collapsed into a single PENDING. This per-domain queue is a VIEW
-  // over the same pending requests the E11 inbox surfaces (IB-5); each row opens leave-detail,
-  // which renders the E11 chain + approve/reject actions via the instance hooks.
-  const defaultStatus = LeaveStatus.PENDING;
-
+  // E11: approval sub-states collapsed into a single PENDING. This per-domain queue VIEWs all
+  // leave requests (any status) so HR sees the full history; each row opens leave-detail, which
+  // renders the E11 chain + approve/reject actions. No default status — the status filter is
+  // opt-in; the page floats PENDING rows to the top (see rows sort below).
   const params: ListLeaveRequestsParams = {
     limit: PAGE_SIZE,
     cursor: search.cursor,
     q: search.q,
-    status: search.status ?? defaultStatus,
+    status: search.status || undefined,
     company_id: search.company_id || undefined,
     leave_type_id: search.leave_type_id || undefined,
   };
@@ -184,7 +184,15 @@ function LeaveApprovalsScreenInner({
   // ---------------------------------------------------------------------------
 
   const page = query.data?.data;
-  const rows: LeaveRequest[] = (page as { data?: LeaveRequest[] })?.data ?? [];
+  const rawRows: LeaveRequest[] = (page as { data?: LeaveRequest[] })?.data ?? [];
+  // Sort: PENDING ("Menunggu Persetujuan") first, then latest submitted. The server already
+  // returns created_at DESC, so within each group the order is preserved (latest first).
+  const rows: LeaveRequest[] = [...rawRows].sort((a, b) => {
+    const pa = a.status === LeaveStatus.PENDING ? 0 : 1;
+    const pb = b.status === LeaveStatus.PENDING ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+  });
 
   // ---------------------------------------------------------------------------
   // Columns
@@ -194,7 +202,6 @@ function LeaveApprovalsScreenInner({
     {
       id: 'agent',
       header: t('approvals.colAgent'),
-      width: 200,
       cell: (r) => (
         <div className="flex flex-col">
           <span className="font-medium text-text">{r.employee_name ?? r.employee_id}</span>
@@ -237,7 +244,7 @@ function LeaveApprovalsScreenInner({
     {
       id: 'status',
       header: t('approvals.colStatus'),
-      width: 150,
+      width: 200,
       cell: (r) => (
         <StatusBadge dot tone={leaveStatusTone(r.status)}>
           {t(`status.${r.status}`)}
@@ -247,15 +254,21 @@ function LeaveApprovalsScreenInner({
     {
       id: 'action',
       header: '',
-      width: 100,
+      width: 110,
+      align: 'right',
       cell: (r) => (
-        <Link
-          to="/leave/$leaveRequestId"
-          params={{ leaveRequestId: r.id }}
-          className="text-sm font-medium text-primary hover:underline"
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            void navigate({
+              to: '/leave/$leaveRequestId',
+              params: { leaveRequestId: r.id },
+            })
+          }
         >
           {t('approvals.review')}
-        </Link>
+        </Button>
       ),
     },
   ];
