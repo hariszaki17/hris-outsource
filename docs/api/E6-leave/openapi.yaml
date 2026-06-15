@@ -293,10 +293,11 @@ paths:
 
         ### Duration computation (server-authoritative)
         `duration_days` is **always** server-computed from `[start_date, end_date]` and equals the
-        number of days the agent **would otherwise be rostered** for a shift (E4 `Schedule`)
-        **minus public holidays** (E7 `PublicHoliday` calendar). The client may send a hint
-        but the server overrides it. Days the agent has no shift on the published roster (i.e. a
-        scheduled day off) do **not** count.
+        number of days the agent **would otherwise be rostered** for a shift (E4 `Schedule`) —
+        **including shifts that fall on a weekend or public holiday** (2026-06-15: a holiday shift
+        is real work the agent is excused from, so it consumes quota; the old "minus public holidays"
+        subtraction was removed). The client may send a hint but the server overrides it. Days the
+        agent has no shift on the published roster (i.e. a scheduled day off) do **not** count.
 
         ### Idempotency
         `Idempotency-Key` is required. Re-submitting with the same key returns the same `SWP-LR-*`

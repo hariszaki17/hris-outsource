@@ -155,22 +155,18 @@ RETURNING id, work_date, status;
 -- E6 F6.2 server-authoritative leave duration: the count of days in
 -- [start_date, end_date] the agent would otherwise be ROSTERED for a shift
 -- (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not
--- CANCELLED_BY_LEAVE, not deleted) MINUS the days that fall on a public holiday
--- (E7 holidays). Mirrors the openapi rule: "days the agent would be rostered
--- (per E4 Schedule) minus E7 public holidays." DISTINCT work_date guards against
--- duplicate live rows; the NOT EXISTS holiday subquery excludes holiday dates.
+-- CANCELLED_BY_LEAVE, not deleted). EVERY scheduled-shift day counts — including
+-- shifts that fall on a weekend or a public holiday (2026-06-15: a holiday shift
+-- is real work the agent is excused from, so it consumes quota). Days with no
+-- shift (day off / unscheduled) are NOT counted. DISTINCT work_date guards against
+-- duplicate live rows.
 SELECT count(DISTINCT se.work_date)::bigint AS duration_days
 FROM schedule_entries se
 WHERE se.employee_id = sqlc.arg(employee_id)
   AND se.work_date BETWEEN sqlc.arg(start_date)::date AND sqlc.arg(end_date)::date
   AND se.deleted_at IS NULL
   AND se.is_day_off = false
-  AND se.status <> 'CANCELLED_BY_LEAVE'
-  AND NOT EXISTS (
-      SELECT 1 FROM holidays h
-      WHERE h.holiday_date = se.work_date
-        AND h.deleted_at IS NULL
-  );
+  AND se.status <> 'CANCELLED_BY_LEAVE';
 
 -- name: FindActivePlacementForAgentDate :one
 -- INV-2 / OUTSIDE_PLACEMENT_PERIOD source: the agent's ACTIVE/EXPIRING placement

@@ -246,10 +246,12 @@ func (r *ScheduleRepo) CancelScheduleEntriesForLeave(ctx context.Context, tx pgx
 	return out, nil
 }
 
-// CountLeaveDuration is the server-authoritative F6.2 leave duration: rostered shift
-// days in [start,end] (live schedule_entries) minus public holidays (E7). Backs
-// leavesvc.SchedulePort so the leave Create path never re-implements a naive
-// day-count.
+// CountLeaveDuration is the server-authoritative F6.2 leave duration: every
+// scheduled-shift day in [start,end] (live schedule_entries, not a day off) —
+// INCLUDING shifts on a weekend or public holiday (2026-06-15; a holiday shift is
+// real work the agent is excused from, so it consumes quota). Days with no shift are
+// not counted. Backs leavesvc.SchedulePort so the leave Create path never
+// re-implements a naive day-count.
 func (r *ScheduleRepo) CountLeaveDuration(ctx context.Context, employeeID string, start, end time.Time) (int, error) {
 	n, err := r.q.CountLeaveDurationDays(ctx, sqlcgen.CountLeaveDurationDaysParams{
 		EmployeeID: employeeID,
