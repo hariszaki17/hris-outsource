@@ -3079,6 +3079,13 @@ export const en: Messages = {
     leaveNeedDoc: 'This leave type requires a document',
     leaveStatutoryNote:
       'Statutory entitlement: {{count}} days — end date pre-filled, you may shorten it.',
+    leaveNoAssignedTypes: 'No leave types have been assigned to you yet.',
+    leaveDurationLabel: 'Requested duration',
+    leaveDurationValue: '{{count}} working days',
+    leaveRemainingLabel: 'Remaining quota',
+    leaveRemainingValue: '{{count}} days',
+    leaveUncapped: 'As applicable',
+    leaveOverQuota: 'Duration exceeds remaining quota ({{count}} days).',
     leaveError: 'Failed to submit request',
     leaveBalance: 'Annual leave remaining: {{days}} days',
     // Overtime (/me/overtime, /me/overtime/new)

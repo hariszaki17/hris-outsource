@@ -9,18 +9,17 @@
  */
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { ApiError } from '@swp/api-client';
+import { type ScheduleEntry, useGetScheduleByAgent } from '@swp/api-client/e4';
 import {
-  type LeaveType,
   type LeaveTypeBalance,
-  LeaveTypeStatus,
   useCreateLeaveRequest,
   useGetEmployeeTypeBalances,
-  useListLeaveTypes,
 } from '@swp/api-client/e6';
 import { addCalendarDays } from '@swp/shared/datetime';
 import { statutoryFixedDays } from '@swp/shared/leave';
 import {
   Button,
+  FilterSelect,
   FormField,
   Input,
   Modal,
@@ -31,7 +30,7 @@ import {
   useToast,
 } from '@swp/ui';
 import { Plane } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
@@ -72,24 +71,17 @@ export function AgentLeaveCreateModal({
   const { toast } = useToast();
 
   const user = useCurrentUser();
-  const typesQ = useListLeaveTypes();
   const create = useCreateLeaveRequest();
 
-  // Per-type balances carry the cap_basis/cap_value that drive statutory day auto-fill.
+  // The picker is scoped to the employee's HR-ASSIGNED types (ELE-1): the balance endpoint already
+  // INNER JOINs the entitlements, so it returns only assigned types + their remaining quota.
   const balancesQ = useGetEmployeeTypeBalances(user?.employeeId ?? '', {
     query: { enabled: !!user?.employeeId },
   });
   const balances = (balancesQ.data?.data as { data?: LeaveTypeBalance[] } | undefined)?.data ?? [];
 
-  const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
-  // Exclude HEAD_OFFICE-only types (agent app) and document-required types (no attachment upload
-  // in v1, LR-2 deferred).
-  const types = allTypes.filter(
-    (lt) =>
-      lt.status === LeaveTypeStatus.ACTIVE &&
-      lt.applies_to !== 'HEAD_OFFICE' &&
-      !lt.requires_document,
-  );
+  // Document-required types stay hidden from the agent picker (upload deferred, PRD §10).
+  const types = balances.filter((b) => !b.requires_document && b.applies_to !== 'HEAD_OFFICE');
 
   const [typeId, setTypeId] = useState('');
   const [start, setStart] = useState('');
@@ -98,6 +90,34 @@ export function AgentLeaveCreateModal({
   const [fieldErr, setFieldErr] = useState<
     Partial<Record<'type' | 'start' | 'end' | 'reason', string>>
   >({});
+
+  const selectedBalance = balances.find((b) => b.leave_type_id === typeId);
+  // remaining_days is null for uncapped types ("sesuai ketentuan") — no quota cap then.
+  const remaining = selectedBalance?.remaining_days ?? null;
+
+  // Server-authoritative duration = scheduled-shift days in [start,end] (workday OR weekend/holiday
+  // shift); days with no shift / day-off are NOT counted. We preview it from the agent's schedule so
+  // the agent sees the exact quota charge before submitting (and we block over-quota client-side).
+  const rangeValid = DATE_RE.test(start) && DATE_RE.test(end) && end >= start;
+  const scheduleQ = useGetScheduleByAgent(
+    user?.employeeId ?? '',
+    { start_date: start, end_date: end },
+    { query: { enabled: !!user?.employeeId && rangeValid } },
+  );
+  const scheduleEntries =
+    (scheduleQ.data?.data as { data?: ScheduleEntry[] } | undefined)?.data ?? [];
+  const requestedDays = useMemo(() => {
+    const dates = new Set<string>();
+    for (const e of scheduleEntries) {
+      if (!e.is_day_off && e.status !== 'CANCELLED_BY_LEAVE') dates.add(e.work_date);
+    }
+    return dates.size;
+  }, [scheduleEntries]);
+
+  const durationReady = rangeValid && !scheduleQ.isFetching;
+  // Block over-quota (capped types only): requested working-days must fit the remaining balance.
+  const overQuota =
+    remaining != null && durationReady && requestedDays > remaining && requestedDays > 0;
 
   // Statutory fixed-duration types (UU 13/2003): pre-fill end_date to the regulated day count when
   // a start date is set. Editable down — the agent may still pick a shorter range.
@@ -123,6 +143,10 @@ export function AgentLeaveCreateModal({
 
   async function onSubmit() {
     if (!validate()) return;
+    if (overQuota) {
+      toast({ tone: 'error', title: t('leaveOverQuota', { count: remaining ?? 0 }) });
+      return;
+    }
     try {
       await create.mutateAsync({
         data: {
@@ -159,36 +183,38 @@ export function AgentLeaveCreateModal({
             {t('leaveType')}
             <span className="ml-0.5 text-bad">*</span>
           </span>
-          {typesQ.isLoading ? (
+          {balancesQ.isLoading ? (
             <StateView kind="loading" title={t('loading')} />
-          ) : typesQ.isError ? (
+          ) : balancesQ.isError ? (
             <StateView
               kind="error"
               title={t('errorGeneric')}
-              onRetry={() => void typesQ.refetch()}
+              onRetry={() => void balancesQ.refetch()}
             />
+          ) : types.length === 0 ? (
+            <p className="text-[13px] text-text-3">{t('leaveNoAssignedTypes')}</p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {types.map((lt) => (
-                <button
-                  key={lt.id}
-                  type="button"
-                  onClick={() => {
-                    setTypeId(lt.id);
-                    setFieldErr((prev) => ({ ...prev, type: undefined }));
-                    autoFillEnd(lt.id, start);
-                  }}
-                  className={[
-                    'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                    typeId === lt.id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-surface text-text-2 hover:bg-muted',
-                  ].join(' ')}
-                >
-                  {lt.name}
-                </button>
+            <FilterSelect
+              containerClassName="w-full"
+              value={typeId}
+              aria-label={t('leaveType')}
+              onChange={(e) => {
+                const id = e.target.value;
+                setTypeId(id);
+                setFieldErr((prev) => ({ ...prev, type: undefined }));
+                autoFillEnd(id, start);
+              }}
+            >
+              <option value="" disabled>
+                {t('leavePickType')}
+              </option>
+              {types.map((b) => (
+                <option key={b.leave_type_id} value={b.leave_type_id}>
+                  {b.name}
+                  {b.code ? ` (${b.code})` : ''}
+                </option>
               ))}
-            </div>
+            </FilterSelect>
           )}
           {fieldErr.type && (
             <p role="alert" className="text-xs text-bad-tx">
@@ -237,6 +263,33 @@ export function AgentLeaveCreateModal({
           </p>
         )}
 
+        {/* Duration (scheduled-shift days) vs remaining quota — over-quota blocks submit. */}
+        {typeId && rangeValid && (
+          <div className="-mt-2 flex flex-col gap-1 rounded-md border border-border bg-surface-2 px-3 py-2">
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-text-2">{t('leaveDurationLabel')}</span>
+              <span className="font-medium text-text tabular-nums">
+                {scheduleQ.isFetching
+                  ? t('loading')
+                  : t('leaveDurationValue', { count: requestedDays })}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[13px]">
+              <span className="text-text-2">{t('leaveRemainingLabel')}</span>
+              <span className="font-medium text-text tabular-nums">
+                {remaining == null
+                  ? t('leaveUncapped')
+                  : t('leaveRemainingValue', { count: remaining })}
+              </span>
+            </div>
+            {overQuota && (
+              <p role="alert" className="text-xs text-bad-tx">
+                {t('leaveOverQuota', { count: remaining ?? 0 })}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Reason */}
         <FormField label={t('leaveReason')} htmlFor="leave-reason" error={fieldErr.reason} required>
           <textarea
@@ -264,7 +317,7 @@ export function AgentLeaveCreateModal({
         <Button
           variant="primary"
           size="sm"
-          disabled={create.isPending}
+          disabled={create.isPending || overQuota}
           onClick={() => void onSubmit()}
         >
           {t('leaveSubmitBtn')}

@@ -3103,6 +3103,13 @@ export const id = {
     leaveNeedDoc: 'Jenis cuti ini memerlukan dokumen',
     leaveStatutoryNote:
       'Hak {{count}} hari sesuai ketentuan — tanggal selesai terisi otomatis, bisa dipersingkat.',
+    leaveNoAssignedTypes: 'Belum ada jenis cuti yang ditetapkan untuk Anda.',
+    leaveDurationLabel: 'Durasi pengajuan',
+    leaveDurationValue: '{{count}} hari kerja',
+    leaveRemainingLabel: 'Sisa kuota',
+    leaveRemainingValue: '{{count}} hari',
+    leaveUncapped: 'Sesuai ketentuan',
+    leaveOverQuota: 'Durasi melebihi sisa kuota ({{count}} hari).',
     leaveError: 'Gagal mengirim pengajuan',
     leaveBalance: 'Sisa cuti tahunan: {{days}} hari',
     // Overtime (/me/overtime, /me/overtime/new)
