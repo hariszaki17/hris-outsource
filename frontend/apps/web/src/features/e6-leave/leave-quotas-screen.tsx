@@ -20,13 +20,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useListEmployees } from '@swp/api-client/e2';
 import {
   type AdjustTypeQuotaBody,
-  type LeaveType,
   type LeaveTypeBalance,
-  LeaveTypeStatus,
   useAdjustTypeQuota,
   useGetEmployeeTypeBalances,
-  useListLeaveTypes,
 } from '@swp/api-client/e6';
+import { isQuotaBearing } from '@swp/shared/leave';
 import {
   Button,
   type Column,
@@ -181,11 +179,6 @@ function QuotaModal({
   const isAdjust = Boolean(target);
   const mutation = useAdjustTypeQuota();
 
-  const typesQuery = useListLeaveTypes(undefined, { query: { enabled: open && !isAdjust } });
-  const leaveTypes = (unwrap<LeaveType[]>(typesQuery.data?.data) ?? []).filter(
-    (lt) => lt.status === LeaveTypeStatus.ACTIVE,
-  );
-
   const {
     register,
     handleSubmit,
@@ -212,6 +205,16 @@ function QuotaModal({
 
   const employeeId = watch('employee_id');
   const delta = watch('delta');
+
+  // Type options for "Tambah Kuota" come from the selected employee's per-type balances, filtered
+  // to quota-bearing cap_basis. PER_EVENT / UNCAPPED types have no adjustable window (the server
+  // would 422 with "tidak punya kuota yang bisa disesuaikan"), so they are never offered.
+  const typeBalQuery = useGetEmployeeTypeBalances(employeeId, {
+    query: { enabled: open && !isAdjust && !!employeeId },
+  });
+  const quotaBearingTypes = (unwrap<LeaveTypeBalance[]>(typeBalQuery.data?.data) ?? []).filter(
+    (b) => isQuotaBearing(b.cap_basis),
+  );
   // Adjust mode previews the resulting entitlement/remaining ("Total baru" / "Sisa baru").
   const newEntitled = target ? target.entitled + (Number.isFinite(delta) ? delta : 0) : 0;
   const newRemaining = target ? newEntitled - target.used : 0;
@@ -302,11 +305,18 @@ function QuotaModal({
                 required
                 error={errors.leave_type_id?.message}
               >
-                <select id="q-type" className={inputCls} {...register('leave_type_id')}>
-                  <option value="">{t('add.typePlaceholder')}</option>
-                  {leaveTypes.map((lt) => (
-                    <option key={lt.id} value={lt.id}>
-                      {lt.name} ({lt.code})
+                <select
+                  id="q-type"
+                  className={inputCls}
+                  disabled={!employeeId}
+                  {...register('leave_type_id')}
+                >
+                  <option value="">
+                    {employeeId ? t('add.typePlaceholder') : t('add.typePlaceholderNoEmployee')}
+                  </option>
+                  {quotaBearingTypes.map((b) => (
+                    <option key={b.leave_type_id} value={b.leave_type_id}>
+                      {b.name} ({b.code})
                     </option>
                   ))}
                 </select>

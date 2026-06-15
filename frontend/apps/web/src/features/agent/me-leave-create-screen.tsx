@@ -7,13 +7,18 @@
  * the picker (no upload support yet, LR-2 deferred). Rendered as a Modal (not a routed page) —
  * matches docs/design/brainstorm.pen "Agen Web · Ajukan Cuti (modal)".
  */
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import { ApiError } from '@swp/api-client';
 import {
   type LeaveType,
+  type LeaveTypeBalance,
   LeaveTypeStatus,
   useCreateLeaveRequest,
+  useGetEmployeeTypeBalances,
   useListLeaveTypes,
 } from '@swp/api-client/e6';
+import { addCalendarDays } from '@swp/shared/datetime';
+import { statutoryFixedDays } from '@swp/shared/leave';
 import {
   Button,
   FormField,
@@ -66,13 +71,24 @@ export function AgentLeaveCreateModal({
   const { t } = useTranslation('agent');
   const { toast } = useToast();
 
+  const user = useCurrentUser();
   const typesQ = useListLeaveTypes();
   const create = useCreateLeaveRequest();
 
+  // Per-type balances carry the cap_basis/cap_value that drive statutory day auto-fill.
+  const balancesQ = useGetEmployeeTypeBalances(user?.employeeId ?? '', {
+    query: { enabled: !!user?.employeeId },
+  });
+  const balances = (balancesQ.data?.data as { data?: LeaveTypeBalance[] } | undefined)?.data ?? [];
+
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
-  // Exclude document-required types (no attachment upload in v1, LR-2 deferred).
+  // Exclude HEAD_OFFICE-only types (agent app) and document-required types (no attachment upload
+  // in v1, LR-2 deferred).
   const types = allTypes.filter(
-    (lt) => lt.status === LeaveTypeStatus.ACTIVE && !lt.requires_document,
+    (lt) =>
+      lt.status === LeaveTypeStatus.ACTIVE &&
+      lt.applies_to !== 'HEAD_OFFICE' &&
+      !lt.requires_document,
   );
 
   const [typeId, setTypeId] = useState('');
@@ -82,6 +98,17 @@ export function AgentLeaveCreateModal({
   const [fieldErr, setFieldErr] = useState<
     Partial<Record<'type' | 'start' | 'end' | 'reason', string>>
   >({});
+
+  // Statutory fixed-duration types (UU 13/2003): pre-fill end_date to the regulated day count when
+  // a start date is set. Editable down — the agent may still pick a shorter range.
+  const statutoryDays = statutoryFixedDays(balances.find((b) => b.leave_type_id === typeId));
+  function autoFillEnd(nextTypeId: string, nextStart: string) {
+    const days = statutoryFixedDays(balances.find((b) => b.leave_type_id === nextTypeId));
+    if (days != null && DATE_RE.test(nextStart)) {
+      setEnd(addCalendarDays(nextStart, days - 1));
+      setFieldErr((prev) => ({ ...prev, end: undefined }));
+    }
+  }
 
   function validate(): boolean {
     const errs: typeof fieldErr = {};
@@ -149,6 +176,7 @@ export function AgentLeaveCreateModal({
                   onClick={() => {
                     setTypeId(lt.id);
                     setFieldErr((prev) => ({ ...prev, type: undefined }));
+                    autoFillEnd(lt.id, start);
                   }}
                   className={[
                     'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
@@ -184,6 +212,7 @@ export function AgentLeaveCreateModal({
               onChange={(e) => {
                 setStart(e.target.value);
                 setFieldErr((prev) => ({ ...prev, start: undefined }));
+                autoFillEnd(typeId, e.target.value);
               }}
             />
           </FormField>
@@ -201,6 +230,12 @@ export function AgentLeaveCreateModal({
             />
           </FormField>
         </div>
+
+        {statutoryDays != null && (
+          <p className="-mt-2 text-xs text-text-3">
+            {t('leaveStatutoryNote', { count: statutoryDays })}
+          </p>
+        )}
 
         {/* Reason */}
         <FormField label={t('leaveReason')} htmlFor="leave-reason" error={fieldErr.reason} required>

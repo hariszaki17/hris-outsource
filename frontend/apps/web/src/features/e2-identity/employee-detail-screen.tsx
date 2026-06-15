@@ -22,6 +22,7 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowLeft, KeyRound, MoreVertical, Pencil, Smartphone } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { EmployeeLeaveEntitlementsSection } from '../e6-leave/employee-leave-entitlements-section.tsx';
 import { EditEmployeeScreen } from './employee-form.tsx';
 import { OffboardEmployeeConfirm, ReactivateEmployeeConfirm } from './employee-overlays.tsx';
 
@@ -112,7 +113,7 @@ function CrossEpicPlaceholder({ tabName, epic }: { tabName: string; epic: string
 // Inline mini-tab switch
 // ---------------------------------------------------------------------------
 
-type DetailTab = 'profil' | 'penempatan' | 'kehadiran' | 'cuti-lembur';
+type DetailTab = 'profil' | 'penempatan' | 'kehadiran' | 'hak-cuti' | 'cuti-lembur';
 
 function DetailTabs({
   active,
@@ -127,6 +128,7 @@ function DetailTabs({
     { id: 'profil', label: t('tabDetailProfil') },
     { id: 'penempatan', label: t('tabDetailPenempatan'), cross: true },
     { id: 'kehadiran', label: t('tabDetailKehadiran'), cross: true },
+    { id: 'hak-cuti', label: t('tabDetailHakCuti') },
     { id: 'cuti-lembur', label: t('tabDetailCutiLembur'), cross: true },
   ];
 
@@ -392,6 +394,15 @@ export function EmployeeDetailScreen() {
         )}
         {activeTab === 'kehadiran' && (
           <CrossEpicPlaceholder tabName={t('tabDetailKehadiran')} epic="E5" />
+        )}
+        {/* Hak Cuti — HR-assigned per-employee leave entitlements (F6, ELE-#, INV-7). SL is
+            read-only (RBAC defense-in-depth). */}
+        {activeTab === 'hak-cuti' && (
+          <DetailCard title={t('tabDetailHakCuti')}>
+            <div className="py-2">
+              <EmployeeLeaveEntitlementsSection employeeId={employeeId} canEdit={!isShiftLeader} />
+            </div>
+          </DetailCard>
         )}
         {activeTab === 'cuti-lembur' && (
           <CrossEpicPlaceholder tabName={t('tabDetailCutiLembur')} epic="E6/E7" />

@@ -70,6 +70,11 @@ export function daysBetween(startIsoDate: string, endIsoDate: string): number {
   return Temporal.PlainDate.from(startIsoDate).until(Temporal.PlainDate.from(endIsoDate)).days;
 }
 
+/** Add `n` calendar days to an ISO date "YYYY-MM-DD" (`n` may be negative). */
+export function addCalendarDays(isoDate: string, n: number): string {
+  return Temporal.PlainDate.from(isoDate).add({ days: n }).toString();
+}
+
 /**
  * An inclusive calendar-date range, both ends "YYYY-MM-DD". `from <= to` always.
  * The canonical shape for E5 attendance `date_from` / `date_to` query params.

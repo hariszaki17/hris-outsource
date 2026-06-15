@@ -199,6 +199,8 @@ const mobileCopy = {
       quota: 'Sisa kuota cuti tidak cukup.',
       backdated: 'Tidak bisa mengajukan cuti untuk tanggal lampau.',
       needDoc: 'Jenis cuti ini butuh dokumen — belum didukung di aplikasi.',
+      statutoryNote:
+        'Hak {{count}} hari sesuai ketentuan — tanggal selesai terisi otomatis, bisa dipersingkat.',
       error: 'Gagal mengajukan cuti. Coba lagi.',
       balanceSection: 'Saldo per jenis',
       historySection: 'Riwayat pengajuan',
@@ -783,6 +785,8 @@ const mobileCopy = {
       quota: 'Not enough leave quota remaining.',
       backdated: 'Cannot request leave for a past date.',
       needDoc: 'This leave type needs a document — not supported in the app yet.',
+      statutoryNote:
+        'Statutory entitlement: {{count}} days — end date pre-filled, you may shorten it.',
       error: 'Failed to submit leave request. Try again.',
       balanceSection: 'Balance by type',
       historySection: 'Request history',

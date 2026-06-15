@@ -889,6 +889,7 @@ export const id = {
     tabDetailProfil: 'Profil',
     tabDetailPenempatan: 'Penempatan',
     tabDetailKehadiran: 'Kehadiran',
+    tabDetailHakCuti: 'Hak Cuti',
     tabDetailCutiLembur: 'Cuti & Lembur',
     crossEpicTitle: 'Tab {{tab}}',
     crossEpicBody:
@@ -3236,6 +3237,35 @@ export const id = {
     leaveEmptyHint: 'Ajukan cuti pertama Anda dengan tombol Ajukan Cuti.',
     otEmptyHint: 'Ajukan lembur atau tunggu deteksi otomatis dari kehadiran.',
     durationDays: '{{count}} hari',
+    tabCuti: 'Cuti',
+    tabLembur: 'Lembur',
+    balSectionTitle: 'Saldo Cuti per Jenis',
+    leaveHistoryTitle: 'Riwayat Pengajuan Cuti',
+    otHistoryTitle: 'Riwayat Pengajuan Lembur',
+    balEmpty: 'Belum ada saldo cuti.',
+    balUncapped: 'Sesuai ketentuan',
+    balRemainingOf: 'dari {{total}} hari',
+    balUsed: 'Terpakai',
+    balPending: 'Pending',
+    balUnitCount: '{{count}} kali',
+    balShowAll: 'Lihat semua jenis ({{count}} lainnya)',
+    balShowLess: 'Tampilkan lebih sedikit',
+    // Per-type balance TABLE (leave-entitlement-assignment §7.1 — replaces the card grid)
+    balColType: 'Jenis Cuti',
+    balColRemaining: 'Sisa',
+    balColUsed: 'Terpakai',
+    balColQuota: 'Kuota',
+    balColPending: 'Pending',
+    balColReset: 'Reset / Kedaluwarsa',
+    balExpiresAt: 'hangus {{date}}',
+    balReset: {
+      ANNUAL_POOL: 'Tahunan',
+      PER_MONTH: 'Bulanan',
+      PER_YEAR_COUNT: 'Tahunan (kuota)',
+      LIFETIME_ONCE: 'Sekali (seumur kerja)',
+      PER_EVENT: 'Per kejadian',
+      UNCAPPED: 'Sesuai ketentuan',
+    },
     akunTitle: 'Akun',
     languageId: 'Bahasa Indonesia',
     languageEn: 'English',
@@ -3249,6 +3279,54 @@ export const id = {
     // Read-view note — all profile edits apply instantly now (no approval).
     profileTierNote:
       'Perubahan profil (alamat, telepon, kontak darurat, rekening bank, bahasa, foto) berlaku langsung tanpa persetujuan.',
+  },
+
+  // E6 · "Hak Cuti" — HR-assigned per-employee leave entitlements
+  // (leave-entitlement-assignment §7.2).
+  leaveEntitlements: {
+    sectionHint:
+      'Jenis cuti yang ditetapkan untuk karyawan ini. Hanya jenis ini yang dapat diajukan.',
+    addBtn: 'Tambah Jenis Cuti',
+    tableLabel: 'Hak cuti karyawan',
+    colType: 'Jenis Cuti',
+    colQuota: 'Kuota',
+    colReset: 'Reset',
+    daysValue: '{{count}} hari',
+    uncapped: 'Sesuai ketentuan',
+    resetCadence: {
+      ANNUAL_POOL: 'Tahunan',
+      PER_MONTH: 'Bulanan',
+      PER_YEAR_COUNT: 'Tahunan (kuota)',
+      LIFETIME_ONCE: 'Sekali (seumur kerja)',
+      PER_EVENT: 'Per kejadian',
+      UNCAPPED: 'Sesuai ketentuan',
+    },
+    empty: 'Belum ada hak cuti yang ditetapkan',
+    emptyHint: 'Tambahkan jenis cuti untuk karyawan ini agar dapat diajukan.',
+    errorTitle: 'Gagal memuat hak cuti',
+    errorGeneric: 'Terjadi kesalahan. Coba lagi.',
+    loading: 'Memuat…',
+    cancel: 'Batal',
+    save: 'Simpan',
+    remove: 'Hapus',
+    quotaSaved: 'Kuota diperbarui.',
+    quotaInvalid: 'Kuota harus berupa angka bulat ≥ 0.',
+    quotaBelowUsage: 'Kuota tidak boleh lebih kecil dari yang sudah terpakai + pending.',
+    // Tambah Jenis Cuti dialog
+    addTitle: 'Tambah Jenis Cuti',
+    addConfirm: 'Tetapkan',
+    addSuccess: 'Jenis cuti ditetapkan.',
+    fieldType: 'Jenis Cuti',
+    fieldQuota: 'Kuota (hari)',
+    fieldNote: 'Catatan (opsional)',
+    quotaHint: 'Kosongkan untuk mengikuti ketentuan jenis cuti.',
+    pickTypeFirst: 'Pilih jenis cuti terlebih dahulu.',
+    allAssigned: 'Semua jenis cuti sudah ditetapkan.',
+    // Hapus confirm
+    removeTitle: 'Hapus jenis cuti?',
+    removeBody:
+      'Karyawan tidak lagi dapat mengajukan "{{name}}". Riwayat dan saldo yang ada tetap tersimpan.',
+    removeSuccess: 'Jenis cuti dihapus dari karyawan.',
   },
 };
 

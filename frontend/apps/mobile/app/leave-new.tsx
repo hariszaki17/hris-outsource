@@ -13,7 +13,8 @@ import {
   useGetEmployeeTypeBalances,
   useListLeaveTypes,
 } from '@swp/api-client/e6';
-import { formatDate } from '@swp/shared/datetime';
+import { addCalendarDays, formatDate } from '@swp/shared/datetime';
+import { statutoryFixedDays } from '@swp/shared/leave';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -39,7 +40,10 @@ export default function LeaveNew() {
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
   // Document-required types are deferred (no attachment upload yet).
   const types = allTypes.filter(
-    (lt) => lt.status === LeaveTypeStatus.ACTIVE && !lt.requires_document,
+    (lt) =>
+      lt.status === LeaveTypeStatus.ACTIVE &&
+      lt.applies_to !== 'HEAD_OFFICE' &&
+      !lt.requires_document,
   );
 
   const [typeId, setTypeId] = useState('');
@@ -47,6 +51,14 @@ export default function LeaveNew() {
   const [end, setEnd] = useState('');
   const [reason, setReason] = useState('');
   const [err, setErr] = useState<string | null>(null);
+
+  // Statutory fixed-duration types (UU 13/2003): pre-fill end_date to the regulated day count when
+  // a start date is set. Editable down — the agent may still pick a shorter range.
+  const statutoryDays = statutoryFixedDays(balances.find((b) => b.leave_type_id === typeId));
+  function autoFillEnd(nextTypeId: string, nextStart: string) {
+    const days = statutoryFixedDays(balances.find((b) => b.leave_type_id === nextTypeId));
+    if (days != null && DATE_RE.test(nextStart)) setEnd(addCalendarDays(nextStart, days - 1));
+  }
 
   async function onSubmit() {
     setErr(null);
@@ -113,7 +125,10 @@ export default function LeaveNew() {
             {types.map((lt) => (
               <Pressable
                 key={lt.id}
-                onPress={() => setTypeId(lt.id)}
+                onPress={() => {
+                  setTypeId(lt.id);
+                  autoFillEnd(lt.id, start);
+                }}
                 className={`rounded-input border px-3 py-2 ${
                   typeId === lt.id ? 'border-primary bg-primary-soft' : 'border-border bg-surface'
                 }`}
@@ -151,7 +166,10 @@ export default function LeaveNew() {
             </Text>
             <TextInput
               value={start}
-              onChangeText={setStart}
+              onChangeText={(v) => {
+                setStart(v);
+                autoFillEnd(typeId, v);
+              }}
               placeholder="2026-06-10"
               autoCapitalize="none"
               className={inputClass}
@@ -170,6 +188,12 @@ export default function LeaveNew() {
             />
           </View>
         </View>
+
+        {statutoryDays != null ? (
+          <Text variant="caption" className="text-text-3 -mt-2">
+            {t('m:leave.statutoryNote', { count: statutoryDays })}
+          </Text>
+        ) : null}
 
         <View>
           <Text variant="caption" className="mb-1">

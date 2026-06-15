@@ -5,9 +5,14 @@
  *
  * Per-type quota ledger (2026-06-12):
  *   useGetEmployeeTypeBalances, useAdjustTypeQuota (leave-balances tag)
+ *
+ * HR-assigned per-employee entitlement (2026-06-15, leave-entitlement-assignment PRD):
+ *   useListEmployeeLeaveEntitlements, useAssignEmployeeLeaveEntitlement,
+ *   useUpdateEmployeeLeaveEntitlement, useRemoveEmployeeLeaveEntitlement (leave-entitlements tag)
  */
 export * from './gen/e6/leave-types/leave-types.ts';
 export * from './gen/e6/leave-balances/leave-balances.ts';
+export * from './gen/e6/leave-entitlements/leave-entitlements.ts';
 export * from './gen/e6/leave-requests/leave-requests.ts';
 export * from './gen/e6/leave-calendar/leave-calendar.ts';
 export * from './gen/e6/model/index.ts';

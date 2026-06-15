@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./ids": "./src/ids.ts",
     "./datetime": "./src/datetime.ts",
+    "./leave": "./src/leave.ts",
     "./i18n": "./src/i18n/index.ts"
   },
   "scripts": {
