@@ -257,12 +257,15 @@ func run() error {
 	quotaRepo := leaverepo.NewQuotaRepo(pool)
 	leaveSvc := leavesvc.NewLeaveService(leaveRepo, scheduleRepo, txm)
 	// Per-type ledger (EPICS §8 2026-06-12): meter against per-type cap_basis windows.
-	leaveSvc.SetMeter(leavesvc.NewQuotaMeter(quotaRepo, quotaRepo))
+	quotaMeter := leavesvc.NewQuotaMeter(quotaRepo, quotaRepo)
+	leaveSvc.SetMeter(quotaMeter)
 	leaveSvc.SetNotifier(jobsClient)                     // E10 (11-02): real notify on approve-final/reject
 	quotaSvc := leavesvc.NewQuotaService(quotaRepo, txm) // per-type balances (F6.5) + HR adjust-entitled
 	calendarSvc := leavesvc.NewCalendarService(leaveRepo)
 	// HR-assigned per-employee leave entitlements (PRD leave-entitlement-assignment).
 	entitlementRepo := leaverepo.NewEntitlementRepo(pool)
+	// "Both places" (2026-06-15): adjusting a non-windowed type in Kuota Cuti defines its base.
+	quotaMeter.SetEntitlementSetter(entitlementRepo)
 	entitlementSvc := leavesvc.NewEntitlementService(entitlementRepo, txm)
 	leaveHandler := leavehttp.NewHandler(leaveSvc, quotaSvc, calendarSvc, entitlementSvc)
 

@@ -51,16 +51,30 @@ type QuotaMeterReader interface {
 	GetEmployeeEntitlement(ctx context.Context, employeeID, leaveTypeID string) (*dom.LeaveEntitlement, error)
 }
 
+// EntitlementSetter writes the HR base entitlement. The meter uses it to open
+// enforcement on an otherwise "sesuai ketentuan" type (PER_EVENT / UNCAPPED) when HR
+// adjusts it straight from Kuota Cuti — the "Both places" rule (2026-06-15): a base can
+// be defined on the Hak Cuti tab OR by adjusting the quota here.
+type EntitlementSetter interface {
+	UpsertEntitlement(ctx context.Context, tx pgx.Tx, p EntitlementWrite) (dom.LeaveEntitlement, error)
+}
+
 // QuotaMeter meters leave against per-type cap_basis windows.
 type QuotaMeter struct {
 	store  QuotaMeterStore
 	reader QuotaMeterReader
+	ent    EntitlementSetter
 }
 
 // NewQuotaMeter builds a QuotaMeter.
 func NewQuotaMeter(store QuotaMeterStore, reader QuotaMeterReader) *QuotaMeter {
 	return &QuotaMeter{store: store, reader: reader}
 }
+
+// SetEntitlementSetter wires the entitlement writer (production). Without it the meter
+// refuses to open enforcement on a non-windowed type from Kuota Cuti (HR must set the
+// base on Hak Cuti instead).
+func (m *QuotaMeter) SetEntitlementSetter(e EntitlementSetter) { m.ent = e }
 
 // GateError is a request-time eligibility/cap rejection. LeaveService maps it to
 // 422 RULE_VIOLATION (CONVENTIONS §error).
@@ -250,9 +264,11 @@ func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEnt
 		return dom.LeaveQuota{}, err
 	}
 	if !isWin {
-		// Not windowed: a truly "sesuai ketentuan" type with no HR-defined quota. HR must
-		// first set a base entitled_days on the employee's Hak Cuti before adjusting.
-		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Tetapkan kuota dasar di Hak Cuti karyawan sebelum menyesuaikan."}
+		// Non-windowed "sesuai ketentuan" type (PER_EVENT / UNCAPPED) with no HR-defined
+		// quota. Adjusting it here DEFINES the base: set entitled_days (= the displayed
+		// cap_value fallback + delta) on the entitlement so the type becomes enforced +
+		// adjustable, then open the lifetime window at that base. "Both places" (2026-06-15).
+		return m.openFromBase(ctx, tx, cap, in)
 	}
 	win, err := m.resolveOrOpen(ctx, tx, cap, in.EmployeeID, in.StartDate)
 	if err != nil {
@@ -263,6 +279,52 @@ func (m *QuotaMeter) AdjustEntitled(ctx context.Context, tx pgx.Tx, in AdjustEnt
 	}
 	adj := dom.LeaveQuotaAdjustment{Delta: in.Delta, Reason: in.Reason, AdjustedBy: in.Actor, AdjustedAt: in.Now}
 	return m.store.AdjustQuotaEntitled(ctx, tx, win.ID, in.Delta, in.Reason, adj)
+}
+
+// openFromBase defines + opens a quota for an otherwise non-windowed type when HR adjusts
+// it from Kuota Cuti. The new base is the displayed entitled (cap_value, else 0) + delta;
+// it is written to the entitlement (flipping the type to windowed/enforced) and the
+// lifetime "EMP" window is opened at that base so the balance reflects it immediately.
+func (m *QuotaMeter) openFromBase(ctx context.Context, tx pgx.Tx, cap dom.LeaveTypeCap, in AdjustEntitledInput) (dom.LeaveQuota, error) {
+	if m.ent == nil {
+		return dom.LeaveQuota{}, &GateError{Reason: GateOverCap, Message: "Tetapkan kuota dasar di Hak Cuti karyawan sebelum menyesuaikan."}
+	}
+	base := 0
+	if cap.CapValue != nil {
+		base = *cap.CapValue
+	}
+	newBase := base + in.Delta
+	if newBase < 0 {
+		newBase = 0
+	}
+	actor := &in.Actor
+	if in.Actor == "" {
+		actor = nil
+	}
+	if _, werr := m.ent.UpsertEntitlement(ctx, tx, EntitlementWrite{
+		EmployeeID: in.EmployeeID, LeaveTypeID: in.LeaveTypeID,
+		EntitledDays: &newBase, Note: in.Reason, AssignedBy: actor,
+	}); werr != nil {
+		return dom.LeaveQuota{}, werr
+	}
+	key, _, _, _, exp := windowFor(cap.CapBasis, in.StartDate)
+	win, rerr := m.store.ResolveQuotaWindow(ctx, tx, in.EmployeeID, in.LeaveTypeID, key)
+	if rerr == nil {
+		// A window already exists (rare for these types): re-base it via a delta to newBase.
+		if d := newBase - win.EntitledDays; d != 0 {
+			adj := dom.LeaveQuotaAdjustment{Delta: d, Reason: in.Reason, AdjustedBy: in.Actor, AdjustedAt: in.Now}
+			return m.store.AdjustQuotaEntitled(ctx, tx, win.ID, d, in.Reason, adj)
+		}
+		return win, nil
+	}
+	if !errors.Is(rerr, domain.ErrNotFound) {
+		return dom.LeaveQuota{}, rerr
+	}
+	return m.store.OpenQuotaWindow(ctx, tx, dom.QuotaWindowSpec{
+		EmployeeID: in.EmployeeID, LeaveTypeID: in.LeaveTypeID, PeriodKey: key,
+		EntitledDays: newBase, Source: dom.QuotaSourceAdjustment,
+		Remark: "HR set base: " + in.Reason, ExpiresAt: exp,
+	})
 }
 
 // windowed reports whether the type meters against a standing window FOR THIS EMPLOYEE.

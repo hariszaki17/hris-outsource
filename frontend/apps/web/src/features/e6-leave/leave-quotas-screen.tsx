@@ -463,7 +463,6 @@ function EmployeeTypeDetail({
     {
       id: 'type',
       header: t('detail.type'),
-      width: 260,
       cell: (b) => (
         <div className="flex items-center gap-[8px] min-w-0">
           <span
@@ -543,33 +542,30 @@ function EmployeeTypeDetail({
       header: '',
       width: 120,
       align: 'right',
-      // Adjustable when the type is windowed: inherently quota-bearing, OR HR has set a base
-      // quota (assigned_days) on an otherwise "sesuai ketentuan" type. Uncapped types with no
-      // HR quota show "sesuai ketentuan" — define the base in the employee's Hak Cuti first.
-      cell: (b) =>
-        isQuotaBearing(b.cap_basis) || b.assigned_days != null ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() =>
-              onAdjust({
-                employeeId: emp.id,
-                employeeName: emp.full_name,
-                leaveTypeId: b.leave_type_id,
-                code: b.code,
-                name: b.name,
-                entitled: b.entitled_days ?? b.cap_value ?? 0,
-                used: b.used_days,
-                remaining: b.remaining_days ?? 0,
-              })
-            }
-          >
-            {t('actions.adjust')}
-          </Button>
-        ) : (
-          <span className="text-[12px] text-text-3">{t('detail.perRule')}</span>
-        ),
+      // Every assigned type is adjustable: quota-bearing types adjust their window; an
+      // otherwise "sesuai ketentuan" type (PER_EVENT / UNCAPPED) gets its base DEFINED on
+      // the first adjust (server upserts the entitlement + opens the lifetime window).
+      cell: (b) => (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            onAdjust({
+              employeeId: emp.id,
+              employeeName: emp.full_name,
+              leaveTypeId: b.leave_type_id,
+              code: b.code,
+              name: b.name,
+              entitled: b.entitled_days ?? b.cap_value ?? 0,
+              used: b.used_days,
+              remaining: b.remaining_days ?? 0,
+            })
+          }
+        >
+          {t('actions.adjust')}
+        </Button>
+      ),
     },
   ];
 
