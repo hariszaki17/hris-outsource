@@ -707,6 +707,90 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
+  # ─────────────────────────  LEAVE-DAY PAYABILITY  ────────────────────────
+  /leave-requests/{id}/days:
+    parameters:
+      - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+    get:
+      tags: [leave-requests]
+      summary: Per-day payability breakdown (approved leave)
+      description: |
+        One row per approved-leave day. A day that cancelled a **scheduled shift**
+        (`had_shift: true`) is auto-payable (`is_payable: true`); an **unpaid leave type**
+        (cuti di luar tanggungan perusahaan, `leave_types.paid=false`) forces every day
+        non-payable; a paid type's **no-shift** day is pending (`is_payable: null`) until
+        SL/HR/super flags it. Empty until the request is `APPROVED`.
+      operationId: listLeaveRequestDays
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - "DJrBn"  # E6 · Detail Pengajuan Cuti
+      responses:
+        '200':
+          description: Per-day payability rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaveDayPayability' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /leave-requests/{id}/days/{date}:
+    parameters:
+      - { $ref: '#/components/parameters/LeaveRequestIdPath' }
+      - name: date
+        in: path
+        required: true
+        description: Leave day (YYYY-MM-DD) to flag.
+        schema: { type: string, format: date }
+    patch:
+      tags: [leave-requests]
+      summary: Flag a no-shift leave day payable (SL/HR/super)
+      description: |
+        Sets `is_payable` for a **no-shift** approved-leave day. Shift days are auto-payable
+        and rejected here (`422`); unpaid leave types are never payable (`422`); the request
+        must be `APPROVED`. Audited.
+      operationId: setLeaveDayPayable
+      x-rbac:
+        roles: [shift_leader, hr_admin, super_admin]
+        scope: company_or_global
+      x-design-screens:
+        - "DJrBn"  # E6 · Detail Pengajuan Cuti
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_payable]
+              properties:
+                is_payable: { type: boolean }
+      responses:
+        '200':
+          description: Updated day.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LeaveDayPayability' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Not a flaggable day (shift day, unpaid type, or not APPROVED).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
   # ───────────────────────────  LEAVE CALENDAR  ───────────────────────────
   /leave-calendar:
     get:
@@ -1035,6 +1119,26 @@ components:
 
   # ──────────────────────────────  SCHEMAS  ─────────────────────────────
   schemas:
+
+    # ── per-day payability (migr. 00064, 2026-06-15) ──
+    LeaveDayPayability:
+      type: object
+      description: |
+        One approved-leave day's payroll status. `had_shift` = the day cancelled a live
+        scheduled shift (auto-payable). `is_payable` null = a no-shift day pending an
+        SL/HR/super flag (payroll treats null as non-payable). `flaggable` = SL/HR/super may
+        set payability (no-shift days only).
+      required: [date, leave_type, had_shift, flaggable]
+      properties:
+        date: { type: string, format: date, example: "2026-06-26" }
+        leave_type: { type: string, example: CT }
+        had_shift: { type: boolean, example: true }
+        is_payable:
+          type: boolean
+          nullable: true
+          description: true = payable · false = not payable · null = pending an SL/HR/super flag.
+          example: true
+        flaggable: { type: boolean, example: false }
 
     # ── per-type ledger (2026-06-12) ──
     LeaveTypeBalance:

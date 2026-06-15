@@ -16,7 +16,14 @@
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { ApiError } from '@swp/api-client';
-import { type LeaveRequest, LeaveStatus, useGetLeaveRequest } from '@swp/api-client/e6';
+import {
+  type LeaveDayPayability,
+  type LeaveRequest,
+  LeaveStatus,
+  useGetLeaveRequest,
+  useListLeaveRequestDays,
+  useSetLeaveDayPayable,
+} from '@swp/api-client/e6';
 import {
   type ApprovalInstanceDetail,
   type ApprovalLine,
@@ -24,7 +31,7 @@ import {
   useGetApprovalInstance,
   useRejectApprovalInstance,
 } from '@swp/api-client/e11';
-import { DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
+import { Button, DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link as RouterLink } from '@tanstack/react-router';
 import { ArrowUpRight, FileText, ShieldAlert } from 'lucide-react';
@@ -302,6 +309,14 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
             </Section>
           )}
 
+          {/* Per-day payability (migr. 00064): SL/HR/super flag no-shift days payable. */}
+          {lr.status === LeaveStatus.APPROVED &&
+            (me?.role === 'super_admin' ||
+              me?.role === 'hr_admin' ||
+              me?.role === 'shift_leader') && (
+              <PayableDaysSection leaveRequestId={leaveRequestId} t={t} />
+            )}
+
           {/* Clock-in conflict warning */}
           {lr.clock_in_conflict && (
             <div className="flex items-start gap-2 rounded-lg border border-warn-bd bg-warn-bg px-4 py-3">
@@ -471,5 +486,98 @@ function BalanceStat({
         {value} {t('common.days')}
       </span>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PayableDaysSection — per-day payability of an APPROVED leave (SL/HR/super).
+// Shift days are auto-payable; unpaid-type days are never payable; a no-shift day on a
+// paid type is pending until flagged here.
+// ---------------------------------------------------------------------------
+
+function PayableDaysSection({
+  leaveRequestId,
+  t,
+}: {
+  leaveRequestId: string;
+  t: (key: string) => string;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const daysQuery = useListLeaveRequestDays(leaveRequestId);
+  const setPayable = useSetLeaveDayPayable();
+
+  // The BE wraps the list in `{ data: [...] }`; unwrap the extra layer when present.
+  const outer = daysQuery.data?.data as
+    | LeaveDayPayability[]
+    | { data?: LeaveDayPayability[] }
+    | undefined;
+  const days: LeaveDayPayability[] = Array.isArray(outer) ? outer : (outer?.data ?? []);
+
+  function flag(date: string, isPayable: boolean) {
+    setPayable.mutate(
+      { id: leaveRequestId, date, data: { is_payable: isPayable } },
+      {
+        onSuccess: () => {
+          void daysQuery.refetch();
+          qc.invalidateQueries({
+            predicate: (q) => q.queryKey.some((k) => typeof k === 'string' && k.includes('/days')),
+          });
+        },
+        onError: () => toast({ tone: 'error', title: t('detail.payableError') }),
+      },
+    );
+  }
+
+  if (days.length === 0) return null;
+
+  return (
+    <Section title={t('detail.payableTitle')}>
+      <ul className="flex flex-col gap-2">
+        {days.map((d) => (
+          <li
+            key={d.date}
+            className="flex items-center justify-between rounded-lg bg-surface-2 px-3.5 py-2.5"
+          >
+            <DateText kind="date" value={d.date} className="text-sm text-text-2" />
+            {d.had_shift ? (
+              <StatusBadge dot tone="ok">
+                {t('detail.payableShift')}
+              </StatusBadge>
+            ) : !d.flaggable ? (
+              <span className="text-xs text-text-3">{t('detail.payableUnpaid')}</span>
+            ) : d.is_payable === true ? (
+              <div className="flex items-center gap-2">
+                <StatusBadge dot tone="ok">
+                  {t('detail.payablePaid')}
+                </StatusBadge>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={setPayable.isPending}
+                  onClick={() => flag(d.date, false)}
+                >
+                  {t('detail.markUnpaid')}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-warn-tx">{t('detail.payablePending')}</span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={setPayable.isPending}
+                  onClick={() => flag(d.date, true)}
+                >
+                  {t('detail.markPayable')}
+                </Button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }

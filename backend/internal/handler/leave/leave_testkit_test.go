@@ -510,6 +510,8 @@ type insertedLeaveDay struct {
 	Date           time.Time
 	LeaveRequestID string
 	LeaveType      string
+	HadShift       bool
+	IsPayable      *bool
 }
 
 func newFakeScheduleRepo() *fakeScheduleRepo {
@@ -521,9 +523,33 @@ func (r *fakeScheduleRepo) CancelScheduleEntriesForLeave(_ context.Context, _ pg
 	return r.cancelReturns[employeeID], nil
 }
 
-func (r *fakeScheduleRepo) InsertApprovedLeaveDay(_ context.Context, _ pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error {
-	r.insertedDays = append(r.insertedDays, insertedLeaveDay{employeeID, date, leaveRequestID, leaveType})
+func (r *fakeScheduleRepo) InsertApprovedLeaveDay(_ context.Context, _ pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string, hadShift bool, isPayable *bool) error {
+	r.insertedDays = append(r.insertedDays, insertedLeaveDay{employeeID, date, leaveRequestID, leaveType, hadShift, isPayable})
 	return nil
+}
+
+func (r *fakeScheduleRepo) ListApprovedLeaveDays(_ context.Context, leaveRequestID string) ([]dom.LeaveDayPayability, error) {
+	out := []dom.LeaveDayPayability{}
+	for _, d := range r.insertedDays {
+		if d.LeaveRequestID == leaveRequestID {
+			out = append(out, dom.LeaveDayPayability{Date: d.Date, LeaveType: d.LeaveType, HadShift: d.HadShift, IsPayable: d.IsPayable})
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeScheduleRepo) SetLeaveDayPayable(_ context.Context, _ pgx.Tx, leaveRequestID string, date time.Time, payable bool) (dom.LeaveDayPayability, error) {
+	for i := range r.insertedDays {
+		d := &r.insertedDays[i]
+		if d.LeaveRequestID == leaveRequestID && d.Date.Equal(date) {
+			if d.HadShift {
+				return dom.LeaveDayPayability{}, domain.ErrNotFound
+			}
+			d.IsPayable = &payable
+			return dom.LeaveDayPayability{Date: d.Date, LeaveType: d.LeaveType, HadShift: d.HadShift, IsPayable: &payable}, nil
+		}
+	}
+	return dom.LeaveDayPayability{}, domain.ErrNotFound
 }
 
 func (r *fakeScheduleRepo) CountLeaveDuration(_ context.Context, _ string, start, end time.Time) (int, error) {

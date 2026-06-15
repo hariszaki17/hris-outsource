@@ -74,6 +74,10 @@ type LeaveTypeInfo struct {
 	// leave_types.allows_backdated column to source AllowsBackdated.
 	IsDocumentRequired bool
 	AllowsBackdated    bool
+
+	// Paid is leave_types.paid: an UNPAID type (cuti di luar tanggungan perusahaan)
+	// makes every day of the request non-payable for payroll, regardless of shift.
+	Paid bool
 }
 
 // --- leave-request repository port ---
@@ -205,7 +209,15 @@ type ScheduleImpact struct {
 // port lives here, in service/leave).
 type SchedulePort interface {
 	CancelScheduleEntriesForLeave(ctx context.Context, tx pgx.Tx, employeeID string, start, end time.Time) ([]ScheduleImpact, error)
-	InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error
+	// InsertApprovedLeaveDay upserts one approved-leave day. hadShift = the day cancelled a
+	// live scheduled shift; isPayable = resolved payability (nil = pending an SL/HR flag for
+	// a no-shift day). Migr. 00064.
+	InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string, hadShift bool, isPayable *bool) error
+	// ListApprovedLeaveDays returns the per-day payability breakdown for a request (detail UI).
+	ListApprovedLeaveDays(ctx context.Context, leaveRequestID string) ([]dom.LeaveDayPayability, error)
+	// SetLeaveDayPayable flags a NO-SHIFT approved-leave day payable/non-payable. Returns
+	// domain.ErrNotFound when the (request, date) is not a flaggable no-shift day.
+	SetLeaveDayPayable(ctx context.Context, tx pgx.Tx, leaveRequestID string, date time.Time, payable bool) (dom.LeaveDayPayability, error)
 
 	// CountLeaveDuration is the server-authoritative F6.2 duration: the number of days
 	// in [start,end] the agent would otherwise be rostered for a shift (E4 schedule

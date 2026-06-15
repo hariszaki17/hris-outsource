@@ -194,6 +194,7 @@ func (r *LeaveRepo) GetLeaveType(ctx context.Context, id string) (svc.LeaveTypeI
 		// No leave_types.allows_backdated column yet; any backdated request fails the
 		// gate (BACKDATED_LEAVE). See LeaveTypeInfo TODO.
 		AllowsBackdated: false,
+		Paid:            row.Paid,
 	}, nil
 }
 

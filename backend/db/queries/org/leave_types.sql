@@ -16,7 +16,7 @@ LIMIT sqlc.arg(row_limit);
 
 -- name: GetLeaveTypeByID :one
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
+       requires_document, cap_basis, cap_value, cap_unit, paid, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;

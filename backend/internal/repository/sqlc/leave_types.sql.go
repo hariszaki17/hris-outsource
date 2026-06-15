@@ -91,7 +91,7 @@ func (q *Queries) CreateLeaveType(ctx context.Context, arg CreateLeaveTypeParams
 
 const getLeaveTypeByID = `-- name: GetLeaveTypeByID :one
 SELECT id, name, code, description, default_annual_quota, is_annual,
-       requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at
+       requires_document, cap_basis, cap_value, cap_unit, paid, color, status, applies_to, common, created_at, updated_at
 FROM leave_types
 WHERE id = $1
   AND deleted_at IS NULL
@@ -108,6 +108,7 @@ type GetLeaveTypeByIDRow struct {
 	CapBasis           string
 	CapValue           *int32
 	CapUnit            string
+	Paid               bool
 	Color              string
 	Status             string
 	AppliesTo          string
@@ -130,6 +131,7 @@ func (q *Queries) GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveType
 		&i.CapBasis,
 		&i.CapValue,
 		&i.CapUnit,
+		&i.Paid,
 		&i.Color,
 		&i.Status,
 		&i.AppliesTo,

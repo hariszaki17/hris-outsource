@@ -486,6 +486,10 @@ func New(d Deps) http.Handler {
 				// kept until GrantService is deleted (Phase 8 code/table removal).
 				// HR cancel-approved of an APPROVED leave (reverses the grant lots).
 				r.With(d.Idempotency.Handler).Post("/leave-requests/{id}:cancel-approved", d.Leave.CancelApprovedLeaveRequest)
+				// Per-day payability (migr. 00064): breakdown + SL/HR/super flag a no-shift
+				// leave day payable. Shift days are auto-payable; unpaid types never payable.
+				r.Get("/leave-requests/{id}/days", d.Leave.ListLeaveDays)
+				r.Patch("/leave-requests/{id}/days/{date}", d.Leave.SetLeaveDayPayable)
 			})
 
 			// Agent file-a-request + own-request actions (F6.2): agent, hr_admin,

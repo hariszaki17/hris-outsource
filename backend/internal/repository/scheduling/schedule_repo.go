@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
+	leavedom "github.com/hariszaki17/hris-outsource/backend/internal/domain/leave"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	sqlcgen "github.com/hariszaki17/hris-outsource/backend/internal/repository/sqlc"
 	leavesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/leave"
@@ -266,7 +267,8 @@ func (r *ScheduleRepo) CountLeaveDuration(ctx context.Context, employeeID string
 
 // InsertApprovedLeaveDay upserts the INV-3 production approved-leave row (the real
 // leave_requests.id replaces the Phase-6 fixture). ON CONFLICT keeps it idempotent.
-func (r *ScheduleRepo) InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string) error {
+// hadShift / isPayable carry per-day payability (migr. 00064).
+func (r *ScheduleRepo) InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, employeeID string, date time.Time, leaveRequestID, leaveType string, hadShift bool, isPayable *bool) error {
 	lrID := leaveRequestID
 	lt := leaveType
 	return r.q.WithTx(tx).InsertApprovedLeaveDay(ctx, sqlcgen.InsertApprovedLeaveDayParams{
@@ -274,5 +276,55 @@ func (r *ScheduleRepo) InsertApprovedLeaveDay(ctx context.Context, tx pgx.Tx, em
 		LeaveDate:      timeToPgDate(date),
 		LeaveRequestID: &lrID,
 		LeaveType:      &lt,
+		HadShift:       hadShift,
+		IsPayable:      isPayable,
 	})
+}
+
+// ListApprovedLeaveDays returns the per-day payability breakdown for a leave request.
+func (r *ScheduleRepo) ListApprovedLeaveDays(ctx context.Context, leaveRequestID string) ([]leavedom.LeaveDayPayability, error) {
+	lrID := leaveRequestID
+	rows, err := r.q.ListApprovedLeaveDaysForRequest(ctx, &lrID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]leavedom.LeaveDayPayability, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, leavedom.LeaveDayPayability{
+			Date:      pgDateToTime(row.LeaveDate),
+			LeaveType: strDeref(row.LeaveType),
+			HadShift:  row.HadShift,
+			IsPayable: row.IsPayable,
+		})
+	}
+	return out, nil
+}
+
+// strDeref returns the pointed-to string, or "" when nil.
+func strDeref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// SetLeaveDayPayable flags a NO-SHIFT approved-leave day payable/non-payable (the SQL
+// guards had_shift=false). Returns domain.ErrNotFound when not a flaggable day.
+func (r *ScheduleRepo) SetLeaveDayPayable(ctx context.Context, tx pgx.Tx, leaveRequestID string, date time.Time, payable bool) (leavedom.LeaveDayPayability, error) {
+	lrID := leaveRequestID
+	p := payable
+	row, err := r.q.WithTx(tx).SetApprovedLeaveDayPayable(ctx, sqlcgen.SetApprovedLeaveDayPayableParams{
+		IsPayable:      &p,
+		LeaveRequestID: &lrID,
+		LeaveDate:      timeToPgDate(date),
+	})
+	if err != nil {
+		return leavedom.LeaveDayPayability{}, mapErr(err)
+	}
+	return leavedom.LeaveDayPayability{
+		Date:      pgDateToTime(row.LeaveDate),
+		LeaveType: strDeref(row.LeaveType),
+		HadShift:  row.HadShift,
+		IsPayable: row.IsPayable,
+	}, nil
 }

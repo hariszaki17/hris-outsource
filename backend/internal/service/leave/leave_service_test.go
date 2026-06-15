@@ -151,9 +151,15 @@ func (f *fakeSchedule) CancelScheduleEntriesForLeave(_ context.Context, _ pgx.Tx
 	f.cancelled = append(f.cancelled, imp)
 	return f.cancelled, nil
 }
-func (f *fakeSchedule) InsertApprovedLeaveDay(context.Context, pgx.Tx, string, time.Time, string, string) error {
+func (f *fakeSchedule) InsertApprovedLeaveDay(context.Context, pgx.Tx, string, time.Time, string, string, bool, *bool) error {
 	f.inserted++
 	return nil
+}
+func (f *fakeSchedule) ListApprovedLeaveDays(context.Context, string) ([]dom.LeaveDayPayability, error) {
+	return nil, nil
+}
+func (f *fakeSchedule) SetLeaveDayPayable(_ context.Context, _ pgx.Tx, _ string, date time.Time, payable bool) (dom.LeaveDayPayability, error) {
+	return dom.LeaveDayPayability{Date: date, IsPayable: &payable}, nil
 }
 func (f *fakeSchedule) CountLeaveDuration(_ context.Context, _ string, start, end time.Time) (int, error) {
 	return int(end.Sub(start).Hours()/24) + 1, nil

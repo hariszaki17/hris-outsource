@@ -75,6 +75,52 @@ func (s *LeaveService) AdjustTypeQuota(ctx context.Context, employeeID, leaveTyp
 	return out, nil
 }
 
+// ListLeaveDays returns the per-day payability breakdown for an approved leave request
+// (detail UI). Empty when the request is not yet approved (no approved_leave_days rows).
+func (s *LeaveService) ListLeaveDays(ctx context.Context, requestID string) ([]dom.LeaveDayPayability, error) {
+	if _, err := s.repo.GetLeaveRequest(ctx, requestID); err != nil {
+		return nil, err
+	}
+	return s.schedule.ListApprovedLeaveDays(ctx, requestID)
+}
+
+// SetLeaveDayPayable flags a NO-SHIFT leave day payable/non-payable (SL/HR/super, F6.x).
+// Guards: the request must be APPROVED, the type must be paid (an unpaid type is never
+// payable), and only no-shift days are flaggable (the repo enforces had_shift=false).
+func (s *LeaveService) SetLeaveDayPayable(ctx context.Context, requestID string, date time.Time, payable bool) (dom.LeaveDayPayability, error) {
+	rec, err := s.repo.GetLeaveRequest(ctx, requestID)
+	if err != nil {
+		return dom.LeaveDayPayability{}, err
+	}
+	if rec.Status != dom.LeaveStatusApproved {
+		return dom.LeaveDayPayability{}, apperr.Rule("RULE_VIOLATION", map[string]string{"status": "Hanya cuti yang sudah disetujui yang dapat ditandai dibayar."})
+	}
+	lt, lterr := s.repo.GetLeaveType(ctx, rec.LeaveTypeID)
+	if lterr != nil && !errors.Is(lterr, domain.ErrNotFound) {
+		return dom.LeaveDayPayability{}, lterr
+	}
+	if !lt.Paid {
+		return dom.LeaveDayPayability{}, apperr.Rule("RULE_VIOLATION", map[string]string{"leave_type_id": "Cuti di luar tanggungan perusahaan tidak dapat ditandai dibayar."})
+	}
+	actor := actorEmployeeID(ctx)
+	var out dom.LeaveDayPayability
+	txerr := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		day, serr := s.schedule.SetLeaveDayPayable(ctx, tx, requestID, date, payable)
+		if serr != nil {
+			if errors.Is(serr, domain.ErrNotFound) {
+				return apperr.Rule("RULE_VIOLATION", map[string]string{"date": "Hari ini punya shift terjadwal (otomatis dibayar) atau bukan bagian dari cuti."})
+			}
+			return serr
+		}
+		out = day
+		return audit.Record(ctx, tx, leaveAudit(requestID, "leave_request", "", "", actor, "SET_LEAVE_DAY_PAYABLE"))
+	})
+	if txerr != nil {
+		return dom.LeaveDayPayability{}, asAppErr(txerr)
+	}
+	return out, nil
+}
+
 // mapMeterErr maps a QuotaMeter GateError to the API error contract.
 func mapMeterErr(err error) error {
 	var ge *GateError
@@ -222,12 +268,30 @@ func (s *LeaveService) OnApproved(ctx context.Context, tx pgx.Tx, requestID stri
 	if lt.Code != "" {
 		leaveTypeCode = lt.Code
 	}
+	// Per-day payability (migr. 00064): a day that cancelled a live shift is payable;
+	// an UNPAID leave type (cuti di luar tanggungan) forces every day non-payable; a
+	// paid type's NO-SHIFT day stays pending (nil) until SL/HR/super flags it.
+	shiftDays := make(map[string]bool, len(cancels))
+	for _, c := range cancels {
+		shiftDays[c.Date.Format("2006-01-02")] = true
+	}
 	for d := rec.StartDate; !d.After(rec.EndDate); d = d.AddDate(0, 0, 1) {
-		if ierr := s.schedule.InsertApprovedLeaveDay(ctx, tx, rec.EmployeeID, d, requestID, leaveTypeCode); ierr != nil {
+		hadShift := shiftDays[d.Format("2006-01-02")]
+		var payable *bool
+		switch {
+		case !lt.Paid:
+			f := false
+			payable = &f // unpaid type → never payable, not flaggable
+		case hadShift:
+			t := true
+			payable = &t // shift day → auto-payable
+		default:
+			payable = nil // no-shift, paid type → pending an SL/HR/super flag
+		}
+		if ierr := s.schedule.InsertApprovedLeaveDay(ctx, tx, rec.EmployeeID, d, requestID, leaveTypeCode, hadShift, payable); ierr != nil {
 			return ierr
 		}
 	}
-	_ = cancels // schedule_impact is recomputed at read time; not persisted here.
 
 	// 4. transition + commit the BalanceCheck snapshot.
 	req := rec.DurationDays

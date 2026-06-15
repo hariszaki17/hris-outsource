@@ -273,6 +273,21 @@ type LeaveEntitlement struct {
 	Common           bool
 }
 
+// LeaveDayPayability is one approved-leave day's payroll status (approved_leave_days,
+// migr. 00064). HadShift = the day cancelled a live scheduled shift. IsPayable is the
+// resolved payability: nil = a no-shift day still pending an SL/HR/super flag (payroll
+// treats nil as non-payable until set). A shift day is auto-payable; an unpaid leave type
+// forces every day non-payable.
+type LeaveDayPayability struct {
+	Date      time.Time
+	LeaveType string
+	HadShift  bool
+	IsPayable *bool
+}
+
+// Flaggable reports whether SL/HR/super may set this day's payability (no-shift days only).
+func (d LeaveDayPayability) Flaggable() bool { return !d.HadShift }
+
 // QuotaWindowSpec opens (or upserts) a per-type quota window keyed by PeriodKey.
 type QuotaWindowSpec struct {
 	EmployeeID   string

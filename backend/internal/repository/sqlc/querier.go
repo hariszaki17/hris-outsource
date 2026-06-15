@@ -447,7 +447,7 @@ type Querier interface {
 	// INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
 	// leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
 	// because (employee_id, leave_date) is unique (a re-approve / overlapping day must
-	// not 23505).
+	// not 23505). had_shift / is_payable carry per-day payability (migr. 00064).
 	InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error
 	// E8 payslip-export job queries (SWP-EXP-*). InsertExportJob writes a QUEUED row
 	// inside the tx that EnqueueTx's the River job (transactional outbox, 10-02); the
@@ -527,6 +527,8 @@ type Querier interface {
 	ListApprovalLineMembersByTemplate(ctx context.Context, templateID string) ([]ListApprovalLineMembersByTemplateRow, error)
 	// Ordered chain (line_no asc) for a template.
 	ListApprovalLinesByTemplate(ctx context.Context, templateID string) ([]ApprovalLine, error)
+	// Per-day payability breakdown for the leave-request detail (payable flag UI).
+	ListApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) ([]ListApprovedLeaveDaysForRequestRow, error)
 	// E5 attendance queries (F5.1/F5.2 / SWP-ATT-*). Reads LEFT JOIN employees for
 	// employee_name, client_companies for company_name, and client_sites for site_name.
 	// position is FREE-TEXT (stored directly on the row; no positions JOIN, no service_line).
@@ -795,6 +797,9 @@ type Querier interface {
 	// Drives :close (status='closed') and supersede-on-renew (status='superseded').
 	// Also sets closed_reason, closed_at, successor_id as applicable.
 	SetAgreementStatus(ctx context.Context, arg SetAgreementStatusParams) (SetAgreementStatusRow, error)
+	// SL/HR/super flags a NO-SHIFT leave day payable (or not). Guarded to had_shift=false
+	// rows only — shift days are auto-payable and never overridden here.
+	SetApprovedLeaveDayPayable(ctx context.Context, arg SetApprovedLeaveDayPayableParams) (SetApprovedLeaveDayPayableRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetAttendanceCodeStatus(ctx context.Context, arg SetAttendanceCodeStatusParams) (SetAttendanceCodeStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').

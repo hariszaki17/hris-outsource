@@ -76,6 +76,8 @@ type ApprovedLeaveDay struct {
 	LeaveRequestID *string
 	LeaveType      *string
 	CreatedAt      time.Time
+	HadShift       bool
+	IsPayable      *bool
 }
 
 type Attendance struct {

@@ -57,10 +57,12 @@ func (q *Queries) FindApprovedLeaveForAgentDate(ctx context.Context, arg FindApp
 }
 
 const insertApprovedLeaveDay = `-- name: InsertApprovedLeaveDay :exec
-INSERT INTO approved_leave_days (employee_id, leave_date, leave_request_id, leave_type)
-VALUES ($1, $2, $3, $4)
+INSERT INTO approved_leave_days (employee_id, leave_date, leave_request_id, leave_type, had_shift, is_payable)
+VALUES ($1, $2, $3, $4,
+        $5, $6)
 ON CONFLICT (employee_id, leave_date) DO UPDATE
-  SET leave_request_id = EXCLUDED.leave_request_id, leave_type = EXCLUDED.leave_type
+  SET leave_request_id = EXCLUDED.leave_request_id, leave_type = EXCLUDED.leave_type,
+      had_shift = EXCLUDED.had_shift, is_payable = EXCLUDED.is_payable
 `
 
 type InsertApprovedLeaveDayParams struct {
@@ -68,18 +70,98 @@ type InsertApprovedLeaveDayParams struct {
 	LeaveDate      pgtype.Date
 	LeaveRequestID *string
 	LeaveType      *string
+	HadShift       bool
+	IsPayable      *bool
 }
 
 // INV-3 write-through (E6 / Phase 8): on final/override leave approval the REAL
 // leave_requests.id replaces the Phase-6 fixture. ON CONFLICT upsert is required
 // because (employee_id, leave_date) is unique (a re-approve / overlapping day must
-// not 23505).
+// not 23505). had_shift / is_payable carry per-day payability (migr. 00064).
 func (q *Queries) InsertApprovedLeaveDay(ctx context.Context, arg InsertApprovedLeaveDayParams) error {
 	_, err := q.db.Exec(ctx, insertApprovedLeaveDay,
 		arg.EmployeeID,
 		arg.LeaveDate,
 		arg.LeaveRequestID,
 		arg.LeaveType,
+		arg.HadShift,
+		arg.IsPayable,
 	)
 	return err
+}
+
+const listApprovedLeaveDaysForRequest = `-- name: ListApprovedLeaveDaysForRequest :many
+SELECT leave_date, leave_type, had_shift, is_payable
+FROM approved_leave_days
+WHERE leave_request_id = $1
+ORDER BY leave_date
+`
+
+type ListApprovedLeaveDaysForRequestRow struct {
+	LeaveDate pgtype.Date
+	LeaveType *string
+	HadShift  bool
+	IsPayable *bool
+}
+
+// Per-day payability breakdown for the leave-request detail (payable flag UI).
+func (q *Queries) ListApprovedLeaveDaysForRequest(ctx context.Context, leaveRequestID *string) ([]ListApprovedLeaveDaysForRequestRow, error) {
+	rows, err := q.db.Query(ctx, listApprovedLeaveDaysForRequest, leaveRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListApprovedLeaveDaysForRequestRow{}
+	for rows.Next() {
+		var i ListApprovedLeaveDaysForRequestRow
+		if err := rows.Scan(
+			&i.LeaveDate,
+			&i.LeaveType,
+			&i.HadShift,
+			&i.IsPayable,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setApprovedLeaveDayPayable = `-- name: SetApprovedLeaveDayPayable :one
+UPDATE approved_leave_days
+SET is_payable = $1
+WHERE leave_request_id = $2
+  AND leave_date       = $3
+  AND had_shift        = false
+RETURNING leave_date, leave_type, had_shift, is_payable
+`
+
+type SetApprovedLeaveDayPayableParams struct {
+	IsPayable      *bool
+	LeaveRequestID *string
+	LeaveDate      pgtype.Date
+}
+
+type SetApprovedLeaveDayPayableRow struct {
+	LeaveDate pgtype.Date
+	LeaveType *string
+	HadShift  bool
+	IsPayable *bool
+}
+
+// SL/HR/super flags a NO-SHIFT leave day payable (or not). Guarded to had_shift=false
+// rows only — shift days are auto-payable and never overridden here.
+func (q *Queries) SetApprovedLeaveDayPayable(ctx context.Context, arg SetApprovedLeaveDayPayableParams) (SetApprovedLeaveDayPayableRow, error) {
+	row := q.db.QueryRow(ctx, setApprovedLeaveDayPayable, arg.IsPayable, arg.LeaveRequestID, arg.LeaveDate)
+	var i SetApprovedLeaveDayPayableRow
+	err := row.Scan(
+		&i.LeaveDate,
+		&i.LeaveType,
+		&i.HadShift,
+		&i.IsPayable,
+	)
+	return i, err
 }

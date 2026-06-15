@@ -775,6 +775,7 @@ func seedLeave(ctx context.Context, pool *db.Pool) error {
 		{"SWP-EMP-3001", "SWP-LT-004", &d5, "Sakit tanpa surat dokter."},  // STSD PER_YEAR_COUNT
 		{"SWP-EMP-3001", "SWP-LT-005", &d2, "Cuti haid."},                 // CH PER_MONTH (female)
 		{"SWP-EMP-3001", "SWP-LT-011", nil, "Kematian keluarga inti."},    // CKM PER_EVENT
+		{"SWP-EMP-3001", "SWP-LT-018", nil, "Cuti di luar tanggungan (tidak dibayar)."}, // CLTP unpaid
 		// Budi (SWP-EMP-2891): CT + sick.
 		{"SWP-EMP-2891", "SWP-LT-001", &d12, "Cuti tahunan PKWT."},
 		{"SWP-EMP-2891", "SWP-LT-002", nil, "Sakit dengan surat dokter."},
