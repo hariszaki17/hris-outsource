@@ -2176,11 +2176,15 @@ export const en: Messages = {
   leaveQuotas: {
     title: 'Leave Quota',
     subtitle:
-      'Annual leave (CT) quota per employee · special leave metered per type. Click a row for the per-type breakdown.',
+      'Leave rights & quota per employee. Employees without leave rights must be configured first; configured ones can have each leave type’s quota adjusted.',
     footerNote:
       'Manual adjustments must include a remark and are recorded in the audit log (LQ-6). Click a row for the per-type quota breakdown.',
+    status: {
+      unconfigured: 'Not configured',
+    },
     actions: {
       addQuota: 'Add Quota',
+      configureRights: 'Set Leave Rights',
       adjust: 'Adjust',
       cancel: 'Cancel',
       back: 'Back',

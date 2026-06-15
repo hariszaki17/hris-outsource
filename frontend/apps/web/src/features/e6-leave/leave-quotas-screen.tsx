@@ -41,11 +41,12 @@ import {
   ModalHeader,
   SearchField,
   StateView,
+  StatusBadge,
   useToast,
 } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ChevronLeft, Info, PackagePlus, Settings2 } from 'lucide-react';
+import { ArrowRight, ChevronLeft, Info, PackagePlus, Settings2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
@@ -410,9 +411,21 @@ function initials(name: string): string {
     .join('');
 }
 
-function EmployeeQuotaRow({ emp, onSelect }: { emp: EmployeeRow; onSelect: () => void }) {
+function EmployeeQuotaRow({
+  emp,
+  onSelect,
+  onConfigure,
+}: {
+  emp: EmployeeRow;
+  onSelect: () => void;
+  onConfigure: () => void;
+}) {
+  const { t } = useTranslation('leaveQuotas');
   const balQuery = useGetEmployeeTypeBalances(emp.id);
   const balances = unwrap<LeaveTypeBalance[]>(balQuery.data?.data) ?? [];
+  // "Configured" = HR has assigned ≥1 leave type (the balance endpoint is entitlement-scoped, ELE-1).
+  // Unconfigured rows route to the employee's "Hak Cuti" tab instead of the per-type quota drill-in.
+  const configured = balances.length > 0;
   const ct = balances.find((b) => b.cap_basis === CAP_ANNUAL);
   const specialUsed = balances.filter(
     (b) => b.cap_basis !== CAP_ANNUAL && (b.used_days > 0 || b.pending_days > 0),
@@ -432,7 +445,7 @@ function EmployeeQuotaRow({ emp, onSelect }: { emp: EmployeeRow; onSelect: () =>
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={configured ? onSelect : onConfigure}
       className="flex items-center w-full text-left py-[12px] px-[18px] border-b border-border-subtle bg-surface hover:bg-surface-2 transition-colors"
     >
       {cell(
@@ -448,72 +461,77 @@ function EmployeeQuotaRow({ emp, onSelect }: { emp: EmployeeRow; onSelect: () =>
         </div>,
         'left',
       )}
-      {balQuery.isLoading
-        ? [COL.ct, COL.used, COL.pending, COL.remaining, COL.special, COL.expiry].map((w, i) =>
-            cell(
-              w,
-              <span className="h-[12px] w-[28px] rounded bg-surface-2 animate-pulse" />,
-              i === 5 ? 'left' : 'right',
+      {balQuery.isLoading ? (
+        [COL.ct, COL.used, COL.pending, COL.remaining, COL.special, COL.expiry].map((w, i) =>
+          cell(
+            w,
+            <span className="h-[12px] w-[28px] rounded bg-surface-2 animate-pulse" />,
+            i === 5 ? 'left' : 'right',
+          ),
+        )
+      ) : !configured ? (
+        // Not yet configured — prompt HR/super-admin to set up the employee's leave rights.
+        <div className="flex flex-1 items-center justify-between gap-3 pl-2">
+          <StatusBadge dot tone="warn">
+            {t('status.unconfigured')}
+          </StatusBadge>
+          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
+            {t('actions.configureRights')}
+            <ArrowRight aria-hidden className="h-[14px] w-[14px]" />
+          </span>
+        </div>
+      ) : ct ? (
+        [
+          cell(
+            COL.ct,
+            <span className={`${mono} font-semibold text-text`}>
+              {ct.entitled_days ?? ct.cap_value ?? 0}
+            </span>,
+          ),
+          cell(COL.used, <span className={`${mono} text-text-2`}>{ct.used_days}</span>),
+          cell(
+            COL.pending,
+            <span
+              className={`${mono} ${ct.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
+            >
+              {ct.pending_days}
+            </span>,
+          ),
+          cell(
+            COL.remaining,
+            <span
+              className={`${mono} font-semibold ${(ct.remaining_days ?? 0) <= 0 ? 'text-text-3' : 'text-ok-tx'}`}
+            >
+              {ct.remaining_days ?? 0}
+            </span>,
+          ),
+          cell(
+            COL.special,
+            specialUsed > 0 ? <span className="text-[13px] text-text-2">{specialUsed}</span> : dash,
+          ),
+          cell(
+            COL.expiry,
+            ct.expires_at ? (
+              <DateText kind="date" value={ct.expires_at} className="text-[13px] text-text-2" />
+            ) : (
+              dash
             ),
-          )
-        : ct
-          ? [
-              cell(
-                COL.ct,
-                <span className={`${mono} font-semibold text-text`}>
-                  {ct.entitled_days ?? ct.cap_value ?? 0}
-                </span>,
-              ),
-              cell(COL.used, <span className={`${mono} text-text-2`}>{ct.used_days}</span>),
-              cell(
-                COL.pending,
-                <span
-                  className={`${mono} ${ct.pending_days > 0 ? 'text-warn-tx font-medium' : 'text-text-3'}`}
-                >
-                  {ct.pending_days}
-                </span>,
-              ),
-              cell(
-                COL.remaining,
-                <span
-                  className={`${mono} font-semibold ${(ct.remaining_days ?? 0) <= 0 ? 'text-text-3' : 'text-ok-tx'}`}
-                >
-                  {ct.remaining_days ?? 0}
-                </span>,
-              ),
-              cell(
-                COL.special,
-                specialUsed > 0 ? (
-                  <span className="text-[13px] text-text-2">{specialUsed}</span>
-                ) : (
-                  dash
-                ),
-              ),
-              cell(
-                COL.expiry,
-                ct.expires_at ? (
-                  <DateText kind="date" value={ct.expires_at} className="text-[13px] text-text-2" />
-                ) : (
-                  dash
-                ),
-                'left',
-              ),
-            ]
-          : [
-              cell(COL.ct, dash),
-              cell(COL.used, dash),
-              cell(COL.pending, dash),
-              cell(COL.remaining, dash),
-              cell(
-                COL.special,
-                specialUsed > 0 ? (
-                  <span className="text-[13px] text-text-2">{specialUsed}</span>
-                ) : (
-                  dash
-                ),
-              ),
-              cell(COL.expiry, dash, 'left'),
-            ]}
+            'left',
+          ),
+        ]
+      ) : (
+        [
+          cell(COL.ct, dash),
+          cell(COL.used, dash),
+          cell(COL.pending, dash),
+          cell(COL.remaining, dash),
+          cell(
+            COL.special,
+            specialUsed > 0 ? <span className="text-[13px] text-text-2">{specialUsed}</span> : dash,
+          ),
+          cell(COL.expiry, dash, 'left'),
+        ]
+      )}
     </button>
   );
 }
@@ -699,7 +717,6 @@ export function LeaveQuotasScreen() {
   const search = useSearch({ strict: false }) as LeaveQuotasSearch;
   const queryClient = useQueryClient();
 
-  const [addOpen, setAddOpen] = useState(false);
   const [adjustTarget, setAdjustTarget] = useState<AdjustTarget | null>(null);
 
   const listQuery = useListEmployees({
@@ -718,7 +735,11 @@ export function LeaveQuotasScreen() {
   const hasMore = pageBody?.has_more ?? false;
   const nextCursor = pageBody?.next_cursor ?? null;
 
-  type NavFn = (o: { to: string; search?: Record<string, unknown> }) => void;
+  type NavFn = (o: {
+    to: string;
+    params?: Record<string, unknown>;
+    search?: Record<string, unknown>;
+  }) => void;
   const nav = navigate as unknown as NavFn;
 
   const selected = search.employee_id
@@ -775,10 +796,6 @@ export function LeaveQuotasScreen() {
           <h1 className="text-[30px] font-bold text-text leading-none">{t('title')}</h1>
           <p className="text-[14px] text-text-3">{t('subtitle')}</p>
         </div>
-        <Button type="button" variant="primary" onClick={() => setAddOpen(true)}>
-          <PackagePlus aria-hidden className="h-[16px] w-[16px]" />
-          {t('actions.addQuota')}
-        </Button>
       </div>
 
       <div className="flex items-center gap-[10px] w-full">
@@ -867,6 +884,13 @@ export function LeaveQuotasScreen() {
                     search: { ...search, employee_id: emp.id, cursor: undefined },
                   })
                 }
+                onConfigure={() =>
+                  nav({
+                    to: '/employees/$employeeId',
+                    params: { employeeId: emp.id },
+                    search: { tab: 'hak-cuti' },
+                  })
+                }
               />
             ))
           )}
@@ -888,8 +912,6 @@ export function LeaveQuotasScreen() {
           }
         />
       )}
-
-      <QuotaModal open={addOpen} onClose={() => setAddOpen(false)} onSuccess={onSuccess} />
     </div>
   );
 }

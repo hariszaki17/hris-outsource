@@ -233,10 +233,18 @@ const employeeNewRoute = createRoute({
   component: CreateEmployeeScreen,
 });
 
+const EMP_DETAIL_TABS = ['profil', 'penempatan', 'kehadiran', 'hak-cuti', 'cuti-lembur'] as const;
 const employeeDetailRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/employees/$employeeId',
   component: EmployeeDetailScreen,
+  // Optional ?tab= deep-link (e.g. Kuota Cuti → "Hak Cuti"); falls back to Profil.
+  validateSearch: (search: Record<string, unknown>): { tab?: (typeof EMP_DETAIL_TABS)[number] } => {
+    const tab = search.tab;
+    return typeof tab === 'string' && (EMP_DETAIL_TABS as readonly string[]).includes(tab)
+      ? { tab: tab as (typeof EMP_DETAIL_TABS)[number] }
+      : {};
+  },
 });
 
 // E2 — Perjanjian Kerja (employment agreements list, detail, create)

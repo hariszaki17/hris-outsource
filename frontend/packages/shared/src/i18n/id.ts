@@ -2194,11 +2194,15 @@ export const id = {
   leaveQuotas: {
     title: 'Kuota Cuti',
     subtitle:
-      'Kuota cuti tahunan (CT) per karyawan · ijin khusus dimeteran per jenis. Klik baris untuk rincian per jenis cuti.',
+      'Hak & kuota cuti per karyawan. Karyawan tanpa hak cuti perlu dikonfigurasi dulu; yang sudah dikonfigurasi dapat disesuaikan kuotanya per jenis cuti.',
     footerNote:
       'Penyesuaian manual wajib menyertakan catatan & tercatat di audit (LQ-6). Klik baris untuk rincian kuota per jenis cuti.',
+    status: {
+      unconfigured: 'Belum dikonfigurasi',
+    },
     actions: {
       addQuota: 'Tambah Kuota',
+      configureRights: 'Atur Hak Cuti',
       adjust: 'Sesuaikan',
       cancel: 'Batal',
       back: 'Kembali',

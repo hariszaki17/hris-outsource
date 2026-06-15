@@ -18,7 +18,7 @@ import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
 import { type Employee, EmployeeStatus, useGetEmployee } from '@swp/api-client/e2';
 import { Avatar, DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { ArrowLeft, KeyRound, MoreVertical, Pencil, Smartphone } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -162,10 +162,12 @@ export function EmployeeDetailScreen() {
   const { t } = useTranslation('employees');
   const navigate = useNavigate();
   const { employeeId } = useParams({ from: '/authed/employees/$employeeId' as const });
+  const { tab: initialTab } = useSearch({ from: '/authed/employees/$employeeId' as const });
   const currentUser = useCurrentUser();
   const isShiftLeader = currentUser?.role === 'shift_leader';
 
-  const [activeTab, setActiveTab] = useState<DetailTab>('profil');
+  // Deep-link support: ?tab=hak-cuti (from Kuota Cuti) opens that tab; default Profil.
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? 'profil');
   const [showEdit, setShowEdit] = useState(false);
   const [showOffboard, setShowOffboard] = useState(false);
   const [showReactivate, setShowReactivate] = useState(false);
