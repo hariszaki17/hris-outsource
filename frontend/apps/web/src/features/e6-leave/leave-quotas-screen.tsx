@@ -543,10 +543,11 @@ function EmployeeTypeDetail({
       header: '',
       width: 120,
       align: 'right',
-      // Only quota-bearing types have an adjustable window. UNCAPPED / PER_EVENT types are
-      // "sesuai ketentuan" (no standing quota) — the server would 422, so no adjust action.
+      // Adjustable when the type is windowed: inherently quota-bearing, OR HR has set a base
+      // quota (assigned_days) on an otherwise "sesuai ketentuan" type. Uncapped types with no
+      // HR quota show "sesuai ketentuan" — define the base in the employee's Hak Cuti first.
       cell: (b) =>
-        isQuotaBearing(b.cap_basis) ? (
+        isQuotaBearing(b.cap_basis) || b.assigned_days != null ? (
           <Button
             type="button"
             variant="secondary"
