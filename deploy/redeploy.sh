@@ -14,7 +14,11 @@ KEY="${KEY:-$HOME/.ssh/id_ed25519_staging}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> rsync $REPO_ROOT -> $VPS:~/hris/"
-rsync -az \
+# --delete mirrors the tree so files removed locally (e.g. regenerated-away sqlc
+# files) don't linger stale on the VPS and break the build. Excluded paths
+# (.env.prod, node_modules, …) are NOT deleted by rsync. Postgres data lives in
+# docker volumes, not the repo tree, so it is untouched.
+rsync -az --delete \
   --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.turbo' \
   --exclude '.vite' --exclude 'coverage' --exclude 'test-results' \
   --exclude 'playwright-report' --exclude '*.env.local' --exclude '.env.development.local' \
