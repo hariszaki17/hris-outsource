@@ -7,10 +7,11 @@
  *   qDhTz   Tambah Kuota (modal)   — assign / raise a per-type quota
  *
  * Per-type cap_basis ledger (EPICS §8): leave_type is the cap axis; each type meters a quota
- * window keyed by period_key. The HR directory lists employees (E2) with their annual CT quota
- * inline (KUOTA CT / TERPAKAI / PENDING / SISA); clicking a row drills into the full per-type
- * breakdown. Manual entitlement changes go through POST /leave-quotas:adjust-entitled (LQ-6,
- * reason required, audited).
+ * window keyed by period_key. The HR directory (canonical DataTable) lists employees (E2) with
+ * their leave-rights config status: "Belum dikonfigurasi → Atur Hak Cuti" (routes to the employee
+ * Hak Cuti tab) or "{n} jenis cuti aktif → Kelola" (drills into the per-type quota breakdown).
+ * Manual entitlement changes go through POST /leave-quotas:adjust-entitled (LQ-6, reason required,
+ * audited).
  *
  * ENGINEERING.md D1 — typed URL search params. B1 — classifyError / applyFieldErrors.
  */
@@ -26,6 +27,7 @@ import {
 } from '@swp/api-client/e6';
 import { isQuotaBearing } from '@swp/shared/leave';
 import {
+  Avatar,
   Button,
   type Column,
   Combobox,
@@ -35,6 +37,7 @@ import {
   DateText,
   EmptyState,
   FormField,
+  IdChip,
   Modal,
   ModalBody,
   ModalFooter,
@@ -400,7 +403,10 @@ function initials(name: string): string {
     .join('');
 }
 
-function EmployeeQuotaRow({
+// LeaveRightsCell is the "Hak Cuti" column body: it fetches the employee's assigned types
+// (entitlement-scoped balance, ELE-1) and renders the config status + the navigate action.
+// configured → "Kelola" (per-type quota drill-in); unconfigured → "Atur Hak Cuti" (Hak Cuti tab).
+function LeaveRightsCell({
   emp,
   onSelect,
   onConfigure,
@@ -412,42 +418,24 @@ function EmployeeQuotaRow({
   const { t } = useTranslation('leaveQuotas');
   const balQuery = useGetEmployeeTypeBalances(emp.id);
   const balances = unwrap<LeaveTypeBalance[]>(balQuery.data?.data) ?? [];
-  // "Configured" = HR has assigned ≥1 leave type (the balance endpoint is entitlement-scoped, ELE-1).
-  // Unconfigured rows route to the employee's "Hak Cuti" tab instead of the per-type quota drill-in.
-  const configured = balances.length > 0;
-  const typeCount = balances.length;
 
+  if (balQuery.isLoading) {
+    return <span className="inline-block h-[14px] w-[160px] rounded bg-surface-2 animate-pulse" />;
+  }
+  const configured = balances.length > 0;
   return (
     <button
       type="button"
       onClick={configured ? onSelect : onConfigure}
-      className="flex items-center justify-between gap-4 w-full text-left py-[12px] px-[18px] border-b border-border-subtle bg-surface hover:bg-surface-2 transition-colors"
+      className="inline-flex items-center gap-3"
     >
-      {/* Employee */}
-      <div className="flex items-center gap-[10px] min-w-0">
-        <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-surface-2 text-[13px] font-semibold text-text-2">
-          {initials(emp.full_name)}
-        </span>
-        <div className="flex flex-col gap-[1px] min-w-0">
-          <span className="text-[14px] font-semibold text-text truncate">{emp.full_name}</span>
-          <span className="text-[11px] font-mono text-text-3">{emp.id}</span>
-        </div>
-      </div>
-
-      {/* Status + action */}
-      {balQuery.isLoading ? (
-        <span className="h-[14px] w-[160px] shrink-0 rounded bg-surface-2 animate-pulse" />
-      ) : (
-        <div className="flex items-center gap-3 shrink-0">
-          <StatusBadge dot tone={configured ? 'ok' : 'warn'}>
-            {configured ? t('status.configured', { count: typeCount }) : t('status.unconfigured')}
-          </StatusBadge>
-          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
-            {configured ? t('actions.manageRights') : t('actions.configureRights')}
-            <ArrowRight aria-hidden className="h-[14px] w-[14px]" />
-          </span>
-        </div>
-      )}
+      <StatusBadge dot tone={configured ? 'ok' : 'warn'}>
+        {configured ? t('status.configured', { count: balances.length }) : t('status.unconfigured')}
+      </StatusBadge>
+      <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary">
+        {configured ? t('actions.manageRights') : t('actions.configureRights')}
+        <ArrowRight aria-hidden className="h-[14px] w-[14px]" />
+      </span>
     </button>
   );
 }
@@ -675,7 +663,6 @@ export function LeaveQuotasScreen() {
 
   const listError = listQuery.error ? classifyError(listQuery.error) : null;
   const isLoading = listQuery.isLoading;
-  const isEmpty = !isLoading && !listError && employees.length === 0;
   const hasActiveFilter = !!search.q;
   const isForbidden = listError?.kind === 'forbidden';
 
@@ -705,6 +692,46 @@ export function LeaveQuotasScreen() {
   }
 
   // ── Directory ─────────────────────────────────────────────────────────────
+  const columns: Column<EmployeeRow>[] = [
+    {
+      id: 'karyawan',
+      header: t('table.employee'),
+      width: 320,
+      cell: (e) => (
+        <div className="flex items-center gap-[8px]">
+          <Avatar initials={initials(e.full_name)} size={32} />
+          <div className="flex flex-col gap-[2px]">
+            <span className="text-[14px] font-semibold text-text">{e.full_name}</span>
+            <IdChip id={e.id} />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'hak-cuti',
+      header: t('table.leaveRights'),
+      align: 'right',
+      cell: (e) => (
+        <LeaveRightsCell
+          emp={e}
+          onSelect={() =>
+            nav({
+              to: '/leave/quotas',
+              search: { ...search, employee_id: e.id, cursor: undefined },
+            })
+          }
+          onConfigure={() =>
+            nav({
+              to: '/employees/$employeeId',
+              params: { employeeId: e.id },
+              search: { tab: 'hak-cuti' },
+            })
+          }
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-[18px] p-[24px] bg-app-bg min-h-full w-full">
       <div className="flex items-center justify-between w-full">
@@ -737,20 +764,14 @@ export function LeaveQuotasScreen() {
           retryLabel={t('actions.retry')}
         />
       ) : (
-        <div className="rounded-[12px] border border-border bg-surface overflow-hidden w-full">
-          {/* Header */}
-          <div className="flex items-center justify-between py-[11px] px-[18px] bg-surface-2 border-b border-border">
-            <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
-              {t('table.employee')}
-            </span>
-            <span className="text-[11px] font-semibold tracking-[0.5px] text-text-3">
-              {t('table.leaveRights')}
-            </span>
-          </div>
-
-          {isLoading ? (
-            <div className="p-[18px] text-[13px] text-text-3">{t('states.loading')}</div>
-          ) : isEmpty ? (
+        <DataTable
+          aria-label={t('title')}
+          columns={columns}
+          data={employees}
+          getRowId={(e) => e.id}
+          isLoading={isLoading}
+          skeletonRows={6}
+          empty={
             hasActiveFilter ? (
               <EmptyState
                 variant="filtered"
@@ -774,42 +795,24 @@ export function LeaveQuotasScreen() {
                 description={t('states.freshDesc')}
               />
             )
-          ) : (
-            employees.map((emp) => (
-              <EmployeeQuotaRow
-                key={emp.id}
-                emp={emp}
-                onSelect={() =>
+          }
+          footer={
+            employees.length > 0 ? (
+              <CursorPagination
+                rangeLabel={t('pagination.rangeLabel', { count: employees.length })}
+                hasPrev={!!search.cursor}
+                hasNext={hasMore}
+                onPrev={() =>
+                  nav({ to: '/leave/quotas', search: { ...search, cursor: undefined } })
+                }
+                onNext={() =>
                   nav({
                     to: '/leave/quotas',
-                    search: { ...search, employee_id: emp.id, cursor: undefined },
-                  })
-                }
-                onConfigure={() =>
-                  nav({
-                    to: '/employees/$employeeId',
-                    params: { employeeId: emp.id },
-                    search: { tab: 'hak-cuti' },
+                    search: { ...search, cursor: nextCursor ?? undefined },
                   })
                 }
               />
-            ))
-          )}
-        </div>
-      )}
-
-      {!isLoading && !listError && employees.length > 0 && (
-        <p className="text-[12px] text-text-3">{t('footerNote')}</p>
-      )}
-
-      {employees.length > 0 && (
-        <CursorPagination
-          rangeLabel={t('pagination.rangeLabel', { count: employees.length })}
-          hasPrev={!!search.cursor}
-          hasNext={hasMore}
-          onPrev={() => nav({ to: '/leave/quotas', search: { ...search, cursor: undefined } })}
-          onNext={() =>
-            nav({ to: '/leave/quotas', search: { ...search, cursor: nextCursor ?? undefined } })
+            ) : undefined
           }
         />
       )}
