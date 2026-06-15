@@ -31,6 +31,7 @@ import {
   ConfirmDialog,
   DataTable,
   EmptyState,
+  FilterSelect,
   FormField,
   Input,
   Modal,
@@ -310,11 +311,10 @@ function AddEntitlementModal({
   const [note, setNote] = useState('');
 
   const allTypes = (typesQ.data?.data as { data?: LeaveType[] } | undefined)?.data ?? [];
-  // Only un-assigned, ACTIVE types. Document-required types are HIDDEN from the picker (upload
-  // flow deferred — resolved default, PRD §10 "Requires-document").
+  // Every ACTIVE catalog type the employee is NOT already assigned. The document-required hide is
+  // an AGENT-request-picker rule (PRD §10), not an HR-assign rule — HR may grant any leave type.
   const available = allTypes.filter(
-    (lt) =>
-      lt.status === LeaveTypeStatus.ACTIVE && !lt.requires_document && !assignedTypeIds.has(lt.id),
+    (lt) => lt.status === LeaveTypeStatus.ACTIVE && !assignedTypeIds.has(lt.id),
   );
 
   const selected = available.find((lt) => lt.id === typeId);
@@ -366,30 +366,31 @@ function AddEntitlementModal({
           ) : available.length === 0 ? (
             <p className="text-[13px] text-text-3">{t('allAssigned')}</p>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <FilterSelect
+              containerClassName="w-full"
+              value={typeId}
+              aria-label={t('fieldType')}
+              onChange={(e) => {
+                const id = e.target.value;
+                setTypeId(id);
+                const lt = available.find((x) => x.id === id);
+                if (lt?.is_annual && lt.default_annual_quota != null) {
+                  setDays(String(lt.default_annual_quota));
+                } else {
+                  setDays('');
+                }
+              }}
+            >
+              <option value="" disabled>
+                {t('pickTypeFirst')}
+              </option>
               {available.map((lt) => (
-                <button
-                  key={lt.id}
-                  type="button"
-                  onClick={() => {
-                    setTypeId(lt.id);
-                    if (lt.is_annual && lt.default_annual_quota != null) {
-                      setDays(String(lt.default_annual_quota));
-                    } else {
-                      setDays('');
-                    }
-                  }}
-                  className={[
-                    'rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                    typeId === lt.id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-surface text-text-2 hover:bg-muted',
-                  ].join(' ')}
-                >
+                <option key={lt.id} value={lt.id}>
                   {lt.name}
-                </button>
+                  {lt.code ? ` (${lt.code})` : ''}
+                </option>
               ))}
-            </div>
+            </FilterSelect>
           )}
         </div>
 
