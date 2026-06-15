@@ -400,8 +400,8 @@ export function AgentKehadiranScreen() {
           />
           <StatCard
             label={t('leaveTitle')}
-            value={`${dash.leave_balance.annual_remaining_days}/${dash.leave_balance.annual_quota_days}`}
-            sub={dash.leave_balance.period_label}
+            value={`${dash.leave_balance?.annual_remaining_days ?? 0}/${dash.leave_balance?.annual_quota_days ?? 0}`}
+            sub={dash.leave_balance?.period_label}
             icon={Plane}
             tone="info"
           />
