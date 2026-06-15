@@ -14,15 +14,17 @@
  */
 
 import { classifyError } from '@/lib/api-error.ts';
+import { useCurrentUser } from '@/lib/use-auth.ts';
 import { ApiError } from '@swp/api-client';
 import { type LeaveRequest, LeaveStatus, useGetLeaveRequest } from '@swp/api-client/e6';
 import {
   type ApprovalInstanceDetail,
+  type ApprovalLine,
   useApproveApprovalInstance,
   useGetApprovalInstance,
   useRejectApprovalInstance,
 } from '@swp/api-client/e11';
-import { Button, DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
+import { DateText, EmptyState, IdChip, StateView, StatusBadge, useToast } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link as RouterLink } from '@tanstack/react-router';
 import { ArrowUpRight, FileText, ShieldAlert } from 'lucide-react';
@@ -49,6 +51,7 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   const { t: ta } = useTranslation('approvals');
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const me = useCurrentUser();
 
   // ---------------------------------------------------------------------------
   // Query — leave request
@@ -199,12 +202,21 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
   // ---------------------------------------------------------------------------
 
   const isPending = lr.status === LeaveStatus.PENDING;
-  // Approve/reject are only meaningful while the instance is on its current line. Membership is
-  // server-enforced; the UI offers the action whenever the request is PENDING and has an instance.
-  const canAct = isPending && Boolean(instanceId);
-
   const approving = approve.isPending;
   const rejecting = reject.isPending;
+
+  // Per-line actions (2026-06-15): the approve/reject controls live INSIDE the chain timeline, one
+  // line at a time. The E11 engine only accepts the CURRENT line, so a line is actionable iff it is
+  // the current line AND the caller may act on it — a super_admin (any line, as the chain advances)
+  // or a member of that specific line. Other approvers see no controls on lines they're not on.
+  // Membership + scope are server-enforced too (ENGINEERING C1 — client gate is defense-in-depth).
+  const isSuperAdmin = me?.role === 'super_admin';
+  function canActOnLine(line: ApprovalLine): boolean {
+    if (!isPending || !instanceId || !instance) return false;
+    if (line.line_no !== instance.current_line) return false;
+    if (isSuperAdmin) return true;
+    return line.members.some((m) => m.user_id === me?.userId);
+  }
 
   // ---------------------------------------------------------------------------
   // Render
@@ -234,27 +246,7 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
           )}
         </div>
 
-        {/* Action buttons — approve/reject via the E11 instance */}
-        {canAct && (
-          <div className="flex items-center gap-2.5">
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => setRejectOpen(true)}
-              disabled={rejecting || approving}
-            >
-              {rejecting ? t('common.processing') : t('detail.actionReject')}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={handleApprove}
-              disabled={approving || rejecting}
-            >
-              {approving ? t('common.processing') : t('detail.actionApprove')}
-            </Button>
-          </div>
-        )}
+        {/* Approve/reject moved INTO the chain timeline (per-line, right column). */}
       </div>
 
       {/* Two-column layout */}
@@ -386,7 +378,17 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
                 actions={instance.actions ?? []}
                 currentLine={instance.current_line}
                 status={instance.status}
+                currentUserId={me?.userId}
                 requesterName={lr.employee_name ?? lr.employee_id}
+                lineActions={{
+                  canAct: canActOnLine,
+                  onApprove: () => handleApprove(),
+                  onReject: () => setRejectOpen(true),
+                  pending: approving || rejecting,
+                  approveLabel: ta('detail.actionApprove'),
+                  rejectLabel: ta('detail.actionReject'),
+                  processingLabel: t('common.processing'),
+                }}
                 t={ta}
               />
             ) : (
@@ -396,8 +398,8 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
         </div>
       </div>
 
-      {/* Reject overlay */}
-      {canAct && (
+      {/* Reject overlay — opened by a per-line Tolak button */}
+      {isPending && Boolean(instanceId) && (
         <RejectLeaveModal
           open={rejectOpen}
           leaveRequest={lr}

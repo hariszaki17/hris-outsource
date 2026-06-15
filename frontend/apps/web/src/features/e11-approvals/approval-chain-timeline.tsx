@@ -23,9 +23,25 @@ import {
   type InstanceStatus as InstanceStatusType,
   type LineMember,
 } from '@swp/api-client/e11';
-import { DateText } from '@swp/ui';
+import { Button, DateText } from '@swp/ui';
 import type { TFunction } from 'i18next';
 import { Check, FilePlus, ShieldCheck, XCircle } from 'lucide-react';
+
+/**
+ * Optional per-line approve/reject controls (E6 leave Persetujuan). When provided, each line for
+ * which `canAct(line)` is true renders Setuju / Tolak buttons inline. Membership + super-admin
+ * scope are decided by the parent's `canAct`; the engine still only accepts the CURRENT line, so
+ * the parent gates `canAct` to the current line (server-enforced as defense-in-depth).
+ */
+export interface ChainLineActions {
+  canAct: (line: ApprovalLine) => boolean;
+  onApprove: (line: ApprovalLine) => void;
+  onReject: (line: ApprovalLine) => void;
+  pending: boolean;
+  approveLabel: string;
+  rejectLabel: string;
+  processingLabel: string;
+}
 
 interface ApprovalChainTimelineProps {
   lines: ApprovalLine[];
@@ -37,6 +53,8 @@ interface ApprovalChainTimelineProps {
   currentUserId?: string;
   /** Display label for the requester (for the submission trail row). */
   requesterName?: string;
+  /** Optional inline per-line approve/reject controls (E6 leave Persetujuan). */
+  lineActions?: ChainLineActions;
   t: TFunction;
 }
 
@@ -63,6 +81,7 @@ export function ApprovalChainTimeline({
   status,
   currentUserId,
   requesterName,
+  lineActions,
   t,
 }: ApprovalChainTimelineProps) {
   const sortedLines = [...lines].sort((a, b) => a.line_no - b.line_no);
@@ -88,11 +107,7 @@ export function ApprovalChainTimeline({
         // testid state: phase, except a current line on a REJECTED instance → 'rejected';
         // 'cleared' phase serializes to 'done' to match the data-state contract.
         const dataState =
-          phase === 'current' && isRejected
-            ? 'rejected'
-            : phase === 'cleared'
-              ? 'done'
-              : phase;
+          phase === 'current' && isRejected ? 'rejected' : phase === 'cleared' ? 'done' : phase;
 
         return (
           <ChainStep
@@ -103,6 +118,7 @@ export function ApprovalChainTimeline({
             currentUserId={currentUserId}
             isLast={idx === sortedLines.length - 1}
             dataState={dataState}
+            lineActions={lineActions}
             t={t}
           />
         );
@@ -142,6 +158,7 @@ function ChainStep({
   currentUserId,
   isLast,
   dataState,
+  lineActions,
   t,
 }: {
   line: ApprovalLine;
@@ -150,6 +167,7 @@ function ChainStep({
   currentUserId?: string;
   isLast: boolean;
   dataState: string;
+  lineActions?: ChainLineActions;
   t: TFunction;
 }) {
   const clearerName = clearer
@@ -177,7 +195,7 @@ function ChainStep({
       <div className="flex flex-1 flex-col gap-2.5 pb-1">
         <div className="flex items-center gap-2">
           <span className="font-bold text-sm text-text">
-            {t('approvals.detail.lineLabel', { n: line.line_no })}
+            {t('approvals.detail.lineLabel', { line: line.line_no })}
           </span>
           <StepPill phase={phase} t={t} />
         </div>
@@ -229,6 +247,31 @@ function ChainStep({
           <p className="text-xs leading-relaxed text-text-3">
             {t('approvals.detail.lineUpcoming')}
           </p>
+        )}
+
+        {/* Inline per-line approve/reject (E6 leave Persetujuan) — only where the parent
+            allows it (current line + super-admin OR member of this line). */}
+        {lineActions?.canAct(line) && (
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={lineActions.pending}
+              onClick={() => lineActions.onApprove(line)}
+            >
+              {lineActions.pending ? lineActions.processingLabel : lineActions.approveLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={lineActions.pending}
+              onClick={() => lineActions.onReject(line)}
+            >
+              {lineActions.rejectLabel}
+            </Button>
+          </div>
         )}
       </div>
     </div>

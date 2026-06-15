@@ -31,6 +31,8 @@ export interface SessionUser {
    * leave balance). The server still enforces `scope: self` — this is just the value to send.
    */
   employeeId: string;
+  /** The signed-in user's `SWP-USR-…` id. Used to match approval-line membership (E11). */
+  userId: string;
   /** Shift leaders are scoped to ONE client company; surfaced in the shell. */
   companyName?: string;
   /**
@@ -113,6 +115,7 @@ export function buildSessionUser(u: MeResponse): SessionUser {
     permissions: permissionsForRole(u.role as Role),
     initials,
     employeeId: u.employee_id,
+    userId: u.id,
     companyName: companyId,
     companyId,
   };
