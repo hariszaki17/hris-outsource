@@ -54,6 +54,16 @@ function isUncapped(capBasis: string | undefined): boolean {
   return capBasis === 'PER_EVENT' || capBasis === 'UNCAPPED';
 }
 
+/**
+ * The standing per-period quota to prefill when HR assigns a catalog type: the annual pool size for
+ * ANNUAL_POOL, else the type's explicit cap_value (statutory days/occurrences). null = uncapped
+ * ("sesuai ketentuan") — HR may still enter an arbitrary number.
+ */
+function standingQuota(lt: LeaveType): number | null {
+  if (lt.cap_basis === 'ANNUAL_POOL') return lt.default_annual_quota ?? lt.cap_value ?? null;
+  return lt.cap_value ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Section (the "Hak Cuti" tab body)
 // ---------------------------------------------------------------------------
@@ -318,16 +328,18 @@ function AddEntitlementModal({
   );
 
   const selected = available.find((lt) => lt.id === typeId);
-  // Catalog `LeaveType` has no cap_basis; non-annual types are the event/uncapped candidates. We
-  // surface the quota input only for annual (day-pool) types — others assign with entitled_days null.
-  const quotaDisabled = !selected || !selected.is_annual;
+  // The quota input is ALWAYS editable: capped types (ANNUAL_POOL / explicit cap_value) prefill
+  // their standing quota from the catalog (HR may override); uncapped types ("sesuai ketentuan")
+  // start empty but HR may still type an arbitrary number. null entitled_days = honour the type's
+  // own cap (event/uncapped) — the backend falls back to cap_value.
+  const hasStandingCap = selected != null && standingQuota(selected) != null;
 
   async function onSubmit() {
     if (!typeId) {
       toast({ tone: 'error', title: t('pickTypeFirst') });
       return;
     }
-    const parsed = quotaDisabled || days.trim() === '' ? null : Number(days);
+    const parsed = days.trim() === '' ? null : Number(days);
     if (parsed != null && (!Number.isInteger(parsed) || parsed < 0)) {
       toast({ tone: 'error', title: t('quotaInvalid') });
       return;
@@ -374,11 +386,8 @@ function AddEntitlementModal({
                 const id = e.target.value;
                 setTypeId(id);
                 const lt = available.find((x) => x.id === id);
-                if (lt?.is_annual && lt.default_annual_quota != null) {
-                  setDays(String(lt.default_annual_quota));
-                } else {
-                  setDays('');
-                }
+                const q = lt ? standingQuota(lt) : null;
+                setDays(q != null ? String(q) : '');
               }}
             >
               <option value="" disabled>
@@ -394,20 +403,19 @@ function AddEntitlementModal({
           )}
         </div>
 
-        {/* Quota — disabled / "Sesuai ketentuan" for event/uncapped types */}
+        {/* Quota — always editable; capped types prefill, uncapped start empty ("sesuai ketentuan") */}
         <FormField
           label={t('fieldQuota')}
           htmlFor="ele-days"
-          hint={quotaDisabled ? t('uncapped') : t('quotaHint')}
+          hint={hasStandingCap ? t('quotaHint') : t('uncapped')}
         >
           <Input
             id="ele-days"
             type="number"
             min={0}
             step={1}
-            value={quotaDisabled ? '' : days}
-            disabled={quotaDisabled}
-            placeholder={quotaDisabled ? t('uncapped') : undefined}
+            value={days}
+            placeholder={t('uncapped')}
             onChange={(e) => setDays(e.target.value)}
           />
         </FormField>
