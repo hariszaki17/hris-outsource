@@ -237,7 +237,7 @@ function ChainStep({
             })}{' '}
             <DateText kind="instant" value={clearer.created_at} className="text-ok-tx" />
             {others.length > 0 &&
-              ` · ${t('approvals.detail.lineOthersSkipped', { names: others.join(', ') })}`}
+              ` · ${t('approvals.detail.lineOthersSkipped', { others: others.join(', ') })}`}
           </p>
         )}
         {phase === 'current' && (
