@@ -2843,7 +2843,7 @@ components:
 
     LeaveType:
       type: object
-      required: [id, name, code, is_annual, requires_document, status]
+      required: [id, name, code, is_annual, requires_document, status, applies_to, common]
       properties:
         id: { $ref: '#/components/schemas/LeaveTypeId' }
         name:
@@ -2872,6 +2872,15 @@ components:
         status:
           type: string
           enum: [ACTIVE, INACTIVE]
+        applies_to:
+          type: string
+          enum: [AGENT, HEAD_OFFICE, ALL]
+          description: >-
+            Audience the type is for: AGENT (outsourced PKWT), HEAD_OFFICE (internal SWP
+            staff), or ALL (universal statutory leave). Self-service pickers filter by it.
+        common:
+          type: boolean
+          description: Surface this type by default on agent quick views (vs behind "lihat semua").
 
     LeaveTypeWriteRequest:
       type: object

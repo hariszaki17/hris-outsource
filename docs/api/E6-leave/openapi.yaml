@@ -22,6 +22,14 @@ info:
     notifications, idempotency, RBAC scope semantics, ID prefix table).
 
     ## Locked product decisions (EPICS.md §8 + FEATURE.md §7)
+    - ✅ **HR-assigned per-employee entitlement (2026-06-15)** — entitlement is now **explicitly
+      assigned per employee** via `/employees/{employee_id}/leave-entitlements` (assign / edit /
+      remove); only assigned types are requestable. The cap_basis window + reset cadence stay. See
+      `docs/epics/E6-leave/prds/leave-entitlement-assignment.md`. **The eligibility gates are
+      dropped** — HR's assignment *is* the eligibility decision (gender / notice_days /
+      min_service_years / lifetime-once no longer block a request; `LIFETIME_ONCE` cap_basis
+      expresses once-per-employment naturally). `gender` / `notice_days` / `min_service_years`
+      remain on `LeaveType` as **unenforced metadata** only.
     - **Balance = per-type quota ledger** *(resolved 2026-06-12 — supersedes the grant-lot model)*.
       `leave_type` is the cap axis: each type carries its own **`cap_basis`** (`ANNUAL_POOL |
       PER_EVENT | PER_MONTH | PER_YEAR_COUNT | UNCAPPED | LIFETIME_ONCE | SERVICE_UNPAID`) which
@@ -33,8 +41,12 @@ info:
         type entitlement (ANNUAL_POOL: the agreement's annual days; else `cap_value`).
       - **PER_EVENT / UNCAPPED** types hold **no standing window** — validated per-occurrence at
         request time (event day-cap / document-bounded), no `entitled/used/pending` row.
-      - **Eligibility gates** (request-time): gender · notice_days · min_service_years ·
-        once-per-year (PER_YEAR_COUNT) · once-per-employment (LIFETIME_ONCE / SERVICE_UNPAID).
+      - **Eligibility gates dropped (2026-06-15):** gender · notice_days · min_service_years ·
+        once-per-employment **no longer block** a request. HR's per-employee assignment is the
+        eligibility control; once-per-employment is expressed by a `LIFETIME_ONCE` window (opens
+        once, never resets). The retained request-time checks are only `INVALID_DATE_RANGE`,
+        `OVERLAPPING_LEAVE`, `BACKDATED_LEAVE`, `QUOTA_EXCEEDED` (+ `MISSING_REQUIRED_DOCUMENT`
+        once upload lands).
       - **No negative balance:** a quota-bearing reserve/commit is blocked when it would exceed the
         window's remaining (HR raises it via `:adjust-entitled`, or a super admin bypasses the
         approval instance in E11).
@@ -60,8 +72,9 @@ info:
 
     ## Cross-epic dependencies
     - **E2** — `LeaveType` master (read via `GET /leave-types`; writes live in E2). The type's
-      `cap_basis` (+ `cap_value`, gender / notice / service gates) and the `requires_document`
-      flag drive this spec's validation.
+      `cap_basis` (+ `cap_value`) and the `requires_document` flag drive this spec's validation.
+      (`gender` / `notice_days` / `min_service_years` are retained on `LeaveType` as **unenforced
+      metadata** — the eligibility gates were dropped 2026-06-15.)
     - **E3** — `Placement` is the source of truth for the agent's company, which selects the
       E11 approval template the request routes through.
     - **E4** — implicit side-effect of the leave **`OnApproved`** hook (fired by E11 on terminal
@@ -76,6 +89,7 @@ info:
     ## Resource ID prefixes (E6-scoped — see CONVENTIONS §4 for the full table)
     - `SWP-LR-*` — Leave Request
     - `SWP-LQ-*` — Leave Quota (one per-type quota window in the cap_basis ledger)
+    - `SWP-ELE-*` — Employee Leave Entitlement (one HR-assigned per-employee leave-type assignment)
     - Cross-epic: `SWP-EMP-*`, `SWP-LT-*`, `SWP-CMP-*`, `SWP-SVC-*`, `SWP-SCH-*`, `SWP-HOL-*`, `SWP-FILE-*`.
   contact:
     name: hris-outsource product+architecture
@@ -105,6 +119,11 @@ tags:
     description: |
       Read-through of E2 master data for client convenience (forms, filters). All writes live
       in the E2 spec under `/leave-types`.
+  - name: leave-entitlements
+    description: |
+      HR-assigned per-employee leave entitlement (PRD leave-entitlement-assignment, 2026-06-15).
+      HR enrols each employee into the leave types they get, with a per-type quota. Only assigned
+      types are requestable. CRUD over the `employee_leave_entitlements` base-policy rows.
 
 # ────────────────────────────────────────────────────────────────────────────────
 #  PATHS
@@ -780,6 +799,137 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ───────────────────────────  LEAVE ENTITLEMENTS (HR-assigned)  ───────────────────────────
+  /employees/{employee_id}/leave-entitlements:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+    get:
+      tags: [leave-entitlements]
+      summary: List an employee's leave-type assignments (HR "Hak Cuti" grid, ELE-1)
+      description: |
+        Returns the employee's leave-entitlement rows (the base policy: which types + per-type
+        `entitled_days`). Each row carries the denormalized leave-type display/cap metadata
+        (`code`, `name`, `cap_basis`, `cap_value`, `cap_unit`, `color`, `applies_to`) and
+        `created_at` / `updated_at` — those fields are **populated only on this list read**.
+        Only assigned types are requestable by the employee (ELE-1).
+      operationId: listEmployeeLeaveEntitlements
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "E6 · HR Hak Cuti (Web)"  # no dedicated .pen frame yet
+      responses:
+        '200':
+          description: The employee's leave-entitlement assignments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaveEntitlement' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+    post:
+      tags: [leave-entitlements]
+      summary: Assign (or reactivate) a leave type for an employee (ELE-6)
+      description: |
+        Inserts or reactivates an `employee_leave_entitlement` row for `(employee, leave_type)`.
+        `entitled_days` is the base per-period quota; `null` means the event/uncapped type is
+        toggled on with no fixed day-quota (the per-event cap, if any, comes from the type). The
+        response returns only the **core** fields (the denormalized type metadata is populated
+        only by the GET list read). Audited; idempotent via `Idempotency-Key`.
+      operationId: assignEmployeeLeaveEntitlement
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "E6 · HR Hak Cuti (Web)"  # no dedicated .pen frame yet
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKeyHeader' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveEntitlementAssignRequest' }
+      responses:
+        '201':
+          description: Leave type assigned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LeaveEntitlement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /employees/{employee_id}/leave-entitlements/{leave_type_id}:
+    parameters:
+      - { $ref: '#/components/parameters/EmployeeIdPath' }
+      - { $ref: '#/components/parameters/LeaveTypeIdPath' }
+    patch:
+      tags: [leave-entitlements]
+      summary: Edit an employee's base entitlement / reactivate (ELE-4)
+      description: |
+        Updates the base `entitled_days` (affects future period windows, and the current one if
+        it opens after the edit) and/or the HR `note`. Omitted fields are left unchanged
+        (`note: null` = leave as-is). The response returns only the **core** fields. Audited.
+      operationId: updateEmployeeLeaveEntitlement
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "E6 · HR Hak Cuti (Web)"  # no dedicated .pen frame yet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveEntitlementUpdateRequest' }
+      responses:
+        '200':
+          description: Entitlement updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LeaveEntitlement' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+    delete:
+      tags: [leave-entitlements]
+      summary: Remove a leave type from an employee (deactivate, ELE-6)
+      description: |
+        Soft on/off — sets `active = false` so the type vanishes from the employee's picker and
+        balance grid; existing windows + history are retained. Audited.
+      operationId: removeEmployeeLeaveEntitlement
+      x-rbac:
+        roles: [hr_admin, super_admin]
+        scope: global
+      x-design-screens:
+        - "E6 · HR Hak Cuti (Web)"  # no dedicated .pen frame yet
+      responses:
+        '204':
+          description: Entitlement deactivated (no body).
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 # ────────────────────────────────────────────────────────────────────────────────
 #  COMPONENTS
 # ────────────────────────────────────────────────────────────────────────────────
@@ -807,6 +957,18 @@ components:
       in: path
       required: true
       schema: { type: string, example: SWP-LR-2026-0042 }
+    EmployeeIdPath:
+      name: employee_id
+      in: path
+      required: true
+      description: Employee (`SWP-EMP-*`).
+      schema: { type: string, example: SWP-EMP-1042 }
+    LeaveTypeIdPath:
+      name: leave_type_id
+      in: path
+      required: true
+      description: Leave type (`SWP-LT-*`).
+      schema: { type: string, example: SWP-LT-001 }
     LimitQuery:
       name: limit
       in: query
@@ -877,11 +1039,16 @@ components:
     LeaveTypeBalance:
       type: object
       description: One active leave type's current-window balance (per-type ledger, F6.5).
-      required: [leave_type_id, code, name, cap_basis, cap_unit, paid, gender, requires_document, color, has_window, used_days, pending_days]
+      required: [leave_type_id, code, name, cap_basis, cap_unit, paid, gender, requires_document, color, applies_to, common, has_window, used_days, pending_days]
       properties:
         leave_type_id: { type: string, example: SWP-LT-001 }
         code: { type: string, example: CT }
         name: { type: string, example: Cuti Tahunan Pegawai PKWT }
+        applies_to:
+          type: string
+          enum: [AGENT, HEAD_OFFICE, ALL]
+          description: Audience — AGENT, HEAD_OFFICE, or ALL.
+        common: { type: boolean, description: Surface by default on agent quick views. }
         cap_basis:
           type: string
           enum: [ANNUAL_POOL, PER_EVENT, PER_MONTH, PER_YEAR_COUNT, UNCAPPED, LIFETIME_ONCE, SERVICE_UNPAID]
@@ -897,6 +1064,120 @@ components:
         pending_days: { type: integer }
         remaining_days: { type: integer, nullable: true, description: null for UNCAPPED / nil-cap ("sesuai ketentuan"). }
         expires_at: { type: string, format: date, nullable: true }
+
+    # ── HR-assigned leave entitlement (2026-06-15) ──
+    LeaveEntitlementAssignRequest:
+      type: object
+      description: Body of `POST /employees/{employee_id}/leave-entitlements` (assign a type).
+      required: [leave_type_id]
+      properties:
+        leave_type_id:
+          type: string
+          description: The leave type to assign (`SWP-LT-*`).
+          example: SWP-LT-001
+        entitled_days:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: |
+            Base per-period quota in days (occurrences for COUNT types). `null` = the
+            event/uncapped type is toggled on with no fixed day-quota (per-event cap, if any,
+            comes from the type). `>= 0` otherwise.
+          example: 12
+        note:
+          type: string
+          description: Optional HR note (why granted).
+          example: "Sesuai paket kontrak klien Plaza Senayan."
+
+    LeaveEntitlementUpdateRequest:
+      type: object
+      description: |
+        Body of `PATCH /employees/{employee_id}/leave-entitlements/{leave_type_id}`.
+        Omitted fields are left unchanged.
+      properties:
+        entitled_days:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: New base per-period quota. `null` = event/uncapped (no fixed quota).
+          example: 14
+        note:
+          type: string
+          nullable: true
+          description: Updated HR note. `null` leaves the existing note unchanged.
+          example: "Disesuaikan per surat HRD 2026-06-15."
+
+    LeaveEntitlement:
+      type: object
+      description: |
+        One HR-assigned leave-type entitlement for an employee (the base-policy row). The
+        **core** fields (`id`, `employee_id`, `leave_type_id`, `entitled_days`, `active`, `note`,
+        `assigned_by`, `paid`, `requires_document`, `common`) are returned by every operation.
+        The **denormalized type metadata** (`code`, `name`, `cap_basis`, `cap_value`, `cap_unit`,
+        `color`, `applies_to`) and `created_at` / `updated_at` are populated **only on the GET
+        list read**; assign / update return the core fields only.
+      required: [id, employee_id, leave_type_id, entitled_days, active, assigned_by, paid, requires_document, common]
+      properties:
+        id: { type: string, example: SWP-ELE-1042-001 }
+        employee_id: { type: string, example: SWP-EMP-1042 }
+        leave_type_id: { type: string, example: SWP-LT-001 }
+        entitled_days:
+          type: integer
+          nullable: true
+          description: Base per-period quota; `null` = event/uncapped type with no fixed quota.
+          example: 12
+        active:
+          type: boolean
+          description: Soft on/off. Deactivating removes the type from the employee's picker/grid.
+          example: true
+        note: { type: string, example: "Sesuai paket kontrak klien Plaza Senayan." }
+        assigned_by:
+          type: string
+          nullable: true
+          description: User who assigned/last changed this entitlement (`SWP-USR-*`).
+          example: SWP-USR-022
+        paid: { type: boolean, description: From the leave type. }
+        requires_document: { type: boolean, description: From the leave type. }
+        common: { type: boolean, description: From the leave type (surface by default hint). }
+        # ── denormalized leave-type metadata (only on the GET list read) ──
+        code:
+          type: string
+          description: Leave-type code (list read only).
+          example: CT
+        name:
+          type: string
+          description: Leave-type name (list read only).
+          example: "Cuti Tahunan Pegawai PKWT"
+        cap_basis:
+          type: string
+          enum: [ANNUAL_POOL, PER_EVENT, PER_MONTH, PER_YEAR_COUNT, UNCAPPED, LIFETIME_ONCE, SERVICE_UNPAID]
+          description: Reset cadence of the type (list read only).
+        cap_value:
+          type: integer
+          nullable: true
+          description: Day/occurrence cap from the type (list read only).
+        cap_unit:
+          type: string
+          enum: [DAYS, COUNT]
+          description: Unit of the cap (list read only).
+        color:
+          type: string
+          description: Hex color from the type (list read only).
+          example: '#188E4D'
+        applies_to:
+          type: string
+          enum: [AGENT, HEAD_OFFICE, ALL]
+          description: Audience of the type (list read only).
+        created_at:
+          type: string
+          format: date-time
+          description: List read only.
+          example: "2026-06-15T08:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          description: List read only.
+          example: "2026-06-15T08:00:00Z"
 
     # ── enums ──
     LeaveStatus:
@@ -990,7 +1271,7 @@ components:
       description: |
         Master data (E2). This read-through mirrors the canonical E2 `LeaveType` schema
         exactly — same field names and shape — so the generated E2/E6 clients agree.
-      required: [id, name, code, is_annual, requires_document, status]
+      required: [id, name, code, is_annual, requires_document, status, applies_to, common]
       properties:
         id: { type: string, example: SWP-LT-001 }
         name: { type: string, example: "Cuti Tahunan" }
@@ -1013,6 +1294,15 @@ components:
         status:
           type: string
           enum: [ACTIVE, INACTIVE]
+        applies_to:
+          type: string
+          enum: [AGENT, HEAD_OFFICE, ALL]
+          description: >-
+            Audience: AGENT (outsourced PKWT), HEAD_OFFICE (internal SWP staff), or ALL
+            (universal statutory). Self-service pickers/grids filter by it.
+        common:
+          type: boolean
+          description: Surface by default on agent quick views (vs behind "lihat semua").
 
     LeaveRequest:
       type: object
