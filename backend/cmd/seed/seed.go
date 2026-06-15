@@ -1853,6 +1853,33 @@ func seedScheduling(ctx context.Context, pool *db.Pool) error {
 		slog.Info("seed: upserted schedule entry", "id", e.id, "employee_id", e.employeeID, "work_date", e.date)
 	}
 
+	// --- Forward weekday roster for Dewi (SWP-EMP-3001) so the agent leave-duration
+	// preview is demonstrable on future date ranges (Mon–Fri shifts for the next 4
+	// weeks; weekends are days off → not counted). Re-seedable: clear the prior
+	// forward batch first since its dates float relative to "today".
+	if _, err := pool.Pool.Exec(ctx,
+		`DELETE FROM schedule_entries WHERE employee_id = 'SWP-EMP-3001' AND id LIKE 'SWP-SCH-71%'`,
+	); err != nil {
+		return fmt.Errorf("seed: clear Dewi forward roster: %w", err)
+	}
+	fwdIdx := 0
+	for d := 1; d <= 28; d++ {
+		day := time.Now().In(jkt).AddDate(0, 0, d)
+		if wd := day.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			continue // weekend = day off, no shift
+		}
+		dateStr := day.Format("2006-01-02")
+		if dateStr == dewiDate {
+			continue // avoid colliding with the SWP-SCH-6002 fixture (INV-3)
+		}
+		id := fmt.Sprintf("SWP-SCH-71%02d", fwdIdx)
+		fwdIdx++
+		if _, err := pool.Pool.Exec(ctx, schQ, id, "SWP-EMP-3001", "SWP-PL-5004", dateStr); err != nil {
+			return fmt.Errorf("seed Dewi forward shift %q: %w", id, err)
+		}
+	}
+	slog.Info("seed: upserted Dewi forward weekday roster", "shifts", fwdIdx)
+
 	// --- Approved-leave day (SHIFT_OVER_LEAVE fixture) ---
 	const aldQ = `
 		INSERT INTO approved_leave_days (employee_id, leave_date, leave_request_id, leave_type)
