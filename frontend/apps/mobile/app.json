@@ -21,6 +21,7 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -39,7 +40,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "SWP HRIS needs photo access so you can attach supporting documents to leave requests."
+          "photosPermission": "SWP HRIS needs photo access so you can attach supporting documents to leave requests.",
+          "cameraPermission": "SWP HRIS uses the camera to take your clock-in/out selfie, confirming you are present at the assigned site."
         }
       ],
       "expo-notifications",
