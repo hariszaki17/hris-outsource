@@ -404,6 +404,13 @@ const mobileCopy = {
       modeOnsite: 'Onsite',
       modeRemote: 'Remote',
       modeRemoteNote: 'Mode remote/jarak jauh — verifikasi lokasi dilewati.',
+      // Live clock-in photo (CI-10, 2026-06-17) — mobile clock-in requires a selfie.
+      photoLabel: 'Ambil Foto Clock-In',
+      photoCaptured: 'Foto clock-in siap',
+      photoUploading: 'Mengunggah foto…',
+      photoFailed: 'Gagal mengunggah foto. Coba lagi.',
+      photoRequired: 'Foto clock-in diperlukan.',
+      cameraDenied: 'Izin kamera ditolak. Aktifkan kamera untuk clock-in.',
     },
     // ── Riwayat Kehadiran (attendance history) ────────────────────────────────────────
     riwayat: {
@@ -1029,6 +1036,13 @@ const mobileCopy = {
       modeOnsite: 'Onsite',
       modeRemote: 'Remote',
       modeRemoteNote: 'Remote/WFH mode — location check skipped.',
+      // Live clock-in photo (CI-10, 2026-06-17) — mobile clock-in requires a selfie.
+      photoLabel: 'Take Clock-In Photo',
+      photoCaptured: 'Clock-in photo ready',
+      photoUploading: 'Uploading photo…',
+      photoFailed: 'Failed to upload photo. Try again.',
+      photoRequired: 'Clock-in photo is required.',
+      cameraDenied: 'Camera permission denied. Enable the camera to clock in.',
     },
     riwayat: {
       title: 'Attendance History',

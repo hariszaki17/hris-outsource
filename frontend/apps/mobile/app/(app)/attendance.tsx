@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 import {
   Ban,
   Bell,
+  Camera,
+  CheckCircle2,
   Clock3,
   House,
   Info,
@@ -44,14 +46,17 @@ import {
   type Attendance,
   type AttendancePage,
   type ClockInRequestMode,
+  type UploadedFile,
   useClockIn,
   useClockOut,
   useListAttendance,
+  useUploadAttendancePhoto,
 } from '@swp/api-client/e5';
 import { color } from '@swp/design-tokens';
 import { formatInstant } from '@swp/shared/datetime';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { captureClockInPhoto } from '../../src/lib/capture';
 import { type Coords, getCurrentCoords } from '../../src/lib/location';
 import { useSession } from '../../src/providers/session';
 import { Text } from '../../src/ui/Text';
@@ -248,15 +253,55 @@ export default function AttendanceScreen() {
 
   const clockInMut = useClockIn();
   const clockOutMut = useClockOut();
+  const uploadPhotoMut = useUploadAttendancePhoto();
   const [busy, setBusy] = useState(false);
-  const pending = busy || clockInMut.isPending || clockOutMut.isPending;
+  // Live clock-in photo (CI-10): captured + uploaded before clock-in. `null` = not yet
+  // taken; `uploading` drives the inline progress state under the button.
+  const [photo, setPhoto] = useState<UploadedFile | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const pending = busy || uploading || clockInMut.isPending || clockOutMut.isPending;
 
   async function refresh() {
     await qc.invalidateQueries({ queryKey: ['/attendance'] });
   }
 
+  // Capture a live photo + upload it; returns the SWP-FILE-* id for clock-in, or null
+  // if the user denied permission / cancelled (the screen then aborts the clock-in).
+  // Caches the uploaded file in `photo` so a retried clock-in reuses it.
+  async function captureAndUploadPhoto(): Promise<string | null> {
+    const cap = await captureClockInPhoto();
+    if (cap.status === 'denied') {
+      Alert.alert(t('m:absen.title'), t('m:absen.cameraDenied'));
+      return null;
+    }
+    if (cap.status === 'cancelled') return null;
+    setUploading(true);
+    try {
+      const res = await uploadPhotoMut.mutateAsync({ data: { file: cap.file } });
+      // 201 → res.data is the UploadedFile; the error members of the union are thrown
+      // as ApiError before reaching here, so on success `id` is present.
+      const uploaded = res.data as UploadedFile;
+      setPhoto(uploaded);
+      return uploaded.id;
+    } catch {
+      Alert.alert(t('m:absen.title'), t('m:absen.photoFailed'));
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function handleApiError(e: unknown, onForce?: () => void) {
     if (e instanceof ApiError) {
+      if (e.code === 'PHOTO_REQUIRED') {
+        // Photo missing/expired (422) — drop the stale id and re-prompt capture.
+        setPhoto(null);
+        Alert.alert(t('m:absen.title'), t('m:absen.photoRequired'), [
+          { text: t('m:clock.cancel'), style: 'cancel' },
+          { text: t('m:absen.photoLabel'), onPress: () => void doClockIn(false) },
+        ]);
+        return;
+      }
       if (e.code === 'OUT_OF_GEOFENCE' && onForce) {
         const dm = (e.fields?.distance_m as number | undefined) ?? null;
         setIsOutside(true);
@@ -292,6 +337,11 @@ export default function AttendanceScreen() {
         setGpsState('unavailable');
         return;
       }
+      // Mobile clock-in requires a live selfie (CI-10): capture + upload before the
+      // clock-in call, then pass the returned photo_id. Reuse a previously-uploaded
+      // photo (e.g. on a no-schedule "proceed" retry) so we don't re-prompt the camera.
+      const photoId = photo?.id ?? (await captureAndUploadPhoto());
+      if (!photoId) return; // permission denied / cancelled / upload failed → abort
       setIsOutside(false); // optimistic reset
       try {
         await clockInMut.mutateAsync({
@@ -302,9 +352,12 @@ export default function AttendanceScreen() {
             mode,
             wfo: mode === 'ONSITE', // deprecated back-compat; `mode` is the source of truth
             force_outside_geofence: noScheduleForce,
+            platform: 'MOBILE',
+            photo_id: photoId,
           },
         });
         setDistanceM(null);
+        setPhoto(null); // consumed — next clock-in captures a fresh photo
         await refresh();
         Alert.alert(t('m:clock.title'), t('m:clock.successIn'));
       } catch (e) {
@@ -608,6 +661,38 @@ export default function AttendanceScreen() {
             </View>
           </View>
         )}
+
+        {/* ── Clock-in photo (CI-10): live-selfie capture step. Shown only in a clock-in
+            context (not clocked-in, action enabled) — clock-out needs no photo. The
+            clock-in button captures automatically if skipped here; this row lets the
+            agent take the photo ahead of time and surfaces the captured/uploading state. */}
+        {!open && !actionDisabled && !list.isLoading && gpsState !== 'checking' ? (
+          <Pressable
+            disabled={pending}
+            onPress={() => void captureAndUploadPhoto()}
+            className="flex-row items-center gap-2.5 rounded-card border border-border bg-surface px-3.5 py-3"
+            style={{ opacity: pending && !uploading ? 0.7 : 1 }}
+          >
+            {uploading ? (
+              <ActivityIndicator size="small" color={color.primary} />
+            ) : photo ? (
+              <CheckCircle2 size={18} color={color.ok.text} />
+            ) : (
+              <Camera size={18} color={color.text2} />
+            )}
+            <Text
+              variant="subtitle"
+              className="flex-1"
+              style={{ color: photo ? color.ok.text : color.text }}
+            >
+              {uploading
+                ? t('m:absen.photoUploading')
+                : photo
+                  ? t('m:absen.photoCaptured')
+                  : t('m:absen.photoLabel')}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {/* ── Action button (.pen ClockInBtn: r12, icon 22 + label 16/700 white) ── */}
         {list.isLoading || gpsState === 'checking' ? (
