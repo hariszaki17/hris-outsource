@@ -17,6 +17,7 @@ import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
 import { Screen } from '../../src/ui/Screen';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,7 @@ export default function ProfileScreen() {
   const { user, signOut } = useSession();
   const employeeId = user?.employee_id ?? '';
   const q = useGetEmployee(employeeId, { query: { enabled: !!employeeId } });
+  const refreshControl = usePullToRefresh();
 
   const emp = q.data?.data as Employee | undefined;
 
@@ -152,7 +154,11 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ gap: 12 }}
+        refreshControl={refreshControl}
+      >
         {/* ── Identity card ── */}
         <Card>
           <View className="flex-row items-center justify-between">

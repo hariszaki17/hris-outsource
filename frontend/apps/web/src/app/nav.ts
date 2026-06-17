@@ -168,6 +168,11 @@ export const SECTION_SUBNAV: Record<string, readonly SubnavItem[]> = {
     { to: '/overtime/rekap', labelKey: 'nav.overtimeRekap', requires: 'overtime.read' },
     { to: '/overtime/aturan', labelKey: 'nav.overtimeRules', requires: 'overtime_rules.read' },
   ],
+  // E8 Payroll — two sub-tabs: archive (existing /payroll) + period close F8.5 (RECON §3)
+  '/payroll': [
+    { to: '/payroll', labelKey: 'nav.payrollArchive', requires: 'payroll.read' },
+    { to: '/payroll/period-close', labelKey: 'nav.payrollPeriodClose', requires: 'payroll.read' },
+  ],
 };
 
 /** Filter a nav list to those whose requirement the permissions satisfy. */

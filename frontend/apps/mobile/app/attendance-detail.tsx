@@ -41,6 +41,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../src/ui/Card';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -234,6 +235,7 @@ export default function AttendanceDetail() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
   const { attendanceId } = useLocalSearchParams<{ attendanceId: string; date?: string }>();
 
   // Prefer the by-id endpoint (richest detail: geofence in/out). Fall back to list-find
@@ -266,6 +268,7 @@ export default function AttendanceDetail() {
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 16, paddingBottom: 16, gap: 14 }}
+        refreshControl={refreshControl}
       >
         {record ? (
           <Detail record={record} />

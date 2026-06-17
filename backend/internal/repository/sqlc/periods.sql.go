@@ -126,6 +126,23 @@ func (q *Queries) CountFieldBlockers(ctx context.Context, arg CountFieldBlockers
 	return i, err
 }
 
+const countOpenClarifications = `-- name: CountOpenClarifications :one
+SELECT count(*)::int AS open_count
+FROM clarification_requests
+WHERE period_id = $1
+  AND status = 'OPEN'
+  AND deleted_at IS NULL
+`
+
+// CountOpenClarifications returns the number of OPEN clarifications for a period
+// (the "awaiting reply" badge on the cockpit header, PC-13 / F8.5).
+func (q *Queries) CountOpenClarifications(ctx context.Context, periodID string) (int32, error) {
+	row := q.db.QueryRow(ctx, countOpenClarifications, periodID)
+	var n int32
+	err := row.Scan(&n)
+	return n, err
+}
+
 const createClarificationRequest = `-- name: CreateClarificationRequest :one
 
 INSERT INTO clarification_requests (

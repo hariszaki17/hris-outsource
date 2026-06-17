@@ -43,6 +43,7 @@ import {
 } from '../src/ui/ApprovalChain';
 import { Card } from '../src/ui/Card';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 // i18n: keys live under the mobile `m` namespace as `approvalStatus.*`. We pass an inline
 // Bahasa `defaultValue` so this screen renders correctly before the catalog bundle is added;
@@ -213,6 +214,7 @@ export default function ApprovalStatusScreen() {
   const { t } = useTranslation() as { t: TFn };
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
   const params = useLocalSearchParams<{
     approval_instance_id?: string;
     request_type?: string;
@@ -336,6 +338,7 @@ export default function ApprovalStatusScreen() {
         className="flex-1"
         contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
       >
         {/* Card 1 — HeaderCard */}
         <Card className="gap-2.5">

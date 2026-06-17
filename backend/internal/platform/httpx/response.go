@@ -42,7 +42,20 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 
 // WriteError maps any error to the shared ErrorEnvelope. Unknown errors become
 // INTERNAL (and are logged with their cause); *apperr.Error is rendered as-is.
+//
+// Special case: if the request context was canceled by the client (e.g. the browser
+// navigated away mid-flight), we respond 499 (CLIENT_CLOSED_REQUEST) and log at
+// DEBUG level — a client abort is not a server fault and must not be counted as a
+// retryable 5xx by the QueryClient.
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	// Client closed the connection — not a server error; don't log ERROR.
+	if errors.Is(err, context.Canceled) || r.Context().Err() == context.Canceled {
+		slog.DebugContext(r.Context(), "client closed request (context canceled)",
+			"url", r.URL.Path)
+		w.WriteHeader(499)
+		return
+	}
+
 	ae, ok := apperr.As(err)
 	if !ok {
 		ae = apperr.Internal(err)

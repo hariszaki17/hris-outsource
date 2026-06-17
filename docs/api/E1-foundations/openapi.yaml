@@ -350,6 +350,59 @@ paths:
                         new_password: "Minimal 10 karakter, harus mengandung huruf besar, kecil, angka, dan simbol."
                       request_id: req_01J7K3W2C2
 
+  /auth/change-password:
+    post:
+      operationId: authChangePassword
+      tags: [authentication]
+      summary: Change the current user's password (authenticated)
+      description: |
+        Sets a new password for the currently-authenticated user. Used for the
+        EP-3 forced temp-password rotation on first login (when
+        `MeResponse.must_change_password` is `true`) and for voluntary changes.
+        Password must meet the platform password policy — violations return 422
+        `WEAK_PASSWORD`. On success the `must_change_password` flag is cleared
+        and all of the user's other sessions are invalidated (AU-6).
+      x-rbac:
+        roles: [super_admin, hr_admin, shift_leader, agent]
+        scope: self
+      x-design-screens: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_password]
+              properties:
+                new_password:
+                  type: string
+                  format: password
+                  minLength: 10
+                  description: New password. Must satisfy platform policy.
+                  example: "Pass1ng-Garuda!"
+      responses:
+        '204':
+          description: Password updated; other sessions invalidated.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          description: Password did not meet policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                weakPassword:
+                  value:
+                    error:
+                      code: WEAK_PASSWORD
+                      message: "Kata sandi tidak memenuhi kebijakan."
+                      fields:
+                        new_password: "Minimal 10 karakter, harus mengandung huruf besar, kecil, angka, dan simbol."
+                      request_id: req_01J7K3W2C3
+
   /auth/me:
     get:
       operationId: authMe
@@ -1530,6 +1583,15 @@ components:
           nullable: true
           description: Previous login. `null` on first-ever login.
           example: "2026-06-03T07:14:52Z"
+        must_change_password:
+          type: boolean
+          default: false
+          description: |
+            `true` when the user signed in with a temporary password and must
+            rotate it via `POST /auth/change-password` before normal use (EP-3).
+            The client routes such users to the change-password screen and
+            blocks the rest of the app until it is cleared.
+          example: false
         scope:
           type: object
           description: Effective access scope.

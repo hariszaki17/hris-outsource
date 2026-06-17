@@ -41,6 +41,11 @@ export interface SessionUser {
    * to the leader's own company — undefined for HR/super-admin (global scope).
    */
   companyId?: string;
+  /**
+   * The user signed in with a temporary password and must rotate it before normal
+   * use (EP-3). While true, the authed guard funnels every route to /change-password.
+   */
+  mustChangePassword: boolean;
 }
 
 let accessToken: string | null = null;
@@ -118,6 +123,7 @@ export function buildSessionUser(u: MeResponse): SessionUser {
     userId: u.id,
     companyName: companyId,
     companyId,
+    mustChangePassword: u.must_change_password ?? false,
   };
 }
 

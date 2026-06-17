@@ -1,6 +1,6 @@
 import { type Href, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
@@ -45,7 +45,7 @@ export default function More() {
       <Button
         variant="secondary"
         label={t('m:more.changePassword')}
-        onPress={() => Alert.alert(t('m:more.changePassword'), t('m:common.comingSoon'))}
+        onPress={() => router.push('/change-password')}
       />
       <Button label={t('m:more.signOut')} onPress={() => void signOut()} />
     </View>

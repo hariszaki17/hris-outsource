@@ -37,6 +37,7 @@ import { Button } from '../src/ui/Button';
 import { Card } from '../src/ui/Card';
 import { StatusBadge } from '../src/ui/StatusBadge';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -191,6 +192,7 @@ export default function CorrectionDetailScreen() {
   const { t } = useTranslation() as { t: TFn };
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const query = useGetCorrection(id ?? '');
@@ -290,6 +292,7 @@ export default function CorrectionDetailScreen() {
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ padding: 16, paddingBottom: 100, gap: 16 }}
+        refreshControl={refreshControl}
       >
         {/* Header: ID + type + status */}
         <View>

@@ -330,6 +330,10 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
 				r.Get("/placements/{id}", d.Placement.GetPlacement)
+				// GET /me/placement — the caller's OWN active placement, resolved from
+				// the principal (no id). Powers the mobile Absen banner + geofence pill
+				// for freshly-onboarded agents with no attendance history yet.
+				r.Get("/me/placement", d.Placement.GetMyPlacement)
 			})
 
 			// Placement LIFECYCLE writes: super_admin, hr_admin (global) + lead

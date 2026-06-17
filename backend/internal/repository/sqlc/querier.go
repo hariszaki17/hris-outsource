@@ -144,6 +144,9 @@ type Querier interface {
 	// is surfaced in ListPeriodCompleteness, this aggregate counts the record-level
 	// blockers which gate the same way).
 	CountFieldBlockers(ctx context.Context, arg CountFieldBlockersParams) (CountFieldBlockersRow, error)
+	// CountOpenClarifications returns the number of OPEN clarifications for a period
+	// (the "awaiting reply" badge, PC-13 / F8.5).
+	CountOpenClarifications(ctx context.Context, periodID string) (int32, error)
 	// E6 F6.2 server-authoritative leave duration: the count of days in
 	// [start_date, end_date] the agent would otherwise be ROSTERED for a shift
 	// (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not

@@ -171,7 +171,7 @@ export function PlacementsScreen() {
     {
       id: 'agen',
       header: t('colAgen'),
-      width: 280,
+      flex: 2.2,
       cell: (pl) => (
         <div className="flex items-center gap-[8px]">
           <Avatar initials={initials(pl.employee_name ?? pl.employee_id)} size={32} />
@@ -185,31 +185,25 @@ export function PlacementsScreen() {
     {
       id: 'perusahaan',
       header: t('colPerusahaan'),
-      width: 210,
+      flex: 2,
       cell: (pl) => (
         <span className="text-[13px] text-text-2">{pl.client_company_name ?? '—'}</span>
       ),
     },
     {
-      id: 'periode',
-      header: t('colPeriode'),
-      width: 220,
+      id: 'mulai',
+      header: t('colMulai'),
+      flex: 1.3,
       cell: (pl) => (
         <span className="text-[13px] text-text-2 tabular-nums">
           <DateText kind="date" value={pl.start_date} />
-          {' – '}
-          {pl.end_date ? (
-            <DateText kind="date" value={pl.end_date} />
-          ) : (
-            <span className="text-text-3">{t('openEnded')}</span>
-          )}
         </span>
       ),
     },
     {
       id: 'status',
       header: t('colStatus'),
-      width: 180,
+      flex: 1.6,
       cell: (pl) => (
         <div className="flex flex-wrap items-center gap-[6px]">
           <StatusBadge dot tone={lifecycleTone[pl.lifecycle_status]}>

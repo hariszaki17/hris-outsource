@@ -457,6 +457,43 @@ paths:
         - pFR79   # Lampirkan perjanjian action on Detail Penempatan
       x-idempotent: true
 
+  /me/placement:
+    get:
+      operationId: getMyPlacement
+      tags: [placements]
+      summary: Get the caller's own active placement (PL-1, self)
+      description: |
+        Returns the **calling agent's own** active placement, resolved from the
+        authenticated principal — no id required. Identical response shape to
+        `GET /placements/{id}` (placement + `history_chain` + current shift
+        leader).
+
+        Unlike `GET /placements/{id}`, the client does not need to already know a
+        placement id. This is what the mobile **Absen** screen calls to discover
+        where the agent is placed: a freshly-onboarded agent has no attendance
+        records yet, so the placement cannot be inferred from attendance — it must
+        be looked up directly.
+
+        Returns `404 NOT_FOUND` when the caller has no active placement (the
+        mobile "Belum ada penempatan aktif" banner renders off that). "Active"
+        here matches the INV-1 set: `lifecycle_status ∈ {ACTIVE, EXPIRING,
+        PENDING_START}` (a not-yet-started placement is still surfaced so the
+        agent sees where they will work).
+      responses:
+        '200':
+          description: The caller's active placement detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlacementDetailResponse'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+      x-rbac:
+        roles: [agent, shift_leader, lead, hr_admin, super_admin]
+        scope: self   # always the caller's own placement, never another's
+      x-design-screens:
+        - mqGEi   # Mobile · Penempatan Saya (agent)
+
   /placements/{id}:
     parameters:
       - $ref: '#/components/parameters/PlacementId'

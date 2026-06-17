@@ -469,6 +469,14 @@ agent **self-scope**, HR/super **cross-company**; audit **HR/Super Admin only**.
 WIB), **IDR** + Indonesian formatting, **role-based nav** on web + mobile. **Login uses Poppins display
 font + a split brand panel** (not the standard sidebar shell).
 
+### 8.16 E8 — Tutup Periode Payroll / F8.5 *(added 2026-06-17)*
+Feature group `gLZlI` · POV line `xlTv2` · ScreensRow `K494zi` · Lane: Other roles `Uy7CG` · Sidebar nav: **Penggajian** (`WvCi4`).
+- **Web · HR/Super Admin**: Cockpit (Terbuka) `XoMsT` · Cockpit (Terkunci) `p2ikRQ` · Konfirmasi Kunci Bersih `qGPyy` · Kunci Ada Blocker — HR `rPFqX` · Kunci Paksa — Super Admin `TBRoX` · Buka Kembali `l0IAi` · Minta Klarifikasi `E3LRpT` · Tab Lembur block-and-link `uPAkt` · Toast Sukses `ATzJd` · States `vq0RK`.
+
+Status→token mapping: **Terbuka**→info · **Terkunci**→neutral · blockers→warn/bad · FIELD type chip→info · INTERNAL type chip→neutral · Menunggu klarifikasi→warn · force-lock path→warn header.
+
+Key rules (PC-1..PC-15): FIELD employees gate the lock (blocker count = FIELD only); INTERNAL informational. HR: can lock only when 0 FIELD blockers; sees OT/Leave as block-and-link (no inline approve). Super Admin: can force-lock with required reason. Reopen: Super Admin only, required reason. Clarification: one round, Shift Leader notified, row marked "Menunggu klarifikasi". State machine: OPEN → LOCKED → REOPENED. All mutations audit-trailed.
+
 ### 8.15 E11 — Approvals (configurable engine) *(added 2026-06-14)*
 Routing is now a per-company **template** of ordered lines (OR within a line, sequential across lines);
 leave/OT route through it. Screens live in the platform×role boards (not a per-epic group — the canvas
@@ -498,6 +506,6 @@ agent CR mobile screens are deleted; profile edits are instant self-edit.
 
 ---
 
-> **Coverage:** §8.1–§8.15 now document the full component library + every designed feature
-> (E1–E8, E10, E11). E9 Migration is back-end (no UI). Canvas is organized into two platform boards
+> **Coverage:** §8.1–§8.16 now document the full component library + every designed feature
+> (E1–E8 F8.5, E10, E11). E9 Migration is back-end (no UI). Canvas is organized into two platform boards
 > (`nNYxY` web · `yPwPD` mobile) with per-role lanes and POV lines.

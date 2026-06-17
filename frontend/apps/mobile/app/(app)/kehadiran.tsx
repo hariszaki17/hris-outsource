@@ -30,6 +30,7 @@ import {
 import { Card } from '../../src/ui/Card';
 import { StatusBadge } from '../../src/ui/StatusBadge';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ export default function KehadiranScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
 
   // ── Filter state (AR-10 date-range · AR-11 single-select status + Semua reset) ──
   const [range, setRange] = useState<DateRange>(() => monthRange());
@@ -210,7 +212,11 @@ export default function KehadiranScreen() {
         </Pressable>
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 12 }}
+        refreshControl={refreshControl}
+      >
         {/* Date-range chip → presets sheet */}
         <DateRangeChip range={range} onPress={() => setPresetsOpen(true)} />
 

@@ -171,7 +171,28 @@ func (h *Handler) GetPlacement(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	today := jakartaToday()
+	httpx.WriteJSON(w, http.StatusOK, toPlacementDetailResponse(detail, jakartaToday()))
+}
+
+// GetMyPlacement handles GET /me/placement — the caller's own active placement
+// (agent self-scope). Unlike GET /placements/{id} it needs no id: the service
+// resolves the placement from the principal's employee_id, so a freshly-onboarded
+// agent with no attendance history can still discover where they are placed (the
+// mobile Absen screen used to infer the placement from attendance rows, which left
+// new agents stuck on "no active placement"). Returns 404 when the agent has no
+// active placement — the mobile banner renders off that.
+func (h *Handler) GetMyPlacement(w http.ResponseWriter, r *http.Request) {
+	detail, err := h.placements.GetMyActivePlacement(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toPlacementDetailResponse(detail, jakartaToday()))
+}
+
+// toPlacementDetailResponse maps a service PlacementDetail to the wire shape shared
+// by GET /placements/{id} and GET /me/placement.
+func toPlacementDetailResponse(detail svc.PlacementDetail, today time.Time) placementDetailResponse {
 	resp := placementDetailResponse{
 		Placement:    toPlacementResponse(detail.Placement, today),
 		HistoryChain: make([]placementSummaryResponse, 0, len(detail.HistoryChain)),
@@ -182,7 +203,7 @@ func (h *Handler) GetPlacement(w http.ResponseWriter, r *http.Request) {
 	if detail.CurrentLeader != nil {
 		resp.CurrentShiftLeader = toShiftLeaderSummaryResponse(*detail.CurrentLeader)
 	}
-	httpx.WriteJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // --- create / update ---

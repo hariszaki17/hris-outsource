@@ -22,19 +22,23 @@ import { useSession } from '../src/providers/session';
 
 // Auth gate: redirect by session status + which route group we're in.
 function RootNavigator() {
-  const { status } = useSession();
+  const { status, user } = useSession();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
     if (status === 'restoring') return;
     const inAuthGroup = segments[0] === '(auth)';
+    const onChangePassword = segments[0] === 'change-password';
     if (status === 'unauthed' && !inAuthGroup) {
       router.replace('/login');
+    } else if (status === 'authed' && user?.must_change_password && !onChangePassword) {
+      // EP-3: a temp-password account must rotate it before reaching any app screen.
+      router.replace('/change-password');
     } else if (status === 'authed' && inAuthGroup) {
       router.replace('/');
     }
-  }, [status, segments, router]);
+  }, [status, user, segments, router]);
 
   if (status === 'restoring') {
     return (

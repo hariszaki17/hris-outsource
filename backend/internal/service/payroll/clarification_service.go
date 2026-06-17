@@ -7,9 +7,11 @@ package payroll
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
+	domain "github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/payroll"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
@@ -65,8 +67,12 @@ func (s *ClarificationService) Raise(ctx context.Context, p RaiseParams) (dom.Cl
 	}
 
 	// Resolve the target (C-PC-6): the record's company shift-leader, else the agent.
+	// domain.ErrNotFound from the resolver means the source record doesn't exist (404).
 	target, err := s.resolver.ResolveTarget(ctx, p.SourceType, p.SourceID)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return dom.ClarificationRequest{}, apperr.NotFound()
+		}
 		return dom.ClarificationRequest{}, asAppErr(err)
 	}
 	targetEmployeeID := target.LeaderEmployeeID
@@ -96,15 +102,17 @@ func (s *ClarificationService) Raise(ctx context.Context, p RaiseParams) (dom.Cl
 
 		// E10 notification (transactional outbox). No dedicated clarification kind in
 		// the v1 catalog — reuse ATTENDANCE_VERIFY_NEEDED as the nearest honest kind,
-		// with clarification-specific copy + a deep link to the source record.
+		// with clarification-specific copy + a deep link directly to the answer screen
+		// (mobile: /clarification-answer?id=<clrID>&question=<encoded>).
+		// entity_id = clarification ID so the client can call :answer without a list fetch.
 		if nerr := jobs.Dispatch(ctx, s.notifier, tx, jobs.NotificationArgs{
 			NotifKind:        string(reportingdom.NotifAttendanceVerifyNeeded),
 			RecipientID:      targetEmployeeID,
 			Title:            "Permintaan klarifikasi",
 			Body:             "HR meminta klarifikasi atas sebuah catatan.",
 			DeepLinkEpic:     "E8",
-			DeepLinkEntityID: p.SourceID,
-			DeepLinkPath:     clarificationDeepLink(p.SourceType, p.SourceID),
+			DeepLinkEntityID: cr.ID,
+			DeepLinkPath:     "/clarification-answer?id=" + cr.ID,
 			ActorLabel:       "HR",
 			IsCritical:       false,
 		}); nerr != nil {

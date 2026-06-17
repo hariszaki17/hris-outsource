@@ -59,6 +59,9 @@ type PeriodRepository interface {
 	ListCompleteness(ctx context.Context, year, month int, cursorID *string, limit int) ([]dom.EmployeeCompleteness, error)
 	// CountFieldBlockers returns the per-tab FIELD-only blocker tally (PC-7 gate).
 	CountFieldBlockers(ctx context.Context, year, month int) (dom.PeriodBlockerCounts, error)
+	// CountOpenClarifications returns the number of OPEN clarifications for a
+	// period (the "awaiting reply" badge, PC-13 / F8.5).
+	CountOpenClarifications(ctx context.Context, periodID string) (int, error)
 	// ListSummaries returns the immutable per-employee summary set (cursor-paged).
 	ListSummaries(ctx context.Context, periodID string, cursorID *string, limit int) ([]dom.PeriodEmployeeSummary, error)
 }

@@ -55,6 +55,11 @@ export function LoginScreen() {
       const body = res.data as LoginResponse;
       const sessionUser = buildSessionUser(body.user);
       auth.login(body.access_token, sessionUser);
+      // EP-3: a temp-password account must rotate it before anything else.
+      if (sessionUser.mustChangePassword) {
+        await navigate({ to: '/change-password' });
+        return;
+      }
       // Agents land on their self-service home; staff on the dashboard.
       await navigate({ to: sessionUser.role === 'agent' ? '/me' : '/' });
     } catch (e) {

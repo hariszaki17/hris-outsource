@@ -292,6 +292,27 @@ export const id = {
     expiredTitle: 'Tautan telah kedaluwarsa',
     expiredBody: 'Tautan reset kata sandi ini sudah tidak berlaku. Silakan minta tautan baru.',
   },
+  changePassword: {
+    title: 'Ubah Kata Sandi',
+    subtitle: 'Pilih kata sandi baru yang kuat untuk akun Anda.',
+    noticeTitle: 'Ganti kata sandi sementara',
+    noticeBody:
+      'Anda masuk dengan kata sandi sementara. Demi keamanan, buat kata sandi baru sebelum melanjutkan.',
+    newPassword: 'Kata Sandi Baru',
+    confirmPassword: 'Konfirmasi Kata Sandi',
+    reqMin: 'Minimal 10 karakter',
+    reqCase: 'Mengandung huruf besar & kecil',
+    reqNum: 'Mengandung angka',
+    reqSym: 'Mengandung simbol',
+    mismatch: 'Konfirmasi kata sandi tidak cocok.',
+    submit: 'Simpan Kata Sandi',
+    successTitle: 'Kata sandi diperbarui',
+    successBody:
+      'Kata sandi Anda berhasil diubah. Sesi lain telah dikeluarkan — silakan masuk kembali dengan kata sandi baru.',
+    goLogin: 'Masuk Sekarang',
+    weakPassword: 'Kata sandi tidak memenuhi persyaratan.',
+    genericError: 'Gagal mengubah kata sandi. Silakan coba lagi.',
+  },
   errors: {
     forbidden: 'Anda tidak memiliki izin untuk tindakan ini.',
     notFound: 'Data tidak ditemukan.',
@@ -323,6 +344,8 @@ export const id = {
     overtimeRekap: 'Rekap',
     overtimeRules: 'Aturan & Libur',
     payroll: 'Payroll',
+    payrollArchive: 'Arsip Payroll',
+    payrollPeriodClose: 'Tutup Periode',
     reports: 'Laporan',
     notifications: 'Notifikasi',
     settings: 'Pengaturan',
@@ -596,6 +619,7 @@ export const id = {
       placeholder: 'Pilih posisi',
       searchPlaceholder: 'Ketik atau cari posisi…',
       empty: 'Tidak ada posisi ditemukan',
+      create: 'Gunakan “{{query}}”',
     },
     shiftLeader: {
       placeholder: 'Pilih pemimpin shift',
@@ -1450,6 +1474,7 @@ export const id = {
     colLiniLayanan: 'Lini Layanan',
     colPosisi: 'Posisi',
     colPeriode: 'Periode',
+    colMulai: 'Mulai Penempatan',
     colStatus: 'Status',
     lifecycle: {
       ACTIVE: 'Aktif',
@@ -1619,7 +1644,8 @@ export const id = {
       reason: 'Alasan transfer',
       reasonPlaceholder: 'Jelaskan alasan transfer...',
       bufferHint: 'Penempatan lama berakhir 1 hari sebelum start baru (BR-2).',
-      timingHint: 'Penempatan baru dimulai pada tanggal transfer; penempatan lama ditutup pada hari yang sama.',
+      timingHint:
+        'Penempatan baru dimulai pada tanggal transfer; penempatan lama ditutup pada hari yang sama.',
       confirmBtn: 'Transfer (akhiri yang lama)',
     },
     renew: {
@@ -2828,6 +2854,158 @@ export const id = {
     },
     errors: {
       loadError: 'Gagal memuat data',
+    },
+    // F8.5 — Payroll Period Close (added 2026-06-17)
+    periodClose: {
+      // Title band (frames XoMsT / p2ikRQ)
+      title: 'Tutup Periode Payroll',
+      subtitle:
+        'Rekonsiliasi akhir bulan — kunci input kehadiran, lembur, dan cuti sebelum penggajian.',
+      // Period status labels (DESIGN-SYSTEM §8.16)
+      statusOpen: 'Terbuka',
+      statusLocked: 'Terkunci',
+      statusReopened: 'Dibuka Kembali',
+      // Period picker navigation
+      prevMonth: 'Bulan sebelumnya',
+      nextMonth: 'Bulan berikutnya',
+      // StatCards — 3 blockers (frame XoMsT)
+      statAttendance: 'Blocker Kehadiran',
+      statOvertime: 'Blocker Lembur',
+      statLeave: 'Blocker Cuti',
+      statBlockersSub: 'Belum diselesaikan (FIELD)',
+      // Tab labels (frame XoMsT tabs)
+      tabKehadiran: 'Kehadiran',
+      tabLembur: 'Lembur',
+      tabCuti: 'Cuti',
+      tabRingkasan: 'Ringkasan',
+      // Completeness table columns (frame XoMsT table)
+      colEmployee: 'Karyawan',
+      colType: 'Tipe',
+      colExpected: 'Diharapkan',
+      colClean: 'Bersih',
+      colLeave: 'Cuti',
+      colBlockers: 'Blocker',
+      // Employment type labels
+      typeField: 'FIELD',
+      typeInternal: 'INTERNAL',
+      // Blocker cell
+      blockerClean: 'Bersih',
+      // Table actions
+      actionDrill: 'Lihat Kehadiran',
+      tableAriaLabel: 'Kelengkapan kehadiran karyawan',
+      // Filter row
+      filterType: 'Tipe karyawan',
+      filterTypeAll: 'Semua tipe',
+      filterBlockersOnly: 'Hanya yang bermasalah',
+      // Open clarifications count badge
+      openClarifications: '{{count}} menunggu klarifikasi',
+      // Empty states (frame vq0RK)
+      emptyTitle: 'Tidak ada karyawan',
+      emptyBody: 'Tidak ada data kehadiran untuk periode ini.',
+      emptyBlockersTitle: 'Semua bersih',
+      emptyBlockersBody: 'Tidak ada karyawan dengan blocker aktif.',
+      resultRange: '{{count}} karyawan',
+      // Force-lock warning banner (shown to super-admin with blockers)
+      forceAvailable:
+        'Masih ada blocker aktif. Sebagai Super Admin, Anda dapat melakukan Kunci Paksa dengan alasan.',
+      forceLocked: 'Kunci Paksa',
+      // CTA buttons
+      lockBtn: 'Kunci Periode',
+      reopenBtn: 'Buka Kembali',
+      // Block-and-link tab (frame uPAkt)
+      blockAndLinkTitle: '{{count}} persetujuan tertunda',
+      lemburBlockDesc: 'Selesaikan persetujuan lembur yang tertunda sebelum mengunci periode.',
+      cutiBlockDesc: 'Selesaikan persetujuan cuti yang tertunda sebelum mengunci periode.',
+      lemburBlockLink: 'Buka Persetujuan Lembur',
+      cutiBlockLink: 'Buka Persetujuan Cuti',
+      blockAndLinkClean: 'Semua selesai — tidak ada yang tertunda.',
+      // Summary tab (frame p2ikRQ)
+      summaryImmutableBanner:
+        'Ringkasan ini immutable — dibuat saat periode dikunci dan tidak dapat diubah.',
+      summaryAriaLabel: 'Ringkasan karyawan per periode',
+      summaryPayableDays: 'Hari Bayar',
+      summaryPresentDays: 'Hadir',
+      summaryLateDays: 'Terlambat',
+      summaryAbsentDays: 'Absen',
+      summaryPaidLeave: 'Cuti Dibayar',
+      summaryOtMinutes: 'Menit OT',
+      summaryLockedAt: 'Dikunci Pada',
+      summaryNotLockedTitle: 'Periode belum dikunci',
+      summaryNotLockedBody: 'Ringkasan immutable akan tersedia setelah periode dikunci.',
+      summaryEmptyTitle: 'Ringkasan kosong',
+      summaryEmptyBody: 'Tidak ada karyawan FIELD pada periode ini.',
+      // Lock dialog — clean (frame qGPyy)
+      lockCleanTitle: 'Kunci Periode',
+      lockCleanBody:
+        'Semua blocker telah diselesaikan. Kunci periode ini untuk membekukan input kehadiran, lembur, dan cuti.',
+      lockCleanNote:
+        'Setelah dikunci, perubahan akan dicatat sebagai Penyesuaian Payroll untuk periode berikutnya.',
+      lockConfirm: 'Kunci Periode',
+      lockSuccessTitle: 'Periode berhasil dikunci',
+      lockSuccessDesc: 'Ringkasan immutable per karyawan FIELD telah dibuat.',
+      lockErrorTitle: 'Gagal mengunci periode',
+      lockErrorDesc: 'Terjadi kesalahan. Pastikan semua blocker sudah diselesaikan lalu coba lagi.',
+      // Lock dialog — blocked HR (frame rPFqX)
+      lockBlockedTitle: 'Tidak Dapat Dikunci',
+      lockBlockedWarning:
+        'Masih ada blocker aktif yang harus diselesaikan sebelum periode dapat dikunci:',
+      blockerAttendance: '{{count}} blocker kehadiran',
+      blockerOvertime: '{{count}} blocker lembur',
+      blockerLeave: '{{count}} blocker cuti',
+      lockBlockedInstruct: 'Selesaikan semua item di setiap tab sebelum mengunci.',
+      lockBlockedOk: 'Mengerti',
+      // Lock dialog — force-lock super-admin (frame TBRoX)
+      forceLockTitle: 'Kunci Paksa — Super Admin',
+      forceLockWarning:
+        'Masih ada {{attendance}} blocker kehadiran, {{overtime}} lembur, {{leave}} cuti. Kunci paksa akan mengabaikan blocker ini dan membuat ringkasan dengan data yang tersedia. Tindakan ini tercatat di audit log.',
+      forceLockReasonLabel: 'Alasan kunci paksa',
+      forceLockReasonPlaceholder: 'Tuliskan alasan kunci paksa (min 10 karakter)…',
+      forceLockConfirm: 'Kunci Paksa',
+      reasonRequired: 'Alasan wajib diisi (minimal 10 karakter)',
+      // Reopen dialog (frame l0IAi)
+      reopenTitle: 'Buka Kembali Periode',
+      reopenWarning:
+        'Membuka kembali periode akan membatalkan ringkasan immutable. Semua perubahan pasca-kunci akan perlu diproses ulang. Tindakan ini hanya diizinkan jika belum ada payroll yang diposting.',
+      reopenReasonLabel: 'Alasan membuka kembali',
+      reopenReasonPlaceholder: 'Tuliskan alasan (min 10 karakter)…',
+      reopenConfirm: 'Buka Kembali',
+      reopenSuccessTitle: 'Periode dibuka kembali',
+      reopenSuccessDesc: 'Status kembali ke Terbuka. Ringkasan immutable telah dibatalkan.',
+      reopenErrorTitle: 'Gagal membuka periode',
+      reopenPostedError: 'Tidak dapat dibuka — sudah ada payroll yang diposting untuk periode ini.',
+      reopenGenericError: 'Terjadi kesalahan. Coba lagi.',
+      // Clarification dialog (frame E3LRpT)
+      clarifTitle: 'Minta Klarifikasi',
+      clarifTarget: 'Ditujukan kepada',
+      clarifAdvisory:
+        'Klarifikasi bersifat informatif — tidak memblokir kunci periode. Shift leader / agen akan menerima notifikasi dan dapat memberikan jawaban atau mengajukan koreksi.',
+      clarifQuestionLabel: 'Pertanyaan',
+      clarifQuestionPlaceholder: 'Tuliskan pertanyaan Anda tentang catatan ini…',
+      clarifSendBtn: 'Kirim Klarifikasi',
+      clarifSentTitle: 'Klarifikasi terkirim',
+      clarifSentDesc: 'Notifikasi telah dikirim ke shift leader / agen terkait.',
+      clarifErrorTitle: 'Gagal mengirim klarifikasi',
+      clarifErrorDesc: 'Terjadi kesalahan. Coba lagi.',
+      questionRequired: 'Pertanyaan wajib diisi (minimal 5 karakter)',
+      // Manage-clarification dialog (no dedicated .pen frame — minimal DS-consistent)
+      clarifManageTitle: 'Kelola Klarifikasi',
+      clarifViewQuestion: 'Pertanyaan HR',
+      clarifViewAnswer: 'Jawaban',
+      clarifNoAnswer: 'Belum ada jawaban — menunggu shift leader / agen.',
+      clarifAnsweredAt: 'Dijawab pada',
+      clarifResolveBtn: 'Selesaikan',
+      clarifCancelBtn: 'Batalkan',
+      clarifCancelConfirmTitle: 'Batalkan Klarifikasi?',
+      clarifCancelConfirmBody:
+        'Klarifikasi ini akan dibatalkan dan tidak dapat diaktifkan kembali.',
+      clarifResolveSuccessTitle: 'Klarifikasi diselesaikan',
+      clarifResolveSuccessDesc: 'Klarifikasi telah ditutup. Status diperbarui.',
+      clarifCancelSuccessTitle: 'Klarifikasi dibatalkan',
+      clarifCancelSuccessDesc: 'Klarifikasi telah dibatalkan.',
+      clarifManageErrorTitle: 'Gagal memperbarui klarifikasi',
+      clarifManageErrorDesc: 'Terjadi kesalahan. Coba lagi.',
+      clarifStatusWaiting: 'Menunggu klarifikasi',
+      clarifManageAriaLabel: 'Kelola klarifikasi',
     },
   },
   notifications: {

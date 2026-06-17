@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/payroll"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/httpx"
 	svc "github.com/hariszaki17/hris-outsource/backend/internal/service/payroll"
@@ -44,6 +45,12 @@ func (h *PeriodHandler) GetPeriod(w http.ResponseWriter, r *http.Request) {
 	resp := toPeriod(view.Period)
 	bc := toBlockerCounts(view.Blockers)
 	resp.Blockers = &bc
+	// lockable = OPEN (or REOPENED) period with zero FIELD blockers (ordinary HR can lock).
+	isOpen := view.Period.Status == dom.PeriodStatusOpen || view.Period.Status == dom.PeriodStatusReopened
+	lockable := isOpen && bc.Attendance == 0 && bc.Overtime == 0 && bc.Leave == 0
+	resp.Lockable = &lockable
+	oc := view.OpenClarifications
+	resp.OpenClarifications = &oc
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[periodResponse]{Data: resp})
 }
 

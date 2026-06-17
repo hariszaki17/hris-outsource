@@ -172,6 +172,14 @@ func (r *PeriodRepo) CountFieldBlockers(ctx context.Context, year, month int) (d
 	}, nil
 }
 
+func (r *PeriodRepo) CountOpenClarifications(ctx context.Context, periodID string) (int, error) {
+	n, err := r.q.CountOpenClarifications(ctx, periodID)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 func (r *PeriodRepo) ListSummaries(ctx context.Context, periodID string, cursorID *string, limit int) ([]dom.PeriodEmployeeSummary, error) {
 	rows, err := r.q.ListPeriodSummaries(ctx, sqlcgen.ListPeriodSummariesParams{
 		PeriodID:  periodID,

@@ -6,4 +6,7 @@
 export * from './gen/e8/payslips/payslips.ts';
 export * from './gen/e8/payslip-audit-notes/payslip-audit-notes.ts';
 export * from './gen/e8/payslip-export/payslip-export.ts';
+// F8.5 Payroll Period Close (added 2026-06-17) — not yet in original barrel
+export * from './gen/e8/payroll-periods/payroll-periods.ts';
+export * from './gen/e8/clarifications/clarifications.ts';
 export * from './gen/e8/model/index.ts';

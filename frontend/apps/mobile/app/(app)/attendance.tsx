@@ -36,7 +36,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError } from '@swp/api-client';
-import { type PlacementDetailResponse, useGetPlacement } from '@swp/api-client/e3';
+import { type PlacementDetailResponse, useGetMyPlacement } from '@swp/api-client/e3';
 import {
   type GetScheduleByAgent200,
   type ScheduleEntry,
@@ -60,6 +60,7 @@ import { captureClockInPhoto } from '../../src/lib/capture';
 import { type Coords, getCurrentCoords } from '../../src/lib/location';
 import { useSession } from '../../src/providers/session';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,15 +199,17 @@ export default function AttendanceScreen() {
   // Most recent closed record for the Keluar tile
   const lastClosed = items.find((a) => a.check_in_at && a.check_out_at);
 
-  // Agent's placement → site geofence (E3). The site centroid + radius are not on
-  // the device, so without this the app can't compute distance pre-clock. The list
-  // endpoint is HR/SL-only, but GET /placements/{id} is agent-self-allowed — so we
-  // resolve the placement id from the attendance records the agent already owns.
-  const placementId =
-    open?.placement_id ?? lastClosed?.placement_id ?? items[0]?.placement_id ?? '';
-  const placementQ = useGetPlacement(placementId, { query: { enabled: !!placementId } });
-  const siteGeofence =
-    (placementQ.data?.data as PlacementDetailResponse | undefined)?.placement.site_geofence ?? null;
+  // Agent's own active placement (E3). GET /me/placement resolves it from the
+  // principal — no id needed — so a freshly-onboarded agent with zero attendance
+  // history still loads their placement (the old approach inferred the id from
+  // existing attendance rows, which left new agents stuck on "no active placement").
+  // 404 ⇒ no active placement; TanStack treats that as an error, so we read the
+  // data, not the error, to decide `hasPlacement`.
+  const myPlacementQ = useGetMyPlacement();
+  const myPlacement =
+    (myPlacementQ.data?.data as PlacementDetailResponse | undefined)?.placement ?? null;
+  // Site centroid + radius — required to compute distance pre-clock.
+  const siteGeofence = myPlacement?.site_geofence ?? null;
 
   // Live distance to the work point: haversine(device GPS, site centroid). Computed
   // once GPS is granted and the geofence is loaded — matches the server clock-in check.
@@ -250,6 +253,8 @@ export default function AttendanceScreen() {
     if (!a.shift_start_at) return false;
     return a.shift_start_at.slice(0, 10) === todayStr;
   });
+
+  const refreshControl = usePullToRefresh();
 
   const clockInMut = useClockIn();
   const clockOutMut = useClockOut();
@@ -392,12 +397,19 @@ export default function AttendanceScreen() {
 
   // ── Derived shift header values ─────────────────────────────────────────────
 
-  const siteName: string =
-    open?.site_name ??
-    open?.company_name ??
-    lastClosed?.site_name ??
-    lastClosed?.company_name ??
-    'Plaza Senayan'; // placeholder until first API load
+  // Site/company label, rendered as "Company · Site". Prefer the live attendance
+  // record while clocked in (it carries the exact site worked), then fall back to
+  // the agent's active placement — so a newly-placed agent with no attendance yet
+  // still sees where they're placed. Either part may be missing; join only what's
+  // present (no leading/trailing separator).
+  const placementCompany =
+    open?.company_name ?? lastClosed?.company_name ?? myPlacement?.client_company_name ?? '';
+  const placementSite =
+    open?.site_name ?? lastClosed?.site_name ?? myPlacement?.site_name ?? '';
+  const siteName: string = [placementCompany, placementSite].filter(Boolean).join(' · ');
+  // Placement existence is authoritative from /me/placement, not inferred from a
+  // label string (a clocked-out agent with no site_name still HAS a placement).
+  const hasPlacement = myPlacement !== null;
 
   const noScheduleState = !hasScheduleToday && !open && !list.isLoading;
 
@@ -413,7 +425,9 @@ export default function AttendanceScreen() {
     // No schedule today (warn-tinted card). The "no schedule" warning is already
     // surfaced under the Clock In button, so here we just show the placement (no dot).
     shiftDotColor = color.warn.text; // #B54708
-    shiftLabelText = `Penempatan: ${siteName}`;
+    shiftLabelText = hasPlacement
+      ? siteName
+      : t('m:absen.noPlacement');
     shiftSite = '';
     shiftCardBg = color.warn.bg;
     shiftCardBorder = color.warn.border;
@@ -588,7 +602,11 @@ export default function AttendanceScreen() {
         </Pressable>
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 14 }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 14 }}
+        refreshControl={refreshControl}
+      >
         {/* ── ShiftToday card (.pen: r10, padding 10/14, dot 8 + label + site) ── */}
         <View
           className="flex-row items-center gap-2 rounded-[10px] border px-3.5 py-2.5"

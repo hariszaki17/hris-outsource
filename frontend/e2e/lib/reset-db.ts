@@ -99,6 +99,15 @@ const TRUNCATE_TABLES = [
   // intact lets the running worker keep its queue. The Go seed re-applies the
   // SWP-PS-90121..90124 FINAL fixtures + the SWP-PS-90119 DECRYPT_FAIL row + its two
   // audit notes (ON CONFLICT DO NOTHING; breakdown lines only on fresh insert).
+  // F8.5 period-close tables: payroll_adjustments / clarification_requests FK to
+  // payroll_periods; period_employee_summaries FK to payroll_periods + employees.
+  // All MUST be truncated in dependency order before payroll_periods itself.
+  // Clearing these ensures every period-close spec starts from scratch (no stale
+  // LOCKED period from a previous spec leaking in and breaking the OPEN assertions).
+  'payroll_adjustments',
+  'clarification_requests',
+  'period_employee_summaries',
+  'payroll_periods',
   'payslip_audit_notes',
   'payslip_benefits',
   'payslip_components',
@@ -173,12 +182,29 @@ export async function resetDb(): Promise<void> {
   await client.connect();
 
   try {
-    // Truncate transactionally so no partial state on failure.
+    // Resolve which tables actually exist in the DB first (some were dropped by later
+    // migrations, e.g. leave_approvals / overtime_approvals / change_requests dropped by
+    // 00061 — superseded by the unified approval engine). Skipping non-existent tables
+    // prevents the TRUNCATE block from aborting when running against a freshly-migrated DB.
+    const existsResult = await client.query<{ tablename: string }>(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+    );
+    const existingTables = new Set(existsResult.rows.map((r) => r.tablename));
+
+    // Truncate the app tables that still exist, then users. We use two separate
+    // non-nested transactions so that a missing table (already handled by the
+    // existingTables guard) doesn't abort the whole block. The users truncate runs
+    // outside the main loop so it's always attempted (users is a required persona table).
     await client.query('BEGIN');
     for (const table of TRUNCATE_TABLES) {
-      await client.query(`TRUNCATE TABLE ${table} CASCADE`);
+      if (existingTables.has(table)) {
+        await client.query(`TRUNCATE TABLE ${table} CASCADE`);
+      }
     }
-    // Also clear users so the seed re-creates them fresh (handles test-deleted users).
+    await client.query('COMMIT');
+
+    // Truncate users in a separate transaction so we always reset personas cleanly.
+    await client.query('BEGIN');
     await client.query('TRUNCATE TABLE users CASCADE');
     await client.query('COMMIT');
   } catch (err) {

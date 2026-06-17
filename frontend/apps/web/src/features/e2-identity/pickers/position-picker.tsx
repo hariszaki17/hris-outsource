@@ -95,6 +95,8 @@ export function PositionPicker({
       disabled={disabled}
       error={error}
       emptyText={t('position.empty')}
+      allowCreate
+      createLabel={(q) => t('position.create', { query: q })}
     />
   );
 }

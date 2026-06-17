@@ -23,6 +23,11 @@ export function createQueryClient(): QueryClient {
           if (error instanceof ApiError) {
             // never retry client-side / auth / business-rule errors
             if (error.status >= 400 && error.status < 500) return false;
+            // status === 0 means the client aborted the fetch (e.g. React StrictMode
+            // double-mount teardown, or navigation away mid-flight). Don't retry — the
+            // component will refetch on remount. Retrying an aborted request burns
+            // network slots and can leave the QueryClient stuck in error state.
+            if (error.status === 0) return false;
           }
           return failureCount < 2;
         },

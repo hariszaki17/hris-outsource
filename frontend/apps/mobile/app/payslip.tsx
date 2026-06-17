@@ -4,9 +4,11 @@ import { ActivityIndicator, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Card } from '../src/ui/Card';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 export default function PayslipScreen() {
   const { t } = useTranslation();
+  const refreshControl = usePullToRefresh();
   const q = useListPayslips({ limit: 24 });
   const items = (q.data?.data as { data?: Payslip[] } | undefined)?.data ?? [];
 
@@ -28,7 +30,7 @@ export default function PayslipScreen() {
           <Text variant="caption">{t('m:payslip.empty')}</Text>
         </View>
       ) : (
-        <ScrollView>
+        <ScrollView refreshControl={refreshControl}>
           <View className="gap-3 px-6 pb-8">
             {items.map((p) => (
               <Card key={p.id}>

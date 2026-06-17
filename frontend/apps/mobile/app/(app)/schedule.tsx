@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSession } from '../../src/providers/session';
 import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // Local (device = WIB) YYYY-MM-DD — avoids the UTC shift of toISOString().
 function ymd(d: Date): string {
@@ -76,6 +77,7 @@ export default function ScheduleScreen() {
   const { user } = useSession();
   const employeeId = user?.employee_id ?? '';
   const days = currentWeek();
+  const refreshControl = usePullToRefresh();
 
   const q = useGetScheduleByAgent(
     employeeId,
@@ -87,7 +89,7 @@ export default function ScheduleScreen() {
   const byDate = (d: Date) => entries.find((e) => e.work_date === ymd(d));
 
   return (
-    <ScrollView className="flex-1 bg-app-bg">
+    <ScrollView className="flex-1 bg-app-bg" refreshControl={refreshControl}>
       <View className="gap-3 p-6" style={{ paddingTop: insets.top + 8 }}>
         <Text variant="title">{t('m:schedule.title')}</Text>
         {q.isLoading ? (

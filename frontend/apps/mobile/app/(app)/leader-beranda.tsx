@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -266,6 +267,7 @@ export default function LeaderBerandaScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const refreshControl = usePullToRefresh();
   const dash = useGetMyDashboard();
   // /dashboards/me 200 is typed unenveloped but the API double-envelopes in `{ data }`, so the
   // payload is one level deeper than the generated type (same unwrap as leave.tsx / index.tsx).
@@ -297,7 +299,7 @@ export default function LeaderBerandaScreen() {
         ) : null}
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} refreshControl={refreshControl}>
         {dash.isLoading ? (
           <View className="items-center py-10">
             <ActivityIndicator />

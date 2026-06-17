@@ -64,6 +64,7 @@ import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
 import { StatusBadge } from '../../src/ui/StatusBadge';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -1002,6 +1003,7 @@ export default function SlVerifikasiScreen() {
   // Counter pill (DxK66): number of approvals needing action.
   const approvals = useListApprovalInstances({ mine: true, limit: 50 });
   const pendingCount = approvals.data?.data?.data?.length ?? 0;
+  const refreshControl = usePullToRefresh();
 
   return (
     <View className="flex-1 bg-app-bg">
@@ -1041,7 +1043,11 @@ export default function SlVerifikasiScreen() {
         })}
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 12 }}
+        refreshControl={refreshControl}
+      >
         {segment === 'approvals' ? <ApprovalsSection /> : <KehadiranSection />}
       </ScrollView>
     </View>

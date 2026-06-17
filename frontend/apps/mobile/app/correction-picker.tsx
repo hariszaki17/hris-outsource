@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../src/ui/Card';
 import { StatusBadge } from '../src/ui/StatusBadge';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -47,6 +48,7 @@ export default function CorrectionPickerScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
 
   const [q, setQ] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -101,7 +103,11 @@ export default function CorrectionPickerScreen() {
         </Text>
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 12 }}
+        refreshControl={refreshControl}
+      >
         <Text variant="caption" className="text-text-3">
           {t('m:koreksi.pickerSubtitle')}
         </Text>

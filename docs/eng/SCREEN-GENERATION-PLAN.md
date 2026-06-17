@@ -241,6 +241,7 @@ Remaining masters → components:
 - [x] Reusable empty/access-denied state blocks · `→ payroll-states.tsx` · frame `dRfK9`
 - Shared: `payroll-shared.tsx` (status tone+key, IDR `formatMoney`, `formatPeriod`). Route glue: `payslip-detail-route.tsx` (drawer + export toast). i18n: full `payroll` namespace (id+en) incl. nested `common`/`errors`/`status`/`month`. Detail gained `onAddNote` prop (opens drawer). nav: `/payroll` (ADMIN).
 - [~] Screenshots deferred to the consolidated end-of-run pass.
+- [x] **F8.5 Tutup Periode Payroll** — **design done (2026-06-17)**: feature group `gLZlI`, ScreensRow `K494zi`. Screens: Cockpit (Terbuka) `XoMsT` · Cockpit (Terkunci) `p2ikRQ` · Konfirmasi Kunci Bersih `qGPyy` · Kunci Ada Blocker — HR `rPFqX` · Kunci Paksa — Super Admin `TBRoX` · Buka Kembali `l0IAi` · Minta Klarifikasi `E3LRpT` · Tab Lembur block-and-link `uPAkt` · Toast Sukses/Klarifikasi `ATzJd` · States `vq0RK`. Sidebar nav: **Penggajian** `WvCi4`. DS §8.16. *(Code generation pending.)*
 
 ### E10 — Reporting & Notifications ✅  · web container `JifD6`
 - [x] Reconciled against live `.pen` *(HR row: dashboard/billable/export-modal/notif-center/super-admin; SL dashboard; export + notif + dashboard-empty showcases)*

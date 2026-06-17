@@ -12,6 +12,7 @@ package payroll
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -42,15 +43,16 @@ func NewPeriodService(repo PeriodRepository, txm TxRunner) *PeriodService {
 
 // --- get/create (PC-1) ---
 
-// PeriodView bundles the period + its FIELD per-tab blocker tally for the cockpit
-// header (§9 GET period).
+// PeriodView bundles the period + its FIELD per-tab blocker tally + open
+// clarification count for the cockpit header (§9 GET period).
 type PeriodView struct {
-	Period   dom.PayrollPeriod
-	Blockers dom.PeriodBlockerCounts
+	Period             dom.PayrollPeriod
+	Blockers           dom.PeriodBlockerCounts
+	OpenClarifications int
 }
 
 // GetOrCreatePeriod returns the month's period (auto-creating OPEN, PC-1) together
-// with its current FIELD blocker counts.
+// with its current FIELD blocker counts and open clarification count.
 func (s *PeriodService) GetOrCreatePeriod(ctx context.Context, year, month int) (PeriodView, error) {
 	if err := validYearMonth(year, month); err != nil {
 		return PeriodView{}, err
@@ -63,7 +65,11 @@ func (s *PeriodService) GetOrCreatePeriod(ctx context.Context, year, month int) 
 	if err != nil {
 		return PeriodView{}, apperr.Internal(err)
 	}
-	return PeriodView{Period: period, Blockers: blockers}, nil
+	openClarif, err := s.repo.CountOpenClarifications(ctx, period.ID)
+	if err != nil {
+		return PeriodView{}, apperr.Internal(err)
+	}
+	return PeriodView{Period: period, Blockers: blockers, OpenClarifications: openClarif}, nil
 }
 
 // --- completeness (PC-2..PC-5) ---
@@ -142,9 +148,14 @@ func (s *PeriodService) Lock(ctx context.Context, year, month int, force bool, r
 		if p.Role != auth.RoleSuperAdmin {
 			return LockResult{}, apperr.Forbidden()
 		}
-		if reason == "" {
+		if strings.TrimSpace(reason) == "" {
 			return LockResult{}, apperr.Rule("FORCE_LOCK_REASON_REQUIRED", map[string]string{
 				"reason": "Alasan wajib diisi untuk penguncian paksa.",
+			})
+		}
+		if len(strings.TrimSpace(reason)) < 10 {
+			return LockResult{}, apperr.Rule("FORCE_LOCK_REASON_TOO_SHORT", map[string]string{
+				"reason": "Alasan harus minimal 10 karakter.",
 			})
 		}
 	}

@@ -18,6 +18,7 @@ import { useSession } from '../../src/providers/session';
 import { Button } from '../../src/ui/Button';
 import { Card } from '../../src/ui/Card';
 import { Text } from '../../src/ui/Text';
+import { usePullToRefresh } from '../../src/ui/usePullToRefresh';
 
 type Tone = 'ok' | 'warn' | 'bad' | 'muted';
 const toneBg: Record<Tone, string> = {
@@ -154,6 +155,7 @@ export default function LeaveScreen() {
   const router = useRouter();
   const { user } = useSession();
   const employeeId = user?.employee_id ?? '';
+  const refreshControl = usePullToRefresh();
 
   const balancesQ = useGetEmployeeTypeBalances(employeeId, {
     query: { enabled: !!employeeId },
@@ -184,7 +186,7 @@ export default function LeaveScreen() {
           <Text className="text-danger">{t('m:common.errorGeneric')}</Text>
         </View>
       ) : (
-        <ScrollView>
+        <ScrollView refreshControl={refreshControl}>
           <SectionHeader label={t('m:leave.balanceSection')} />
           {balances.length === 0 ? (
             <View className="px-6 pb-2">

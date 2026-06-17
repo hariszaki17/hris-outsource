@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../src/ui/Button';
 import { Card } from '../src/ui/Card';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 // Collapsed OvertimeStatus (E11):
 // PENDING_AGENT_CONFIRM | PENDING | APPROVED | REJECTED | CANCELLED.
@@ -29,6 +30,7 @@ export default function OvertimeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const qc = useQueryClient();
+  const refreshControl = usePullToRefresh();
   const q = useListOvertime({ limit: 20 });
   const confirm = useConfirmOvertime();
   const withdraw = useWithdrawOvertime();
@@ -74,7 +76,7 @@ export default function OvertimeScreen() {
           <Text variant="caption">{t('m:overtime.empty')}</Text>
         </View>
       ) : (
-        <ScrollView>
+        <ScrollView refreshControl={refreshControl}>
           <View className="gap-3 px-6 pb-8">
             {items.map((it) => (
               <Card key={it.id}>

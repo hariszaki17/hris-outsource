@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../src/ui/Card';
 import { StatusBadge } from '../src/ui/StatusBadge';
 import { Text } from '../src/ui/Text';
+import { usePullToRefresh } from '../src/ui/usePullToRefresh';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -207,6 +208,7 @@ export default function CorrectionTrackerScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullToRefresh();
   const [activeFilter, setActiveFilter] = useState<FilterKey>('ALL');
 
   const list = useListCorrections(undefined);
@@ -232,7 +234,11 @@ export default function CorrectionTrackerScreen() {
         </Text>
       </View>
 
-      <ScrollView className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 12 }}
+        refreshControl={refreshControl}
+      >
         {/* Filter tabs */}
         <ScrollView
           horizontal

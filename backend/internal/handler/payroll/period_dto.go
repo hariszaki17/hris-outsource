@@ -37,6 +37,17 @@ type periodResponse struct {
 	// Blockers is the live FIELD per-tab tally (nil on the lock/reopen action
 	// responses, which echo the period only).
 	Blockers *blockerCountsResponse `json:"blockers,omitempty"`
+
+	// Lockable is true when the period is OPEN and all blocker counts are zero
+	// (i.e. an ordinary HR user can lock without a force flag). The field is
+	// omitempty so it is absent on lock/reopen action responses where Blockers
+	// is also nil. Matches the OpenAPI spec PayrollPeriod.lockable field.
+	Lockable *bool `json:"lockable,omitempty"`
+
+	// OpenClarifications is the count of OPEN clarifications on this period
+	// (the "awaiting reply" badge, PC-13 / F8.5). Omitted on lock/reopen action
+	// responses where Blockers is also nil.
+	OpenClarifications *int `json:"open_clarifications,omitempty"`
 }
 
 func toPeriod(p dom.PayrollPeriod) periodResponse {

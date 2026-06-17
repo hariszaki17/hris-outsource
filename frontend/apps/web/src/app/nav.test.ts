@@ -183,11 +183,15 @@ describe('AGENT_NAV_ITEMS (agent self-service backbone, 3 merged homes)', () => 
     expect(pengajuan?.requires).toEqual({ anyOf: ['self.leave', 'self.overtime'] });
   });
 
-  it('shift_leader holds no self.* keys, so the agent backbone filters empty', () => {
-    // shift_leader is the role whose bundle never overlaps the self.* keys. (super_admin/hr_admin
-    // hold the whole catalog incl. self.* under the interim bundle, but they never RENDER this
-    // backbone — the shell switches by role via navForRole, not by filtering. See next test.)
-    expect(visibleNav(AGENT_NAV_ITEMS, permissionsForRole('shift_leader'))).toEqual([]);
+  it('all staff roles carry self.* (2026-06-15 baseline), so AGENT_NAV_ITEMS filter is non-empty — but the shell never renders it for staff (navForRole gates by role, see next test)', () => {
+    // As of 2026-06-15 every internal staff role (super_admin, hr_admin, lead, shift_leader)
+    // carries the self.* capability baseline so they can also reach their own /me self-service
+    // surface. The filter-by-permission pass is no longer empty for any role. The actual
+    // isolation between staff and agent surfaces is enforced by navForRole (role-keyed, not
+    // permission-keyed) — confirmed in the next test.
+    for (const role of ['super_admin', 'hr_admin', 'lead', 'shift_leader'] as const) {
+      expect(visibleNav(AGENT_NAV_ITEMS, permissionsForRole(role)).length).toBeGreaterThan(0);
+    }
   });
 
   it('staff roles never render the agent backbone — the shell switches by role, not permission', () => {
@@ -224,14 +228,19 @@ describe('routeRequirement (agent /me/* — merged homes + old-path redirects)',
     expect(routeRequirement('/me/pengajuan')).not.toBe('self.attendance');
   });
 
-  it('an agent satisfies every /me requirement; a staff role satisfies none of them', () => {
+  it('an agent satisfies every /me requirement; all staff roles also satisfy them (2026-06-15 self.* baseline) — isolation is by navForRole, not permission', () => {
+    // As of 2026-06-15 every internal staff role carries the self.* baseline so they can
+    // also visit their own /me surface (clock-in, leave, OT, payslip). The old "staff role
+    // satisfies none" invariant no longer holds. Surface isolation is enforced by navForRole()
+    // (returns NAV_ITEMS for staff, AGENT_NAV_ITEMS for agent) — not by permission filtering.
     const agentPerms = permissionsForRole('agent');
     const slPerms = permissionsForRole('shift_leader');
     for (const path of ['/me', '/me/pengajuan', '/me/akun', '/me/leave', '/me/profile']) {
       const req = routeRequirement(path);
       expect(req).not.toBeNull();
       expect(hasPermission(agentPerms, req as never)).toBe(true);
-      expect(hasPermission(slPerms, req as never)).toBe(false);
+      // shift_leader now has self.* keys → also satisfies /me requirements
+      expect(hasPermission(slPerms, req as never)).toBe(true);
     }
   });
 

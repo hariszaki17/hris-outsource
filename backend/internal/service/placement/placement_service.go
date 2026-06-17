@@ -383,6 +383,28 @@ func (s *PlacementService) GetPlacement(ctx context.Context, id string) (Placeme
 	return detail, nil
 }
 
+// GetMyActivePlacement resolves the calling agent's own active placement from the
+// principal (no id needed) and returns the same detail shape as GetPlacement. Used
+// by GET /me/placement so a newly-onboarded agent can discover their placement
+// before they have any attendance history. Returns apperr.NotFound when the
+// principal has no employee or no active placement.
+func (s *PlacementService) GetMyActivePlacement(ctx context.Context) (PlacementDetail, error) {
+	pr, ok := auth.PrincipalFrom(ctx)
+	if !ok || pr.EmployeeID == "" {
+		return PlacementDetail{}, apperr.NotFound()
+	}
+	p, err := s.repo.GetActivePlacementForEmployee(ctx, pr.EmployeeID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return PlacementDetail{}, apperr.NotFound()
+	}
+	if err != nil {
+		return PlacementDetail{}, apperr.Internal(err)
+	}
+	// Delegate to GetPlacement for the chain + leader + self-scope guard (which the
+	// principal trivially passes — it is their own placement).
+	return s.GetPlacement(ctx, p.ID)
+}
+
 // --- create ---
 
 // CreatePlacement creates a placement, enforcing INV-1 + BR-1b/3/4/5/6.

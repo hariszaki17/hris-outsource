@@ -51,6 +51,7 @@ type fakePeriodRepo struct {
 	period      dom.PayrollPeriod
 	periodFound bool
 	blockers    dom.PeriodBlockerCounts
+	openClarif  int
 
 	lockCalled    bool
 	lockParams    LockPeriodParams
@@ -114,6 +115,10 @@ func (f *fakePeriodRepo) ListCompleteness(_ context.Context, _, _ int, _ *string
 
 func (f *fakePeriodRepo) CountFieldBlockers(_ context.Context, _, _ int) (dom.PeriodBlockerCounts, error) {
 	return f.blockers, nil
+}
+
+func (f *fakePeriodRepo) CountOpenClarifications(_ context.Context, _ string) (int, error) {
+	return f.openClarif, nil
 }
 
 func (f *fakePeriodRepo) ListSummaries(_ context.Context, _ string, _ *string, _ int) ([]dom.PeriodEmployeeSummary, error) {
