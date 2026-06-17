@@ -64,6 +64,9 @@ type Deps struct {
 	Overtime *overtimehttp.Handler
 	// PAYROLL slice (10-02): historical payslip archive + audit notes + async export (E8).
 	Payroll *payrollhttp.Handler
+	// PAYROLL period-close slice (F8.5): month-end reconciliation gate — period FSM,
+	// completeness, lock/reopen, immutable summary, clarification back-channel (E8).
+	PayrollPeriod *payrollhttp.PeriodHandler
 	// APPROVAL slice (E11): configurable per-company approval engine — templates +
 	// instances/actions. Single source of truth for leave/overtime approval.
 	Approval *approvalhttp.Handler
@@ -285,13 +288,12 @@ func New(d Deps) http.Handler {
 			// PEOPLE agreements slice end (04-03). 04-04 change-requests: append here.
 
 			// ---------------------------------------------------------------
-			// Agent self-service PROFILE (E2 F2.1): instant-tier edit of own
+			// Self-service PROFILE (E2 F2.1): instant-tier edit of own
 			// {address, app_language, photo} + presigned photo-upload init.
-			// x-rbac roles:[agent] scope:self — the service resolves the employee
-			// from the principal (GuardSelf). Approval-tier fields are rejected
-			// (FIELD_REQUIRES_APPROVAL) so the agent files a change request instead.
+			// scope:self — AUTHENTICATED-ONLY (any logged-in employee, incl. INTERNAL
+			// back-office staff, not just agents): the service resolves the employee
+			// from the principal and enforces scope via rbac.GuardSelf.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleAgent))
 				r.Patch("/me/profile", d.PeopleSelfProfile.UpdateMyProfile)
 				r.Post("/me/profile/photo-upload-init", d.PeopleSelfProfile.InitProfilePhotoUpload)
 			})
@@ -419,9 +421,12 @@ func New(d Deps) http.Handler {
 				r.Get("/attendance/{id}", d.Attendance.GetAttendance)
 			})
 
-			// Agent CLOCK-IN/OUT (F5.1, mobile, scope:self). Idempotent per openapi.
+			// CLOCK-IN/OUT (F5.1, mobile, scope:self). Idempotent per openapi.
+			// AUTHENTICATED-ONLY (any logged-in employee, incl. INTERNAL back-office
+			// staff, not just agents): the employee is always the principal (the
+			// service derives employee_id from the token, never the body), so this is
+			// inherently self-scoped — OutOfScope if the principal has no employee_id.
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleAgent))
 				r.With(d.Idempotency.Handler).Post("/attendance:clock-in", d.Clock.ClockIn)
 				r.With(d.Idempotency.Handler).Post("/attendance:clock-out", d.Clock.ClockOut)
 			})
@@ -633,6 +638,37 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/payslips:export", d.Payroll.ExportPayslips)
 			})
 			// PAYROLL slice end (10-02). Phase 10+ appends after this line.
+
+				// ---------------------------------------------------------------
+				// PAYROLL PERIOD CLOSE slice (F8.5): the month-end reconciliation
+				// gate (PC-1..PC-15). Review/lock/reopen/raise-clarification =
+				// hr_admin + super_admin, global (PC-15). Force-lock + reopen are
+				// super_admin-only — enforced IN-SERVICE (the route admits both, the
+				// service rejects a non-super forced lock / reopen with 403).
+				// Clarification :answer is scope-checked in the service to the target
+				// (resolved SL/agent), so SL/lead/agent are admitted on that ONE route.
+				// chi matches the `:lock`/`:reopen`/`:answer`/`:resolve`/`:cancel`
+				// action suffixes natively.
+				// ---------------------------------------------------------------
+				r.Group(func(r chi.Router) {
+					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+					r.Get("/payroll-periods/{year}/{month}", d.PayrollPeriod.GetPeriod)
+					r.Get("/payroll-periods/{year}/{month}/completeness", d.PayrollPeriod.GetCompleteness)
+					r.Get("/payroll-periods/{year}/{month}/summary", d.PayrollPeriod.GetSummary)
+					r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:lock", d.PayrollPeriod.LockPeriod)
+					r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:reopen", d.PayrollPeriod.ReopenPeriod)
+					// Raise + close the clarification loop (HR).
+					r.With(d.Idempotency.Handler).Post("/clarifications", d.PayrollPeriod.RaiseClarification)
+					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:resolve", d.PayrollPeriod.ResolveClarification)
+					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:cancel", d.PayrollPeriod.CancelClarification)
+				})
+				// Clarification :answer — the target replies. All roles admitted; the
+				// service scope-checks to the resolved target (SL/agent) or HR/super.
+				r.Group(func(r chi.Router) {
+					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
+					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:answer", d.PayrollPeriod.AnswerClarification)
+				})
+				// PAYROLL PERIOD CLOSE slice end (F8.5). Phase 10+ appends after this line.
 
 			// ---------------------------------------------------------------
 			// E10 REPORTING slice — NOTIFICATIONS (11-02). The caller's in-app

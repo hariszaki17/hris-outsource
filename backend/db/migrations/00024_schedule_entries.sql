@@ -30,6 +30,9 @@ CREATE TABLE schedule_entries (
 -- INV-1 (DOUBLE_SHIFT backstop): at most one live entry per agent per date.
 -- Mirrors placements_active_employee_uq — race-proof; 06-02 service pre-checks
 -- (FindLiveEntryForAgentDate) then relies on this index as the final backstop.
+-- TODO(multi-shift): relax this partial unique (employee_id, work_date) → allow
+-- multiple NON-OVERLAPPING shifts per agent per day (new migration). Enables true
+-- multi-shift; F5.7 reconcile is already window-based and forward-compatible (AR-3).
 CREATE UNIQUE INDEX schedule_entries_active_agent_date_uq
     ON schedule_entries (employee_id, work_date)
     WHERE deleted_at IS NULL;

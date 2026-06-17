@@ -54,7 +54,10 @@ type Employee struct {
 	// GET photo_url is derived at the DTO boundary, never stored.
 	PhotoObjectKey *string
 	Status         string // "active" | "inactive" (DB lowercase)
-	HasLogin       bool   // derived: UserID != nil
+	// EmployeeType distinguishes outsourced field agents from SWP back-office staff
+	// (migr. 00067): "FIELD" (default) | "INTERNAL".
+	EmployeeType string
+	HasLogin     bool // derived: UserID != nil
 	// current_* come from the agent's current placement (E3 read); empty/nil unplaced.
 	// CurrentPosition is a free-text label (no master / FK / ID).
 	CurrentPosition      string
@@ -78,6 +81,7 @@ type EmployeeFilter struct {
 	Role            *string // filter by linked User role (E1): agent|shift_leader|hr_admin|super_admin
 	Assigned        *bool   // true/false against an active shift-leader assignment
 	ClientCompanyID *string // filter by current placement's client company ID
+	EmployeeType    *string // filter by employee_type: FIELD|INTERNAL (migr. 00067)
 	Limit           int
 	CursorCreatedAt *time.Time
 	CursorID        *string

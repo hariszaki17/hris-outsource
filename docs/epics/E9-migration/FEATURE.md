@@ -214,6 +214,7 @@ flowchart TD
 - ✅ **Blocking review items** = `decrypt_fail`, `orphan_identity`, `unmatched_placement`; non-blocking = `ambiguous_chain`. *(`unclassified_service_line` removed 2026-06-12 — service line dropped project-wide; position is free-text, copied verbatim, never queued.)*
 - ✅ **Placement-string matching** = exact + alias list + fuzzy-with-manual-confirm.
 - ✅ **Post-cutover** = keep `lumen_swp` read-only ~6–12 months.
+- ✅ **Role/identity remap (2026-06-15)** — `agent` is no longer a role: legacy `users.role=agent` (and `shift_leader`) → **NULL** (baseline self-service / derived); only {super_admin, hr_admin, lead} are stored elevations. Seed the SWP **`type=INTERNAL`** company + HQ Site, and set `Employee.employee_type` (`FIELD` for client-placed, `INTERNAL` for SWP staff). Field rules in [E2 DATA-MAPPING G-1/G-9](../E2-identity/DATA-MAPPING.md); see [EPICS §8 E1/E2].
 
 **Still open (sized during dry-runs / ops):**
 1. Maintenance-window length + rehearsal schedule.

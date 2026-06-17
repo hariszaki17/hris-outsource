@@ -26,6 +26,7 @@ import {
   type Attendance,
   type AttendancePage,
   AttendanceStatus,
+  ClockInRequestMode,
   useClockIn,
   useClockOut,
   useListAttendance,
@@ -36,6 +37,7 @@ import { LOCALE_ID, TZ, formatInstant } from '@swp/shared';
 import {
   Button,
   EmptyState,
+  FilterSelect,
   Modal,
   ModalBody,
   ModalFooter,
@@ -182,6 +184,8 @@ export function AgentKehadiranScreen() {
 
   const [busy, setBusy] = useState(false);
   const [absenOpen, setAbsenOpen] = useState(false);
+  // Clock-in mode: ONSITE (geofence applies) vs REMOTE (WFH, geofence skipped). Defaults ONSITE.
+  const [mode, setMode] = useState<ClockInRequestMode>(ClockInRequestMode.ONSITE);
   const [geofencePrompt, setGeofencePrompt] = useState<{ distance: string; radius: string } | null>(
     null,
   );
@@ -253,17 +257,25 @@ export function AgentKehadiranScreen() {
     }
     setBusy(true);
     try {
-      const coords = await getCurrentCoords();
-      if (!coords) {
-        toast({ tone: 'error', title: t('gpsDenied') });
-        return;
+      // REMOTE (WFH) skips geolocation entirely — geofence is bypassed server-side, so we do not
+      // require coords. ONSITE still acquires GPS and guards on a denied/unavailable fix.
+      const isRemote = mode === ClockInRequestMode.REMOTE;
+      let coords: Awaited<ReturnType<typeof getCurrentCoords>> = null;
+      if (!isRemote) {
+        coords = await getCurrentCoords();
+        if (!coords) {
+          toast({ tone: 'error', title: t('gpsDenied') });
+          return;
+        }
       }
       try {
         await clockIn.mutateAsync({
           data: {
-            lat: coords.lat,
-            lng: coords.lng,
+            // REMOTE has no fix; send 0,0 (never distance-checked since geofence is skipped).
+            lat: coords?.lat ?? 0,
+            lng: coords?.lng ?? 0,
             gps_available: true,
+            mode,
             wfo: true,
             force_outside_geofence: force,
           },
@@ -507,6 +519,8 @@ export function AgentKehadiranScreen() {
         checkIn={open ? timeOf(open.check_in_at) : '—'}
         checkOut="—"
         isOpenRecord={Boolean(open)}
+        mode={mode}
+        onModeChange={setMode}
         pending={pending}
         onConfirm={() => (open ? void doClockOut() : void doClockIn(false))}
       />
@@ -582,6 +596,8 @@ interface AbsenModalProps {
   checkIn: string;
   checkOut: string;
   isOpenRecord: boolean;
+  mode: ClockInRequestMode;
+  onModeChange: (mode: ClockInRequestMode) => void;
   pending: boolean;
   onConfirm: () => void;
 }
@@ -596,6 +612,8 @@ function AbsenModal({
   checkIn,
   checkOut,
   isOpenRecord,
+  mode,
+  onModeChange,
   pending,
   onConfirm,
 }: AbsenModalProps) {
@@ -655,11 +673,36 @@ function AbsenModal({
             </div>
           </div>
 
-          {/* Location hint */}
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
-            <MapPin size={14} className="shrink-0 text-text-3" aria-hidden />
-            <span className="text-[12px] font-medium text-text-2">{t('locationHint')}</span>
-          </div>
+          {/* Clock-in mode (ONSITE / REMOTE) — REMOTE skips geofence + geolocation.
+              Only on clock-in; mode does not apply to clock-out. */}
+          {!isOpenRecord && (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] font-semibold text-text-3">
+                {t('attendance.mode.label', { ns: 'translation' })}
+              </span>
+              <FilterSelect
+                aria-label={t('attendance.mode.label', { ns: 'translation' })}
+                value={mode}
+                onChange={(e) => onModeChange(e.target.value as ClockInRequestMode)}
+                disabled={pending}
+              >
+                <option value={ClockInRequestMode.ONSITE}>
+                  {t('attendance.mode.ONSITE', { ns: 'translation' })}
+                </option>
+                <option value={ClockInRequestMode.REMOTE}>
+                  {t('attendance.mode.REMOTE', { ns: 'translation' })}
+                </option>
+              </FilterSelect>
+            </div>
+          )}
+
+          {/* Location hint — only meaningful for ONSITE (geofence) clock-in. */}
+          {(isOpenRecord || mode === ClockInRequestMode.ONSITE) && (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
+              <MapPin size={14} className="shrink-0 text-text-3" aria-hidden />
+              <span className="text-[12px] font-medium text-text-2">{t('locationHint')}</span>
+            </div>
+          )}
         </div>
       </ModalBody>
       <ModalFooter>

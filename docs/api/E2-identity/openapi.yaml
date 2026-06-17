@@ -122,11 +122,22 @@ paths:
         - in: query
           name: role
           description: |
-            Filter by linked User role (E1). Use `shift_leader` (combined
+            Filter by linked User elevation role (E1). Use `shift_leader` (combined
             with `assigned=false`) for the unassigned-leader picker (§18).
+            `agent` retired as a role 2026-06-15 — to list field workers filter
+            `employee_type=FIELD` instead; baseline (no elevation) employees are
+            excluded by any role value.
           schema:
             type: string
-            enum: [agent, shift_leader, hr_admin, super_admin]
+            enum: [shift_leader, lead, hr_admin, super_admin]
+        - in: query
+          name: employee_type
+          description: |
+            Filter by employee category (2026-06-15). `FIELD` = placed at a client
+            (the "agent" audience); `INTERNAL` = SWP HQ staff.
+          schema:
+            type: string
+            enum: [FIELD, INTERNAL]
         - in: query
           name: assigned
           description: |
@@ -270,7 +281,6 @@ paths:
         populated by **separate** endpoints — only the Profil tab is served
         from E2. See `x-cross-epic-references` extension below.
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: company_or_global
       x-design-screens:
         - JBjBb   # E2 · Karyawan — Detail
@@ -545,7 +555,6 @@ paths:
         accepted here. The employee is resolved from the authenticated
         principal (self scope); there is no path id.
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - l2BKa   # Agen · Ubah Profil (tiered instant-edit form)
@@ -610,7 +619,6 @@ paths:
         signature, so an oversized or wrong-type upload fails at the storage
         layer. Same pattern is reused by E5 attendance selfies.
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - l2BKa   # Agen · Ubah Profil (photo picker)
@@ -842,7 +850,6 @@ paths:
         role-gated; HR admin & super admin only). Agents (mobile) get a
         slimmer view: type, period, status — compensation hidden (EA-4 §4).
       x-rbac:
-        roles: [hr_admin, super_admin, agent]
         scope: self
       responses:
         '200':
@@ -1631,7 +1638,6 @@ paths:
         Returns the SWP-wide leave types (legacy was per-company; collapsed
         to one set per DATA-MAPPING G-6 / C-2). Doubles as the picker for E6.
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: global
       x-design-screens: []  # AUDIT BLOCKER: F2.5 screens entirely missing
       parameters:
@@ -1733,7 +1739,6 @@ paths:
       tags: [master-data]
       summary: Get a leave type
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: global
       responses:
         '200':
@@ -1793,7 +1798,6 @@ paths:
       tags: [master-data]
       summary: List attendance codes (also serves as AttendanceCode picker)
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: global
       x-design-screens: []  # AUDIT BLOCKER
       parameters:
@@ -1893,7 +1897,6 @@ paths:
       tags: [master-data]
       summary: Get an attendance code
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: global
       responses:
         '200':
@@ -2394,7 +2397,7 @@ components:
         Full employee record. The list response uses the same shape — the
         picker projection is just `id`, `full_name`, `nip`,
         `current_position`, `current_client_company`.
-      required: [id, user_id, full_name, nik, join_at, status, phone]
+      required: [id, user_id, full_name, nik, join_at, status, employee_type, phone]
       properties:
         id: { $ref: '#/components/schemas/EmployeeId' }
         user_id:
@@ -2459,6 +2462,13 @@ components:
             Tier: **instant** self-edit via `PATCH /me/profile` (no approval).
             Also HR-editable.
         status: { $ref: '#/components/schemas/EmployeeStatus' }
+        employee_type:
+          type: string
+          enum: [FIELD, INTERNAL]
+          default: FIELD
+          description: |
+            FIELD = placed at a client (agent); INTERNAL = SWP HQ staff
+            (2026-06-15).
         temp_password:
           type: string
           nullable: true
@@ -2517,6 +2527,13 @@ components:
             master/FK. The `GET /positions:search` typeahead surfaces existing
             labels for reuse.
           example: Petugas Parkir
+        employee_type:
+          type: string
+          enum: [FIELD, INTERNAL]
+          default: FIELD
+          description: |
+            FIELD = placed at a client (agent); INTERNAL = SWP HQ staff
+            (2026-06-15). Optional on input; defaults to FIELD when omitted.
         phone:
           type: string
           description: |
@@ -2750,6 +2767,13 @@ components:
         status:
           type: string
           enum: [ACTIVE, INACTIVE]
+        type:
+          type: string
+          enum: [CLIENT, INTERNAL]
+          default: CLIENT
+          description: |
+            CLIENT = placement-target client; INTERNAL = SWP itself (HQ).
+            INTERNAL is seed-only, not creatable via API.
         has_leader:
           type: boolean
           readOnly: true

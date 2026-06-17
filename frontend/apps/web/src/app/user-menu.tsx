@@ -1,7 +1,7 @@
 import type { SessionUser } from '@/lib/auth.ts';
 import { TopbarUser, cn } from '@swp/ui';
 import { useNavigate } from '@tanstack/react-router';
-import { LogOut, Settings } from 'lucide-react';
+import { Fingerprint, LogOut, Settings } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -33,6 +33,10 @@ export function UserMenu({ user, onLogout }: { user: SessionUser; onLogout: () =
   }, [open]);
 
   const isAdmin = user.role === 'super_admin' || user.role === 'hr_admin';
+  // Self-service baseline (2026-06-15): every internal staff role also reaches the /me surface.
+  // Gate the link on the capability key, not the role, so it follows the permission map. The
+  // baseline-only `agent` already lands on the /me backbone, so the link is redundant for them.
+  const showSelfService = user.role !== 'agent' && user.permissions.includes('self.attendance');
 
   function handleLogout() {
     setOpen(false);
@@ -56,6 +60,16 @@ export function UserMenu({ user, onLogout }: { user: SessionUser; onLogout: () =
             <p className="font-semibold text-sm text-text">{user.name}</p>
             <p className="text-text-3 text-xs">{t(`role.${user.role}`)}</p>
           </div>
+          {showSelfService && (
+            <MenuItem
+              icon={Fingerprint}
+              label={t('userMenu.selfService')}
+              onClick={() => {
+                setOpen(false);
+                void navigate({ to: '/me' });
+              }}
+            />
+          )}
           {isAdmin && (
             <MenuItem
               icon={Settings}

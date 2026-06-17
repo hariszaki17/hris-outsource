@@ -39,7 +39,7 @@ All users (consume), Engineers (build to conventions), System.
 | PC-1 | UI is **Bahasa Indonesia**; strings are externalized (i18n-ready) so a second language could be added later. |
 | PC-2 | **Asia/Jakarta** is the canonical timezone for all evaluation (lateness, auto-close, period boundaries) and display; storage in UTC, render in WIB. |
 | PC-3 | API uses a **consistent error envelope** (code, message, field errors), **pagination** (cursor/offset standard), and **server-side validation** with structured field errors. |
-| PC-4 | The **app shell** renders **role-based navigation** (agent vs leader vs HR vs super admin) on both web and mobile. |
+| PC-4 | The **app shell** renders **navigation by highest elevation** (baseline self-service vs lead vs leader vs HR vs super admin) on both web and mobile; an employee with no elevation gets the self-service backbone. *(agent retired as a role 2026-06-15 — see EPICS §8 E1.)* |
 | PC-5 | Money renders as **IDR**; dates/numbers use Indonesian formatting. |
 | PC-6 | Conventions are documented and shared so all epics conform. |
 

@@ -27,7 +27,7 @@ func (q *Queries) CountActiveSitesForCompany(ctx context.Context, clientCompanyI
 }
 
 const createClientCompany = `-- name: CreateClientCompany :one
-INSERT INTO client_companies (id, name, address, leader_scope, npwp, pic_name, phone, email)
+INSERT INTO client_companies (id, name, address, leader_scope, type, npwp, pic_name, phone, email)
 VALUES (
     'SWP-CMP-' || swp_next_id('CMP'),
     $1,
@@ -36,9 +36,10 @@ VALUES (
     $4,
     $5,
     $6,
-    $7
+    $7,
+    $8
 )
-RETURNING id, name, address, leader_scope, npwp, pic_name, phone, email,
+RETURNING id, name, address, leader_scope, type, npwp, pic_name, phone, email,
           status, created_at, updated_at
 `
 
@@ -46,6 +47,7 @@ type CreateClientCompanyParams struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -57,6 +59,7 @@ type CreateClientCompanyRow struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -72,6 +75,7 @@ func (q *Queries) CreateClientCompany(ctx context.Context, arg CreateClientCompa
 		arg.Name,
 		arg.Address,
 		arg.LeaderScope,
+		arg.Type,
 		arg.Npwp,
 		arg.PicName,
 		arg.Phone,
@@ -83,6 +87,7 @@ func (q *Queries) CreateClientCompany(ctx context.Context, arg CreateClientCompa
 		&i.Name,
 		&i.Address,
 		&i.LeaderScope,
+		&i.Type,
 		&i.Npwp,
 		&i.PicName,
 		&i.Phone,
@@ -95,7 +100,7 @@ func (q *Queries) CreateClientCompany(ctx context.Context, arg CreateClientCompa
 }
 
 const getClientCompanyByID = `-- name: GetClientCompanyByID :one
-SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
+SELECT id, name, address, leader_scope, type, npwp, pic_name, phone, email,
        status, created_at, updated_at,
        EXISTS (
          SELECT 1 FROM shift_leader_assignments sla
@@ -112,6 +117,7 @@ type GetClientCompanyByIDRow struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -130,6 +136,7 @@ func (q *Queries) GetClientCompanyByID(ctx context.Context, id string) (GetClien
 		&i.Name,
 		&i.Address,
 		&i.LeaderScope,
+		&i.Type,
 		&i.Npwp,
 		&i.PicName,
 		&i.Phone,
@@ -143,7 +150,7 @@ func (q *Queries) GetClientCompanyByID(ctx context.Context, id string) (GetClien
 }
 
 const listClientCompanies = `-- name: ListClientCompanies :many
-SELECT id, name, address, leader_scope, npwp, pic_name, phone, email,
+SELECT id, name, address, leader_scope, type, npwp, pic_name, phone, email,
        status, created_at, updated_at,
        EXISTS (
          SELECT 1 FROM shift_leader_assignments sla
@@ -182,6 +189,7 @@ type ListClientCompaniesRow struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -215,6 +223,7 @@ func (q *Queries) ListClientCompanies(ctx context.Context, arg ListClientCompani
 			&i.Name,
 			&i.Address,
 			&i.LeaderScope,
+			&i.Type,
 			&i.Npwp,
 			&i.PicName,
 			&i.Phone,
@@ -240,7 +249,7 @@ SET status     = $1,
     updated_at = now()
 WHERE id = $2
   AND deleted_at IS NULL
-RETURNING id, name, address, leader_scope, npwp, pic_name, phone, email,
+RETURNING id, name, address, leader_scope, type, npwp, pic_name, phone, email,
           status, created_at, updated_at
 `
 
@@ -254,6 +263,7 @@ type SetClientCompanyStatusRow struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -272,6 +282,7 @@ func (q *Queries) SetClientCompanyStatus(ctx context.Context, arg SetClientCompa
 		&i.Name,
 		&i.Address,
 		&i.LeaderScope,
+		&i.Type,
 		&i.Npwp,
 		&i.PicName,
 		&i.Phone,
@@ -288,14 +299,15 @@ UPDATE client_companies
 SET name         = $1,
     address      = $2,
     leader_scope = $3,
-    npwp         = $4,
-    pic_name     = $5,
-    phone        = $6,
-    email        = $7,
+    type         = $4,
+    npwp         = $5,
+    pic_name     = $6,
+    phone        = $7,
+    email        = $8,
     updated_at   = now()
-WHERE id = $8
+WHERE id = $9
   AND deleted_at IS NULL
-RETURNING id, name, address, leader_scope, npwp, pic_name, phone, email,
+RETURNING id, name, address, leader_scope, type, npwp, pic_name, phone, email,
           status, created_at, updated_at
 `
 
@@ -303,6 +315,7 @@ type UpdateClientCompanyParams struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -315,6 +328,7 @@ type UpdateClientCompanyRow struct {
 	Name        string
 	Address     string
 	LeaderScope string
+	Type        string
 	Npwp        *string
 	PicName     *string
 	Phone       *string
@@ -329,6 +343,7 @@ func (q *Queries) UpdateClientCompany(ctx context.Context, arg UpdateClientCompa
 		arg.Name,
 		arg.Address,
 		arg.LeaderScope,
+		arg.Type,
 		arg.Npwp,
 		arg.PicName,
 		arg.Phone,
@@ -341,6 +356,7 @@ func (q *Queries) UpdateClientCompany(ctx context.Context, arg UpdateClientCompa
 		&i.Name,
 		&i.Address,
 		&i.LeaderScope,
+		&i.Type,
 		&i.Npwp,
 		&i.PicName,
 		&i.Phone,

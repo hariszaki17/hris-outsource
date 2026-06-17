@@ -17,6 +17,8 @@ type Querier interface {
 	AdjustQuotaEntitled(ctx context.Context, arg AdjustQuotaEntitledParams) (LeaveQuota, error)
 	// AgentDashboard.recent_attendance: last-7-day present/late/absent for one agent.
 	AgentRecentAttendance(ctx context.Context, arg AgentRecentAttendanceParams) (AgentRecentAttendanceRow, error)
+	// OPEN -> ANSWERED (PC-13). Guarded to OPEN (0 rows -> already answered/closed).
+	AnswerClarificationRequest(ctx context.Context, arg AnswerClarificationRequestParams) (AnswerClarificationRequestRow, error)
 	// Apply an approved correction's whitelisted proposed_* fields to the target row:
 	// COALESCE(narg, existing) preserves untouched fields; appends 'CORRECTED' to flags
 	// (de-duped via array_remove first); sets last_correction_id. status/is_late/
@@ -134,6 +136,14 @@ type Querier interface {
 	CountExpiringAgreements30d(ctx context.Context, today pgtype.Date) (int64, error)
 	// Active/expiring placements ending within the next 30 days (inclusive of today).
 	CountExpiringPlacements30d(ctx context.Context, arg CountExpiringPlacements30dParams) (int64, error)
+	// The cockpit per-tab blocker tally (PC-7 gate) — FIELD employees ONLY (PC-5).
+	// Returns the three counts the lock precondition checks (attendance / overtime /
+	// leave). attendance = PENDING/ESCALATED + open + is_payable-NULL no-shift +
+	// coverage gaps (expected schedule rows with neither a clean record nor leave is
+	// approximated here as the attendance-blocker rows; the per-employee coverage gap
+	// is surfaced in ListPeriodCompleteness, this aggregate counts the record-level
+	// blockers which gate the same way).
+	CountFieldBlockers(ctx context.Context, arg CountFieldBlockersParams) (CountFieldBlockersRow, error)
 	// E6 F6.2 server-authoritative leave duration: the count of days in
 	// [start_date, end_date] the agent would otherwise be ROSTERED for a shift
 	// (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not
@@ -201,6 +211,10 @@ type Querier interface {
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (CreateAttachmentRow, error)
 	// Allocates the SWP-AC id inline from the per-prefix sequence.
 	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
+	// ============================================================================
+	// clarification_requests (PC-13)
+	// ============================================================================
+	CreateClarificationRequest(ctx context.Context, arg CreateClarificationRequestParams) (CreateClarificationRequestRow, error)
 	// Allocates the SWP-CMP id inline from the per-prefix sequence.
 	CreateClientCompany(ctx context.Context, arg CreateClientCompanyParams) (CreateClientCompanyRow, error)
 	// Insert a new agent/leader-filed correction in PENDING. company_id +
@@ -228,6 +242,16 @@ type Querier interface {
 	// Allocates the SWP-OTR id inline from the per-prefix sequence. Overtime rules are
 	// GLOBAL ONLY (decision 2026-06-12 — service_line_id dropped).
 	CreateOvertimeRule(ctx context.Context, arg CreateOvertimeRuleParams) (CreateOvertimeRuleRow, error)
+	// ============================================================================
+	// payroll_adjustments — the F8.3 carry-forward ledger (PC-9)
+	// ============================================================================
+	// Emit a PENDING, unvalued adjustment for a post-lock change (PC-9). amount stays
+	// NULL until the F8.3 run values it.
+	CreatePayrollAdjustment(ctx context.Context, arg CreatePayrollAdjustmentParams) (CreatePayrollAdjustmentRow, error)
+	// Auto-create OPEN on first access (PC-1). ON CONFLICT keeps a concurrent creator's
+	// row (the UNIQUE(year,month) race) — DO UPDATE no-ops so RETURNING always yields the
+	// live row.
+	CreatePayrollPeriod(ctx context.Context, arg CreatePayrollPeriodParams) (CreatePayrollPeriodRow, error)
 	// id allocated by the column DEFAULT ('SWP-PL-' || swp_next_id('PL')).
 	CreatePlacement(ctx context.Context, arg CreatePlacementParams) (CreatePlacementRow, error)
 	// id allocated by the column DEFAULT ('SWP-SCH-' || swp_next_id('SCH')).
@@ -270,6 +294,24 @@ type Querier interface {
 	// DOUBLE_SHIFT pre-check / replace lookup: the live entry (if any) for an
 	// agent on a date. Mirrors the INV-1 partial unique index predicate.
 	FindLiveEntryForAgentDate(ctx context.Context, arg FindLiveEntryForAgentDateParams) (FindLiveEntryForAgentDateRow, error)
+	// E5 attendance auto-reconcile queries (F5.7 / AR-1..AR-10). When a workable shift
+	// is created (scheduling.CreateEntry), an existing machine-owned UNSCHEDULED
+	// attendance record the shift covers is adopted: linked to the new schedule_id, its
+	// shift window snapshotted, and (for machine-owned rows) its lateness / status /
+	// flags / verification / payability re-derived with the same clock-in rules. The
+	// window [shift_start-2h, shift_end+4h] is computed in Go (Asia/Jakarta wall-clock,
+	// mirroring clock.sql GetTodayScheduleForEmployee) and passed as timestamptz bounds.
+	// `make gen` writes internal/repository/sqlc (NEVER hand-edit).
+	// The UNSCHEDULED attendance row a new shift adopts (AR-3 window). Match: same
+	// employee_id + placement_id, schedule_id IS NULL, not deleted, UNSCHEDULED in
+	// flags, and check_in_at within [window_start, window_end]; earliest check_in_at
+	// wins (AR-3 — earliest if several, no out-of-window fallback). The machine-owned
+	// vs human-decided split (AR-2 vs AR-9) is classified in Go from the returned
+	// verification_status / verified_by / rejected_by: a machine-owned row is
+	// re-derived (ReconcileAttendance); a human-decided one gets lineage-only
+	// (RelinkAttendanceLineage). FOR UPDATE row-locks the adoptee so a mid-review SL is
+	// serialized (C-AR-7).
+	FindReconcileCandidate(ctx context.Context, arg FindReconcileCandidateParams) (FindReconcileCandidateRow, error)
 	// E5 absence-sweep queries (F5.2 true-ABSENT / SWP-ATT-*). The in-process cron
 	// (cmd/api, single binary) periodically marks scheduled shifts that ended past a
 	// grace with NO clock-in as ABSENT. schedule_entries carries NO stored shift
@@ -289,6 +331,9 @@ type Querier interface {
 	GetActiveAgreementForEmployee(ctx context.Context, employeeID string) (GetActiveAgreementForEmployeeRow, error)
 	// INV-3 lock: the employee's active leadership assignment, row-locked.
 	GetActiveAssignmentForEmployeeForUpdate(ctx context.Context, employeeID string) (ShiftLeaderAssignment, error)
+	// The active company-scope shift-leader's employee id (PC-13 target). NULL row when
+	// the company has no active leader -> the service falls back to the agent (C-PC-6).
+	GetActiveCompanyLeaderEmployee(ctx context.Context, clientCompanyID string) (string, error)
 	// INV-2 company-scope lock: active leader of a company-scope unit, row-locked.
 	GetActiveLeaderForCompanyForUpdate(ctx context.Context, clientCompanyID string) (ShiftLeaderAssignment, error)
 	// INV-2 site-scope lock: active leader of a site-scope unit, row-locked.
@@ -323,7 +368,14 @@ type Querier interface {
 	// Row-lock for verify/reject/bulk + correction-apply: reads company_id/employee_id/
 	// verification_status for scope + state guards (omits joins; service re-reads for DTO).
 	GetAttendanceForUpdate(ctx context.Context, id string) (GetAttendanceForUpdateRow, error)
+	// ============================================================================
+	// Clarification target resolution (PC-13 / C-PC-6): for a source record, the
+	// owning agent + company; then the company's active shift-leader (else the agent).
+	// ============================================================================
+	GetAttendanceOwner(ctx context.Context, id string) (GetAttendanceOwnerRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
+	GetClarificationRequest(ctx context.Context, id string) (GetClarificationRequestRow, error)
+	GetClarificationRequestForUpdate(ctx context.Context, id string) (GetClarificationRequestForUpdateRow, error)
 	GetClientCompanyByID(ctx context.Context, id string) (GetClientCompanyByIDRow, error)
 	// Single correction with denormalized requester/company names.
 	GetCorrection(ctx context.Context, id string) (GetCorrectionRow, error)
@@ -368,6 +420,7 @@ type Querier interface {
 	// Row-lock for the state-machine transitions (approve-l1/final/override/reject).
 	// Omits joins; the service re-reads via GetLeaveRequest for the DTO.
 	GetLeaveRequestForUpdate(ctx context.Context, id string) (GetLeaveRequestForUpdateRow, error)
+	GetLeaveRequestOwner(ctx context.Context, id string) (GetLeaveRequestOwnerRow, error)
 	GetLeaveTypeByID(ctx context.Context, id string) (GetLeaveTypeByIDRow, error)
 	// E6 per-type meter read queries (Phase 3, EPICS §8 2026-06-12). Source data the
 	// QuotaMeter needs to pick the window, gate eligibility, and size the annual pool.
@@ -397,7 +450,22 @@ type Querier interface {
 	// Row-lock for the state-machine transitions (confirm/approve-l1/approve-final/
 	// reject/withdraw). Omits joins; the service re-reads via GetOvertime for the DTO.
 	GetOvertimeForUpdate(ctx context.Context, id string) (GetOvertimeForUpdateRow, error)
+	GetOvertimeOwner(ctx context.Context, id string) (GetOvertimeOwnerRow, error)
 	GetOvertimeRuleByID(ctx context.Context, id string) (GetOvertimeRuleByIDRow, error)
+	// F8.5 Payroll Period Close — period FSM + completeness + summary snapshot +
+	// clarification + adjustment ledger queries (PC-1..PC-15). All month anchoring on
+	// the Asia/Jakarta wall-clock date, matching the established attendance basis
+	// (COALESCE(shift_start_at, check_in_at) AT TIME ZONE 'Asia/Jakarta'; C-PC-2: a
+	// record belongs to its shift-start month). Guarded transitions return the updated
+	// row (or pgx.ErrNoRows when the guard rejects the state) so the service can map a
+	// stale-state attempt to a 409 / 422.
+	// ============================================================================
+	// payroll_periods — FSM (PC-1, PC-7, PC-12)
+	// ============================================================================
+	// The period for a month, if it already exists (NULL row -> service auto-creates).
+	GetPayrollPeriod(ctx context.Context, arg GetPayrollPeriodParams) (GetPayrollPeriodRow, error)
+	// Row-locked read for the lock/reopen transitions (re-check under the tx).
+	GetPayrollPeriodForUpdate(ctx context.Context, arg GetPayrollPeriodForUpdateParams) (GetPayrollPeriodForUpdateRow, error)
 	// Single payslip with all columns incl. ENCRYPTED money (for GET /payslips/{id}).
 	GetPayslip(ctx context.Context, id string) (GetPayslipRow, error)
 	// Active-pending guard for the agent CREATE path (F5.4 / one open correction per
@@ -423,6 +491,10 @@ type Querier interface {
 	// lateness eval and the schedule_id stamped on the clock-in record. Mirrors
 	// absence.sql's shift-window computation. is_day_off / CANCELLED_BY_LEAVE entries are
 	// not work days; both times must be present. Earliest shift wins when more than one.
+	// TODO(multi-shift): when true multi-shift lands, select the shift whose window
+	// CONTAINS the clock-in instant (window-match) instead of ORDER BY start_time LIMIT 1
+	// (earliest), so clock-in links the correct shift on a multi-shift day. The F5.7
+	// reconcile finder is already window-based (reconcile.sql), so it is forward-ready.
 	GetTodayScheduleForEmployee(ctx context.Context, arg GetTodayScheduleForEmployeeParams) (GetTodayScheduleForEmployeeRow, error)
 	// Email-only lookup: used by forgot-password (reset link is email-delivered).
 	GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error)
@@ -643,6 +715,9 @@ type Querier interface {
 	// Overtime rules are GLOBAL ONLY (decision 2026-06-12 — the service_line scope axis
 	// + line-vs-global precedence were dropped). Filter: status.
 	ListOvertimeRules(ctx context.Context, arg ListOvertimeRulesParams) ([]ListOvertimeRulesRow, error)
+	// Pending/applied ledger for an employee (run consumption + cockpit). Cursor-paged
+	// (id DESC keyset).
+	ListPayrollAdjustments(ctx context.Context, arg ListPayrollAdjustmentsParams) ([]ListPayrollAdjustmentsRow, error)
 	// E8 payslip audit-note queries (PA-7, §8). Append-only HR annotations keyed to
 	// a payslip. The id is a composite "{payslip_id}-NOTE-{seq}" assigned by the
 	// service (seq = CountPayslipAuditNotes + 1 in the insert tx). Notes may exist on
@@ -667,6 +742,29 @@ type Querier interface {
 	// period YYYY-MM), status. Summary only — NO components/benefits join. Returns
 	// the *_enc ciphertext (repo decrypts in 10-02).
 	ListPayslips(ctx context.Context, arg ListPayslipsParams) ([]ListPayslipsRow, error)
+	// ============================================================================
+	// Completeness aggregation (PC-2..PC-5) — per employee, for (year, month).
+	// The hard query. expected/clean/on_leave/blockers per FIELD-vs-INTERNAL employee.
+	// Month anchor: attendance via COALESCE(shift_start_at, check_in_at) Jakarta date;
+	// schedule via work_date; leave via leave_date; OT via work_date.
+	// ============================================================================
+	// Cursor-paged (employee_id ASC keyset). One row per employee that has ANY
+	// schedule / attendance / leave / OT activity in the month. Counts:
+	//   expected            = workable schedule entries (is_day_off=false,
+	//                         status in SCHEDULED/MODIFIED) in-month
+	//   recorded            = attendance rows in-month
+	//   clean               = attendance with verification_status in VERIFIED/AUTO_APPROVED
+	//   on_leave            = approved_leave_days in-month
+	//   attendance_blockers = attendance PENDING/ESCALATED + open(check_out_at NULL)
+	//                         + is_payable-NULL no-shift (schedule_id NULL)
+	//   pending_ot          = overtime in-month with status='PENDING'
+	//   pending_leave       = leave_requests overlapping the month with status in
+	//                         (PENDING_L1, PENDING_HR)
+	// coverage_gap is computed in the service (expected - (clean + on_leave), floored).
+	ListPeriodCompleteness(ctx context.Context, arg ListPeriodCompletenessParams) ([]ListPeriodCompletenessRow, error)
+	// The immutable per-employee summary set (post-lock; §9 GET summary). Cursor-paged
+	// (employee_id ASC keyset). LEFT JOIN employees for the display name.
+	ListPeriodSummaries(ctx context.Context, arg ListPeriodSummariesParams) ([]ListPeriodSummariesRow, error)
 	ListPlacementHistory(ctx context.Context, placementID string) ([]PlacementHistory, error)
 	// E3 placement queries (F3.1/F3.2 / PLC-*). All reads LEFT JOIN the Phase-3/4
 	// master tables to fill the denormalized *_name fields the spec returns.
@@ -733,6 +831,10 @@ type Querier interface {
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error)
 	// INV-1 / period-overlap lock: all of the agent's placements, row-locked.
 	LockEmployeePlacements(ctx context.Context, employeeID string) ([]LockEmployeePlacementsRow, error)
+	// Guarded OPEN/REOPENED -> LOCKED transition (PC-7). Stamps locked_by/at + the
+	// force fields. The WHERE status guard makes a double-lock a no-op (0 rows -> the
+	// service treats it as already-locked).
+	LockPayrollPeriod(ctx context.Context, arg LockPayrollPeriodParams) (LockPayrollPeriodRow, error)
 	// Bulk mark-read for a recipient. Optional @before cutoff (created_at < before).
 	// Returns the affected row count.
 	MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error)
@@ -758,6 +860,14 @@ type Querier interface {
 	// entity_id; the service composes actor_label/target_label from these (no
 	// human-name columns exist on audit_log).
 	RecentAuditEntries(ctx context.Context, rowLimit int32) ([]RecentAuditEntriesRow, error)
+	// Adopt a machine-owned UNSCHEDULED record (AR-5/6/7/8): link schedule_id + shift
+	// snapshot and write the Go-re-derived status / is_late / late_minutes / flags /
+	// verification_status / is_payable. flags is the caller-computed array (UNSCHEDULED
+	// removed, LATE added when derived; OUTSIDE_GEOFENCE / AUTO_CLOSED preserved).
+	// is_payable is COALESCE'd so an explicit true/false is never overridden, only a
+	// NULL is promoted to true (AR-8). Count-guarded by schedule_id IS NULL (AR-4) so a
+	// concurrent link cannot double-apply — zero rows ⇒ already linked (repo no-op).
+	ReconcileAttendance(ctx context.Context, arg ReconcileAttendanceParams) (string, error)
 	// EP-3: HR re-issues a temporary password (show-once). Sets the new hash and
 	// forces a rotation on next login. Used by :regenerate-password.
 	RegenerateTempPassword(ctx context.Context, arg RegenerateTempPasswordParams) error
@@ -767,6 +877,16 @@ type Querier interface {
 	RejectCorrection(ctx context.Context, arg RejectCorrectionParams) (RejectCorrectionRow, error)
 	// Reject/withdraw: release the held reservation.
 	ReleaseQuotaDays(ctx context.Context, arg ReleaseQuotaDaysParams) (LeaveQuota, error)
+	// Lineage-only adoption of a HUMAN-decided record (AR-9): a record already
+	// VERIFIED/REJECTED/ESCALATED is NOT re-derived — its status / verification_status /
+	// flags / is_payable are the human's authoritative decision and stay untouched. Only
+	// the schedule_id + shift snapshot are attached so payroll/reporting tie the record
+	// to its shift. Count-guarded by schedule_id IS NULL (AR-4).
+	RelinkAttendanceLineage(ctx context.Context, arg RelinkAttendanceLineageParams) (string, error)
+	// Guarded LOCKED -> REOPENED transition (PC-12), super-admin only (enforced in the
+	// service). Clears the lock stamps; stamps reopened_by/at. Note status goes to
+	// REOPENED (the §6 FSM) but the period is mutable again like OPEN (CanLock covers it).
+	ReopenPayrollPeriod(ctx context.Context, arg ReopenPayrollPeriodParams) (ReopenPayrollPeriodRow, error)
 	// Submit: hold pending_days on the window (remaining must cover it — service guards).
 	ReserveQuotaDays(ctx context.Context, arg ReserveQuotaDaysParams) (LeaveQuota, error)
 	// INV-6 live-template reset: on a template edit, every non-terminal instance for the
@@ -814,6 +934,8 @@ type Querier interface {
 	// guards that the day has no scheduled shift (a shift-backed day is auto-payable →
 	// 422 ATTENDANCE_HAS_SHIFT_AUTO_PAYABLE) before calling. Returns the full row.
 	SetAttendancePayable(ctx context.Context, arg SetAttendancePayableParams) (SetAttendancePayableRow, error)
+	// HR closes the loop: RESOLVED or CANCELLED (PC-13). Allowed from OPEN or ANSWERED.
+	SetClarificationStatus(ctx context.Context, arg SetClarificationStatusParams) (SetClarificationStatusRow, error)
 	// Drives :deactivate (status='inactive') and :reactivate (status='active').
 	SetClientCompanyStatus(ctx context.Context, arg SetClientCompanyStatusParams) (SetClientCompanyStatusRow, error)
 	// Link the E11 approval_instance created at submit (mirrors leave SetApprovalInstanceID).
@@ -852,6 +974,15 @@ type Querier interface {
 	SetSiteStatus(ctx context.Context, arg SetSiteStatusParams) (SetSiteStatusRow, error)
 	// Used by :deactivate (status='disabled') and :reactivate (status='active').
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) (SetUserStatusRow, error)
+	// ============================================================================
+	// Lock snapshot (PC-8) — materialize the immutable per-FIELD-employee summary.
+	// One INSERT-SELECT off the SAME aggregation as completeness, FIELD employees only.
+	// ============================================================================
+	// Materialize PeriodEmployeeSummary for every FIELD employee with month activity
+	// (PC-8). present/late/absent/no_shift_payable/worked from attendance; payable_days
+	// = clean+payable rows; approved_ot_minutes from APPROVED OT; paid/unpaid leave from
+	// approved_leave_days. Idempotent via ON CONFLICT DO NOTHING (a re-lock can't dup).
+	SnapshotPeriodSummaries(ctx context.Context, arg SnapshotPeriodSummariesParams) (int64, error)
 	SoftDeleteAttendanceCode(ctx context.Context, id string) error
 	// DELETE /holidays/{id} (soft). The service first runs CountOvertimeUsingHoliday to
 	// guard HOLIDAY_IN_USE.
@@ -934,6 +1065,9 @@ type Querier interface {
 	// reevaluates status/is_late/late_minutes before calling — those override nargs
 	// are COALESCEd so they can be left NULL (verify-only, no times mutation).
 	VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAttendanceWithTimesParams) (VerifyAttendanceWithTimesRow, error)
+	// Reopen voids the immutable summary set (PC-12). Hard DELETE — the snapshot is
+	// regenerated on the next lock.
+	VoidPeriodSummaries(ctx context.Context, periodID string) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

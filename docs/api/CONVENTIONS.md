@@ -373,28 +373,36 @@ Implicit; not exposed via API. Documented per epic if a write affects another ep
 
 ## 17. RBAC matrix
 
-Four roles (per CLAUDE.md):
+**Self-service is a baseline, not a role; `users.role` holds only elevations** *(2026-06-15 — see EPICS §8 E1 "agent retired as a role").* Every authenticated `Employee` implicitly carries the `self.*` capability bundle (clock in/out, own schedule/attendance/corrections, leave, overtime, profile, payslip, notifications). Roles are **elevations** layered on top:
 
 - `super_admin` — full system config, user management, master data.
 - `hr_admin` — manages employees, placements, master data; oversight & escalation approver.
-- `shift_leader` — on-site supervisor for ONE client company; rosters, approvals, verification for that company's agents.
-- `agent` — placed employee; clocks in/out, requests leave/OT, views own schedule.
+- `lead` — company-scoped operational approver (arranges placements; L2 leave/OT) over assigned client companies.
+- `shift_leader` — on-site supervisor for ONE client company; rosters, approvals, verification for that company's agents. **Derived per request** from the E3 assignment, never stored.
+- *(retired)* ~~`agent`~~ — **removed as a role 2026-06-15.** "Agent" is now only a **domain term** for an `employee_type = FIELD` employee placed at a client. A staff member with **no elevation** (field agent or internal rank-and-file) gets exactly the `self.*` baseline.
 
-Each endpoint in the per-epic specs declares allowed roles via the OpenAPI extension:
+Each endpoint in the per-epic specs declares access via the OpenAPI extension:
 
 ```yaml
+# elevation-gated endpoint:
 x-rbac:
-  roles: [hr_admin, super_admin]
-  scope: company  # or 'global', 'self', 'company_or_global'
+  roles: [hr_admin, super_admin]   # only these elevations
+  scope: company                   # or 'global', 'self', 'company_or_global'
+
+# baseline endpoint — any authenticated employee (self-service):
+x-rbac:
+  scope: self                      # NO `roles:` key → any employee, own records
 ```
+
+**Convention:** `roles:` **present** = restricted to the listed elevation roles. `roles:` **omitted** = any authenticated employee (the `self.*` baseline). `scope:` is always required. (Migration of the old `roles: […, agent, …]` lists: any block that listed `agent` drops its `roles:` line entirely and keeps `scope` — `scope` already encodes self/company_or_global widening.)
 
 **Scope values:**
 - `global` — caller can access all resources matching the endpoint
-- `company` — caller can only access resources within their assigned company (shift leader)
-- `self` — caller can only access resources for their own employee record (agent)
-- `company_or_global` — leader sees their company; HR/super-admin sees all
+- `company` — caller can only access resources within their assigned company (shift leader / lead)
+- `self` — caller can only access resources for their own employee record (baseline; any employee)
+- `company_or_global` — caller sees own (self); leader/lead sees their company; HR/super-admin sees all
 
-**Shift-leader role + `company` scope are derived per request (2026-06-08).** ✅ For `shift_leader`, both the effective role and the `company` they are scoped to are resolved **server-side on each request** from the active E3 `shift_leader_assignments` row (one company, per INV-3), not from stored columns: `users.role` / `users.company_id` and the JWT `cmp` claim are **advisory only**. A field employee with an active assignment ⇒ role `shift_leader`, scope = that company; without one ⇒ role `agent`, no company scope. Staff roles (`super_admin`, `hr_admin`) are `global` and never derived. Fail-safe: on resolver error or no assignment the scope is stripped and the role falls back to `agent` (deny, never escalate). The enforcement primitives are unchanged — a role gate plus row-level company guard; only the source of the role/company changes.
+**Shift-leader role + `company` scope are derived per request (2026-06-08).** ✅ For `shift_leader`, both the effective role and the `company` they are scoped to are resolved **server-side on each request** from the active E3 `shift_leader_assignments` row (one company, per INV-3), not from stored columns: `users.role` / `users.company_id` and the JWT `cmp` claim are **advisory only**. A field employee with an active assignment ⇒ role `shift_leader`, scope = that company; without one ⇒ **no elevation** (baseline `self.*` only), no company scope. Staff roles (`super_admin`, `hr_admin`, `lead`) are stored elevations (`lead` is `company`-set scoped, the others `global`); `shift_leader` is the only derived role. Fail-safe: on resolver error or no assignment the scope is stripped and the role falls back to **baseline / no elevation** (deny, never escalate). The enforcement primitives are unchanged — a role gate plus row-level company guard; only the source of the role/company changes.
 
 Server enforces RBAC at controller/handler level; clients hide unauthorized actions but MUST tolerate `403` defensively.
 

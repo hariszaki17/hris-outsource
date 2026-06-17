@@ -111,17 +111,21 @@ export type Permission = (typeof PERMISSIONS)[number];
  * (a `/me` response or the generated `x-rbac` map), delete this table — nav declarations and
  * screen guards never change.
  *
- * `agent` has no web permissions (mobile-only). A future `client_viewer` role (external
+ * Every role carries the self-service baseline (`self.*`) as of 2026-06-15, so internal staff
+ * with an elevation role can also reach the `/me` self-service surface; `agent` is the
+ * no-elevation sentinel that carries ONLY the baseline. A future `client_viewer` role (external
  * client/partner access — see the doc's "Client portal" section) would be added here as a
  * read-only, hard-scoped bundle, and would surface in `apps/client-portal`, not this console.
  */
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // Full access, including defining custom roles. Via the all-permissions spread this includes
   // every E11 key: approvals.template.manage, approvals.act AND approvals.bypass (super-admin only).
+  // The all-permissions spread already carries the self.* self-service baseline (2026-06-15).
   super_admin: [...PERMISSIONS],
   // Everything except authoring roles/permissions (super-admin owns the access model) AND
   // except approvals.bypass (force-approve is super-admin only). hr_admin keeps
-  // approvals.template.manage + approvals.act.
+  // approvals.template.manage + approvals.act. The filter retains the self.* keys, so an HR
+  // admin can also reach the /me self-service surface (clock-in, leave, OT, payslip).
   hr_admin: PERMISSIONS.filter(
     (p) => p !== 'settings.roles.manage' && p !== 'approvals.bypass',
   ),
@@ -142,6 +146,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'leave.read',
     'overtime.read',
     'approvals.act',
+    // Self-service baseline (2026-06-15): every internal staff role can also reach the /me
+    // self-service surface (own clock-in, leave, OT, profile, payslip). Server-enforced scope: self.
+    'self.dashboard',
+    'self.attendance',
+    'self.schedule',
+    'self.leave',
+    'self.overtime',
+    'self.profile',
+    'self.payslip',
   ],
   // On-site supervisor: their site's daily operation only. No clients, contracts, payroll,
   // reports, master data, or settings. Scope (their one company) is enforced server-side.
@@ -163,6 +176,15 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // line (membership-gated server-side) — not a *.approve permission. (Replaces the removed
     // change_requests.read/.approve; profile edits are now instant self-edit, E11 removes them.)
     'approvals.act',
+    // Self-service baseline (2026-06-15): every internal staff role can also reach the /me
+    // self-service surface (own clock-in, leave, OT, profile, payslip). Server-enforced scope: self.
+    'self.dashboard',
+    'self.attendance',
+    'self.schedule',
+    'self.leave',
+    'self.overtime',
+    'self.profile',
+    'self.payslip',
   ],
   // Agent self-service (mobile + web console under /me/*). These `self.*` keys gate the agent's
   // OWN records; data scope is server-enforced (scope: self). See docs/eng/AGENT-WEB-ACCESS.md.

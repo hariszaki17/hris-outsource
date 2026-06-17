@@ -38,7 +38,7 @@ erDiagram
         string phone "unique, required"
         string email "unique, nullable"
         string password_hash
-        string role "super_admin|hr_admin|shift_leader|agent"
+        string role "elevation only: hr_admin|super_admin|lead; NULL = baseline self-service (field agent or internal staff); shift_leader is DERIVED per request (E3), not stored — agent retired as a role 2026-06-15"
         string status "active|disabled"
         datetime last_login_at
     }

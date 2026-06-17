@@ -78,7 +78,10 @@ type CreateEmployeeParams struct {
 	BankAccountNumber     string
 	BankAccountHolderName string
 	Position              string // free-text job position/title (required; moved off placement 2026-06-15)
-	CreatedBy             string
+	// EmployeeType is "FIELD" (default, outsourced field agent) | "INTERNAL" (SWP
+	// back-office staff), migr. 00067. Defaulted to FIELD by the handler when empty.
+	EmployeeType string
+	CreatedBy    string
 	// Login provisioning is AUTOMATIC at create (D1): a linked agent User is always
 	// created in the same tx with a temporary password (show-once). The login
 	// identifier is the employee Phone (required, D2); LoginEmail is an optional
@@ -108,6 +111,9 @@ type UpdateEmployeeParams struct {
 	EmergencyContactName  string
 	EmergencyContactPhone string
 	Position              string // free-text job position/title (required)
+	// EmployeeType is "FIELD" (default) | "INTERNAL" (migr. 00067); defaulted to
+	// FIELD by the handler when empty.
+	EmployeeType string
 }
 
 // TxRunner is a thin interface over db.TxManager (injectable for tests).

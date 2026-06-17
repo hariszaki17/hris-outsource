@@ -27,7 +27,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -65,7 +65,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -89,7 +89,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at
 FROM attendance a
 WHERE a.id = sqlc.arg(id)
@@ -114,7 +114,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at;
+          is_payable, mode, created_at, updated_at;
 
 -- name: VerifyAttendanceWithTimes :one
 -- Approve an exception record AND override check_in/check_out times (HR/SL
@@ -141,7 +141,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at;
+          is_payable, mode, created_at, updated_at;
 
 -- name: RejectAttendance :one
 -- Reject an exception record (reason required). Same PENDING/ESCALATED guard.
@@ -161,7 +161,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at;
+          is_payable, mode, created_at, updated_at;
 
 -- name: ApplyCorrectionToAttendance :one
 -- Apply an approved correction's whitelisted proposed_* fields to the target row:
@@ -189,7 +189,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at;
+          is_payable, mode, created_at, updated_at;
 
 -- name: CreateManualAttendance :one
 -- HR/admin creates an attendance record for any agent (F5.6). Bypasses GPS/geofence.
@@ -206,7 +206,7 @@ INSERT INTO attendance (
     wfo, is_late, late_minutes, worked_minutes,
     in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
     status, verification_status, flags,
-    is_payable,
+    is_payable, mode,
     created_by,
     created_at, updated_at
 ) VALUES (
@@ -218,7 +218,7 @@ INSERT INTO attendance (
     sqlc.arg(wfo), sqlc.arg(is_late), sqlc.arg(late_minutes), sqlc.narg(worked_minutes),
     sqlc.arg(in_geofence), sqlc.arg(in_distance_m), sqlc.narg(out_geofence), sqlc.narg(out_distance_m), sqlc.arg(geofence_radius_m),
     sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags)::text[],
-    sqlc.narg(is_payable),
+    sqlc.narg(is_payable), sqlc.arg(mode),
     sqlc.narg(created_by),
     now(), now()
 ) RETURNING id, employee_id, placement_id, schedule_id, company_id,
@@ -228,7 +228,7 @@ INSERT INTO attendance (
             in_geofence, in_distance_m, out_geofence, out_distance_m,
             geofence_radius_m, status, verification_status, flags, verified_by,
             verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-            is_payable,
+            is_payable, mode,
             created_by,
             created_at, updated_at;
 
@@ -307,4 +307,4 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at;
+          is_payable, mode, created_at, updated_at;

@@ -342,6 +342,20 @@ export const en: Messages = {
     shift_leader: 'Shift Leader',
     agent: 'Agent',
   },
+  userMenu: {
+    selfService: 'My Attendance',
+  },
+  employeeType: {
+    label: 'Employee type',
+    FIELD: 'Field',
+    INTERNAL: 'Internal',
+  },
+  company: {
+    type: {
+      CLIENT: 'Client',
+      INTERNAL: 'Internal',
+    },
+  },
   settingsOverview: {
     title: 'Settings',
     subtitle: 'Platform configuration areas. Language, timezone, and format are locked in v1.',
@@ -1967,6 +1981,11 @@ export const en: Messages = {
       VERIFIED: 'Verified',
       REJECTED: 'Rejected',
       ESCALATED: 'Escalated',
+    },
+    mode: {
+      label: 'Mode',
+      ONSITE: 'On-site',
+      REMOTE: 'Remote (WFH)',
     },
     // F5.6 Manual attendance entry
     manualCreateTitle: 'Manual Attendance',

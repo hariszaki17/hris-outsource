@@ -87,7 +87,6 @@ paths:
 
         Requires `Idempotency-Key` (CONVENTIONS §13) — mobile retries must not double-create.
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - Iek78  # Agen · Absen (Clock In/Out)
@@ -276,7 +275,6 @@ paths:
             (asymmetric vs clock-in: leaving the site is normal at the end of a shift).
           - Photo optional on clock-out.
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - Iek78  # Agen · Absen (Clock In/Out) — clock-out variant (P0 missing per audit §3)
@@ -377,7 +375,6 @@ paths:
         `platform/storage` client. Documented here for traceability; this
         multipart route stays the contract until that migration lands.
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - Iek78
@@ -473,7 +470,6 @@ paths:
 
         The cursor encodes the active filter+sort tuple; mismatched cursor → `400 CURSOR_MISMATCH`.
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - sZCLW  # Kehadiran — Dashboard (HR)
@@ -601,7 +597,6 @@ paths:
         leader own-company, HR all. 404 used for both "not found" and "out of scope"
         (CONVENTIONS §7) to avoid leaking existence.
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - VY894  # Detail Verifikasi (HR)
@@ -1086,7 +1081,6 @@ paths:
 
         Requires `Idempotency-Key`.
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         # P0 missing per E5-AUDIT §3 — mobile correction-request sheet
@@ -1225,7 +1219,6 @@ paths:
           - `shift_leader` → corrections on attendance records of their assigned company.
           - `hr_admin` / `super_admin` → all.
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         # P0 missing per E5-AUDIT §3 — leader/HR correction-approval queue + mobile correction tracker
@@ -1273,7 +1266,6 @@ paths:
         proposed values, plus a server-rendered `diff[]` array enumerating each changed field
         for the UI to render side-by-side.
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - web-correction-detail
@@ -1332,7 +1324,6 @@ paths:
         Only the original requester (or HR) may cancel a `PENDING` correction. Sets status
         `CANCELLED` (terminal). No effect on the attendance record.
       x-rbac:
-        roles: [agent, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - mobile-correction-list
@@ -1498,7 +1489,11 @@ components:
         schedule_id:
           type: [string, "null"]
           pattern: '^SWP-SCH-[A-Za-z0-9]+$'
-          description: "Null for **unscheduled** clock-ins (flagged `UNSCHEDULED`)."
+          description: >-
+            Null for **unscheduled** clock-ins (flagged `UNSCHEDULED`). May change from null to a
+            shift id later via **attendance auto-reconcile** (E5 F5.7) when a late roster is entered
+            for that agent/day — which also re-derives `verification_status`, `flags`, lateness and
+            `is_payable` on this record.
         company_id:
           type: string
           pattern: '^SWP-CMP-[A-Za-z0-9]+$'
@@ -1569,6 +1564,13 @@ components:
             Working From Office indicator. **v1: defaults to `true`** (anti-spoofing post-v1 per
             EPICS §8). The contract carries the field today so future versions can flip it without
             schema break.
+        mode:
+          type: string
+          enum: [ONSITE, REMOTE]
+          description: |
+            ONSITE = clocked in at the site (geofence applies if the site defines one);
+            REMOTE = WFH/off-site, geofence skipped (2026-06-16). Mirrors the
+            `mode` on `ClockInRequest`.
         late_minutes:
           type: integer
           minimum: 0
@@ -1605,13 +1607,25 @@ components:
           description: |
             Zero or more flags driving the verification queue. **No flags + on-time + in-radius +
             complete + code-doesn't-need-verification → AUTO_APPROVED.** Any flag → PENDING (or
-            ESCALATED for leader-own).
+            ESCALATED for leader-own). `flags` / `verification_status` / `status` may also change via
+            **attendance auto-reconcile** (E5 F5.7): a late roster adopting this record strips
+            `UNSCHEDULED` and re-derives lateness/status/verification (other flags such as
+            `OUTSIDE_GEOFENCE` / `AUTO_CLOSED` survive). Records already decided by a human are not
+            re-derived.
         geofence_in:
-          $ref: '#/components/schemas/GeofenceCheck'
+          oneOf:
+            - $ref: '#/components/schemas/GeofenceCheck'
+            - type: "null"
+          description: |
+            Null when the site defines no geofence or the clock-in was `mode=REMOTE`
+            (geofence skipped); otherwise the in check result.
         geofence_out:
           oneOf:
             - $ref: '#/components/schemas/GeofenceCheck'
             - type: "null"
+          description: |
+            Null while still open, or when the site defines no geofence or the
+            clock-out was `mode=REMOTE` (geofence skipped); otherwise the out check result.
         verified_by:
           type: [string, "null"]
           pattern: '^SWP-EMP-[A-Za-z0-9]+$'
@@ -1810,9 +1824,17 @@ components:
           description: |
             Client signal: `false` means location services off / permission denied — server returns
             `422 GPS_UNAVAILABLE`. Required true to clock in.
+        mode:
+          type: string
+          enum: [ONSITE, REMOTE]
+          default: ONSITE
+          description: |
+            ONSITE = at the site (geofence applies if the site defines one);
+            REMOTE = WFH/off-site, geofence skipped (2026-06-16).
         wfo:
           type: boolean
           default: true
+          deprecated: true
           description: "v1 default `true`; placeholder for post-v1 anti-spoofing flag."
         photo_id:
           type: [string, "null"]

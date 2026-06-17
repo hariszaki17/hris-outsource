@@ -138,6 +138,7 @@ func (r *ClockRepo) ClockIn(ctx context.Context, tx pgx.Tx, p svc.ClockInRow) (s
 		LngIn:              &lngIn,
 		PhotoInID:          p.PhotoInID,
 		Wfo:                p.WFO,
+		Mode:               p.Mode,
 		IsLate:             p.IsLate,
 		LateMinutes:        int32(p.LateMinutes),
 		InGeofence:         p.InGeofence,

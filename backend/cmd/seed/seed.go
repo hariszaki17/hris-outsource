@@ -24,6 +24,10 @@ const (
 	PasswordShiftLeader = "Lead3r-Senayan!"
 	PasswordSuperAdmin  = "Sup3r-Admin-2026!"
 	PasswordAgent       = "Ag3nt-Budi-2026!"
+	// PasswordInternalHR is the seed password for the INTERNAL back-office HR persona
+	// (internal.hr@swp.test, SWP-EMP-4001) used to prove an elevated internal employee
+	// can clock in at the geofence-less SWP HQ site.
+	PasswordInternalHR = "Int3rnal-HR-2026!"
 )
 
 // persona holds the data required to seed a single user row.
@@ -132,6 +136,19 @@ var extraPersonas = []persona{
 		role:       "lead",
 		fullName:   "Joko Pratama",
 		employeeID: strPtr("SWP-EMP-3004"),
+		companyID:  nil,
+	},
+	{
+		// INTERNAL back-office persona (migration 00067 employee_type=INTERNAL). An
+		// elevated internal employee (hr_admin) placed at SWP HQ (SWP-SITE-9001, no
+		// geofence) — used to prove "internal staff clocks in" end-to-end. Backed by
+		// employee SWP-EMP-4001 (employee_type=INTERNAL) and placement SWP-PL-5005.
+		email:      "internal.hr@swp.test",
+		phone:      "+628110004001",
+		password:   PasswordInternalHR,
+		role:       "hr_admin",
+		fullName:   "Intan Permata",
+		employeeID: strPtr("SWP-EMP-4001"),
 		companyID:  nil,
 	},
 }
@@ -976,6 +993,7 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 		nip                   string
 		joinAt                string // YYYY-MM-DD
 		gender                string
+		employeeType          string // FIELD | INTERNAL (migration 00067); "" → FIELD
 		phone                 *string
 		emailPersonal         *string
 		address               *string
@@ -1072,6 +1090,18 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 			joinAt:   "2021-09-01",
 			gender:   "MALE",
 		},
+		{
+			// INTERNAL back-office employee (migration 00067 employee_type=INTERNAL),
+			// backing the internal.hr persona. Placed at SWP HQ (SWP-PL-5005) so an
+			// elevated internal employee has an active assignment and can clock in.
+			id:           "SWP-EMP-4001",
+			fullName:     "Intan Permata",
+			nik:          "3175001505904001",
+			nip:          "4001",
+			joinAt:       "2023-02-01",
+			gender:       "FEMALE",
+			employeeType: "INTERNAL",
+		},
 	}
 
 	// ON CONFLICT DO UPDATE so a re-seed enriches an existing row (e.g. Dewi's full
@@ -1085,19 +1115,20 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 			 npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
 			 bank_name, bank_account_number, bank_account_holder_name,
 			 emergency_contact_name, emergency_contact_phone,
-			 status)
+			 employee_type, status)
 		VALUES ($1, $2, $3, $4, $5::date, $6,
 		        $7, $8, $9, $10::date, $11,
 		        $12, $13, $14,
 		        $15, $16, $17,
 		        $18, $19,
-		        'active')
+		        COALESCE(NULLIF($20, ''), 'FIELD'), 'active')
 		ON CONFLICT (id) DO UPDATE SET
 			full_name                = COALESCE(EXCLUDED.full_name, employees.full_name),
 			nik                      = COALESCE(EXCLUDED.nik, employees.nik),
 			nip                      = COALESCE(EXCLUDED.nip, employees.nip),
 			join_at                  = COALESCE(EXCLUDED.join_at, employees.join_at),
 			gender                   = COALESCE(EXCLUDED.gender, employees.gender),
+			employee_type            = EXCLUDED.employee_type,
 			phone                    = COALESCE(EXCLUDED.phone, employees.phone),
 			email_personal           = COALESCE(EXCLUDED.email_personal, employees.email_personal),
 			address                  = COALESCE(EXCLUDED.address, employees.address),
@@ -1119,6 +1150,7 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 			e.npwp, e.bpjsKesehatan, e.bpjsKetenagakerjaan,
 			e.bankName, e.bankAccountNumber, e.bankAccountHolderName,
 			e.emergencyContactName, e.emergencyContactPhone,
+			e.employeeType,
 		); err != nil {
 			return fmt.Errorf("seed employee %q: %w", e.id, err)
 		}
@@ -1132,10 +1164,15 @@ func seedEmployees(ctx context.Context, pool *db.Pool) error {
 // All inserts use ON CONFLICT (id) DO NOTHING so re-runs are idempotent.
 //
 // Companies:
+//   - SWP-CMP-0001  "PT Saranawisesa Properindo (Internal)" — SWP itself, type=INTERNAL
+//     (migration 00067); the placement target for SWP's own back-office staff so
+//     "internal staff clocks in" is demonstrable. Not a client.
 //   - SWP-CMP-0021  "Plaza Senayan"     — shift_leader persona's company scope target
 //   - SWP-CMP-0022  "Mall Kelapa Gading" — extra company for list/pagination E2E
 //
 // Sites:
+//   - SWP-SITE-9001  SWP HQ (primary, NO geo → geofence_active=false; exercises the
+//     "site without geofence → skip check" path for internal/remote clock-in)
 //   - SWP-SITE-0001  Plaza Senayan Main (primary, geo set → geofence_active=true)
 //   - SWP-SITE-0002  Mall Kelapa Gading Main (primary, no geo)
 func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
@@ -1144,32 +1181,42 @@ func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
 		name        string
 		address     string
 		leaderScope string
+		typ         string // CLIENT | INTERNAL (migration 00067)
 	}
 	companies := []company{
+		{
+			id:          "SWP-CMP-0001",
+			name:        "PT Saranawisesa Properindo (Internal)",
+			address:     "Jl. Kebon Sirih No. 1, Jakarta Pusat 10340",
+			leaderScope: "company",
+			typ:         "INTERNAL",
+		},
 		{
 			id:          "SWP-CMP-0021",
 			name:        "Plaza Senayan",
 			address:     "Jl. Asia Afrika No. 8, Jakarta Pusat 10270",
 			leaderScope: "company",
+			typ:         "CLIENT",
 		},
 		{
 			id:          "SWP-CMP-0022",
 			name:        "Mall Kelapa Gading",
 			address:     "Jl. Boulevard Raya, Jakarta Utara 14240",
 			leaderScope: "company",
+			typ:         "CLIENT",
 		},
 	}
 
 	const companyQ = `
-		INSERT INTO client_companies (id, name, address, leader_scope, status)
-		VALUES ($1, $2, $3, $4, 'active')
+		INSERT INTO client_companies (id, name, address, leader_scope, type, status)
+		VALUES ($1, $2, $3, $4, $5, 'active')
 		ON CONFLICT (id) DO NOTHING`
 
 	for _, c := range companies {
-		if _, err := pool.Pool.Exec(ctx, companyQ, c.id, c.name, c.address, c.leaderScope); err != nil {
+		if _, err := pool.Pool.Exec(ctx, companyQ, c.id, c.name, c.address, c.leaderScope, c.typ); err != nil {
 			return fmt.Errorf("seed company %q: %w", c.id, err)
 		}
-		slog.Info("seed: upserted client company", "id", c.id, "name", c.name)
+		slog.Info("seed: upserted client company", "id", c.id, "name", c.name, "type", c.typ)
 	}
 
 	// Sites — use explicit IDs so E2E tests can reference them deterministically.
@@ -1188,6 +1235,19 @@ func seedClientCompanies(ctx context.Context, pool *db.Pool) error {
 	lat := -6.2253
 	lng := 106.7995
 	sites := []site{
+		{
+			// SWP HQ — INTERNAL company site with NO geofence (null lat/lng), primary.
+			// Exercises the "site without geofence → skip check" clock-in path for
+			// SWP's own back-office staff.
+			id:              "SWP-SITE-9001",
+			companyID:       "SWP-CMP-0001",
+			name:            "SWP HQ",
+			address:         "Jl. Kebon Sirih No. 1, Jakarta Pusat 10340",
+			geoLat:          nil,
+			geoLng:          nil,
+			geofenceRadiusM: 100, // null lat/lng → geofence_active=false regardless of radius
+			isPrimary:       true,
+		},
 		{
 			id:              "SWP-SITE-0001",
 			companyID:       "SWP-CMP-0021",
@@ -1654,6 +1714,8 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 		{"SWP-AG-7002", "SWP-EMP-1042", "PKWTT", "PKWTT/SWP/2026/0042", "2020-03-01", nil},
 		{"SWP-AG-7003", "SWP-EMP-1108", "PKWT", "PKWT/SWP/2026/0108", "2026-01-01", &endPKWT},
 		{"SWP-AG-7004", "SWP-EMP-3001", "PKWT", "PKWT/SWP/2026/3001", "2026-01-01", &endPKWT},
+		// INTERNAL back-office staff (Intan) — permanent PKWTT.
+		{"SWP-AG-7005", "SWP-EMP-4001", "PKWTT", "PKWTT/SWP/2026/4001", "2023-02-01", nil},
 	}
 	for _, a := range agreements {
 		if _, err := pool.Pool.Exec(ctx, agQ, a.id, a.employeeID, a.typ, a.no, a.start, a.end); err != nil {
@@ -1689,6 +1751,9 @@ func seedPlacements(ctx context.Context, pool *db.Pool) error {
 		{"SWP-PL-5002", "SWP-EMP-2891", "SWP-AG-7001", "SWP-CMP-0022", "SWP-SITE-0002", "Petugas Parkir", "2026-02-01", &endBudi},
 		{"SWP-PL-5003", "SWP-EMP-1042", "SWP-AG-7002", "SWP-CMP-0021", "SWP-SITE-0001", "Koordinator Lokasi", "2026-03-01", nil},
 		{"SWP-PL-5004", "SWP-EMP-3001", "SWP-AG-7004", "SWP-CMP-0021", "SWP-SITE-0001", "Petugas Parkir", dewiStart, &expEnd},
+		// INTERNAL staff placed at SWP HQ (no geofence) — the active assignment that
+		// lets the elevated internal employee clock in.
+		{"SWP-PL-5005", "SWP-EMP-4001", "SWP-AG-7005", "SWP-CMP-0001", "SWP-SITE-9001", "Staf HR Internal", "2023-02-01", nil},
 	}
 	for _, p := range placements {
 		if _, err := pool.Pool.Exec(ctx, plQ,

@@ -11,7 +11,8 @@ client's *visibility* layer (defense-in-depth, ENGINEERING.md C1).
 ## 1. Why this exists
 
 The web console serves **two opposite users** from one app (the third staff role, super admin,
-is HR admin + system config; `agent` is mobile-only):
+is HR admin + system config; an employee with **no elevation** gets the baseline self-service
+surface — web `/me/*` + mobile — not a role):
 
 | | **HR / placement admin** | **Shift leader** |
 |---|---|---|
@@ -73,7 +74,7 @@ Order matches `comp/Sidebar` `iCqTB` and `NAV_ITEMS`:
 The "8 modules" design lock (DESIGN-SYSTEM line 171) is **retired** — sidebar length is a
 per-role *outcome* (a shift leader sees ~8; a future finance role would see ~3), not a fixed count.
 
-[^db7]: `dashboard.view` gates the route for all staff roles that hold it (`super_admin`, `hr_admin`, `shift_leader`, `lead`; agents use `self.dashboard`); the **Super Admin admin-widget block** (DB-7: users & access · audit feed · org rollups · pending grants) needs **no new permission key** — the server fills `HrDashboard.admin` only when the principal's effective role is `super_admin`, and the client renders those widgets conditionally on `role === 'super_admin'`. Defense-in-depth: the API is the gate (ENGINEERING C1). The shift-leader dashboard is dual-surface (web + mobile Beranda, DB-8) on the same `LeaderDashboard` payload.
+[^db7]: `dashboard.view` gates the route for all elevations that hold it (`super_admin`, `hr_admin`, `shift_leader`, `lead`; baseline self-service uses `self.dashboard`); the **Super Admin admin-widget block** (DB-7: users & access · audit feed · org rollups · pending grants) needs **no new permission key** — the server fills `HrDashboard.admin` only when the principal's effective role is `super_admin`, and the client renders those widgets conditionally on `role === 'super_admin'`. Defense-in-depth: the API is the gate (ENGINEERING C1). The shift-leader dashboard is dual-surface (web + mobile Beranda, DB-8) on the same `LeaderDashboard` payload.
 
 ### 3.2 Section sub-nav (tabs under the topbar)
 
@@ -107,6 +108,15 @@ sidebar active-state). Follow-up: move these under `/settings/*` and relocate ov
 ## 4. RBAC model
 
 ### 4.1 Capability axis — permissions ✅
+
+*(Agent retired as a role 2026-06-15 — see EPICS §8 E1.)* `users.role` holds **elevations only**:
+`super_admin`, `hr_admin`, `lead` (plus `shift_leader`, **derived per request** from the E3
+assignment, never stored). It is **nullable; NULL = baseline self-service.** The `self.*`
+self-service bundle (clock in/out, own schedule/attendance/corrections, leave, overtime, profile,
+payslip, notifications) is an **implicit baseline every employee carries** — not a role. `agent` is
+no longer an auth role; it is purely a **domain term** for an `employee_type = FIELD` employee placed
+at a client. There is **one Employee** entity (`employee_type ∈ {FIELD, INTERNAL}`); internal SWP
+staff with no elevation use the **same self-service surface** as field agents.
 
 The catalog lives in `packages/shared/src/rbac.ts` (`PERMISSIONS`, type `Permission`). Granularity
 is **`module.action`** (decided 2026-06-03) so one vocabulary gates both nav items and in-screen
@@ -145,12 +155,16 @@ Interim role bundles:
   approval is no longer role-derived L1/L2 — both are routed by E11 line membership; either may be
   placed on a company's template lines. Supersedes the 2026-06-12 lead-as-L2 / shift_leader-as-L1
   model.)*
-- **agent** — the `self.*` self-service bundle: `self.dashboard`, `self.attendance`, `self.schedule`,
-  `self.leave`, `self.overtime`, `self.profile`, `self.payslip`. *(Updated 2026-06-10: agents now
-  have a **web self-service console** under `/me/*` — reverses the prior "none (mobile-only)". The
-  shell picks the nav backbone by role; `self.*` keys never overlap the staff capability keys, so
-  the two surfaces stay cleanly separated. Ratified EPICS §8; full spec:
-  [AGENT-WEB-ACCESS.md](./AGENT-WEB-ACCESS.md).)*
+- **baseline self-service (no elevation, `users.role IS NULL`)** — *not a role*; the implicit
+  `self.*` bundle every employee carries: `self.dashboard`, `self.attendance`, `self.schedule`,
+  `self.leave`, `self.overtime`, `self.profile`, `self.payslip`, `self.notifications`. Both field
+  agents (`employee_type = FIELD`) and internal SWP staff (`employee_type = INTERNAL`) with no
+  elevation get this same surface. *(Updated 2026-06-10: there is a **web self-service console**
+  under `/me/*` alongside mobile — reverses the prior "none (mobile-only)". The shell picks the nav
+  backbone by **highest elevation**, defaulting to the **self-service backbone** when the employee
+  has none; `self.*` keys never overlap the staff capability keys, so the two surfaces stay cleanly
+  separated. Ratified EPICS §8; full spec: [AGENT-WEB-ACCESS.md](./AGENT-WEB-ACCESS.md).)*
+  *(2026-06-15: agent retired as a role — this is a baseline, not a `ROLE_PERMISSIONS` entry.)*
 
 **Profile change-request approval removed; approval is now the E11 engine** *(2026-06-14).* The
 `change_requests.*` keys (incl. `.approve.bank`) and the profile-edit approval queue are **deleted** —
@@ -173,11 +187,11 @@ whatever scoped rows the API returns.
 the **effective `shift_leader` role and its company scope are not stored on `users`** — the auth
 middleware derives both **per request** from the active E3 `shift_leader_assignments` row, which is
 the **single source of truth** for leadership. An employee with an active assignment ⇒ role
-`shift_leader`, scope = that one company (INV-3); without one ⇒ role `agent`, no company scope.
+`shift_leader`, scope = that one company (INV-3); without one ⇒ **no derived elevation (baseline self-service)**, no company scope.
 Staff roles (`super_admin`, `hr_admin`) are global and never derived. Stored `users.role` /
 `users.company_id` and the JWT `cmp` claim are **advisory only**; `/auth/me` reports the
-request-time derived role + scope. **Fail-safe:** on resolver error or no assignment the scope is
-stripped and the role falls back to `agent` — deny, never escalate. **No re-login required:**
+request-time derived elevation + scope. **Fail-safe:** on resolver error or no assignment the scope is
+stripped and the elevation falls back to **baseline self-service** — deny, never escalate. **No re-login required:**
 assigning or revoking leadership in E3 takes effect on the next request, since nothing leader-related
 is baked into the token.
 

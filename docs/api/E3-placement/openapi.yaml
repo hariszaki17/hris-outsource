@@ -481,7 +481,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
       x-rbac:
-        roles: [hr_admin, super_admin, shift_leader, agent]
         scope: company_or_global  # agent: self only; SL: own company only
       x-design-screens:
         - pFR79   # Detail Penempatan

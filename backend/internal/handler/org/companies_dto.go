@@ -75,6 +75,7 @@ type clientCompanyResponse struct {
 	Name                 string  `json:"name"`
 	Address              string  `json:"address"`
 	LeaderScope          string  `json:"leader_scope"`
+	Type                 string  `json:"type"` // CLIENT | INTERNAL (migr. 00067)
 	NPWP                 *string `json:"npwp"`
 	PICName              *string `json:"pic_name"`
 	Phone                *string `json:"phone"`
@@ -122,6 +123,7 @@ func toClientCompanyResponse(c domain.ClientCompany) clientCompanyResponse {
 		Name:                 c.Name,
 		Address:              c.Address,
 		LeaderScope:          c.LeaderScope,
+		Type:                 c.Type,
 		NPWP:                 c.NPWP,
 		PICName:              c.PICName,
 		Phone:                c.Phone,

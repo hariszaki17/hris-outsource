@@ -26,7 +26,8 @@ type employeeWriteRequest struct {
 	NPWP                *string         `json:"npwp"`
 	BPJSKesehatan       *string         `json:"bpjs_kesehatan"`
 	BPJSKetenagakerjaan *string         `json:"bpjs_ketenagakerjaan"`
-	Position            *string         `json:"position"` // free-text job position/title (required)
+	Position            *string         `json:"position"`       // free-text job position/title (required)
+	EmployeeType        *string         `json:"employee_type"`  // FIELD (default) | INTERNAL (migr. 00067)
 	BankAccount         *bankAccountReq `json:"bank_account"`
 	// LoginEmail is the optional secondary login identifier (D2). The primary
 	// identifier is Phone (required); a login is always auto-provisioned (D1).
@@ -92,7 +93,8 @@ type employeeResponse struct {
 	BPJSKetenagakerjaan  *string               `json:"bpjs_ketenagakerjaan"`
 	BankAccount          *bankAccountResp      `json:"bank_account"`
 	EmergencyContact     *emergencyContactResp `json:"emergency_contact"`
-	Status               string                `json:"status"` // ACTIVE | INACTIVE
+	Status               string                `json:"status"`        // ACTIVE | INACTIVE
+	EmployeeType         string                `json:"employee_type"` // FIELD | INTERNAL
 	HasLogin             bool                  `json:"has_login"`
 	CurrentPosition      *string               `json:"current_position"` // free-text label; null when unplaced
 	CurrentClientCompany *clientCompanyRef     `json:"current_client_company"`
@@ -122,6 +124,7 @@ func toEmployeeResponse(e domain.Employee) employeeResponse {
 		BPJSKesehatan:       e.BPJSKesehatan,
 		BPJSKetenagakerjaan: e.BPJSKetenagakerjaan,
 		Status:              strings.ToUpper(e.Status), // "active" → "ACTIVE"
+		EmployeeType:        e.EmployeeType,
 		HasLogin:            e.HasLogin,
 		CreatedAt:           e.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:           e.UpdatedAt.UTC().Format(time.RFC3339),

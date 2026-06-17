@@ -25,6 +25,10 @@ LIMIT 1;
 -- lateness eval and the schedule_id stamped on the clock-in record. Mirrors
 -- absence.sql's shift-window computation. is_day_off / CANCELLED_BY_LEAVE entries are
 -- not work days; both times must be present. Earliest shift wins when more than one.
+-- TODO(multi-shift): when true multi-shift lands, select the shift whose window
+-- CONTAINS the clock-in instant (window-match) instead of ORDER BY start_time LIMIT 1
+-- (earliest), so clock-in links the correct shift on a multi-shift day. The F5.7
+-- reconcile finder is already window-based (reconcile.sql), so it is forward-ready.
 SELECT
     se.id AS schedule_id,
     ((se.work_date + se.start_time::time) AT TIME ZONE 'Asia/Jakarta')::timestamptz AS shift_start_at,
@@ -55,7 +59,7 @@ INSERT INTO attendance (
     check_in_at, lat_in, lng_in, photo_in_id,
     wfo, is_late, late_minutes,
     in_geofence, in_distance_m, geofence_radius_m,
-    status, verification_status, flags
+    status, verification_status, flags, mode
 )
 VALUES (
     sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.arg(schedule_id),
@@ -65,7 +69,7 @@ VALUES (
     sqlc.arg(check_in_at), sqlc.arg(lat_in), sqlc.arg(lng_in), sqlc.arg(photo_in_id),
     sqlc.arg(wfo), sqlc.arg(is_late), sqlc.arg(late_minutes),
     sqlc.arg(in_geofence), sqlc.arg(in_distance_m), sqlc.arg(geofence_radius_m),
-    sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags)
+    sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags), sqlc.arg(mode)
 )
 ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
 DO NOTHING

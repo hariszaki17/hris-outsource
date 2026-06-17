@@ -351,6 +351,26 @@ export const id = {
     shift_leader: 'Shift Leader',
     agent: 'Agen',
   },
+  // Topbar user menu (apps/web/src/app/user-menu.tsx). `selfService` jumps an elevated staff
+  // user to their own /me self-service surface (clock-in, leave, OT, payslip) — the self-service
+  // baseline every role carries (2026-06-15).
+  userMenu: {
+    selfService: 'Kehadiran Saya',
+  },
+  // Employee type (FIELD = on-site agent · INTERNAL = SWP back-office staff). Shared label set
+  // consumed by employee list/detail/forms (E2). Server enum: FIELD | INTERNAL.
+  employeeType: {
+    label: 'Tipe Karyawan',
+    FIELD: 'Lapangan',
+    INTERNAL: 'Internal',
+  },
+  // Client-company type badge (CLIENT = external client company · INTERNAL = SWP itself).
+  company: {
+    type: {
+      CLIENT: 'Klien',
+      INTERNAL: 'Internal',
+    },
+  },
   settingsOverview: {
     title: 'Pengaturan',
     subtitle: 'Area konfigurasi platform. Bahasa, zona waktu, dan format dikunci di v1.',
@@ -1985,6 +2005,12 @@ export const id = {
       VERIFIED: 'Diverifikasi',
       REJECTED: 'Ditolak',
       ESCALATED: 'Dieskalasi',
+    },
+    // Attendance mode (ONSITE = on-site clock-in with geofence · REMOTE = work-from-home).
+    mode: {
+      label: 'Mode',
+      ONSITE: 'Di Lokasi',
+      REMOTE: 'WFH',
     },
     // F5.6 Manual attendance entry
     manualCreateTitle: 'Buat Kehadiran Manual',

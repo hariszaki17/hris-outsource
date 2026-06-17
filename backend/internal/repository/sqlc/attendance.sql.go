@@ -33,7 +33,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at
+          is_payable, mode, created_at, updated_at
 `
 
 type ApplyCorrectionToAttendanceParams struct {
@@ -87,6 +87,7 @@ type ApplyCorrectionToAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -148,6 +149,7 @@ func (q *Queries) ApplyCorrectionToAttendance(ctx context.Context, arg ApplyCorr
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -164,7 +166,7 @@ INSERT INTO attendance (
     wfo, is_late, late_minutes, worked_minutes,
     in_geofence, in_distance_m, out_geofence, out_distance_m, geofence_radius_m,
     status, verification_status, flags,
-    is_payable,
+    is_payable, mode,
     created_by,
     created_at, updated_at
 ) VALUES (
@@ -176,8 +178,8 @@ INSERT INTO attendance (
     $16, $17, $18, $19,
     $20, $21, $22, $23, $24,
     $25, $26, $27::text[],
-    $28,
-    $29,
+    $28, $29,
+    $30,
     now(), now()
 ) RETURNING id, employee_id, placement_id, schedule_id, company_id,
             site_id, position, attendance_code_id, shift_start_at, shift_end_at,
@@ -186,7 +188,7 @@ INSERT INTO attendance (
             in_geofence, in_distance_m, out_geofence, out_distance_m,
             geofence_radius_m, status, verification_status, flags, verified_by,
             verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-            is_payable,
+            is_payable, mode,
             created_by,
             created_at, updated_at
 `
@@ -220,6 +222,7 @@ type CreateManualAttendanceParams struct {
 	VerificationStatus string
 	Flags              []string
 	IsPayable          *bool
+	Mode               string
 	CreatedBy          *string
 }
 
@@ -262,6 +265,7 @@ type CreateManualAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedBy          *string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -302,6 +306,7 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		arg.VerificationStatus,
 		arg.Flags,
 		arg.IsPayable,
+		arg.Mode,
 		arg.CreatedBy,
 	)
 	var i CreateManualAttendanceRow
@@ -344,6 +349,7 @@ func (q *Queries) CreateManualAttendance(ctx context.Context, arg CreateManualAt
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -361,7 +367,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -413,6 +419,7 @@ type GetAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	EmployeeName       *string
@@ -463,6 +470,7 @@ func (q *Queries) GetAttendance(ctx context.Context, id string) (GetAttendanceRo
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.EmployeeName,
@@ -482,7 +490,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at
 FROM attendance a
 WHERE a.id = $1
@@ -529,6 +537,7 @@ type GetAttendanceForUpdateRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -577,6 +586,7 @@ func (q *Queries) GetAttendanceForUpdate(ctx context.Context, id string) (GetAtt
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -696,7 +706,7 @@ SELECT a.id, a.employee_id, a.placement_id, a.schedule_id, a.company_id,
        a.out_geofence, a.out_distance_m, a.geofence_radius_m, a.status,
        a.verification_status, a.flags, a.verified_by, a.verified_at,
        a.rejected_by, a.rejected_at, a.reject_reason, a.last_correction_id,
-       a.is_payable,
+       a.is_payable, a.mode,
        a.created_at, a.updated_at,
        e.full_name AS employee_name,
        c.name      AS company_name,
@@ -778,6 +788,7 @@ type ListAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	EmployeeName       *string
@@ -865,6 +876,7 @@ func (q *Queries) ListAttendance(ctx context.Context, arg ListAttendanceParams) 
 			&i.RejectReason,
 			&i.LastCorrectionID,
 			&i.IsPayable,
+			&i.Mode,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.EmployeeName,
@@ -898,7 +910,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at
+          is_payable, mode, created_at, updated_at
 `
 
 type RejectAttendanceParams struct {
@@ -946,6 +958,7 @@ type RejectAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -993,6 +1006,7 @@ func (q *Queries) RejectAttendance(ctx context.Context, arg RejectAttendancePara
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1012,7 +1026,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at
+          is_payable, mode, created_at, updated_at
 `
 
 type SetAttendancePayableParams struct {
@@ -1059,6 +1073,7 @@ type SetAttendancePayableRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -1108,6 +1123,7 @@ func (q *Queries) SetAttendancePayable(ctx context.Context, arg SetAttendancePay
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1130,7 +1146,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at
+          is_payable, mode, created_at, updated_at
 `
 
 type VerifyAttendanceParams struct {
@@ -1177,6 +1193,7 @@ type VerifyAttendanceRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -1225,6 +1242,7 @@ func (q *Queries) VerifyAttendance(ctx context.Context, arg VerifyAttendancePara
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1252,7 +1270,7 @@ RETURNING id, employee_id, placement_id, schedule_id, company_id,
           in_geofence, in_distance_m, out_geofence, out_distance_m,
           geofence_radius_m, status, verification_status, flags, verified_by,
           verified_at, rejected_by, rejected_at, reject_reason, last_correction_id,
-          is_payable, created_at, updated_at
+          is_payable, mode, created_at, updated_at
 `
 
 type VerifyAttendanceWithTimesParams struct {
@@ -1304,6 +1322,7 @@ type VerifyAttendanceWithTimesRow struct {
 	RejectReason       *string
 	LastCorrectionID   *string
 	IsPayable          *bool
+	Mode               string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }
@@ -1362,6 +1381,7 @@ func (q *Queries) VerifyAttendanceWithTimes(ctx context.Context, arg VerifyAtten
 		&i.RejectReason,
 		&i.LastCorrectionID,
 		&i.IsPayable,
+		&i.Mode,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

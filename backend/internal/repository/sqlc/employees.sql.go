@@ -17,7 +17,7 @@ INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
     bank_name, bank_account_number, bank_account_holder_name,
-    emergency_contact_name, emergency_contact_phone, position, created_by
+    emergency_contact_name, emergency_contact_phone, position, employee_type, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     $1,
@@ -40,14 +40,15 @@ INSERT INTO employees (
     $18,
     $19,
     $20,
-    $21
+    $21,
+    $22
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           position AS current_position,
-          status, created_by, created_at, updated_at
+          status, employee_type, created_by, created_at, updated_at
 `
 
 type CreateEmployeeParams struct {
@@ -71,6 +72,7 @@ type CreateEmployeeParams struct {
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
 	Position              string
+	EmployeeType          string
 	CreatedBy             *string
 }
 
@@ -99,6 +101,7 @@ type CreateEmployeeRow struct {
 	PhotoObjectKey        *string
 	CurrentPosition       string
 	Status                string
+	EmployeeType          string
 	CreatedBy             *string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -127,6 +130,7 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		arg.EmergencyContactName,
 		arg.EmergencyContactPhone,
 		arg.Position,
+		arg.EmployeeType,
 		arg.CreatedBy,
 	)
 	var i CreateEmployeeRow
@@ -155,6 +159,7 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		&i.PhotoObjectKey,
 		&i.CurrentPosition,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -167,7 +172,7 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
-       e.status, e.created_by, e.created_at, e.updated_at,
+       e.status, e.employee_type, e.created_by, e.created_at, e.updated_at,
        e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
@@ -210,6 +215,7 @@ type GetEmployeeByIDRow struct {
 	AppLanguage              string
 	PhotoObjectKey           *string
 	Status                   string
+	EmployeeType             string
 	CreatedBy                *string
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
@@ -249,6 +255,7 @@ func (q *Queries) GetEmployeeByID(ctx context.Context, id string) (GetEmployeeBy
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -264,7 +271,7 @@ SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_plac
        phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
        bank_name, bank_account_number, bank_account_holder_name,
        emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-       status, created_by, created_at, updated_at
+       status, employee_type, created_by, created_at, updated_at
 FROM employees
 WHERE nik = $1
   AND deleted_at IS NULL
@@ -294,6 +301,7 @@ type GetEmployeeByNIKRow struct {
 	AppLanguage           string
 	PhotoObjectKey        *string
 	Status                string
+	EmployeeType          string
 	CreatedBy             *string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -327,6 +335,7 @@ func (q *Queries) GetEmployeeByNIK(ctx context.Context, nik string) (GetEmployee
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -339,7 +348,7 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
-       e.status, e.created_by, e.created_at, e.updated_at,
+       e.status, e.employee_type, e.created_by, e.created_at, e.updated_at,
        e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
@@ -388,11 +397,15 @@ WHERE e.deleted_at IS NULL
         OR cc.id = $5::text
       )
   AND (
-        $6::timestamptz IS NULL
-        OR (e.created_at, e.id) < ($6::timestamptz, $7::text)
+        $6::text IS NULL
+        OR e.employee_type = $6::text
+      )
+  AND (
+        $7::timestamptz IS NULL
+        OR (e.created_at, e.id) < ($7::timestamptz, $8::text)
       )
 ORDER BY e.created_at DESC, e.id DESC
-LIMIT $8
+LIMIT $9
 `
 
 type ListEmployeesParams struct {
@@ -401,6 +414,7 @@ type ListEmployeesParams struct {
 	Assigned        *bool
 	Q               *string
 	ClientCompany   *string
+	EmployeeType    *string
 	CursorCreatedAt *time.Time
 	CursorID        *string
 	RowLimit        int32
@@ -430,6 +444,7 @@ type ListEmployeesRow struct {
 	AppLanguage              string
 	PhotoObjectKey           *string
 	Status                   string
+	EmployeeType             string
 	CreatedBy                *string
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
@@ -451,6 +466,7 @@ func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([
 		arg.Assigned,
 		arg.Q,
 		arg.ClientCompany,
+		arg.EmployeeType,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,
@@ -486,6 +502,7 @@ func (q *Queries) ListEmployees(ctx context.Context, arg ListEmployeesParams) ([
 			&i.AppLanguage,
 			&i.PhotoObjectKey,
 			&i.Status,
+			&i.EmployeeType,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -513,7 +530,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-          status, created_by, created_at, updated_at
+          status, employee_type, created_by, created_at, updated_at
 `
 
 type SetEmployeeStatusParams struct {
@@ -545,6 +562,7 @@ type SetEmployeeStatusRow struct {
 	AppLanguage           string
 	PhotoObjectKey        *string
 	Status                string
+	EmployeeType          string
 	CreatedBy             *string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -578,6 +596,7 @@ func (q *Queries) SetEmployeeStatus(ctx context.Context, arg SetEmployeeStatusPa
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -626,15 +645,16 @@ SET full_name                = $1,
     emergency_contact_name   = $17,
     emergency_contact_phone  = $18,
     position                 = $19,
+    employee_type            = $20,
     updated_at               = now()
-WHERE id = $20
+WHERE id = $21
   AND deleted_at IS NULL
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           position AS current_position,
-          status, created_by, created_at, updated_at
+          status, employee_type, created_by, created_at, updated_at
 `
 
 type UpdateEmployeeParams struct {
@@ -657,6 +677,7 @@ type UpdateEmployeeParams struct {
 	EmergencyContactName  *string
 	EmergencyContactPhone *string
 	Position              string
+	EmployeeType          string
 	ID                    string
 }
 
@@ -685,6 +706,7 @@ type UpdateEmployeeRow struct {
 	PhotoObjectKey        *string
 	CurrentPosition       string
 	Status                string
+	EmployeeType          string
 	CreatedBy             *string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -711,6 +733,7 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		arg.EmergencyContactName,
 		arg.EmergencyContactPhone,
 		arg.Position,
+		arg.EmployeeType,
 		arg.ID,
 	)
 	var i UpdateEmployeeRow
@@ -739,6 +762,7 @@ func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) 
 		&i.PhotoObjectKey,
 		&i.CurrentPosition,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -764,7 +788,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-          status, created_by, created_at, updated_at
+          status, employee_type, created_by, created_at, updated_at
 `
 
 type UpdateEmployeeSelfInstantParams struct {
@@ -804,6 +828,7 @@ type UpdateEmployeeSelfInstantRow struct {
 	AppLanguage           string
 	PhotoObjectKey        *string
 	Status                string
+	EmployeeType          string
 	CreatedBy             *string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -853,6 +878,7 @@ func (q *Queries) UpdateEmployeeSelfInstant(ctx context.Context, arg UpdateEmplo
 		&i.AppLanguage,
 		&i.PhotoObjectKey,
 		&i.Status,
+		&i.EmployeeType,
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,

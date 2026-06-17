@@ -17,6 +17,7 @@ import { useCurrentUser } from '@/lib/use-auth.ts';
 import {
   type ClientCompany,
   ClientCompanyStatus,
+  ClientCompanyType,
   type ListClientCompaniesParams,
   useDeactivateClientCompany,
   useListClientCompanies,
@@ -211,9 +212,19 @@ export function ClientCompaniesScreen() {
       cell: (row) => {
         const tone: StatusTone = row.status === ClientCompanyStatus.ACTIVE ? 'ok' : 'bad';
         return (
-          <StatusBadge tone={tone} dot>
-            {row.status === ClientCompanyStatus.ACTIVE ? t('status.active') : t('status.inactive')}
-          </StatusBadge>
+          <div className="flex items-center gap-1.5">
+            <StatusBadge tone={tone} dot>
+              {row.status === ClientCompanyStatus.ACTIVE
+                ? t('status.active')
+                : t('status.inactive')}
+            </StatusBadge>
+            {/* INTERNAL = SWP itself (seed-only). Flag it so HQ is never read as a client. */}
+            {row.type === ClientCompanyType.INTERNAL && (
+              <StatusBadge tone="info">
+                {t('company.type.INTERNAL', { ns: 'translation' })}
+              </StatusBadge>
+            )}
+          </div>
         );
       },
     },

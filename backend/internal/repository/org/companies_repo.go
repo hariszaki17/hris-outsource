@@ -59,6 +59,7 @@ func (r *Repository) ListClientCompanies(ctx context.Context, f domain.CompanyFi
 			Name:                 row.Name,
 			Address:              row.Address,
 			LeaderScope:          row.LeaderScope,
+			Type:                 row.Type,
 			NPWP:                 row.Npwp,
 			PICName:              row.PicName,
 			Phone:                row.Phone,
@@ -89,6 +90,7 @@ func (r *Repository) GetCompanyByID(ctx context.Context, id string) (domain.Clie
 		Name:                 row.Name,
 		Address:              row.Address,
 		LeaderScope:          row.LeaderScope,
+		Type:                 row.Type,
 		NPWP:                 row.Npwp,
 		PICName:              row.PicName,
 		Phone:                row.Phone,
@@ -103,11 +105,14 @@ func (r *Repository) GetCompanyByID(ctx context.Context, id string) (domain.Clie
 }
 
 // CreateCompany inserts a new client company in the given transaction.
+// Company creation is CLIENT-only (migr. 00067); the INTERNAL SWP org record is
+// seed-only, so Type is hard-wired to "CLIENT" here (no create input).
 func (r *Repository) CreateCompany(ctx context.Context, tx pgx.Tx, p svc.CreateCompanyParams) (domain.ClientCompany, error) {
 	row, err := r.q.WithTx(tx).CreateClientCompany(ctx, sqlcgen.CreateClientCompanyParams{
 		Name:        p.Name,
 		Address:     p.Address,
 		LeaderScope: p.LeaderScope,
+		Type:        "CLIENT",
 		Npwp:        nullStr(p.NPWP),
 		PicName:     nullStr(p.PICName),
 		Phone:       nullStr(p.Phone),
@@ -121,6 +126,7 @@ func (r *Repository) CreateCompany(ctx context.Context, tx pgx.Tx, p svc.CreateC
 		Name:                 row.Name,
 		Address:              row.Address,
 		LeaderScope:          row.LeaderScope,
+		Type:                 row.Type,
 		NPWP:                 row.Npwp,
 		PICName:              row.PicName,
 		Phone:                row.Phone,
@@ -136,11 +142,19 @@ func (r *Repository) CreateCompany(ctx context.Context, tx pgx.Tx, p svc.CreateC
 
 // UpdateCompany patches a client company's mutable fields.
 func (r *Repository) UpdateCompany(ctx context.Context, tx pgx.Tx, p svc.UpdateCompanyParams) (domain.ClientCompany, error) {
-	row, err := r.q.WithTx(tx).UpdateClientCompany(ctx, sqlcgen.UpdateClientCompanyParams{
+	q := r.q.WithTx(tx)
+	// Type is not editable via the API (no update input); carry forward the existing
+	// value so the CLIENT/INTERNAL classification (migr. 00067) is preserved.
+	current, err := q.GetClientCompanyByID(ctx, p.ID)
+	if err != nil {
+		return domain.ClientCompany{}, mapErr(err)
+	}
+	row, err := q.UpdateClientCompany(ctx, sqlcgen.UpdateClientCompanyParams{
 		ID:          p.ID,
 		Name:        p.Name,
 		Address:     p.Address,
 		LeaderScope: p.LeaderScope,
+		Type:        current.Type,
 		Npwp:        nullStr(p.NPWP),
 		PicName:     nullStr(p.PICName),
 		Phone:       nullStr(p.Phone),
@@ -158,6 +172,7 @@ func (r *Repository) UpdateCompany(ctx context.Context, tx pgx.Tx, p svc.UpdateC
 		Name:                 row.Name,
 		Address:              row.Address,
 		LeaderScope:          row.LeaderScope,
+		Type:                 row.Type,
 		NPWP:                 row.Npwp,
 		PICName:              row.PicName,
 		Phone:                row.Phone,
@@ -189,6 +204,7 @@ func (r *Repository) SetCompanyStatus(ctx context.Context, tx pgx.Tx, id, status
 		Name:                 row.Name,
 		Address:              row.Address,
 		LeaderScope:          row.LeaderScope,
+		Type:                 row.Type,
 		NPWP:                 row.Npwp,
 		PICName:              row.PicName,
 		Phone:                row.Phone,

@@ -217,7 +217,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - H1eBN  # HR · Persetujuan Lembur
@@ -278,7 +277,6 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - wDLQu  # Mobile · Agen Ajukan Lembur
@@ -307,7 +305,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - H1eBN
@@ -429,7 +426,6 @@ paths:
             Wrong-state transition (record not in `PENDING_AGENT_CONFIRM`) → `CONFLICT`.
           $ref: '#/components/responses/Conflict'
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - mzCUA  # Mobile · Agen OT Terdeteksi (Konfirmasi)
@@ -464,7 +460,6 @@ paths:
             Not withdrawable — record is already APPROVED / REJECTED / CANCELLED.
           $ref: '#/components/responses/Conflict'
       x-rbac:
-        roles: [agent]
         scope: self
       x-design-screens:
         - nd3KT  # Mobile · Lembur Saya (history rows)
@@ -537,7 +532,6 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: global
       x-design-screens:
         - tpIxx  # vd4na right pane · Kalender Hari Libur
@@ -625,7 +619,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: global
       x-design-screens:
         - vd4na
@@ -726,7 +719,6 @@ paths:
                       - type: 'null'
         '401': { $ref: '#/components/responses/Unauthenticated' }
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: global
       x-design-screens: []
 

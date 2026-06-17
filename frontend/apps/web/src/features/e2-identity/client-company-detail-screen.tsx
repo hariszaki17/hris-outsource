@@ -15,7 +15,12 @@
 import ApprovalTemplateEditorScreen from '@/features/e11-approvals/approval-template-editor-screen.tsx';
 import { classifyError } from '@/lib/api-error.ts';
 import { useCurrentUser } from '@/lib/use-auth.ts';
-import { type ClientCompany, ClientCompanyStatus, useGetClientCompany } from '@swp/api-client/e2';
+import {
+  type ClientCompany,
+  ClientCompanyStatus,
+  ClientCompanyType,
+  useGetClientCompany,
+} from '@swp/api-client/e2';
 import { DateText, EmptyState, StateView, StatusBadge } from '@swp/ui';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, Building2, Edit2, Info } from 'lucide-react';
@@ -152,6 +157,10 @@ export function ClientCompanyDetailScreen({ clientCompanyId }: ClientCompanyDeta
               ? t('status.active')
               : t('status.inactive')}
           </StatusBadge>
+          {/* INTERNAL = SWP itself (seed-only) — flag so HQ is never read as a client company. */}
+          {company.type === ClientCompanyType.INTERNAL && (
+            <StatusBadge tone="info">{t('company.type.INTERNAL', { ns: 'translation' })}</StatusBadge>
+          )}
           {canWrite && (
             <Link
               to={'/client-companies/$clientCompanyId/edit' as never}

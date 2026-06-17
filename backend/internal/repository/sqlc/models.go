@@ -123,6 +123,7 @@ type Attendance struct {
 	CreatedBy          *string
 	Position           string
 	IsPayable          *bool
+	Mode               string
 }
 
 type AttendanceCode struct {
@@ -178,6 +179,23 @@ type AuditLog struct {
 	CreatedAt   time.Time
 }
 
+type ClarificationRequest struct {
+	ID               string
+	SourceType       string
+	SourceID         string
+	PeriodID         *string
+	RaisedBy         *string
+	TargetEmployeeID string
+	Question         string
+	Status           string
+	Answer           *string
+	AnsweredBy       *string
+	AnsweredAt       *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time
+}
+
 type ClientCompany struct {
 	ID          string
 	Name        string
@@ -191,6 +209,7 @@ type ClientCompany struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
+	Type        string
 }
 
 type ClientSite struct {
@@ -240,6 +259,7 @@ type Employee struct {
 	AppLanguage           string
 	PhotoObjectKey        *string
 	Position              string
+	EmployeeType          string
 }
 
 type EmployeeLeaveEntitlement struct {
@@ -485,6 +505,38 @@ type PasswordResetToken struct {
 	CreatedAt time.Time
 }
 
+type PayrollAdjustment struct {
+	ID           string
+	EmployeeID   string
+	SourceType   string
+	SourceID     string
+	OriginYear   int32
+	OriginMonth  int32
+	Note         *string
+	Amount       *string
+	Status       string
+	AppliedRunID *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
+type PayrollPeriod struct {
+	ID              string
+	Year            int32
+	Month           int32
+	Status          string
+	LockedBy        *string
+	LockedAt        *time.Time
+	ForceLocked     bool
+	ForceLockReason *string
+	ReopenedBy      *string
+	ReopenedAt      *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+}
+
 type Payslip struct {
 	ID                 string
 	EmployeeID         string
@@ -531,6 +583,22 @@ type PayslipComponent struct {
 	ValueEnc  []byte
 	ForBpjs   bool
 	SortOrder int32
+}
+
+type PeriodEmployeeSummary struct {
+	ID                 string
+	PeriodID           string
+	EmployeeID         string
+	PayableDays        int32
+	PresentDays        int32
+	LateDays           int32
+	AbsentDays         int32
+	NoShiftPayableDays int32
+	WorkedMinutes      int32
+	ApprovedOtMinutes  int32
+	PaidLeaveDays      int32
+	UnpaidLeaveDays    int32
+	CreatedAt          time.Time
 }
 
 type Placement struct {

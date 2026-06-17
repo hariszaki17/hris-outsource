@@ -37,6 +37,7 @@ func (h *Handler) ListEmployees(w http.ResponseWriter, r *http.Request) {
 		Role:            queryStringPtr(q.Get("role")),
 		Assigned:        queryBoolPtr(q.Get("assigned")),
 		ClientCompanyID: queryStringPtr(q.Get("client_company")),
+		EmployeeType:    queryStringPtr(q.Get("employee_type")),
 		Limit:           parseLimit(q.Get("limit")),
 	}
 
@@ -137,6 +138,7 @@ func (h *Handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 		BankAccountNumber:     bankAccNum,
 		BankAccountHolderName: bankHolder,
 		Position:              derefString(req.Position),
+		EmployeeType:          employeeTypeOrDefault(req.EmployeeType),
 		LoginEmail:            derefString(req.LoginEmail),
 	}
 
@@ -226,6 +228,7 @@ func (h *Handler) UpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		BankAccountNumber:     bankAccNum,
 		BankAccountHolderName: bankHolder,
 		Position:              coalesce(req.Position, current.CurrentPosition),
+		EmployeeType:          employeeTypeOrDefault(queryStringPtr(coalesce(req.EmployeeType, current.EmployeeType))),
 	}
 
 	emp, err := h.svc.UpdateEmployee(r.Context(), params)
@@ -306,6 +309,15 @@ func coalesce(ptr *string, fallback string) string {
 		return *ptr
 	}
 	return fallback
+}
+
+// employeeTypeOrDefault returns the employee_type from the request, defaulting to
+// "FIELD" when omitted/empty (migr. 00067 — DB-checked FIELD|INTERNAL).
+func employeeTypeOrDefault(p *string) string {
+	if p == nil || *p == "" {
+		return "FIELD"
+	}
+	return *p
 }
 
 // ptrStr dereferences a *string; empty string if nil.

@@ -63,7 +63,7 @@ INSERT INTO attendance (
     check_in_at, lat_in, lng_in, photo_in_id,
     wfo, is_late, late_minutes,
     in_geofence, in_distance_m, geofence_radius_m,
-    status, verification_status, flags
+    status, verification_status, flags, mode
 )
 VALUES (
     $1, $2, $3,
@@ -73,7 +73,7 @@ VALUES (
     $9, $10, $11, $12,
     $13, $14, $15,
     $16, $17, $18,
-    $19, $20, $21
+    $19, $20, $21, $22
 )
 ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
 DO NOTHING
@@ -102,6 +102,7 @@ type ClockInAttendanceParams struct {
 	Status             string
 	VerificationStatus string
 	Flags              []string
+	Mode               string
 }
 
 // Insert ONE clock-in row. id fires via the column DEFAULT (omitted). schedule_id is
@@ -132,6 +133,7 @@ func (q *Queries) ClockInAttendance(ctx context.Context, arg ClockInAttendancePa
 		arg.Status,
 		arg.VerificationStatus,
 		arg.Flags,
+		arg.Mode,
 	)
 	var id string
 	err := row.Scan(&id)
@@ -256,6 +258,10 @@ type GetTodayScheduleForEmployeeRow struct {
 // lateness eval and the schedule_id stamped on the clock-in record. Mirrors
 // absence.sql's shift-window computation. is_day_off / CANCELLED_BY_LEAVE entries are
 // not work days; both times must be present. Earliest shift wins when more than one.
+// TODO(multi-shift): when true multi-shift lands, select the shift whose window
+// CONTAINS the clock-in instant (window-match) instead of ORDER BY start_time LIMIT 1
+// (earliest), so clock-in links the correct shift on a multi-shift day. The F5.7
+// reconcile finder is already window-based (reconcile.sql), so it is forward-ready.
 func (q *Queries) GetTodayScheduleForEmployee(ctx context.Context, arg GetTodayScheduleForEmployeeParams) (GetTodayScheduleForEmployeeRow, error) {
 	row := q.db.QueryRow(ctx, getTodayScheduleForEmployee, arg.EmployeeID, arg.Now)
 	var i GetTodayScheduleForEmployeeRow

@@ -18,6 +18,7 @@ import { applyFieldErrors, classifyError } from '@/lib/api-error.ts';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   type Employee,
+  EmployeeWriteRequestEmployeeType,
   type EmployeeWriteRequest,
   Gender,
   useCreateEmployee,
@@ -56,6 +57,9 @@ const employeeSchema = z.object({
   nip: z.string().optional(),
   // Position is the agent's free-text job title (required; moved off placement 2026-06-15).
   position: z.string().min(1, 'Posisi wajib diisi'),
+  // FIELD = on-site agent placed at a client · INTERNAL = SWP HQ staff (2026-06-15).
+  // Defaults to FIELD when the form initializes (set in useForm defaultValues / reset).
+  employee_type: z.nativeEnum(EmployeeWriteRequestEmployeeType),
   join_at: z.string().min(1),
   // FilterSelect emits '' for the empty placeholder; coerce '' → undefined before enum check.
   gender: z.preprocess((v) => (v === '' ? undefined : v), z.nativeEnum(Gender).optional()),
@@ -210,6 +214,36 @@ function EmployeeFormBody({ form, isEdit }: EmployeeFormBodyProps) {
                   error={!!fieldState.error}
                   placeholder={t('fieldPositionPlaceholder')}
                 />
+              )}
+            />
+          </FormField>
+
+          {/* Employee type — FIELD (on-site agent) vs INTERNAL (SWP HQ staff).
+              Defaults to FIELD. FilterSelect matches the gender control above. */}
+          <FormField
+            label={t('employeeType.label', { ns: 'translation' })}
+            htmlFor="employee_type"
+            error={errors.employee_type?.message}
+          >
+            <Controller
+              control={form.control}
+              name="employee_type"
+              render={({ field }) => (
+                <FilterSelect
+                  id="employee_type"
+                  aria-label={t('employeeType.label', { ns: 'translation' })}
+                  value={field.value ?? EmployeeWriteRequestEmployeeType.FIELD}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                >
+                  <option value={EmployeeWriteRequestEmployeeType.FIELD}>
+                    {t('employeeType.FIELD', { ns: 'translation' })}
+                  </option>
+                  <option value={EmployeeWriteRequestEmployeeType.INTERNAL}>
+                    {t('employeeType.INTERNAL', { ns: 'translation' })}
+                  </option>
+                </FilterSelect>
               )}
             />
           </FormField>
@@ -370,6 +404,7 @@ export function CreateEmployeeScreen() {
 
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema),
+    defaultValues: { employee_type: EmployeeWriteRequestEmployeeType.FIELD },
   });
 
   const mutation = useCreateEmployee();
@@ -386,6 +421,7 @@ export function CreateEmployeeScreen() {
       nik: values.nik,
       nip: values.nip || undefined,
       position: values.position,
+      employee_type: values.employee_type,
       join_at: values.join_at,
       gender: values.gender,
       birth_date: values.birth_date || undefined,
@@ -530,6 +566,9 @@ export function EditEmployeeScreen({
       nik: emp.nik,
       nip: emp.nip ?? '',
       position: emp.current_position ?? '',
+      employee_type:
+        (emp.employee_type as EmployeeWriteRequestEmployeeType | undefined) ??
+        EmployeeWriteRequestEmployeeType.FIELD,
       join_at: emp.join_at,
       gender: emp.gender,
       birth_date: emp.birth_date ?? '',
@@ -554,6 +593,7 @@ export function EditEmployeeScreen({
       nik: values.nik,
       nip: values.nip || undefined,
       position: values.position,
+      employee_type: values.employee_type,
       join_at: values.join_at,
       gender: values.gender,
       birth_date: values.birth_date || undefined,

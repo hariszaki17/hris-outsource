@@ -143,7 +143,6 @@ paths:
         types ("sesuai ketentuan"). Mobile flat list (`o1BUa`) reads from here.
       operationId: getEmployeeTypeBalances
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - "o1BUa"  # Agen · Cuti Saya — per-type flat list
@@ -221,7 +220,6 @@ paths:
         `hr_admin` / `super_admin` see all.
       operationId: listLeaveRequests
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - "yho5i"  # HR L2 queue
@@ -304,7 +302,6 @@ paths:
         ID and body for 24h (CONVENTIONS §13).
       operationId: createLeaveRequest
       x-rbac:
-        roles: [agent, hr_admin, super_admin, shift_leader]
         scope: self  # leader/HR widen by sending `employee_id` of someone else (their scope)
       x-design-screens:
         - "QT92D"  # Agen · Ajukan Cuti (mobile)
@@ -382,7 +379,6 @@ paths:
           cancelled on final approval (LI-1).
       operationId: getLeaveRequest
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: company_or_global
       x-design-screens:
         - "DJrBn"  # E6 · Detail Pengajuan Cuti (HR L2 detail)
@@ -411,7 +407,6 @@ paths:
         rejected (`409 CONFLICT`).
       operationId: updateLeaveRequest
       x-rbac:
-        roles: [agent, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - "QT92D"
@@ -446,7 +441,6 @@ paths:
         response. Re-runs the same validation suite as `POST /leave-requests`.
       operationId: submitLeaveRequest
       x-rbac:
-        roles: [agent, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - "QT92D"
@@ -482,7 +476,6 @@ paths:
         For cancelling an **APPROVED** future leave, see `:cancel-approved`.
       operationId: cancelLeaveRequest
       x-rbac:
-        roles: [agent, hr_admin, super_admin]
         scope: self
       x-design-screens:
         - "hjCYy"  # mobile status detail — "Tarik Pengajuan"
@@ -535,7 +528,6 @@ paths:
         `reason` is required.
       operationId: cancelApprovedLeaveRequest
       x-rbac:
-        roles: [agent, hr_admin, super_admin]
         scope: self  # HR widens
       x-design-screens:
         - "hjCYy"  # mobile (audit M12)
@@ -659,7 +651,6 @@ paths:
           supplementary evidence.
       operationId: uploadLeaveRequestAttachment
       x-rbac:
-        roles: [agent, hr_admin, super_admin, shift_leader]
         scope: self
       x-design-screens:
         - "QT92D"  # mobile upload field
@@ -855,7 +846,6 @@ paths:
         (LR-2 / INV-5).
       operationId: listLeaveTypes
       x-rbac:
-        roles: [agent, shift_leader, hr_admin, super_admin]
         scope: global
       x-design-screens:
         - "QT92D"  # mobile type picker

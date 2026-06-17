@@ -195,7 +195,6 @@ paths:
         Returns the instance, its resolved chain (lines + members), and the append-only
         `actions` trail (approve/reject/bypass), for the request-detail timeline (IB-4).
       x-rbac:
-        roles: [hr_admin, super_admin, lead, shift_leader, agent]
         scope: company_or_global   # requester (self) may also read their own
       x-design-screens: []
       responses:
@@ -218,7 +217,6 @@ paths:
         requester (EX-2/EX-4). Clears the line (OR) and advances; the last line clearing
         finalizes the request and fires the type's `OnApproved` hook (EX-3/EX-7).
       x-rbac:
-        roles: [hr_admin, super_admin, lead, shift_leader, agent]   # membership decides, not role
         scope: company_or_global
       x-design-screens: []
       parameters:
@@ -259,7 +257,6 @@ paths:
         Any current-line member may reject; **reason required**. Moves the instance to
         `REJECTED` and fires `OnRejected` (EX-5 / INV-4).
       x-rbac:
-        roles: [hr_admin, super_admin, lead, shift_leader, agent]
         scope: company_or_global
       x-design-screens: []
       parameters:

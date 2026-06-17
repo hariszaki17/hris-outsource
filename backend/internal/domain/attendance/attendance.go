@@ -155,6 +155,10 @@ type Attendance struct {
 	WorkedMinutes *int // nil while open
 	AutoClosed    bool
 
+	// Mode is where the clock event was captured (migr. 00067): "ONSITE" (default,
+	// geofenced client/internal site) | "REMOTE" (work-from-home / off-site).
+	Mode string
+
 	// Geofence assembled from stored columns (nil when no inside flag present).
 	GeofenceIn  *GeofenceCheck
 	GeofenceOut *GeofenceCheck

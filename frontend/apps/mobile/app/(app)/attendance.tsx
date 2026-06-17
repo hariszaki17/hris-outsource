@@ -17,6 +17,7 @@ import {
   Ban,
   Bell,
   Clock3,
+  House,
   Info,
   LogIn,
   LogOut,
@@ -42,6 +43,7 @@ import {
 import {
   type Attendance,
   type AttendancePage,
+  type ClockInRequestMode,
   useClockIn,
   useClockOut,
   useListAttendance,
@@ -170,6 +172,10 @@ export default function AttendanceScreen() {
   const [distanceM, setDistanceM] = useState<number | null>(null);
   // isOutside: set true when server returns OUT_OF_GEOFENCE on a clock-in attempt
   const [isOutside, setIsOutside] = useState(false);
+  // Clock-in mode (2026-06-16): ONSITE = geofence applies; REMOTE = WFH/off-site,
+  // geofence skipped (GPS still sent for the record, not gated). Default ONSITE.
+  const [mode, setMode] = useState<ClockInRequestMode>('ONSITE');
+  const isRemote = mode === 'REMOTE';
 
   useEffect(() => {
     void (async () => {
@@ -200,6 +206,13 @@ export default function AttendanceScreen() {
   // Live distance to the work point: haversine(device GPS, site centroid). Computed
   // once GPS is granted and the geofence is loaded — matches the server clock-in check.
   useEffect(() => {
+    // REMOTE (WFH) clock-in skips the geofence gate entirely — no distance check,
+    // no outside-radius state. Clear any prior distance so the pill/banner hide.
+    if (isRemote) {
+      setDistanceM(null);
+      setIsOutside(false);
+      return;
+    }
     if (gpsState !== 'ok' || !siteGeofence) return;
     void (async () => {
       const coords = await getCurrentCoords();
@@ -211,7 +224,7 @@ export default function AttendanceScreen() {
       setDistanceM(d);
       setIsOutside(d > siteGeofence.radius_m);
     })();
-  }, [gpsState, siteGeofence]);
+  }, [gpsState, siteGeofence, isRemote]);
 
   // Weekly schedule — surfaced on Beranda (the Jadwal tab was replaced by Kehadiran).
   const { user } = useSession();
@@ -269,11 +282,13 @@ export default function AttendanceScreen() {
   }
 
   async function doClockIn(noScheduleForce: boolean) {
-    if (gpsState === 'unavailable') return;
+    // ONSITE requires GPS; REMOTE (WFH) does not gate on it.
+    if (!isRemote && gpsState === 'unavailable') return;
     setBusy(true);
     try {
+      // REMOTE still sends best-effort coords for the record, but never gates on them.
       const coords = await getCurrentCoords();
-      if (!coords) {
+      if (!coords && !isRemote) {
         setGpsState('unavailable');
         return;
       }
@@ -281,10 +296,11 @@ export default function AttendanceScreen() {
       try {
         await clockInMut.mutateAsync({
           data: {
-            lat: coords.lat,
-            lng: coords.lng,
-            gps_available: true,
-            wfo: true,
+            lat: coords?.lat ?? 0,
+            lng: coords?.lng ?? 0,
+            gps_available: !!coords,
+            mode,
+            wfo: mode === 'ONSITE', // deprecated back-compat; `mode` is the source of truth
             force_outside_geofence: noScheduleForce,
           },
         });
@@ -341,10 +357,11 @@ export default function AttendanceScreen() {
   let shiftLabelColor: string = color.text;
 
   if (noScheduleState) {
-    // No schedule today (warn-tinted card)
+    // No schedule today (warn-tinted card). The "no schedule" warning is already
+    // surfaced under the Clock In button, so here we just show the placement (no dot).
     shiftDotColor = color.warn.text; // #B54708
-    shiftLabelText = t('m:absen.noScheduleLabel');
-    shiftSite = `Penempatan: ${siteName}`;
+    shiftLabelText = `Penempatan: ${siteName}`;
+    shiftSite = '';
     shiftCardBg = color.warn.bg;
     shiftCardBorder = color.warn.border;
     shiftLabelColor = color.warn.text;
@@ -412,8 +429,8 @@ export default function AttendanceScreen() {
   let bannerIcon: LucideIcon = Info;
   let bannerIconColor: string = color.info.text;
 
-  if (gpsState === 'unavailable') {
-    // GPS unavailable — disabled
+  if (!isRemote && gpsState === 'unavailable') {
+    // GPS unavailable — disabled (ONSITE only; REMOTE/WFH does not require GPS)
     actionLabel = t('m:absen.activateLocation');
     actionIcon = Ban;
     actionBg = color.controlOff; // #D1D5DB-ish gray
@@ -425,8 +442,8 @@ export default function AttendanceScreen() {
     bannerTextClass = 'text-bad-text';
     bannerIcon = MapPin;
     bannerIconColor = color.bad.text;
-  } else if (isOutside && !open) {
-    // Outside geofence — disabled
+  } else if (!isRemote && isOutside && !open) {
+    // Outside geofence — disabled (ONSITE only; REMOTE skips the geofence gate)
     actionLabel = t('m:absen.cannotClockIn');
     actionIcon = Ban;
     actionBg = color.controlOff;
@@ -478,9 +495,10 @@ export default function AttendanceScreen() {
     actionOnPress = () => void doClockIn(false);
     bannerBg = 'bg-info-bg';
     bannerBorder = 'border-info-border';
-    bannerText = t('m:absen.outsideInfoNote');
+    // REMOTE explains the geofence skip; ONSITE keeps the out-of-radius-flagged note.
+    bannerText = isRemote ? t('m:absen.modeRemoteNote') : t('m:absen.outsideInfoNote');
     bannerTextClass = 'text-info-text';
-    bannerIcon = Info;
+    bannerIcon = isRemote ? House : Info;
     bannerIconColor = color.info.text;
   }
 
@@ -523,7 +541,9 @@ export default function AttendanceScreen() {
           className="flex-row items-center gap-2 rounded-[10px] border px-3.5 py-2.5"
           style={{ backgroundColor: shiftCardBg, borderColor: shiftCardBorder }}
         >
-          <View className="h-2 w-2 rounded-pill" style={{ backgroundColor: shiftDotColor }} />
+          {noScheduleState ? null : (
+            <View className="h-2 w-2 rounded-pill" style={{ backgroundColor: shiftDotColor }} />
+          )}
           <Text
             variant="label"
             weight="semibold"
@@ -543,15 +563,51 @@ export default function AttendanceScreen() {
           <Text variant="secondary" className="text-text-3">
             {dateLong(now)}
           </Text>
-          <View
-            className={`mt-0.5 flex-row items-center gap-1.5 rounded-pill border px-3.5 py-1.5 ${locPillBg} ${locPillBorder}`}
-          >
-            <LocPillIcon size={14} color={locIconColor} />
-            <Text variant="caption" weight="semibold" className={locTextClass}>
-              {locPillLabel}
-            </Text>
-          </View>
+          {/* Geofence/GPS pill — ONSITE only. REMOTE (WFH) skips the geofence gate,
+              so the radius pill is hidden to avoid a dead/irrelevant status. */}
+          {isRemote ? null : (
+            <View
+              className={`mt-0.5 flex-row items-center gap-1.5 rounded-pill border px-3.5 py-1.5 ${locPillBg} ${locPillBorder}`}
+            >
+              <LocPillIcon size={14} color={locIconColor} />
+              <Text variant="caption" weight="semibold" className={locTextClass}>
+                {locPillLabel}
+              </Text>
+            </View>
+          )}
         </View>
+
+        {/* ── Mode selector (ONSITE | REMOTE/WFH) — pill segmented control, reused
+            from sl-verifikasi's segment toggle. Hidden when clocked in (mode is a
+            clock-in concern). REMOTE skips the geofence gate. ─────────────────── */}
+        {open ? null : (
+          <View style={{ gap: 6 }}>
+            <Text variant="caption" weight="semibold" className="text-text-2">
+              {t('m:absen.modeLabel')}
+            </Text>
+            <View className="flex-row gap-2">
+              {(['ONSITE', 'REMOTE'] as ClockInRequestMode[]).map((m) => {
+                const active = mode === m;
+                const ModeIcon = m === 'ONSITE' ? MapPinCheck : House;
+                return (
+                  <Pressable
+                    key={m}
+                    testID={`mode-${m}`}
+                    onPress={() => setMode(m)}
+                    className={`flex-1 flex-row items-center justify-center gap-1.5 rounded-pill border px-3 py-2 ${
+                      active ? 'border-primary bg-primary' : 'border-border bg-surface'
+                    }`}
+                  >
+                    <ModeIcon size={15} color={active ? color.surface : color.text2} />
+                    <Text variant="strong" className={active ? 'text-surface' : 'text-text-2'}>
+                      {m === 'ONSITE' ? t('m:absen.modeOnsite') : t('m:absen.modeRemote')}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* ── Action button (.pen ClockInBtn: r12, icon 22 + label 16/700 white) ── */}
         {list.isLoading || gpsState === 'checking' ? (
@@ -615,8 +671,9 @@ export default function AttendanceScreen() {
           ))}
         </View>
 
-        {/* ── GPS unavailable → open settings (.pen: red outline, settings icon) ── */}
-        {gpsState === 'unavailable' ? (
+        {/* ── GPS unavailable → open settings (.pen: red outline, settings icon).
+            Hidden in REMOTE (WFH) — GPS isn't required there. ──────────────────── */}
+        {!isRemote && gpsState === 'unavailable' ? (
           <Pressable
             onPress={() => void ExpoLinking.openSettings()}
             className="flex-row items-center justify-center gap-2.5 rounded-card border bg-surface px-5 py-3.5"

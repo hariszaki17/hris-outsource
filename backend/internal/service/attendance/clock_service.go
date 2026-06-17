@@ -58,6 +58,9 @@ type ClockInParams struct {
 	Lng                  float64
 	GPSAvailable         bool
 	WFO                  bool
+	// Mode is where the clock event is captured (migr. 00067): "ONSITE" (default,
+	// geofenced) | "REMOTE" (work-from-home / off-site, geofence skipped).
+	Mode                 string
 	PhotoID              *string
 	ForceOutsideGeofence bool
 }
@@ -85,6 +88,7 @@ type ClockInRow struct {
 	LngIn              float64
 	PhotoInID          *string
 	WFO                bool
+	Mode               string
 	IsLate             bool
 	LateMinutes        int
 	InGeofence         *bool
@@ -192,11 +196,28 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		return att.Attendance{}, false, apperr.Rule("ON_LEAVE", nil)
 	}
 
+	// Mode (migr. 00067): "ONSITE" (default, geofenced) | "REMOTE" (off-site/WFH).
+	mode := req.Mode
+	if mode == "" {
+		mode = "ONSITE"
+	}
+
 	siteLat, siteLng, radiusM, _, err := s.repo.GetSite(ctx, pl.SiteID)
 	if err != nil {
 		return att.Attendance{}, false, apperr.Internal(err)
 	}
-	inside, distanceM, haveGeo := evalGeofence(req.Lat, req.Lng, siteLat, siteLng, radiusM)
+
+	// Geofence is evaluated only for ONSITE clock-ins against a site that actually has
+	// a geofence. REMOTE clock-ins (and ONSITE against a geofence-less site) skip the
+	// check entirely: no geofence_in capture, no OUTSIDE_GEOFENCE flag/block.
+	var (
+		inside    bool
+		distanceM int
+		haveGeo   bool
+	)
+	if mode != "REMOTE" {
+		inside, distanceM, haveGeo = evalGeofence(req.Lat, req.Lng, siteLat, siteLng, radiusM)
+	}
 
 	// Out-of-geofence blocks clock-in unless the agent explicitly overrides.
 	if haveGeo && !inside && !req.ForceOutsideGeofence {
@@ -294,7 +315,9 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		LatIn:              req.Lat,
 		LngIn:              req.Lng,
 		PhotoInID:          req.PhotoID,
-		WFO:                req.WFO,
+		// Back-compat: wfo mirrors the mode (ONSITE ⇒ at the work site).
+		WFO:                mode == "ONSITE",
+		Mode:               mode,
 		IsLate:             isLate,
 		LateMinutes:        lateMinutes,
 		InGeofence:         inGeofencePtr,

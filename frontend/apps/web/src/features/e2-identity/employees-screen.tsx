@@ -21,6 +21,7 @@ import {
   EmployeeStatus,
   type ListEmployees200,
   type ListEmployeesParams,
+  ListEmployeesEmployeeType,
   useListEmployees,
 } from '@swp/api-client/e2';
 import type { StatusTone } from '@swp/design-tokens';
@@ -31,6 +32,7 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  FilterSelect,
   SearchField,
   StatCard,
   StateView,
@@ -53,6 +55,8 @@ export type EmployeesSearch = {
   q?: string;
   status?: EmployeeStatus;
   client_company?: string;
+  /** Filter by employee category: FIELD (on-site agent) | INTERNAL (SWP HQ staff). */
+  employee_type?: ListEmployeesEmployeeType;
   /** Status-tab shortcut: 'all' | 'active' | 'inactive' */
   tab?: 'all' | 'active' | 'inactive';
   cursor?: string;
@@ -157,6 +161,7 @@ export function EmployeesScreen() {
     q: search.q || undefined,
     status: tabStatus ?? search.status,
     client_company: isShiftLeader ? slCompanyId : search.client_company || undefined,
+    employee_type: search.employee_type,
     cursor: search.cursor,
   };
 
@@ -164,7 +169,7 @@ export function EmployeesScreen() {
 
   // SL company pin is implicit scope, not a user-set filter → exclude it from hasFilters.
   const hasFilters = Boolean(
-    search.q || search.status || (!isShiftLeader && search.client_company),
+    search.q || search.status || search.employee_type || (!isShiftLeader && search.client_company),
   );
 
   // Totals for stat cards (from page envelope, not real aggregates — use count from loaded page)
@@ -214,7 +219,16 @@ export function EmployeesScreen() {
       id: 'posisi',
       header: t('colPosisi'),
       flex: 1.5,
-      cell: (emp) => <span className="text-[13px] text-text">{emp.current_position ?? '—'}</span>,
+      cell: (emp) => (
+        <div className="flex flex-col gap-[2px]">
+          <span className="text-[13px] text-text">{emp.current_position ?? '—'}</span>
+          {emp.employee_type && (
+            <span className="text-[11px] text-text-3">
+              {t(`employeeType.${emp.employee_type}`, { ns: 'translation' })}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       id: 'penempatan',
@@ -468,6 +482,24 @@ export function EmployeesScreen() {
               ))}
             </select>
           )}
+          {/* Employee-type filter (FIELD / INTERNAL) — cursor reset is handled by setSearch. */}
+          <FilterSelect
+            aria-label={t('employeeType.label', { ns: 'translation' })}
+            value={search.employee_type ?? ''}
+            onChange={(e) =>
+              setSearch({
+                employee_type: (e.target.value as ListEmployeesEmployeeType) || undefined,
+              })
+            }
+          >
+            <option value="">{t('employeeType.label', { ns: 'translation' })}</option>
+            <option value={ListEmployeesEmployeeType.FIELD}>
+              {t('employeeType.FIELD', { ns: 'translation' })}
+            </option>
+            <option value={ListEmployeesEmployeeType.INTERNAL}>
+              {t('employeeType.INTERNAL', { ns: 'translation' })}
+            </option>
+          </FilterSelect>
           {/* Status filtering is the tabs above (Semua / Aktif / Nonaktif) — no separate dropdown. */}
         </div>
 

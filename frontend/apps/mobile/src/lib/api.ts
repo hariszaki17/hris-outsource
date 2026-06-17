@@ -8,7 +8,7 @@ import { tokenStore } from './auth';
 export const API_BASE_URL =
   typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_BASE_URL
     ? process.env.EXPO_PUBLIC_API_BASE_URL
-    : 'http://192.168.1.3:8080/api/v1';
+    : 'http://192.168.1.6:8080/api/v1';
 
 configureApiClient({
   baseUrl: API_BASE_URL,

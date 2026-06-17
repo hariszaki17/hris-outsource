@@ -234,6 +234,11 @@ func run() error {
 	// corrections to the target record in the same tx.
 	attendanceRepo := attendancerepo.NewAttendanceRepo(pool)
 	correctionRepo := attendancerepo.NewCorrectionRepo(pool)
+	// F5.7 auto-reconcile: a late roster (scheduling.CreateEntry) adopts an existing
+	// UNSCHEDULED attendance record it covers, in the same tx (E4→E5, mirrors the
+	// shift-end propagation wiring). Inject into the schedule service created above.
+	reconcileSvc := attendancesvc.NewReconcileService(attendanceRepo)
+	scheduleSvc.SetReconciler(reconcileSvc)
 	attendanceSvc := attendancesvc.NewAttendanceService(attendanceRepo, txm)
 	attendanceSvc.SetNotifier(jobsClient) // E10 (11-02): real notify on verify/reject
 	correctionSvc := attendancesvc.NewCorrectionService(correctionRepo, attendanceRepo, txm)
@@ -318,6 +323,26 @@ func run() error {
 	payrollExportSvc := payrollsvc.NewExportService(payrollExportRepo, txm, jobsClient)
 	payrollHandler := payrollhttp.NewHandler(payslipSvc, payrollExportSvc)
 
+	// Payroll period-close slice (F8.5): the month-end reconciliation gate. The
+	// period repo drives the FSM + completeness aggregation + immutable summary
+	// snapshot; the clarification service raises notification-backed clarifications
+	// (target resolved via the SL-assignment lookup) + emits the F8.3 carry-forward
+	// adjustment ledger. Two F8.5 ports are injected into existing services:
+	//   - PC-11: the period repo's IsMonthLocked makes F5.7 auto-reconcile inert on a
+	//     LOCKED month (inject into the reconcile service created above).
+	//   - PC-9: the locked-month guard + the adjustment emitter make a post-lock
+	//     correction-apply emit a PENDING PayrollAdjustment instead of mutating the
+	//     summary (inject into the correction service created above).
+	payrollPeriodRepo := payrollrepo.NewPeriodRepo(pool)
+	payrollClarificationRepo := payrollrepo.NewClarificationRepo(pool)
+	payrollTargetResolver := payrollrepo.NewTargetResolver(pool)
+	payrollPeriodSvc := payrollsvc.NewPeriodService(payrollPeriodRepo, txm)
+	payrollClarificationSvc := payrollsvc.NewClarificationService(payrollClarificationRepo, payrollTargetResolver, txm)
+	payrollClarificationSvc.SetNotifier(jobsClient) // E10: notify the clarification target
+	reconcileSvc.SetLockedMonthChecker(payrollPeriodRepo)
+	correctionSvc.SetPayrollPeriodGuard(payrollPeriodRepo, payrollClarificationSvc)
+	payrollPeriodHandler := payrollhttp.NewPeriodHandler(payrollPeriodSvc, payrollClarificationSvc)
+
 	// Reporting slice (11-02): E10 notifications (list/mark-read/mark-all-read).
 	// scope=self — the service derives the recipient set from the principal. The
 	// auto-dispatched notifications (leave/OT/attendance retro-wire) land here via
@@ -356,6 +381,7 @@ func run() error {
 		Leave:             leaveHandler,
 		Overtime:          overtimeHandler,
 		Payroll:           payrollHandler,
+		PayrollPeriod:     payrollPeriodHandler,
 		Reporting:         reportingHandler,
 		Authn:             authn,
 		Idempotency:       idempotency.New(pool),

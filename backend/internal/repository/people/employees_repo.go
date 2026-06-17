@@ -39,6 +39,7 @@ func (r *Repository) ListEmployees(ctx context.Context, f domain.EmployeeFilter)
 		Role:            f.Role,
 		Assigned:        f.Assigned,
 		ClientCompany:   f.ClientCompanyID,
+		EmployeeType:    f.EmployeeType,
 		CursorCreatedAt: f.CursorCreatedAt,
 		CursorID:        f.CursorID,
 		RowLimit:        int32(f.Limit),
@@ -231,6 +232,7 @@ func (r *Repository) CreateEmployee(ctx context.Context, tx pgx.Tx, p svc.Create
 		BankAccountNumber:     nullStr(p.BankAccountNumber),
 		BankAccountHolderName: nullStr(p.BankAccountHolderName),
 		Position:              p.Position,
+		EmployeeType:          p.EmployeeType,
 		CreatedBy:             nullStr(p.CreatedBy),
 	})
 	if err != nil {
@@ -268,6 +270,7 @@ func (r *Repository) UpdateEmployee(ctx context.Context, tx pgx.Tx, p svc.Update
 		EmergencyContactName:  nullStr(p.EmergencyContactName),
 		EmergencyContactPhone: nullStr(p.EmergencyContactPhone),
 		Position:              p.Position,
+		EmployeeType:          p.EmployeeType,
 	})
 	if err != nil {
 		return domain.Employee{}, mapErr(err)
@@ -311,11 +314,12 @@ func mapEmployeeFromList(row sqlcgen.ListEmployeesRow) domain.Employee {
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		Status:       row.Status,
+		EmployeeType: row.EmployeeType,
+		HasLogin:     row.UserID != nil,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CreatedBy:    row.CreatedBy,
 	}
 	// current_* come from the employee's non-terminal placement (null when unplaced).
 	// current_position is the free-text placement label (no master / FK / ID).
@@ -355,6 +359,7 @@ func mapEmployeeFromGetByID(row sqlcgen.GetEmployeeByIDRow) domain.Employee {
 		AppLanguage:    row.AppLanguage,
 		PhotoObjectKey: row.PhotoObjectKey,
 		Status:         row.Status,
+		EmployeeType:   row.EmployeeType,
 		HasLogin:       row.UserID != nil,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
@@ -391,11 +396,12 @@ func mapEmployeeFromGetByNIK(row sqlcgen.GetEmployeeByNIKRow) domain.Employee {
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		Status:       row.Status,
+		EmployeeType: row.EmployeeType,
+		HasLogin:     row.UserID != nil,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CreatedBy:    row.CreatedBy,
 	}
 }
 
@@ -422,6 +428,7 @@ func mapEmployeeFromCreate(row sqlcgen.CreateEmployeeRow) domain.Employee {
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
 		Status:          row.Status,
+		EmployeeType:    row.EmployeeType,
 		HasLogin:        row.UserID != nil,
 		CurrentPosition: row.CurrentPosition,
 		CreatedAt:       row.CreatedAt,
@@ -453,6 +460,7 @@ func mapEmployeeFromUpdate(row sqlcgen.UpdateEmployeeRow) domain.Employee {
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
 		Status:          row.Status,
+		EmployeeType:    row.EmployeeType,
 		HasLogin:        row.UserID != nil,
 		CurrentPosition: row.CurrentPosition,
 		CreatedAt:       row.CreatedAt,
@@ -483,11 +491,12 @@ func mapEmployeeFromSetStatus(row sqlcgen.SetEmployeeStatusRow) domain.Employee 
 			AccountNumber:     derefStr(row.BankAccountNumber),
 			AccountHolderName: derefStr(row.BankAccountHolderName),
 		},
-		Status:    row.Status,
-		HasLogin:  row.UserID != nil,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CreatedBy: row.CreatedBy,
+		Status:       row.Status,
+		EmployeeType: row.EmployeeType,
+		HasLogin:     row.UserID != nil,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CreatedBy:    row.CreatedBy,
 	}
 }
 

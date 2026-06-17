@@ -114,7 +114,9 @@ paths:
           today's team status (clock-ins, late count from E5), pending
           verifications (E5), OT/leave pending counts (E6/E7), schedule
           alerts for the leader's single assigned company (E3 INV-3).
-        - `agent` → `AgentDashboard` shape:
+        - `self` → `AgentDashboard` shape (the baseline self-service dashboard
+          any employee with no elevation receives — field agent or internal staff;
+          `agent` retired as a role 2026-06-15):
           today's shift (E4), recent attendance summary (E5), leave balance
           summary (E6), pending requests (E6/E7), recent notifications
           (F10.1 read projection).
@@ -136,7 +138,6 @@ paths:
         (epic + entity_id + path) the client uses to route into the owning
         epic's screen.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [ETi5H, DhzyL, RiSPW, UMzuO, e8Sw1]
       responses:
@@ -335,7 +336,6 @@ paths:
         **Read state filter** (`read_state`): `UNREAD` | `READ` | `ALL`
         (default `ALL`). Wave-1 mobile "Belum dibaca" tab maps to `UNREAD`.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [i0qW8, WKYgI]
       parameters:
@@ -434,7 +434,6 @@ paths:
         re-fetching the full list (no SSE/WebSocket in v1, per
         CONVENTIONS §1).
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [caFkE]
       responses:
@@ -469,7 +468,6 @@ paths:
         If the notification is already read, the call is a no-op (200 with
         the existing `read_at` preserved).
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [WslFv, meAQc, LsYPf, eOrnJ, inLk6]
       parameters:
@@ -501,7 +499,6 @@ paths:
         when an agent/leader wants to flag a notification for later
         attention. Idempotent.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [i0qW8]
       parameters:
@@ -540,7 +537,6 @@ paths:
         unless `before_timestamp` was supplied and new items have arrived
         since).
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [B9XPDU]
       parameters:
@@ -592,7 +588,6 @@ paths:
 
         Always returns the same payload in v1; never accepts writes.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [i0qW8]
       responses:
@@ -1599,8 +1594,10 @@ components:
     # -- shared enums ------------------------------------------------------
     Role:
       type: string
-      description: Caller's role (RB-1; same enum as E1 `Role`).
-      enum: [super_admin, hr_admin, shift_leader, agent]
+      description: |
+        Caller's elevation role (RB-1; same enum as E1 `Role`). `agent` is retained
+        (deprecated) as the stored no-elevation baseline sentinel until the full purge.
+      enum: [super_admin, hr_admin, lead, shift_leader, agent]
       example: hr_admin
 
     # ====================================================================
@@ -1623,7 +1620,7 @@ components:
           hr_admin: '#/components/schemas/HrDashboard'
           super_admin: '#/components/schemas/HrDashboard'
           shift_leader: '#/components/schemas/LeaderDashboard'
-          agent: '#/components/schemas/AgentDashboard'
+          self: '#/components/schemas/AgentDashboard'
 
     HrDashboard:
       type: object
@@ -1944,9 +1941,10 @@ components:
     AgentDashboard:
       type: object
       description: |
-        Agent (self) dashboard. Data: E4 (today's shift), E5
-        (attendance), E6 (leave balance + pending), E7 (OT MTD), F10.1
-        (recent notifications).
+        Baseline self-service dashboard (`role: self`) — for any employee with
+        no elevation (field agent or internal staff). Data: E4 (today's shift),
+        E5 (attendance), E6 (leave balance + pending), E7 (OT MTD), F10.1
+        (recent notifications). *(agent retired as a role 2026-06-15.)*
       required:
         - role
         - generated_at
@@ -1959,7 +1957,7 @@ components:
       properties:
         role:
           type: string
-          enum: [agent]
+          enum: [self]
         generated_at:
           type: string
           format: date-time

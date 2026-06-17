@@ -9,7 +9,7 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
-       e.status, e.created_by, e.created_at, e.updated_at,
+       e.status, e.employee_type, e.created_by, e.created_at, e.updated_at,
        e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
@@ -58,6 +58,10 @@ WHERE e.deleted_at IS NULL
         OR cc.id = sqlc.narg(client_company)::text
       )
   AND (
+        sqlc.narg(employee_type)::text IS NULL
+        OR e.employee_type = sqlc.narg(employee_type)::text
+      )
+  AND (
         sqlc.narg(cursor_created_at)::timestamptz IS NULL
         OR (e.created_at, e.id) < (sqlc.narg(cursor_created_at)::timestamptz, sqlc.narg(cursor_id)::text)
       )
@@ -73,7 +77,7 @@ SELECT e.id, e.user_id, e.full_name, e.nik, e.nip, e.join_at, e.gender, e.birth_
        e.phone, e.email_personal, e.address, e.npwp, e.bpjs_kesehatan, e.bpjs_ketenagakerjaan,
        e.bank_name, e.bank_account_number, e.bank_account_holder_name,
        e.emergency_contact_name, e.emergency_contact_phone, e.app_language, e.photo_object_key,
-       e.status, e.created_by, e.created_at, e.updated_at,
+       e.status, e.employee_type, e.created_by, e.created_at, e.updated_at,
        e.position AS current_position,
        cc.id       AS current_client_company_id,
        cc.name     AS current_client_company_name
@@ -97,7 +101,7 @@ SELECT id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_plac
        phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
        bank_name, bank_account_number, bank_account_holder_name,
        emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-       status, created_by, created_at, updated_at
+       status, employee_type, created_by, created_at, updated_at
 FROM employees
 WHERE nik = sqlc.arg(nik)
   AND deleted_at IS NULL;
@@ -108,7 +112,7 @@ INSERT INTO employees (
     id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
     phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
     bank_name, bank_account_number, bank_account_holder_name,
-    emergency_contact_name, emergency_contact_phone, position, created_by
+    emergency_contact_name, emergency_contact_phone, position, employee_type, created_by
 ) VALUES (
     'SWP-EMP-' || swp_next_id('EMP'),
     sqlc.narg(user_id),
@@ -131,6 +135,7 @@ INSERT INTO employees (
     sqlc.narg(emergency_contact_name),
     sqlc.narg(emergency_contact_phone),
     sqlc.arg(position),
+    sqlc.arg(employee_type),
     sqlc.narg(created_by)
 )
 RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_place,
@@ -138,7 +143,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           position AS current_position,
-          status, created_by, created_at, updated_at;
+          status, employee_type, created_by, created_at, updated_at;
 
 -- name: UpdateEmployee :one
 UPDATE employees
@@ -161,6 +166,7 @@ SET full_name                = sqlc.arg(full_name),
     emergency_contact_name   = sqlc.narg(emergency_contact_name),
     emergency_contact_phone  = sqlc.narg(emergency_contact_phone),
     position                 = sqlc.arg(position),
+    employee_type            = sqlc.arg(employee_type),
     updated_at               = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
@@ -169,7 +175,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
           position AS current_position,
-          status, created_by, created_at, updated_at;
+          status, employee_type, created_by, created_at, updated_at;
 
 -- name: SetEmployeeStatus :one
 -- Drives :deactivate (status='inactive') and :reactivate (status='active').
@@ -182,7 +188,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-          status, created_by, created_at, updated_at;
+          status, employee_type, created_by, created_at, updated_at;
 
 -- name: UpdateEmployeeSelfInstant :one
 -- EP-5 agent self-service instant apply (PATCH /me/profile). E11 removed the
@@ -208,7 +214,7 @@ RETURNING id, user_id, full_name, nik, nip, join_at, gender, birth_date, birth_p
           phone, email_personal, address, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan,
           bank_name, bank_account_number, bank_account_holder_name,
           emergency_contact_name, emergency_contact_phone, app_language, photo_object_key,
-          status, created_by, created_at, updated_at;
+          status, employee_type, created_by, created_at, updated_at;
 
 -- name: SetEmployeeUserID :exec
 -- EP-3: links a freshly provisioned E1 User to the employee (1:1). Flips

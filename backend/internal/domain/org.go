@@ -11,7 +11,10 @@ type ClientCompany struct {
 	ID                   string
 	Name                 string
 	Address              string
-	LeaderScope          string  // "company" | "site"
+	LeaderScope          string // "company" | "site"
+	// Type distinguishes external client companies from SWP's own internal org
+	// (migr. 00067): "CLIENT" (default) | "INTERNAL".
+	Type                 string
 	NPWP                 *string // optional Indonesian tax ID (unique when set, CC-2)
 	PICName              *string
 	Phone                *string

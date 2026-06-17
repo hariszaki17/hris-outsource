@@ -128,7 +128,7 @@ erDiagram
 - **INV-3:** an agent sees **only their own** payslip **summaries** (take-home, gross earnings, gross deductions, working days, period, payment status) — **not** the component breakdown.
 - **INV-4:** the full breakdown (`SALARY_COMPONENT`) + benefits are **HR/Super Admin only**.
 - **INV-5:** payroll math is **agent-pay only inside SWP** — **no client invoicing / rate application** in E8 (that stays outside, hours-only per E10).
-- **INV-6:** the agent pay base is the **monthly** `EmploymentAgreement.base_salary` (E2), **not** an hourly rate. Attendance/OT/leave **modulate** the monthly amount (proration + additions/deductions); they do not define an hourly wage.
+- **INV-6:** the pay base is the **monthly** `EmploymentAgreement.base_salary` (E2), **not** an hourly rate. **Two pay models by `employee_type`** (2026-06-16): for **FIELD** agents, attendance/OT/leave **modulate** the monthly amount (attendance-gated proration via E5 `is_payable` + additions/deductions); for **INTERNAL** staff, the salary is **fixed monthly** — daily attendance does **not** prorate it (`is_payable` is FIELD-only and ignored for INTERNAL), and the only adjustments are **unpaid leave** (deduct) and **approved OT** (add). Neither defines an hourly wage. *(See EPICS §8 E8 "two pay models".)*
 - **INV-7:** a payroll run **assembles** from authoritative upstream data (E2/E5/E6/E7) at run time; only **verified** attendance (E5) and **Approved** OT (E7) are eligible (consistent with E5/E10 "verified-only").
 - **INV-8:** payment is **manual** — the system records a transfer reference + evidence; it does **not** move money. A payslip is `Paid` only once a `PayrollPayment` with evidence exists.
 
@@ -140,6 +140,7 @@ erDiagram
 | **F8.2** | Payroll Archive & Retention (HR) | [payroll-archive.md](prds/payroll-archive.md) |
 | **F8.3** | Compute-Assist Payroll Run (assemble → review → post) | [payroll-run.md](prds/payroll-run.md) |
 | **F8.4** | Payment Recording & Transfer Evidence (manual) | [payroll-payment.md](prds/payroll-payment.md) |
+| **F8.5** | Payroll Period Close (month-end reconciliation gate) | [payroll-period-close.md](prds/payroll-period-close.md) |
 
 ## 6. Platform / clients
 
@@ -245,6 +246,27 @@ flowchart LR
 ```
 
 **Entities:** writes `PayrollPayment`, updates `Payslip.payment_status`/`paid_on`. **Depends on:** F8.3, E1 (audit + file storage).
+
+---
+
+### F8.5 — Payroll Period Close (month-end reconciliation gate)
+
+The **month-end gate** that turns record-by-record reconciliation into an authoritative *"the inputs for this month are settled"* signal. One **`PayrollPeriod`** per `(year, month)` (global, v1) that HR reviews across three completeness tabs — **Attendance** (the largest; orchestrates the E5 resolution actions), **Overtime** (E7 pending), **Leave** (E6 pending) — resolving every FIELD blocker via the **existing** actions (no new approval UI), then **locks**. State machine `OPEN → LOCKED` (+ super-admin `REOPENED → OPEN`), auto-created `OPEN` on first access. Locking (a) requires in-scope blockers = 0 (or a super-admin **force-lock** with a stored reason), (b) materializes an **immutable `PeriodEmployeeSummary`** per FIELD employee (attendance + OT + leave figures) — the authoritative input the **F8.3 run** consumes instead of live records (PC-10 seam), (c) audits who/when. **Post-lock immutability:** a later correction (F5.4) or approval never mutates the summary — it emits a **`PayrollAdjustment`** (origin = the locked period) carried to the next open run (reuses the F8.3 PR-13 carry-forward). FIELD employees gate the lock; **INTERNAL** staff are shown for discipline but **never block**. A new thin **clarification back-channel** lets HR ask a record's shift-leader/agent a one-round question (E10 notification, `OPEN → ANSWERED → RESOLVED`/`CANCELLED`) — advisory, blocks nothing. **F5.7 auto-reconcile is inert on a `LOCKED` period** (a late shift inserts but does not re-derive locked figures).
+
+```mermaid
+stateDiagram-v2
+    [*] --> OPEN : auto-create on first access
+    OPEN --> LOCKED : lock (FIELD blockers = 0, or super-admin force-lock + reason)
+    LOCKED --> REOPENED : super-admin reopen + reason (no Posted run)
+    REOPENED --> OPEN : summary voided
+    LOCKED --> [*] : F8.3 run reads PeriodEmployeeSummary (PC-10)
+    note right of LOCKED
+        emits immutable PeriodEmployeeSummary (per FIELD employee)
+        post-lock change → PayrollAdjustment → next open run
+    end note
+```
+
+**Entities:** writes `PayrollPeriod`, `PeriodEmployeeSummary` (immutable), `ClarificationRequest`, `PayrollAdjustment`. Reads E4 roster, E5 `Attendance`, E6 leave, E7 OT; reuses E10 notifications + E1 audit. **Depends on:** E5 F5.3/F5.4/F5.7 (resolution + lock interaction), E6 (leave feed + approvals), E7 (OT feed + approvals), E10 (clarification notifications), E11 (corrections still route there); F8.3 (run precondition + `PayrollAdjustment` reuse), E1 (audit/RBAC).
 
 ---
 

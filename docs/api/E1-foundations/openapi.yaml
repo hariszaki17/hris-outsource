@@ -168,7 +168,6 @@ paths:
         Invalidates the current access + refresh token (AU-6). Subsequent
         requests with the same token return 401. Auth event is audited.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [caFkE]
       responses:
@@ -361,7 +360,6 @@ paths:
         current access token. Drives the topbar user pill, role-based
         nav (PC-4), and any "self-scope" UI gating.
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: self
       x-design-screens: [caFkE]
       responses:
@@ -1392,10 +1390,19 @@ components:
     Role:
       type: string
       description: |
-        The four fixed roles (RB-1 / INV-2). Not user-extensible in v1.
+        Elevation roles (RB-1 / INV-2). Not user-extensible in v1.
+        `agent` was retired as a role 2026-06-15 — self-service (`self.*`) is an
+        implicit baseline carried by every employee, so an employee with NO
+        elevation is a plain self-service user (field agent or internal staff).
+        `shift_leader` is DERIVED per request from the E3 assignment, never stored
+        on the user. "Agent" is now only a domain term for `employee_type = FIELD`.
+        `agent` is **retained (deprecated)** as the stored no-elevation baseline
+        sentinel until the full enum purge — a user with `role: agent` is a plain
+        self-service employee with no elevation.
       enum:
         - super_admin
         - hr_admin
+        - lead
         - shift_leader
         - agent
       example: hr_admin

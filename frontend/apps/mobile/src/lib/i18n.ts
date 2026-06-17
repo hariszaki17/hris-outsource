@@ -399,6 +399,11 @@ const mobileCopy = {
       keluar: 'Keluar',
       weekSchedule: 'Jadwal Minggu Ini',
       scheduledLegend: 'Terjadwal',
+      // Clock-in mode selector (ONSITE vs REMOTE/WFH · skips geofence) — 2026-06-16.
+      modeLabel: 'Mode clock-in',
+      modeOnsite: 'Onsite',
+      modeRemote: 'Remote',
+      modeRemoteNote: 'Mode remote/jarak jauh — verifikasi lokasi dilewati.',
     },
     // ── Riwayat Kehadiran (attendance history) ────────────────────────────────────────
     riwayat: {
@@ -1019,6 +1024,11 @@ const mobileCopy = {
       keluar: 'Out',
       weekSchedule: "This Week's Schedule",
       scheduledLegend: 'Scheduled',
+      // Clock-in mode selector (ONSITE vs REMOTE/WFH · skips geofence) — 2026-06-16.
+      modeLabel: 'Clock-in mode',
+      modeOnsite: 'Onsite',
+      modeRemote: 'Remote',
+      modeRemoteNote: 'Remote/WFH mode — location check skipped.',
     },
     riwayat: {
       title: 'Attendance History',

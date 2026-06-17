@@ -18,6 +18,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/rbac"
+	attsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 )
 
 // --- schedule repository port ---
@@ -72,9 +73,10 @@ type UpdateScheduleEntryParams struct {
 
 // ScheduleService implements the schedule business logic.
 type ScheduleService struct {
-	repo ScheduleRepository
-	txm  TxRunner
-	now  Clock
+	repo       ScheduleRepository
+	txm        TxRunner
+	now        Clock
+	reconciler attsvc.Reconciler // F5.7: late-roster attendance auto-reconcile (optional).
 }
 
 // NewScheduleService wires the schedule service.
@@ -84,6 +86,12 @@ func NewScheduleService(repo ScheduleRepository, txm TxRunner) *ScheduleService 
 
 // SetClock overrides the time source (tests only).
 func (s *ScheduleService) SetClock(c Clock) { s.now = c }
+
+// SetReconciler wires the F5.7 attendance auto-reconcile side-effect. When set,
+// CreateEntry adopts an existing machine-owned UNSCHEDULED attendance record a newly
+// created workable shift covers, inside the same tx (AR-1/AR-10). Left nil in tests
+// that don't exercise reconcile — CreateEntry then skips it.
+func (s *ScheduleService) SetReconciler(r attsvc.Reconciler) { s.reconciler = r }
 
 // today returns the current calendar date in Asia/Jakarta (mirrors placement).
 func (s *ScheduleService) today() time.Time {
@@ -242,8 +250,10 @@ func (s *ScheduleService) CreateEntry(ctx context.Context, req CreateEntryReques
 			}
 			return inErr
 		}
-		// TODO(Phase-11): dispatch "Schedule published" notification (INV-4 auto-publish).
-		return audit.Record(ctx, tx, audit.Entry{
+		// TODO(notify): dispatch "Schedule published" notification (INV-4 auto-publish).
+		// F5.7 dequeue/notify the shift leader when a reconciled record flips
+		// PENDING→AUTO_APPROVED slots in here too (Phase-11).
+		if aerr := audit.Record(ctx, tx, audit.Entry{
 			Action:     audit.ActionCreate,
 			EntityType: "schedule_entry",
 			EntityID:   created.ID,
@@ -251,7 +261,29 @@ func (s *ScheduleService) CreateEntry(ctx context.Context, req CreateEntryReques
 				"employee_id": created.EmployeeID, "work_date": created.WorkDate.Format("2006-01-02"),
 				"shift_master_id": created.ShiftMasterID, "status": created.Status,
 			},
-		})
+		}); aerr != nil {
+			return aerr
+		}
+
+		// F5.7 auto-reconcile (AR-1): a newly created WORKABLE shift (not a day-off,
+		// status SCHEDULED, both times set, NOT a force_replace of an existing entry)
+		// adopts an existing machine-owned UNSCHEDULED attendance record it covers, in
+		// THIS tx. force_replace (status MODIFIED) is skipped — that day was already
+		// linked. An unexpected reconcile error rolls back the create (AR-10).
+		if s.reconciler != nil && replaced == nil && isWorkableEntry(created) {
+			if rerr := s.reconciler.ReconcileForEntry(ctx, tx, attsvc.ReconcileEntry{
+				ScheduleID:    created.ID,
+				EmployeeID:    created.EmployeeID,
+				PlacementID:   created.PlacementID,
+				WorkDate:      created.WorkDate,
+				StartTime:     *created.StartTime,
+				EndTime:       *created.EndTime,
+				CrossMidnight: created.CrossMidnight,
+			}); rerr != nil {
+				return rerr
+			}
+		}
+		return nil
 	}); err != nil {
 		return domain.ScheduleEntry{}, asAppErr(err)
 	}
@@ -551,6 +583,15 @@ func (s *ScheduleService) expandBulk(req BulkRequest) ([]ConflictInput, error) {
 }
 
 // --- shared helpers ---
+
+// isWorkableEntry reports whether a created entry is a workable shift eligible for
+// F5.7 auto-reconcile (AR-1): not a day-off, status SCHEDULED, both times present.
+// CANCELLED_BY_LEAVE / MODIFIED / day-off entries are not workable shifts.
+func isWorkableEntry(e domain.ScheduleEntry) bool {
+	return !e.IsDayOff &&
+		e.Status == "SCHEDULED" &&
+		e.StartTime != nil && e.EndTime != nil
+}
 
 // conflictMessage returns the Bahasa message for each conflict code.
 func conflictMessage(code string) string {

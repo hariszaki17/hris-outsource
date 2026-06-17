@@ -1,31 +1,36 @@
-# Agent Web Access — Spec (self-service console for the AGENT role)
+# Self-Service Web Access — Spec (the `/me/*` self-service console)
 
 > **Status:** Adopted 2026-06-10 · **Owner:** eng · **Binds:** `apps/web`, `packages/{shared,ui,api-client}`
 > **Supersedes:** the "`agent` is mobile-only / no web permissions" stance in
 > [NAVIGATION-AND-RBAC.md](./NAVIGATION-AND-RBAC.md) §4 — ratified in [EPICS.md](../EPICS.md) §8.
 
-This doc specifies which **pages, features and data** the **agent** role can reach on the **web
+> *(agent retired as a role 2026-06-15 — `self.*` is now an implicit baseline, not a role; see EPICS §8 E1)*
+
+This doc specifies which **pages, features and data** the **self-service surface** reaches on the **web
 console** (`apps/web`), and the **web clock-in** feature (porting the mobile clock flow to the
-browser). It is the source of truth for the build; screens trace to it.
+browser). The self-service surface is the **implicit baseline carried by every employee** — not gated
+behind a role; "agent" describes the field-worker audience (`employee_type = FIELD` placed at a
+client), and internal SWP staff (`employee_type = INTERNAL`) reach the same `/me/*` surface. It is the
+source of truth for the build; screens trace to it.
 
 ---
 
 ## 1. Why
 
-Agents already have the full self-service surface on the **React Native mobile app**. Some agents
+Employees already have the full self-service surface on the **React Native mobile app**. Some agents
 work from sites with a shared desktop/kiosk or simply prefer the browser, and HR wants a single
-web origin where an agent can clock in and manage their own records. The **backend is already
-agent-ready**: every clock + self-service endpoint declares `x-rbac: { roles: [agent], scope: self }`
-and identifies the agent from the **JWT principal** (never a body `employee_id`). So this is a
-**frontend-only** port — no new endpoints, no schema changes.
+web origin where any employee can clock in and manage their own records. The **backend is already
+self-service-ready**: every clock + self-service endpoint declares `x-rbac: { scope: self }` (no
+`roles:` key — any authenticated employee) and identifies the employee from the **JWT principal**
+(never a body `employee_id`). So this is a **frontend-only** port — no new endpoints, no schema changes.
 
-This does **not** change the internal-only tenancy decision (EPICS §2): agents are SWP staff with
+This does **not** change the internal-only tenancy decision (EPICS §2): employees are SWP staff with
 logins, not clients. The separate **client portal** (NAVIGATION-AND-RBAC §5) remains a distinct,
 unratified concern.
 
 ## 2. Scope
 
-**In scope** — full parity with the mobile agent surface, on the web, plus **web clock-in**:
+**In scope** — full parity with the mobile self-service surface, on the web, plus **web clock-in**:
 
 | Page (web route) | Mobile analog | Purpose |
 |---|---|---|
@@ -49,16 +54,18 @@ any admin/leader capability; a separate `apps/agent-portal` (we reuse `apps/web`
 
 | # | Decision | Rationale |
 |---|---|---|
-| AW-1 | **Same app** (`apps/web`) with an agent nav backbone, not a separate SPA. | Reuses shell, auth, router, api-client; no new build/deploy surface. |
-| AW-2 | Agent routes live under the **`/me/*`** prefix. | Avoids collision with admin screens that already own `/attendance`, `/schedule`, `/leave`, `/overtime` (those are the HR/leader verification/approval surfaces). `/me/*` reads unambiguously as "my own". |
-| AW-3 | New **`self.*` capability keys** gate agent pages; the `agent` role bundle is these keys; `agent` joins `WEB_ROLES`. | Keeps RBAC permission-keyed (NAVIGATION-AND-RBAC). Admin roles don't carry `self.*`, so agent nav never shows for them and vice-versa. |
-| AW-4 | The shell picks the **nav backbone by role** (`agent` → agent nav; staff → admin nav); item visibility within a backbone stays permission-filtered. | The agent IA is fundamentally different from the admin IA — a single merged sidebar would be confusing. Backbone-by-role is a presentation choice; the capability gate remains permission-keyed (defense-in-depth, ENGINEERING.md C1). |
+| AW-1 | **Same app** (`apps/web`) with a self-service nav backbone, not a separate SPA. | Reuses shell, auth, router, api-client; no new build/deploy surface. |
+| AW-2 | Self-service routes live under the **`/me/*`** prefix. | Avoids collision with admin screens that already own `/attendance`, `/schedule`, `/leave`, `/overtime` (those are the HR/leader verification/approval surfaces). `/me/*` reads unambiguously as "my own". |
+| AW-3 | **`self.*` capability keys** describe the self-service pages as an **implicit baseline carried by every authenticated employee** — not a role bundle. *(2026-06-15: `agent` retired as a role; `self.*` is no longer keyed to an `agent` role and does not join `WEB_ROLES`.)* | Keeps RBAC permission-keyed (NAVIGATION-AND-RBAC). Every employee carries `self.*`; elevations (`super_admin`/`hr_admin`/`lead`, `shift_leader` derived) are layered on top via `WEB_ROLES`. |
+| AW-4 | The shell picks the **nav backbone by elevation** (no elevation → self-service nav; elevated staff → admin nav); item visibility within a backbone stays permission-filtered. | The self-service IA is fundamentally different from the admin IA — a single merged sidebar would be confusing. Backbone-by-elevation is a presentation choice; the capability gate remains permission-keyed (defense-in-depth, ENGINEERING.md C1). |
 | AW-5 | **Web clock-in matches mobile**: GPS required (browser Geolocation), out-of-geofence override flow, photo optional/deferred. | One behavior across surfaces; the server logic is identical (same endpoints). |
-| AW-6 | **G0 deviation, documented**: there are **no agent web `.pen` frames**; screens are built pragmatically by reusing `packages/ui` and adapting the mobile frame layouts, not authored in `brainstorm.pen` first. | Agent web access was decided after the design system; authoring frames first would block the port. Frames may be back-filled later; until then this doc + the mobile frames (`Iek78`, `PAOwr`, `fN9AJ`, `QT92D`, `o1BUa`, `wDLQu`, `nd3KT`, `e8Sw1`, `WKYgI`) are the design reference. |
+| AW-6 | **G0 deviation, documented**: there are **no self-service web `.pen` frames**; screens are built pragmatically by reusing `packages/ui` and adapting the mobile frame layouts, not authored in `brainstorm.pen` first. | Self-service web access was decided after the design system; authoring frames first would block the port. Frames may be back-filled later; until then this doc + the mobile frames (`Iek78`, `PAOwr`, `fN9AJ`, `QT92D`, `o1BUa`, `wDLQu`, `nd3KT`, `e8Sw1`, `WKYgI`) are the design reference. |
 
 ## 4. RBAC — capability keys & data scope
 
-New permission keys (capability axis, added to `packages/shared/src/rbac.ts`):
+The `self.*` permission keys (capability axis, in `packages/shared/src/rbac.ts`) describe the
+self-service pages. They are an **implicit baseline carried by every authenticated employee**, not a
+role bundle — `agent` is not a role *(retired 2026-06-15)* and `self.*` does not join `WEB_ROLES`:
 
 | Key | Grants | Server endpoints (already exist) |
 |---|---|---|
@@ -70,10 +77,10 @@ New permission keys (capability axis, added to `packages/shared/src/rbac.ts`):
 | `self.profile` | `/me/profile` | `GET /employees/{self}`, `PATCH /me/profile` *(instant self-edit; change-requests removed 2026-06-14)* |
 | `self.payslip` | `/me/payslip` | `GET /payslips` (self) |
 
-`agent` role bundle = **all seven** `self.*` keys. `/me/notifications` is auth-only (no key), like
-the existing `/notifications`. **Data scope is server-enforced** (`scope: self` → the API resolves
-the agent from the token and rejects/filters anyone else's rows); the client never sends another
-employee's id. Client gates are **defense-in-depth only** (ENGINEERING.md C1).
+Every employee carries **all seven** `self.*` keys as a baseline. `/me/notifications` is auth-only
+(no key), like the existing `/notifications`. **Data scope is server-enforced** (`scope: self` → the
+API resolves the employee from the token and rejects/filters anyone else's rows); the client never
+sends another employee's id. Client gates are **defense-in-depth only** (ENGINEERING.md C1).
 
 ## 5. Web clock-in (the detailed feature)
 
@@ -108,7 +115,7 @@ confirm · already/not-clocked-in · GPS denied/unavailable · generic error · 
 - Reuse `packages/ui`: `StateView`, `StatusBadge`, `Button`, `Card`-style surfaces (the
   `rounded-xl border border-border bg-surface` pattern used across feature screens), `FormField`,
   `Input`, `useToast`, `ConfirmDialog`, `DataTable`/`StatCard` where they fit. **No new `packages/ui`
-  components** unless a second domain-agnostic reuse appears (G2). A small agent page-shell wrapper
+  components** unless a second domain-agnostic reuse appears (G2). A small self-service page-shell wrapper
   (centered max-width column with header) may live in `features/agent/` as an organism.
 - **Status colors only via `StatusBadge`** (DESIGN-SYSTEM §2 maps). Attendance: Hadir→ok(teal),
   Terlambat→warn, Tdk Lengkap→`#ED962F`, Absen→bad; verification auto→neutral, pending→warn,
@@ -120,11 +127,11 @@ confirm · already/not-clocked-in · GPS denied/unavailable · generic error · 
 
 ## 7. Build plan (foundation → parallel screens)
 
-**Foundation (single-threaded — shared files):** `rbac.ts` keys + agent bundle + `WEB_ROLES`;
-`nav.ts` `AGENT_NAV_ITEMS` + `/me/*` route requirements; `auth.ts`/`login` agent landing (`/me`);
-`shell.tsx` role-based backbone + agent redirect from `/`; `geolocation.ts`; the full `agent` i18n
-namespace (id+en); `router.tsx` `/me/*` route registration pointing at per-screen files; one stub
-file per screen so the tree compiles.
+**Foundation (single-threaded — shared files):** `rbac.ts` `self.*` baseline keys (not in `WEB_ROLES`);
+`nav.ts` `AGENT_NAV_ITEMS` (self-service nav) + `/me/*` route requirements; `auth.ts`/`login`
+self-service landing (`/me` for un-elevated employees); `shell.tsx` backbone-by-elevation + redirect
+from `/`; `geolocation.ts`; the full `agent` i18n namespace (id+en); `router.tsx` `/me/*` route
+registration pointing at per-screen files; one stub file per screen so the tree compiles.
 
 **Screens (parallel — one feature file each, no shared-file edits):** `/me/attendance` (clock),
 `/me` dashboard, `/me/schedule`, `/me/leave`(+new), `/me/overtime`(+new), `/me/profile`,

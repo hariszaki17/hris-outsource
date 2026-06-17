@@ -26,6 +26,7 @@ type AttendanceRepo struct {
 }
 
 var _ svc.AttendanceRepository = (*AttendanceRepo)(nil)
+var _ svc.ReconcileRepo = (*AttendanceRepo)(nil)
 
 // NewAttendanceRepo returns an AttendanceRepo backed by pool.
 func NewAttendanceRepo(pool *db.Pool) *AttendanceRepo {
@@ -190,6 +191,7 @@ func (r *AttendanceRepo) CreateManualAttendance(ctx context.Context, tx pgx.Tx, 
 		LatOut:             nil,
 		LngOut:             nil,
 		Wfo:                p.WFO,
+		Mode:               "ONSITE", // manual/correction entries default to ONSITE (migr. 00067)
 		IsLate:             p.IsLate,
 		LateMinutes:        lateMin,
 		WorkedMinutes:      workedMin,
@@ -311,4 +313,86 @@ func (r *AttendanceRepo) GetTodaySchedule(ctx context.Context, employeeID string
 // state-guarded UPDATE...RETURNING queries to detect a terminal-state no-op.
 func isNoRows(err error) bool {
 	return err == pgx.ErrNoRows || mapErr(err) == domain.ErrNotFound
+}
+
+// --- F5.7 auto-reconcile (AR-1..AR-10) ---
+
+// FindCandidate returns the earliest UNSCHEDULED attendance row in
+// [windowStart, windowEnd] for (employeeID, placementID), FOR UPDATE under tx.
+// found=false (no error) when no row matches (AR-3 — no fallback).
+func (r *AttendanceRepo) FindCandidate(ctx context.Context, tx pgx.Tx, employeeID, placementID string, windowStart, windowEnd time.Time) (svc.ReconcileCandidate, bool, error) {
+	row, err := r.q.WithTx(tx).FindReconcileCandidate(ctx, sqlcgen.FindReconcileCandidateParams{
+		EmployeeID:  employeeID,
+		PlacementID: placementID,
+		WindowStart: windowStart,
+		WindowEnd:   windowEnd,
+	})
+	if err != nil {
+		if isNoRows(err) {
+			return svc.ReconcileCandidate{}, false, nil
+		}
+		return svc.ReconcileCandidate{}, false, err
+	}
+	checkIn := time.Time{}
+	if row.CheckInAt != nil {
+		checkIn = *row.CheckInAt
+	}
+	return svc.ReconcileCandidate{
+		ID:                 row.ID,
+		CheckInAt:          checkIn,
+		Flags:              row.Flags,
+		Status:             row.Status,
+		VerificationStatus: row.VerificationStatus,
+		IsPayable:          row.IsPayable,
+		VerifiedBy:         row.VerifiedBy,
+		RejectedBy:         row.RejectedBy,
+	}, true, nil
+}
+
+// Reconcile re-derives + links a machine-owned record (AR-5/6/7/8). found=false when
+// the schedule_id IS NULL guard no-ops (a concurrent link won — AR-4).
+func (r *AttendanceRepo) Reconcile(ctx context.Context, tx pgx.Tx, p svc.ReconcileParams) (bool, error) {
+	scheduleID := p.ScheduleID
+	shiftStart := p.ShiftStartAt
+	shiftEnd := p.ShiftEndAt
+	_, err := r.q.WithTx(tx).ReconcileAttendance(ctx, sqlcgen.ReconcileAttendanceParams{
+		ScheduleID:         &scheduleID,
+		ShiftStartAt:       &shiftStart,
+		ShiftEndAt:         &shiftEnd,
+		Status:             p.Status,
+		IsLate:             p.IsLate,
+		LateMinutes:        int32(p.LateMinutes),
+		Flags:              p.Flags,
+		VerificationStatus: p.VerificationStatus,
+		IsPayable:          p.IsPayable,
+		ID:                 p.ID,
+	})
+	if err != nil {
+		if isNoRows(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// Relink attaches schedule_id + shift-snapshot lineage to a human-decided record
+// (AR-9) WITHOUT re-deriving it. found=false when the guard no-ops (AR-4).
+func (r *AttendanceRepo) Relink(ctx context.Context, tx pgx.Tx, p svc.RelinkParams) (bool, error) {
+	scheduleID := p.ScheduleID
+	shiftStart := p.ShiftStartAt
+	shiftEnd := p.ShiftEndAt
+	_, err := r.q.WithTx(tx).RelinkAttendanceLineage(ctx, sqlcgen.RelinkAttendanceLineageParams{
+		ScheduleID:   &scheduleID,
+		ShiftStartAt: &shiftStart,
+		ShiftEndAt:   &shiftEnd,
+		ID:           p.ID,
+	})
+	if err != nil {
+		if isNoRows(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

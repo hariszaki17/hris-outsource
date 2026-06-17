@@ -1,13 +1,13 @@
 # E5 — Attendance · Feature Document
 
 > **Epic:** E5 Attendance · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
-> Shift-aware, GPS-geofenced clock in/out for placed agents; auto-evaluation of lateness; exceptions-only shift-leader verification; corrections.
+> Shift-aware clock in/out for any employee with an active assignment — placed agents at client sites **and** internal staff at SWP HQ; GPS geofence applied when the site defines one; auto-evaluation of lateness; exceptions-only shift-leader verification; corrections.
 
 ---
 
 ## 1. Goal & outcome
 
-Let placed agents **clock in/out from mobile, validated against the site geofence**, and tie each record to the **scheduled shift** (E4) so the system can auto-judge lateness and completeness. Clean records auto-approve; only exceptions reach the shift leader. This is the source of truth for "who actually worked," feeding overtime (E7), payroll history context (E8), and client-billable reporting (E10).
+Let any employee with an active assignment — **placed agents at client sites and internal staff at SWP HQ** — **clock in/out from mobile or web**, and tie each record to the **scheduled shift** (E4) so the system can auto-judge lateness and completeness. Location is **validated against the site geofence when the site defines one**; a site with no geofence (mobile/cruise placement, fully-remote role) skips the check, and a clock-in carries a **`mode ∈ {ONSITE, REMOTE}`** so WFH days skip the geofence (recorded as remote, not blocked). Geofence enforcement is therefore a property of the site + the clock-in mode, **never** of the employee category. Clean records auto-approve; only exceptions reach the shift leader. This is the source of truth for "who actually worked," feeding overtime (E7), payroll history context (E8), and client-billable reporting (E10). The per-day **`is_payable`** flag is a **FIELD-only** mechanic (it gates attendance-prorated agent pay); **INTERNAL** attendance is a presence/discipline record only — internal staff are fixed-monthly-salaried, so their pay is not attendance-gated (E8). *(One-Employee/FIELD-vs-INTERNAL + optional-geofence model resolved 2026-06-15; two-pay-models resolved 2026-06-16 — see EPICS §8 E2 + E8.)*
 
 ## 2. Actors & roles
 
@@ -48,8 +48,9 @@ erDiagram
         decimal lng_in
         decimal lat_out
         decimal lng_out
-        boolean in_geofence_in
-        boolean in_geofence_out
+        string mode "ONSITE|REMOTE — REMOTE (WFH) skips geofence; default ONSITE"
+        boolean in_geofence_in "null when site has no geofence or mode=REMOTE"
+        boolean in_geofence_out "null when site has no geofence or mode=REMOTE"
         boolean is_late
         int late_minutes
         boolean auto_closed
@@ -91,6 +92,7 @@ erDiagram
 | **F5.4** | Attendance Corrections | [attendance-corrections.md](prds/attendance-corrections.md) |
 | **F5.5** | Attendance Records & Dashboard | [attendance-records.md](prds/attendance-records.md) |
 | **F5.6** | Manual Attendance Entry | [manual-attendance.md](prds/manual-attendance.md) |
+| **F5.7** | Attendance Auto-Reconcile (late-roster linking) | [attendance-auto-reconcile.md](prds/attendance-auto-reconcile.md) |
 
 ## 6. Platform / clients
 
@@ -313,6 +315,24 @@ flowchart TD
 - ✅ *(2026-06-10)* Autofill surfaces existing attendance + steers to verify/correct — the absence-sweep already creates `ABSENT`/`PENDING` rows for scheduled shifts, so manual create is reserved for unscheduled/unprocessed gaps (MR-14).
 - ✅ *(2026-06-10)* No-placement on autofill is a non-blocking warning; placement window includes `EXPIRING`/`EXTENDED` and open-ended (PKWTT) terms (MR-1, MR-15).
 - ✅ PRD: [manual-attendance.md](prds/manual-attendance.md).
+
+---
+
+### F5.7 — Attendance Auto-Reconcile (late-roster linking)
+
+Closes the loop when the roster is entered **late**. Flexible clock-in (F5.1) lets an agent clock in with no schedule, leaving an `UNSCHEDULED`, `PENDING` record that no later shift links to. F5.7 is triggered by an **E4 schedule-create** (`scheduling.CreateEntry`, also backing `:bulk-apply`): when a **workable** shift covers a **machine-owned** `UNSCHEDULED` record (same employee + placement) whose `check_in_at` falls in the shift window, the shift retroactively **adopts** the record and **re-derives its truth** (link, lateness, status, flags, verification, payability) exactly as clock-in would have — reusing the same 15-min grace. A record already decided by a human (`VERIFIED`/`REJECTED`/`ESCALATED`) is **never** re-derived; it gets `schedule_id` lineage only. Runs synchronously inside the schedule-create transaction, fail-closed; no new endpoint, no migration.
+
+```mermaid
+flowchart TD
+    SC([E4: schedule entry created]) --> W{Workable shift? SCHEDULED, not day-off, times set}
+    W -- No --> SK[Skip — no reconcile]
+    W -- Yes --> F{Machine-owned UNSCHEDULED record in [shift_start-2h, shift_end+4h]?}
+    F -- None --> SK
+    F -- Human-decided VERIFIED/REJECTED/ESCALATED --> RL[Relink only: attach schedule_id + snapshot, audit ATTENDANCE_RELINKED]
+    F -- Machine-owned --> RC[Reconcile: re-derive lateness/status/flags/verification/payable, audit ATTENDANCE_RECONCILED]
+```
+
+**Entities:** `Attendance` (update). **Depends on:** F5.1, F5.2, F5.3, E4 (schedule-create trigger + shift window).
 
 ---
 

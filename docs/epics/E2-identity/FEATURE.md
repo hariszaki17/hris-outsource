@@ -35,6 +35,7 @@ erDiagram
     EMPLOYEE {
         bigint id PK
         bigint user_id FK "1:1, null until provisioned"
+        string employee_type "FIELD (placed at client) | INTERNAL (SWP HQ) — default FIELD"
         string full_name
         string nik
         string nip
@@ -63,6 +64,7 @@ erDiagram
     }
     CLIENT_COMPANY {
         bigint id PK
+        string type "CLIENT (placement target) | INTERNAL (SWP itself, HQ) — default CLIENT"
         string name
         string address "registered / billing"
         string leader_scope "company | site (default company)"
@@ -124,8 +126,9 @@ erDiagram
 **Invariants:**
 - **INV-1:** an Employee maps **1:1 to a User** (nullable until a login is provisioned).
 - **INV-2:** an Employee has **at most one *active* EmploymentAgreement** at a time (history retained; renewals link via `predecessor_id`).
-- **INV-5:** a ClientCompany has **at least one** Site, **exactly one** of which is `is_primary` (the default "Main Site"). Geofence config (lat/lng/`geofence_radius_m`) lives on **Site**, never on ClientCompany. Site name is unique within its company. *(Added 2026-06-03, F2.6.)*
+- **INV-5:** a Company has **at least one** Site, **exactly one** of which is `is_primary` (the default "Main Site"). Geofence config (lat/lng/`geofence_radius_m`) lives on **Site**, never on the Company, and is **optional** — a Site may have no geofence (mobile/cruise placement, fully-remote role), in which case clock-in skips the location check. Site name is unique within its company. *(Added 2026-06-03, F2.6; geofence made optional 2026-06-15 — see EPICS §8 E2 "FIELD vs INTERNAL".)*
 - **INV-6:** login access is bound to **employment**, not placement. Revocation fires **only** when the EmploymentAgreement closes (offboarding); ending/transferring/renewing a *placement* never revokes a login. *(Added 2026-06-06, F2.7.)*
+- **INV-7:** one `Employee` entity serves **all** SWP staff, categorized by **`employee_type ∈ {FIELD, INTERNAL}`** (orthogonal to auth role). `Company.type ∈ {CLIENT, INTERNAL}` distinguishes placement-target clients from SWP itself; the single `INTERNAL` company holds the HQ Site(s) that internal staff are assigned to. Client-facing surfaces (lists, billing, reporting, `lead`/`shift_leader` scope) filter `type = CLIENT`. *(Added 2026-06-15 — see EPICS §8 E2 "FIELD vs INTERNAL".)*
 
 ## 5. Features
 

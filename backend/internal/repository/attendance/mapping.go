@@ -137,6 +137,7 @@ type attendanceCols struct {
 	PhotoInID          *string
 	PhotoOutID         *string
 	Wfo                bool
+	Mode               string
 	IsLate             bool
 	LateMinutes        int32
 	WorkedMinutes      *int32
@@ -185,6 +186,7 @@ func mapAttendance(c attendanceCols) att.Attendance {
 		PhotoInID:          c.PhotoInID,
 		PhotoOutID:         c.PhotoOutID,
 		WFO:                c.Wfo,
+		Mode:               c.Mode,
 		IsLate:             c.IsLate,
 		LateMinutes:        i32ToInt(c.LateMinutes),
 		WorkedMinutes:      i32PtrToIntPtr(c.WorkedMinutes),
@@ -217,7 +219,7 @@ func mapAttendanceFromList(r sqlcgen.ListAttendanceRow) att.Attendance {
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -232,7 +234,7 @@ func mapAttendanceFromGet(r sqlcgen.GetAttendanceRow) att.Attendance {
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -247,7 +249,7 @@ func mapAttendanceFromForUpdate(r sqlcgen.GetAttendanceForUpdateRow) att.Attenda
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -261,7 +263,7 @@ func mapAttendanceFromVerify(r sqlcgen.VerifyAttendanceRow) att.Attendance {
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -275,7 +277,7 @@ func mapAttendanceFromReject(r sqlcgen.RejectAttendanceRow) att.Attendance {
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -289,7 +291,7 @@ func mapAttendanceFromApply(r sqlcgen.ApplyCorrectionToAttendanceRow) att.Attend
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -303,7 +305,7 @@ func mapAttendanceFromSetPayable(r sqlcgen.SetAttendancePayableRow) att.Attendan
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,
@@ -344,7 +346,7 @@ func mapAttendanceFromCreate(r sqlcgen.CreateManualAttendanceRow) att.Attendance
 		CompanyID: r.CompanyID, SiteID: r.SiteID, Position: r.Position, AttendanceCodeID: r.AttendanceCodeID,
 		ShiftStartAt: r.ShiftStartAt, ShiftEndAt: r.ShiftEndAt, CheckInAt: r.CheckInAt, CheckOutAt: r.CheckOutAt,
 		LatIn: r.LatIn, LngIn: r.LngIn, LatOut: r.LatOut, LngOut: r.LngOut, PhotoInID: r.PhotoInID, PhotoOutID: r.PhotoOutID,
-		Wfo: r.Wfo, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
+		Wfo: r.Wfo, Mode: r.Mode, IsLate: r.IsLate, LateMinutes: r.LateMinutes, WorkedMinutes: r.WorkedMinutes, AutoClosed: r.AutoClosed,
 		InGeofence: r.InGeofence, InDistanceM: r.InDistanceM, OutGeofence: r.OutGeofence, OutDistanceM: r.OutDistanceM, GeofenceRadiusM: r.GeofenceRadiusM,
 		Status: r.Status, VerificationStatus: r.VerificationStatus, Flags: r.Flags,
 		VerifiedBy: r.VerifiedBy, VerifiedAt: r.VerifiedAt, RejectedBy: r.RejectedBy, RejectedAt: r.RejectedAt,

@@ -474,6 +474,11 @@ paths:
         - **Auto-publish (INV-4):** the new entry is immediately visible to the agent on mobile.
         - **Notification (CONVENTIONS §16.2):** a "Schedule published" notification is dispatched to the
           affected agent (fire-and-forget; failures don't block).
+        - **Attendance auto-reconcile (E5 F5.7):** creating a *workable* shift (not `is_day_off`) may
+          retroactively reconcile an existing `UNSCHEDULED` attendance record for that agent/day —
+          the late roster adopts the already-captured clock-in and re-derives its lateness / status /
+          flags / verification / payability. Synchronous in the same transaction, fail-closed; no
+          request/response field changes here. See the F5.7 PRD (E5).
         - **Audit:** one E1 audit entry per write.
 
         To mark a day OFF (SA-7), POST with `is_day_off=true` and omit `shift_master_id`.
@@ -737,7 +742,6 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
       x-rbac:
-        roles: [super_admin, hr_admin, shift_leader, agent]
         scope: company_or_global
       x-design-screens:
         - fN9AJ   # Agen · Jadwal Saya
@@ -761,7 +765,9 @@ paths:
         - Status code is 200 if ≥1 cell succeeded; 422 only when ALL cells failed.
 
         Implicit: every successful cell auto-publishes + notifies + audits (one audit row each, per
-        CONVENTIONS §16.1).
+        CONVENTIONS §16.1). Each workable cell may also **auto-reconcile** an existing `UNSCHEDULED`
+        attendance record for that agent/day (E5 F5.7) — the same per-cell side-effect as
+        `createScheduleEntry`, applied in each cell's own transaction.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKeyRequired'
       requestBody:

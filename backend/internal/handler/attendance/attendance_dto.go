@@ -67,6 +67,7 @@ type clockInRequest struct {
 	Lng                  float64 `json:"lng"`
 	GPSAvailable         bool    `json:"gps_available"`
 	WFO                  *bool   `json:"wfo"`
+	Mode                 *string `json:"mode"` // ONSITE (default) | REMOTE (migr. 00067)
 	PhotoID              *string `json:"photo_id"`
 	ForceOutsideGeofence bool    `json:"force_outside_geofence"`
 }
@@ -77,6 +78,14 @@ func (c clockInRequest) wfoOrDefault() bool {
 		return true
 	}
 	return *c.WFO
+}
+
+// modeOrDefault applies the spec default (ONSITE) when mode is omitted/empty.
+func (c clockInRequest) modeOrDefault() string {
+	if c.Mode == nil || *c.Mode == "" {
+		return "ONSITE"
+	}
+	return *c.Mode
 }
 
 // clockOutRequest is the openapi ClockOutRequest.
@@ -125,10 +134,11 @@ type attendanceResponse struct {
 	PhotoInID  *string  `json:"photo_in_id"`
 	PhotoOutID *string  `json:"photo_out_id"`
 
-	WFO           bool `json:"wfo"`
-	LateMinutes   int  `json:"late_minutes"`
-	WorkedMinutes *int `json:"worked_minutes"`
-	AutoClosed    bool `json:"auto_closed"`
+	WFO           bool   `json:"wfo"`
+	Mode          string `json:"mode"` // ONSITE | REMOTE (migr. 00067)
+	LateMinutes   int    `json:"late_minutes"`
+	WorkedMinutes *int   `json:"worked_minutes"`
+	AutoClosed    bool   `json:"auto_closed"`
 
 	// CanCheckOut is a server-computed display hint for the mobile toggle (F5.1): true
 	// only for an OPEN record still within its checkout window (shift_end + grace). An
@@ -244,6 +254,7 @@ func toAttendanceResponse(a att.Attendance) attendanceResponse {
 		PhotoInID:          a.PhotoInID,
 		PhotoOutID:         a.PhotoOutID,
 		WFO:                a.WFO,
+		Mode:               a.Mode,
 		LateMinutes:        a.LateMinutes,
 		WorkedMinutes:      a.WorkedMinutes,
 		AutoClosed:         a.AutoClosed,

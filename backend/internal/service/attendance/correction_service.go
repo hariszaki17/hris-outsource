@@ -57,6 +57,20 @@ type CorrectionService struct {
 	txm     TxRunner
 	now     Clock
 	engine  approval.Engine
+	// PC-9 post-lock carry-forward: when a correction applies to a LOCKED payroll
+	// month, the locked summary is NOT mutated — instead a PayrollAdjustment is
+	// emitted to the next open run. Both ports are consumer-defined here (avoid an
+	// import cycle with the payroll service) + nil-safe (no F8.5 wiring = no-op).
+	locked   LockedMonthChecker
+	adjuster AdjustmentEmitter
+}
+
+// AdjustmentEmitter emits a PENDING, unvalued PayrollAdjustment for a post-lock
+// change (E8 F8.5 / PC-9). Runs INSIDE the caller's tx so the adjustment commits
+// atomically with the correction. Defined here (consumer side) to avoid an import
+// cycle with the payroll service; satisfied by payroll.ClarificationService.
+type AdjustmentEmitter interface {
+	EmitCorrectionAdjustment(ctx context.Context, tx pgx.Tx, employeeID, sourceID string, originYear, originMonth int) error
 }
 
 // NewCorrectionService wires the correction service. It needs the attendance repo
@@ -71,6 +85,13 @@ func (s *CorrectionService) SetClock(c Clock) { s.now = c }
 // SetApprovalEngine injects the E11 engine (corrections route through it on submit;
 // the OnApproved/OnRejected hooks fire on the engine's terminal transition).
 func (s *CorrectionService) SetApprovalEngine(e approval.Engine) { s.engine = e }
+
+// SetPayrollPeriodGuard wires the F8.5 locked-month guard + adjustment emitter
+// (PC-9). Additive + nil-safe: without it, an approved correction never emits an
+// adjustment (pre-F8.5 behavior).
+func (s *CorrectionService) SetPayrollPeriodGuard(c LockedMonthChecker, a AdjustmentEmitter) {
+	s.locked, s.adjuster = c, a
+}
 
 // --- list / get ---
 
@@ -384,6 +405,14 @@ func (s *CorrectionService) OnApproved(ctx context.Context, tx pgx.Tx, requestID
 	// attachID is the created record's id for a NEW_ENTRY (attached to the correction on
 	// APPLIED); nil for an existing-record correction.
 	var attachID *string
+	// adjEmployeeID / adjSourceID / adjMonth capture the PC-9 carry-forward target:
+	// the affected employee + attendance record + its work-date month. adjSourceID is
+	// set once the affected record id is known (the new record for NEW_ENTRY, else the
+	// existing attendance id). adjMonth defaults to the work date of the change.
+	var (
+		adjSourceID  string
+		adjMonthTime time.Time
+	)
 
 	if cor.Type == att.CorrectionTypeNewEntry {
 		// NEW_ENTRY: create the attendance record for the no-shift day (CR-10). Resolve the
@@ -446,6 +475,9 @@ func (s *CorrectionService) OnApproved(ctx context.Context, tx pgx.Tx, requestID
 			return cerr
 		}
 		attachID = &created.ID
+		adjSourceID = created.ID
+		// NEW_ENTRY belongs to its work_date month (C-PC-2).
+		adjMonthTime = workDate
 	} else {
 		// Existing-record correction: apply whitelisted proposed_* + BR CR-9 re-eval.
 		attRec, arerr := s.attRepo.GetAttendanceForUpdate(ctx, tx, cor.AttendanceID)
@@ -479,6 +511,17 @@ func (s *CorrectionService) OnApproved(ctx context.Context, tx pgx.Tx, requestID
 			}
 			return aerr
 		}
+		adjSourceID = cor.AttendanceID
+		// The existing record belongs to its shift-start month (C-PC-2); fall back to
+		// the clock-in instant for an unscheduled record.
+		switch {
+		case attRec.ShiftStartAt != nil:
+			adjMonthTime = attRec.ShiftStartAt.In(jakartaLoc())
+		case attRec.CheckInAt != nil:
+			adjMonthTime = attRec.CheckInAt.In(jakartaLoc())
+		default:
+			adjMonthTime = s.now()
+		}
 	}
 
 	_, n, cerr := s.repo.ApproveCorrection(ctx, tx, requestID, actor, attachID)
@@ -487,6 +530,22 @@ func (s *CorrectionService) OnApproved(ctx context.Context, tx pgx.Tx, requestID
 	}
 	if n == 0 {
 		return correctionTerminalConflict(cor.Status)
+	}
+
+	// PC-9: if the change lands in a LOCKED payroll month, the immutable summary is
+	// NOT mutated — emit a PENDING PayrollAdjustment (origin = that month) for the
+	// next open run instead. Pre-lock changes apply in place (no adjustment, C-PC-5).
+	if s.locked != nil && s.adjuster != nil && !adjMonthTime.IsZero() {
+		y, m := adjMonthTime.In(jakartaLoc()).Year(), int(adjMonthTime.In(jakartaLoc()).Month())
+		locked, lkErr := s.locked.IsMonthLocked(ctx, y, m)
+		if lkErr != nil {
+			return apperr.Internal(lkErr)
+		}
+		if locked {
+			if emErr := s.adjuster.EmitCorrectionAdjustment(ctx, tx, cor.RequesterID, adjSourceID, y, m); emErr != nil {
+				return emErr
+			}
+		}
 	}
 
 	// TODO(Phase-11): enqueue NotificationArgs ("correction approved" + E7/E10

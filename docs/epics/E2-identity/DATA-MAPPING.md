@@ -16,8 +16,9 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | `users` | User (E1) | `id, email, password, name, nip, phone_number, company_id, role(tinyint), position, is_enabled` |
 | `employees` | Employee | `id, name, nik, nip, join_at, gender, birth_*, npwp, bpjs_kesehatan, bpjs_ketenagakerjaan, acc_number_*, user_id, last_contract_id` |
 | `employee_contracts` | EmploymentAgreement | `contract_status_id, pkwt_reference, contract_start_at, contract_end_at, resign_at, gaji_pokok*, bpjs_*, pph21*` (`*`=encrypted) |
-| `companies` (role=2) | ClientCompany | `id, name, address, npwp, penanggung_jawab, phone_number, is_enabled` (geo `lat/long_address` **not** migrated — see G-8) · `leader_scope` defaults `company` |
-| *(none — net-new)* | Site (F2.6) | Loader **auto-creates one primary "Main Site" per ClientCompany**, geofence **empty**; geo is configured post-cutover (G-8). |
+| `companies` (role=2) | ClientCompany (**`type=CLIENT`**) | `id, name, address, npwp, penanggung_jawab, phone_number, is_enabled` (geo `lat/long_address` **not** migrated — see G-8) · `leader_scope` defaults `company` |
+| *(none — net-new, G-9)* | **SWP internal company (`type=INTERNAL`)** | Loader **seeds the single SWP company** (`type=INTERNAL`) + ≥1 HQ Site, holding the internal-staff assignments. Excluded from client lists/billing/reporting. *(2026-06-15.)* |
+| *(none — net-new)* | Site (F2.6) | Loader **auto-creates one primary "Main Site" per company** (every CLIENT company + the INTERNAL company's HQ), geofence **empty**; geo is configured post-cutover (G-8). |
 | `recruitment_roles` | → **free-text `position` string** on Placement (E3) | `id, role` (the role label) — no Position master |
 | `recruitment_role_types` | (lookup) | `id, name` — drives PKWT/PKWTT derivation |
 | `leave_types` | LeaveType | `id, name, description, is_tahunan, is_document_required` (legacy has only annual/doc flags — new cap mechanics are **seeded**, not migrated; see leave_types mapping below) |
@@ -34,13 +35,14 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 | `password` | `password_hash` | Laravel bcrypt — carry hash if scheme compatible, else force reset (G-2) |
 | `name`,`nip`,`phone_number` | → **Employee** fields | identity attributes live on Employee now |
 | `company_id` | **DROP** | single internal tenant (SWP) |
-| `role` (tinyint) | `role` | **remap** legacy enum → {super_admin, hr_admin, shift_leader, agent} (need value map, G-1) |
+| `role` (tinyint) | `role` (nullable, **elevations only**) | **remap** legacy enum → {super_admin, hr_admin, lead, **NULL**}; legacy `agent` → **NULL** (no elevation — `agent` retired as a role 2026-06-15); legacy shift_leader → **NULL** too (the role is now derived per request from the E3 assignment, never stored). Need value map (G-1). |
 | `position` | **DROP** | position is per-placement (E3) |
 | `is_enabled` | `status` | enabled→active |
 | `is_announcement` | **DROP** | legacy feature flag |
 
 ### `employees` → Employee
 `name→full_name`, `nik→nik`, `nip→nip`, `join_at→join_at`, `gender`, `birth_date/place`, `npwp`, `bpjs_kesehatan`, `bpjs_ketenagakerjaan`, `acc_number_*→bank_account`, `user_id→user_id` (1:1 link), `last_contract_id`→resolve to current EmploymentAgreement, `is_posted`→drop, soft-deletes carried.
+**`employee_type` (net-new, 2026-06-15, G-9):** derive — an employee with a placement at a `role=2` (CLIENT) company → **`FIELD`**; an employee who is SWP internal staff (legacy admin role, or no client placement) → **`INTERNAL`**, assigned to the seeded SWP HQ Site. Default `FIELD` when a client placement exists, else `INTERNAL`; ambiguous cases → `REVIEW_ITEM`.
 
 ### `employee_contracts` → EmploymentAgreement
 | Legacy | → | Notes |
@@ -72,7 +74,8 @@ Legacy splits identity across **`users`** (login, with a tinyint `role` + `compa
 
 | # | Gap | Handling |
 |---|-----|----------|
-| G-1 | **Legacy role tinyint → new role enum** unknown | Inspect distinct `users.role` values in prod; build an explicit value map to {super_admin, hr_admin, shift_leader, agent}. Shift-leader role is mostly derived from E3 F3.4, not the legacy enum. |
+| G-1 | **Legacy role tinyint → new role enum** unknown | Inspect distinct `users.role` values in prod; build an explicit value map to the **elevation** enum {super_admin, hr_admin, lead} or **NULL** (baseline). Legacy `agent` → **NULL** (`agent` retired as a role 2026-06-15); legacy shift_leader → **NULL** (shift_leader is derived per request from the E3 assignment, not the stored enum). |
+| G-9 | **`employee_type` + SWP internal company are net-new** (2026-06-15) | Seed the single SWP company (`type=INTERNAL`) + its HQ Site(s) before load. Derive `Employee.employee_type`: a client (`role=2`) placement ⇒ **`FIELD`**; SWP internal staff (legacy admin role / no client placement) ⇒ **`INTERNAL`** + an assignment to the HQ Site. Ambiguous ⇒ `REVIEW_ITEM`. Client lists/billing/reporting filter `type=CLIENT`. |
 | G-2 | **Password hashes** | Confirm Laravel bcrypt cost/scheme; if portable, carry the hash; otherwise force a password reset / re-invite on first login. |
 | G-4 | **PKWT/PKWTT derivation** | Read distinct `recruitment_role_types.name` values; map to type + status. Fallback: null `contract_end_at` ⇒ PKWTT. |
 | G-5 | **Identity reconciliation** | Post-migration **every Employee MUST have a linked User** (1:1 non-null — F2.1 EP-4, D1/D4). Legacy `employees.user_id` that are **null** (no login) are **backfilled a User keyed on phone** (email if present), with a **temp password / forced reset** on first login (G-2). Phone is the **required** login identifier (email optional). `users` with no employee are reviewed separately (E9 review queue). Keep both legacy ids in the crosswalk. **No null `user_id` post-migration.** |
