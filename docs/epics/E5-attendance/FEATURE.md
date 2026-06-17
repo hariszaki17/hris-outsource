@@ -20,8 +20,8 @@ Let any employee with an active assignment — **placed agents at client sites a
 
 ## 3. Scope
 
-**In scope:** GPS-geofenced clock in/out, shift-aware evaluation (late/incomplete), auto-clock-out, exceptions-only verification, corrections, attendance records/dashboard.
-**Out of scope:** the schedule itself (E4), overtime calc (E7), leave (E6), payroll figures (E8). Selfie/QR capture — **not chosen** (GPS only).
+**In scope:** GPS-geofenced clock in/out, **mandatory mobile clock-in photo** (web exempt; clock-out photo optional everywhere), shift-aware evaluation (late/incomplete), auto-clock-out, exceptions-only verification, corrections, attendance records/dashboard.
+**Out of scope:** the schedule itself (E4), overtime calc (E7), leave (E6), payroll figures (E8). QR capture — **not chosen**. *(Clock-in photo: **required on mobile**, **not required on web**, since 2026-06-17 — reverses the prior "GPS only, no selfie".)*
 
 ## 4. Domain entities
 
@@ -48,6 +48,8 @@ erDiagram
         decimal lng_in
         decimal lat_out
         decimal lng_out
+        string photo_in_id FK "SWP-FILE-* — REQUIRED on mobile clock-in; null on web clock-in / Absent"
+        string photo_out_id FK "SWP-FILE-* — optional clock-out photo"
         string mode "ONSITE|REMOTE — REMOTE (WFH) skips geofence; default ONSITE"
         boolean in_geofence_in "null when site has no geofence or mode=REMOTE"
         boolean in_geofence_out "null when site has no geofence or mode=REMOTE"
@@ -110,31 +112,35 @@ Geofencing needs a **center + radius per site** — held on the **`Site` entity 
 
 ### F5.1 — Clock In/Out (GPS geofence)
 
-Agent clocks in/out from mobile; the app captures GPS and the system checks it against the site geofence. **Out-of-geofence is allowed but flagged** (avoids blocking real work on GPS drift). Ties to the agent's scheduled shift.
+Agent clocks in/out from mobile; the app **captures a live photo** and GPS, and the system checks location against the site geofence. **A clock-in photo is mandatory on mobile** (`platform=MOBILE` — uploaded first → `photo_id`; no photo → clock-in rejected); **web clock-in/out (`platform=WEB`) is exempt** (no photo required). **Out-of-geofence is allowed but flagged** (avoids blocking real work on GPS drift). Ties to the agent's scheduled shift.
 
 ```mermaid
 flowchart TD
     subgraph AG[Agent - mobile]
-        A1([Tap Clock In]) --> A2[Capture GPS]
-        A2 --> A6([Tap Clock Out]) 
+        A1([Tap Clock In]) --> A0[Capture photo]
+        A0 --> A2[Capture GPS]
+        A0 --> AU[Upload photo -> photo_id]
+        A2 --> A6([Tap Clock Out])
     end
     subgraph SYS[System]
-        A2 --> S1{Active placement + shift today?}
+        A2 --> S0{platform=MOBILE and no photo_id?}
+        S0 -- Yes --> SX[Reject: PHOTO_REQUIRED]
+        S0 -- No --> S1{Active placement + shift today?}
         S1 -- No --> S2[Allow but flag: unscheduled]
         S1 -- Yes --> S3[Resolve site geofence]
         S2 --> S3
         S3 --> S4{Inside geofence radius?}
         S4 -- No --> S5[Record in_geofence=false, FLAG]
         S4 -- Yes --> S6[in_geofence=true]
-        S5 --> S7[Create Attendance + check_in_at + lat/lng]
+        S5 --> S7[Create Attendance + check_in_at + lat/lng + photo_in_id]
         S6 --> S7
         S7 --> S8[(Persist + audit)]
-        A6 --> S9[Set check_out_at + lat/lng + geofence_out]
+        A6 --> S9[Set check_out_at + lat/lng + geofence_out + optional photo_out_id]
         S9 --> S8
     end
 ```
 
-**Entities:** `Attendance` (create/update). **Depends on:** E4 (schedule), E3 (placement), E2 (site geofence).
+**Entities:** `Attendance` (create/update). **Depends on:** E4 (schedule), E3 (placement), E2 (site geofence), file storage (CONVENTIONS §15).
 
 ---
 

@@ -7,12 +7,13 @@
 
 ## 1. Context & problem
 
-Agents need to record arrival and departure at their assigned site. hris-outsource captures this via **mobile GPS clock in/out**, validating location against the site's geofence and tying the record to the agent's **scheduled shift** (E4). Per decision, being outside the geofence is **allowed but flagged** (real work shouldn't be blocked by GPS drift). No selfie/QR.
+Agents need to record arrival and departure at their assigned site. hris-outsource captures this via **mobile GPS clock in/out**, validating location against the site's geofence and tying the record to the agent's **scheduled shift** (E4). Per decision, being outside the geofence is **allowed but flagged** (real work shouldn't be blocked by GPS drift). **A photo is required at clock-in** — the agent captures a live photo (selfie/site photo) that is uploaded and attached to the record, giving the shift leader visual proof of presence alongside the GPS point *(required-clock-in-photo resolved 2026-06-17; reverses the earlier "GPS only, no selfie" decision)*. The clock-out photo stays optional.
 
 ## 2. Goals & non-goals
 
 **Goals**
 - Mobile clock-in/out with GPS + timestamp.
+- **Mandatory clock-in photo** — captured live, uploaded, attached to the record.
 - Geofence evaluation against the site; out-of-geofence flagged.
 - Link to the scheduled shift + placement; create the attendance record.
 
@@ -43,10 +44,11 @@ Agent (mobile), System (geofence check, persist, audit), Shift Leader (monitors,
 | CI-7 | A default attendance code is applied at clock-in (configurable default, e.g., "Present"); leader/correction can change it. |
 | CI-8 | All clock events are audited; the record is near-live to the leader (F5.5). |
 | CI-9 | The **scheduled shift window** an attendance record uses is the entry's **effective** window at the moment of each clock event (E4 INV-5): `shift_start_at` is fixed to the entry's `start_time` at clock-in and does not change; `shift_end_at` continues to follow master edits on the linked `Schedule` entry until clock-out, at which point it is fixed to the entry's current `end_time`. |
+| CI-10 | **Mobile clock-in requires a photo.** On the **mobile app** (`platform=MOBILE`) the agent captures a live photo, which the client uploads first (`POST /attendance:photo-upload` → `SWP-FILE-*`) and passes as `photo_id`. A mobile clock-in **without** a photo is **rejected** (`422 PHOTO_REQUIRED`); the record is never created. The photo is stored as `photo_in_id`. **Web clock-in/out (`platform=WEB` — web console, HR/SL or on-behalf, internal-staff self) does NOT require a photo** *(2026-06-17)*. **Clock-out photo is optional on every platform** (`photo_out_id`). The mobile required-photo rule is independent of geofence and `mode` (applies ONSITE **and** REMOTE). `platform` defaults to `MOBILE` (fails safe — photo enforced when unset). |
 
 ## 6. Data model
 
-Creates/updates `Attendance` (see [FEATURE.md](../FEATURE.md) §4): `check_in_at, lat_in, lng_in, in_geofence_in, schedule_id, placement_id, attendance_code_id` on clock-in; `check_out_at, lat_out, lng_out, in_geofence_out` on clock-out.
+Creates/updates `Attendance` (see [FEATURE.md](../FEATURE.md) §4): `check_in_at, lat_in, lng_in, in_geofence_in, schedule_id, placement_id, attendance_code_id, photo_in_id` (**required**) on clock-in; `check_out_at, lat_out, lng_out, in_geofence_out, photo_out_id` (optional) on clock-out. Photos are referenced by `SWP-FILE-*` id, uploaded via `POST /attendance:photo-upload` (multipart, ≤10 MB, `image/jpeg`/`image/png`) before the clock event; an orphan upload expires after 24 h if never attached.
 
 ## 7. Acceptance criteria (Gherkin)
 
@@ -59,9 +61,24 @@ Feature: Clock in / out
     And "Plaza Senayan" has a geofence radius of 100m
 
   Scenario: Clock in inside the geofence
+    Given I have captured and uploaded a clock-in photo
     When I clock in from within 100m of the site
     Then an attendance record is created with in_geofence_in true
+    And the photo is attached as photo_in_id
     And it links my scheduled shift and placement
+
+  Scenario: Mobile clock in without a photo is rejected
+    Given I am on the mobile app
+    And I have not captured a photo
+    When I try to clock in
+    Then the clock-in is rejected with PHOTO_REQUIRED
+    And no attendance record is created
+
+  Scenario: Web clock in does not require a photo
+    Given an HR admin clocks in on the web console (platform WEB)
+    When they clock in without a photo
+    Then the attendance record is created
+    And photo_in_id is null
 
   Scenario: Clock in outside the geofence is allowed but flagged
     When I clock in from 500m away
@@ -99,14 +116,21 @@ Feature: Clock in / out
 | C-4 | Spoofed/mock GPS | Out of scope v1; flag as future anti-fraud (note). |
 | C-5 | Offline at site (no connectivity) | See §10 open — queue+sync vs require connectivity. |
 | C-6 | Site has no geo set (lat/lng) | Geofence check **skipped + flagged**; record still saved (E2 F2.6 ST-8). `geofence_radius_m` defaults to 100m. |
+| C-7 | Camera permission denied / no camera (mobile) | Clock-in blocked at the client; agent prompted to grant camera access. No `photo_id` → server rejects `422 PHOTO_REQUIRED`. (Web is exempt — no camera step.) |
+| C-11 | Web clock-in/out (`platform=WEB`) | Photo **not required**; record created with `photo_in_id=null`. A photo may still be attached optionally. |
+| C-8 | Photo upload fails (network) | Client retries the upload; clock-in cannot proceed until a `photo_id` is obtained. Online-only (v1) — no offline photo queue. |
+| C-9 | Stale `photo_id` (upload >24 h old, expired) | Server rejects `422 PHOTO_REQUIRED` (orphan expired); client re-captures and re-uploads. |
+| C-10 | Photo passed at clock-out | Accepted + stored as `photo_out_id` (optional); never required. |
 
 ## 9. Dependencies
 
-E4 (schedule), E3 (placement → site), E2 (**Site geofence** F2.6 + attendance codes), E1 (audit), E10 (notifications), F5.2 (evaluation).
+E4 (schedule), E3 (placement → site), E2 (**Site geofence** F2.6 + attendance codes), E1 (audit), E10 (notifications), F5.2 (evaluation), file storage / multipart upload (CONVENTIONS §15 — `POST /attendance:photo-upload`).
 
 ## 10. Decisions & open questions
 
-- ✅ GPS-only; out-of-geofence allowed + flagged; tied to schedule.
+- ✅ GPS + **mandatory clock-in photo**; out-of-geofence allowed + flagged; tied to schedule.
+- ✅ **Mobile clock-in photo required; web exempt** *(2026-06-17)* — reverses the earlier "GPS only, no selfie/QR". On `platform=MOBILE`: captured live, uploaded first → `photo_id`, server rejects clock-in without one (`422 PHOTO_REQUIRED`). On `platform=WEB` (web console / on-behalf / internal-staff self): **photo not required** for clock-in **or** clock-out. Clock-out photo always optional. Mobile rule applies regardless of geofence/`mode`. `platform` defaults to `MOBILE`.
 - ✅ **Geofence source = the placement's `Site`** (E2 F2.6), single circle (center + `geofence_radius_m`, default 100m) *(2026-06-03; was ClientCompany)*.
-- **Open:** offline clock-in (queue + later sync) needed, or is on-site connectivity assumed?
+- **Open:** offline clock-in (queue + later sync) needed, or is on-site connectivity assumed? (Photo is online-only in v1.)
 - **Open:** anti-spoofing (mock-location detection) — v1 or later?
+- **Open:** liveness / EXIF-timestamp check on the photo (anti-reuse) — post-v1.

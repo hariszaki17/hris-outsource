@@ -21,6 +21,7 @@ info:
       - Agent self-correction window **7 days** (older = HR only).
       - Anti-spoofing (mock GPS) **post-v1** (`wfo` boolean carried in contract but not enforced).
       - Early clock-out flagged if > 15 min before scheduled end.
+      - **Clock-in photo required on mobile** *(2026-06-17)* — `ClockInRequest.photo_id` is mandatory when `platform=MOBILE`; missing/expired → `422 PHOTO_REQUIRED`. **Web clock-in/out (`platform=WEB`) is exempt.** Clock-out photo optional on every platform. Reverses the prior "GPS only, no selfie".
 
     **Cross-epic references:**
       - E2 — `ClientCompany.geofence_radius_m`, `ClientCompany.location` (lat/lng), `AttendanceCode`.
@@ -84,6 +85,9 @@ paths:
             within grace → `late_minutes=0` and `flags.late=false`; strictly after → `flags.late=true`.
           - **Already clocked in:** `409 ALREADY_CLOCKED_IN` returned (CI-5).
           - **GPS unavailable** (client passes `gps_available=false` or omits lat/lng): `422 GPS_UNAVAILABLE`.
+          - **Photo missing/expired (mobile only):** when `platform=MOBILE`, `photo_id` is
+            **required** (CI-10) — a missing field or an expired/unknown upload id returns
+            `422 PHOTO_REQUIRED`; no record is created. `platform=WEB` (console / on-behalf) is exempt.
 
         Requires `Idempotency-Key` (CONVENTIONS §13) — mobile retries must not double-create.
       x-rbac:
@@ -114,6 +118,7 @@ paths:
                   lat: -6.2256
                   lng: 106.7997
                   gps_available: true
+                  photo_id: SWP-FILE-att-9184
                   wfo: true
               budi_force_outside:
                 summary: Override after seeing the out-of-geofence warning
@@ -121,6 +126,7 @@ paths:
                   lat: -6.2298
                   lng: 106.8051
                   gps_available: true
+                  photo_id: SWP-FILE-att-9185
                   wfo: true
                   force_outside_geofence: true
       responses:
@@ -232,7 +238,7 @@ paths:
                         open_attendance_id: SWP-ATT-10711
                       request_id: req_01J5XK1ABCDEFG
         '422':
-          description: Geofence / GPS rule violation.
+          description: Geofence / GPS / photo rule violation.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -255,6 +261,13 @@ paths:
                       code: GPS_UNAVAILABLE
                       message: Layanan lokasi tidak tersedia. Aktifkan GPS untuk clock-in.
                       request_id: req_01J5XK3OPQRSTU
+                photo_required:
+                  summary: Clock-in photo missing or expired (CI-10)
+                  value:
+                    error:
+                      code: PHOTO_REQUIRED
+                      message: Foto wajib diambil untuk clock-in. Ambil foto lalu coba lagi.
+                      request_id: req_01J5XK3PHOTOXX
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -1555,9 +1568,14 @@ components:
           format: double
         photo_in_id:
           type: [string, "null"]
-          description: SWP-FILE-* id (optional).
+          description: |
+            SWP-FILE-* id of the clock-in photo (CI-10). **Mandatory for `platform=MOBILE`
+            clock-in**, so always set on an organic mobile clock-in. **Null** for a `platform=WEB`
+            clock-in (photo optional there), a true `ABSENT` record (no clock-in), or legacy records
+            pre-dating the required-photo rule (2026-06-17).
         photo_out_id:
           type: [string, "null"]
+          description: SWP-FILE-* id of the optional clock-out photo.
         wfo:
           type: boolean
           description: |
@@ -1836,9 +1854,23 @@ components:
           default: true
           deprecated: true
           description: "v1 default `true`; placeholder for post-v1 anti-spoofing flag."
+        platform:
+          type: string
+          enum: [MOBILE, WEB]
+          default: MOBILE
+          description: |
+            Originating client (CI-10, 2026-06-17). `MOBILE` (agent self via the app) → `photo_id`
+            is **required**. `WEB` (web console: HR/SL/on-behalf or internal-staff self) → photo is
+            **not required**. Defaults to `MOBILE` so a missing value fails safe (photo enforced).
         photo_id:
           type: [string, "null"]
-          description: Optional SWP-FILE-* id from `/attendance:photo-upload`.
+          pattern: '^SWP-FILE-[A-Za-z0-9\-]+$'
+          description: |
+            SWP-FILE-* id from `/attendance:photo-upload` (CI-10, 2026-06-17). **Required when
+            `platform=MOBILE`** — the agent captures a live photo, the client uploads it first, then
+            passes the returned id here; missing/expired → `422 PHOTO_REQUIRED` (no record created).
+            **Optional when `platform=WEB`.** Independent of geofence/`mode`. (Clock-out photo stays
+            optional on every platform.)
         force_outside_geofence:
           type: boolean
           default: false
