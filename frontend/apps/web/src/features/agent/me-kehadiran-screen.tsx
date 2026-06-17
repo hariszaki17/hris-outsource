@@ -27,6 +27,7 @@ import {
   type AttendancePage,
   AttendanceStatus,
   ClockInRequestMode,
+  ClockInRequestPlatform,
   useClockIn,
   useClockOut,
   useListAttendance,
@@ -278,6 +279,8 @@ export function AgentKehadiranScreen() {
             mode,
             wfo: true,
             force_outside_geofence: force,
+            // Web console clock-in is photo-exempt (CI-10, 2026-06-17).
+            platform: ClockInRequestPlatform.WEB,
           },
         });
         await list.refetch();
