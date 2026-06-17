@@ -89,9 +89,15 @@ func clockHarness(repo *fakeClockRepo) http.Handler {
 	return r
 }
 
+// postClockIn posts a default MOBILE-with-photo clock-in (the normal happy path now
+// that mobile requires a selfie). Use postClockInBody for platform/photo variants.
 func postClockIn(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
-	body := `{"lat":-6.2,"lng":106.8,"gps_available":true}`
+	return postClockInBody(t, h, `{"lat":-6.2,"lng":106.8,"gps_available":true,"photo_id":"SWP-FILE-1"}`)
+}
+
+func postClockInBody(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/attendance:clock-in", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -155,6 +161,57 @@ func TestClockInHandler_Contract(t *testing.T) {
 		}
 		if repo.autoClose.Status != string(att.StatusIncomplete) {
 			t.Errorf("auto-close status = %q, want INCOMPLETE", repo.autoClose.Status)
+		}
+	})
+}
+
+// TestClockInHandler_PhotoGate asserts the 2026-06-17 platform/photo rule:
+// MOBILE (default) requires photo_id → 422 PHOTO_REQUIRED when missing; WEB is exempt.
+func TestClockInHandler_PhotoGate(t *testing.T) {
+	now := time.Now()
+	newRepo := func() *fakeClockRepo {
+		return &fakeClockRepo{
+			newID:   "SWP-ATT-NEW",
+			records: map[string]att.Attendance{"SWP-ATT-NEW": {ID: "SWP-ATT-NEW", CheckInAt: &now}},
+		}
+	}
+
+	t.Run("mobile, no photo: 422 PHOTO_REQUIRED, no record created", func(t *testing.T) {
+		repo := newRepo()
+		// platform omitted → defaults MOBILE; photo_id omitted.
+		rr := postClockInBody(t, clockHarness(repo), `{"lat":-6.2,"lng":106.8,"gps_available":true}`)
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422 (body: %s)", rr.Code, rr.Body.String())
+		}
+		if code := strOf(errObject(t, decodeBody(t, rr))["code"]); code != "PHOTO_REQUIRED" {
+			t.Errorf("error code = %q, want PHOTO_REQUIRED", code)
+		}
+		if repo.inserted {
+			t.Error("a record was created, want none on PHOTO_REQUIRED")
+		}
+	})
+
+	t.Run("mobile, with photo: 201", func(t *testing.T) {
+		repo := newRepo()
+		rr := postClockInBody(t, clockHarness(repo),
+			`{"lat":-6.2,"lng":106.8,"gps_available":true,"platform":"MOBILE","photo_id":"SWP-FILE-1"}`)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 (body: %s)", rr.Code, rr.Body.String())
+		}
+		if !repo.inserted {
+			t.Error("no record created on a valid mobile clock-in")
+		}
+	})
+
+	t.Run("web, no photo: 201 (exempt)", func(t *testing.T) {
+		repo := newRepo()
+		rr := postClockInBody(t, clockHarness(repo),
+			`{"lat":-6.2,"lng":106.8,"gps_available":true,"platform":"WEB"}`)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201 (body: %s)", rr.Code, rr.Body.String())
+		}
+		if !repo.inserted {
+			t.Error("no record created on a valid web clock-in")
 		}
 	})
 }

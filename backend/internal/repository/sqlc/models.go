@@ -166,6 +166,18 @@ type AttendanceCorrection struct {
 	ApprovalInstanceID       *string
 }
 
+type AttendancePhoto struct {
+	ID         string
+	EmployeeID string
+	Caption    string
+	FileName   string
+	Mime       string
+	SizeBytes  int64
+	Blob       []byte
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+}
+
 type AuditLog struct {
 	ID          string
 	ActorUserID *string

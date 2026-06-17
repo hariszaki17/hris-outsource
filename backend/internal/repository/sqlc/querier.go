@@ -211,6 +211,9 @@ type Querier interface {
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (CreateAttachmentRow, error)
 	// Allocates the SWP-AC id inline from the per-prefix sequence.
 	CreateAttendanceCode(ctx context.Context, arg CreateAttendanceCodeParams) (CreateAttendanceCodeRow, error)
+	// Stores one clock-in/out selfie (E5 F5.1 / CI-10). Allocates the SWP-FILE id inline
+	// from the shared per-prefix sequence. Returns metadata only (not the blob).
+	CreateAttendancePhoto(ctx context.Context, arg CreateAttendancePhotoParams) (CreateAttendancePhotoRow, error)
 	// ============================================================================
 	// clarification_requests (PC-13)
 	// ============================================================================
@@ -373,6 +376,8 @@ type Querier interface {
 	// owning agent + company; then the company's active shift-leader (else the agent).
 	// ============================================================================
 	GetAttendanceOwner(ctx context.Context, id string) (GetAttendanceOwnerRow, error)
+	// Returns selfie metadata + blob for the authenticated file-download handler.
+	GetAttendancePhotoByID(ctx context.Context, id string) (GetAttendancePhotoByIDRow, error)
 	GetAuditLogByID(ctx context.Context, id string) (AuditLog, error)
 	GetClarificationRequest(ctx context.Context, id string) (GetClarificationRequestRow, error)
 	GetClarificationRequestForUpdate(ctx context.Context, id string) (GetClarificationRequestForUpdateRow, error)

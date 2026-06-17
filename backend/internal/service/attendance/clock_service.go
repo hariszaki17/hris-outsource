@@ -60,7 +60,10 @@ type ClockInParams struct {
 	WFO                  bool
 	// Mode is where the clock event is captured (migr. 00067): "ONSITE" (default,
 	// geofenced) | "REMOTE" (work-from-home / off-site, geofence skipped).
-	Mode                 string
+	Mode string
+	// Platform is the originating surface (2026-06-17): "MOBILE" (default) | "WEB".
+	// MOBILE clock-in requires PhotoID (else PHOTO_REQUIRED); WEB is exempt.
+	Platform             string
 	PhotoID              *string
 	ForceOutsideGeofence bool
 }
@@ -176,6 +179,12 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 	}
 	if !req.GPSAvailable {
 		return att.Attendance{}, false, apperr.Rule("GPS_UNAVAILABLE", nil)
+	}
+	// Clock-in photo gate (2026-06-17): MOBILE requires a selfie (photo_id from
+	// /attendance:photo-upload); missing → PHOTO_REQUIRED (422), no record created.
+	// WEB (console / on-behalf) is exempt. Validation-only — platform is not persisted.
+	if req.Platform == "MOBILE" && req.PhotoID == nil {
+		return att.Attendance{}, false, apperr.Rule("PHOTO_REQUIRED", nil)
 	}
 
 	pl, found, err := s.repo.GetActivePlacement(ctx, employeeID)

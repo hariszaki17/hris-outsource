@@ -249,6 +249,15 @@ func run() error {
 	clockSvc := attendancesvc.NewClockService(clockRepo, txm)
 	clockHandler := attendancehttp.NewClockHandler(clockSvc)
 
+	// Clock-in/out selfie upload (F5.1 / CI-10): multipart photo store, returns an
+	// SWP-FILE-* id the client passes to clock-in/out as photo_id. In-DB bytea blob
+	// (mirrors agreement attachments). Selfies share the /files/{id} download route:
+	// register the photo download as a fallback on the agreement-attachment handler.
+	photoRepo := attendancerepo.NewPhotoRepo(pool)
+	photoSvc := attendancesvc.NewPhotoService(photoRepo, txm)
+	photoHandler := attendancehttp.NewPhotoHandler(photoSvc)
+	agreementsHandler.SetFileFallback(photoHandler.DownloadPhoto)
+
 	// Absence-sweep (F5.2) + leave-expiry-sweep (F6.1) used to run as in-process cron
 	// runners here. They now live in the standalone `cmd/cron` binary (one-shot,
 	// externally scheduled) so the API process never mutates shared state on a timer.
@@ -378,6 +387,7 @@ func run() error {
 		Scheduling:        schedulingHandler,
 		Attendance:        attendanceHandler,
 		Clock:             clockHandler,
+		AttendancePhoto:   photoHandler,
 		Leave:             leaveHandler,
 		Overtime:          overtimeHandler,
 		Payroll:           payrollHandler,

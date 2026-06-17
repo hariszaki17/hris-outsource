@@ -67,7 +67,8 @@ type clockInRequest struct {
 	Lng                  float64 `json:"lng"`
 	GPSAvailable         bool    `json:"gps_available"`
 	WFO                  *bool   `json:"wfo"`
-	Mode                 *string `json:"mode"` // ONSITE (default) | REMOTE (migr. 00067)
+	Mode                 *string `json:"mode"`     // ONSITE (default) | REMOTE (migr. 00067)
+	Platform             *string `json:"platform"` // MOBILE (default) | WEB — gates PHOTO_REQUIRED (2026-06-17)
 	PhotoID              *string `json:"photo_id"`
 	ForceOutsideGeofence bool    `json:"force_outside_geofence"`
 }
@@ -86,6 +87,15 @@ func (c clockInRequest) modeOrDefault() string {
 		return "ONSITE"
 	}
 	return *c.Mode
+}
+
+// platformOrDefault applies the spec default (MOBILE) when platform is omitted/empty.
+// MOBILE clock-in requires a photo (PHOTO_REQUIRED); WEB is exempt (2026-06-17).
+func (c clockInRequest) platformOrDefault() string {
+	if c.Platform == nil || *c.Platform == "" {
+		return "MOBILE"
+	}
+	return *c.Platform
 }
 
 // clockOutRequest is the openapi ClockOutRequest.

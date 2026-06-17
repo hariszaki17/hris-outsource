@@ -19,11 +19,21 @@ import (
 // AgreementHandler holds the agreement service and handles all E2 agreement endpoints.
 type AgreementHandler struct {
 	svc *svc.AgreementService
+	// fileFallback, when set, is tried on a /files/{id} miss so non-agreement file
+	// id-spaces (e.g. E5 attendance selfies) can share the same download route. It
+	// returns true once it has fully served the response.
+	fileFallback func(w http.ResponseWriter, r *http.Request, fileID string) bool
 }
 
 // NewAgreementHandler returns an AgreementHandler wired to the given service.
 func NewAgreementHandler(s *svc.AgreementService) *AgreementHandler {
 	return &AgreementHandler{svc: s}
+}
+
+// SetFileFallback registers a secondary /files/{id} resolver tried when the agreement
+// attachment lookup misses (used to serve E5 attendance selfies from the same route).
+func (h *AgreementHandler) SetFileFallback(fn func(w http.ResponseWriter, r *http.Request, fileID string) bool) {
+	h.fileFallback = fn
 }
 
 // ListAgreements handles GET /agreements.
@@ -295,6 +305,11 @@ func (h *AgreementHandler) DownloadFile(w http.ResponseWriter, r *http.Request) 
 
 	att, err := h.svc.GetAttachment(r.Context(), fileID)
 	if err != nil {
+		// On a miss, try a registered fallback id-space (e.g. E5 attendance selfies)
+		// before 404ing — both share the /files/{id} route and the SWP-FILE prefix.
+		if h.fileFallback != nil && h.fileFallback(w, r, fileID) {
+			return
+		}
 		httpx.WriteError(w, r, err)
 		return
 	}

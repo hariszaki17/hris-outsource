@@ -36,6 +36,7 @@ func (h *ClockHandler) ClockIn(w http.ResponseWriter, r *http.Request) {
 		GPSAvailable:         req.GPSAvailable,
 		WFO:                  req.wfoOrDefault(),
 		Mode:                 req.modeOrDefault(),
+		Platform:             req.platformOrDefault(),
 		PhotoID:              req.PhotoID,
 		ForceOutsideGeofence: req.ForceOutsideGeofence,
 	})

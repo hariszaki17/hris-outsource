@@ -58,6 +58,8 @@ type Deps struct {
 	Attendance *attendancehttp.Handler
 	// ATTENDANCE clock slice (F5.1): agent mobile clock-in/out (E5).
 	Clock *attendancehttp.ClockHandler
+	// ATTENDANCE photo slice (F5.1 / CI-10): agent clock-in/out selfie upload (E5).
+	AttendancePhoto *attendancehttp.PhotoHandler
 	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
 	Leave *leavehttp.Handler
 	// OVERTIME slice (09-02): OT two-level approval + holiday calendar (E7).
@@ -429,6 +431,10 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.With(d.Idempotency.Handler).Post("/attendance:clock-in", d.Clock.ClockIn)
 				r.With(d.Idempotency.Handler).Post("/attendance:clock-out", d.Clock.ClockOut)
+				// Clock-in/out selfie upload (F5.1 / CI-10, scope:self). Multipart;
+				// returns an SWP-FILE-* id for clock-in/out photo_id. Self-scoped (the
+				// service derives employee_id from the principal).
+				r.Post("/attendance:photo-upload", d.AttendancePhoto.UploadPhoto)
 			})
 
 			// Correction CREATE (F5.4): an agent files their own correction;
