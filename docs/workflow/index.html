@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product → Engineering Development Workflow · SWP HRIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,650&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --brand:#15784A; --brand-d:#0E5A37; --brand-dd:#0B3F28; --brand-soft:#ECF5EF; --brand-line:#CBE6D6;
+    --accent:#0E7C74; --accent-d:#0A5C56; --accent-soft:#E8F4F2; --accent-line:#BFE0DC;
+    --ink:#191B1A; --body:#33373A; --muted:#6A6E72; --faint:#9CA1A6;
+    --paper:#FAFAF8; --surface:#FFFFFF; --border:#E7E5E0; --border-s:#D8D5CE; --rule:#EDEBE6;
+    --ink-bg:#11161D; --ink-bar:#1A222D; --ink-line:#283442; --ink-text:#DBE5F0; --ink-dim:#8497AB;
+    --amber:#9A6314; --amber-soft:#FBF1DC;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --serif:'Fraunces',Georgia,'Times New Roman',serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(16,22,26,.04),0 1px 3px rgba(16,22,26,.05);
+    --shadow-m:0 4px 14px rgba(16,22,26,.06),0 1px 3px rgba(16,22,26,.05);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--paper);color:var(--body);font-family:var(--sans);
+    font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  .ic{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.13em;flex:0 0 auto}
+
+  /* ---------------- cover ---------------- */
+  .cover{position:relative;overflow:hidden;color:#fff;padding:64px 40px 52px;
+    background:radial-gradient(120% 140% at 88% -10%, #1C3B2C 0%, #122A1F 42%, #0F1519 100%);}
+  .cover::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;
+    background:linear-gradient(90deg,var(--brand) 0%, var(--accent) 100%)}
+  .cover::after{content:"";position:absolute;right:-120px;top:-120px;width:420px;height:420px;border-radius:50%;
+    background:radial-gradient(circle, rgba(21,120,74,.28) 0%, rgba(21,120,74,0) 70%)}
+  .cover-inner{max-width:1080px;margin:0 auto;position:relative;z-index:1}
+  .kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;letter-spacing:.18em;
+    text-transform:uppercase;font-weight:600;color:#8FD3AE;margin:0 0 20px}
+  .kicker .dot{width:5px;height:5px;border-radius:50%;background:#8FD3AE;opacity:.8}
+  .cover h1{font-family:var(--serif);font-size:46px;line-height:1.06;margin:0 0 18px;font-weight:600;
+    letter-spacing:-.01em;max-width:16ch;color:#fff}
+  .cover .lede{margin:0;max-width:60ch;font-size:17px;line-height:1.6;color:rgba(255,255,255,.82);font-weight:400}
+  .cover .meta{margin-top:30px;display:flex;flex-wrap:wrap;gap:9px}
+  .chip{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px 13px;font-size:12.5px;font-weight:500;color:rgba(255,255,255,.92)}
+  .chip .ic{color:#8FD3AE;font-size:14px}
+  .chip.ghost{color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums}
+
+  /* ---------------- layout ---------------- */
+  .wrap{max-width:1080px;margin:0 auto;display:flex;gap:40px;align-items:flex-start;padding:0 40px}
+  .toc{position:sticky;top:24px;flex:0 0 196px;margin-top:44px;font-size:13px}
+  .toc h4{margin:0 0 12px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  .toc a{display:flex;gap:9px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:7px;
+    border-left:2px solid transparent;line-height:1.3;transition:.12s}
+  .toc a:hover{background:var(--surface);color:var(--ink)}
+  .toc a .n{color:var(--faint);font-family:var(--mono);font-size:11.5px;font-weight:500;font-variant-numeric:tabular-nums}
+  .content{flex:1 1 auto;min-width:0;background:var(--surface);border:1px solid var(--border);
+    border-radius:16px;margin:40px 0 60px;padding:8px 52px 48px;box-shadow:var(--shadow)}
+
+  /* ---------------- typography ---------------- */
+  section{padding-top:34px;scroll-margin-top:16px}
+  section+section{border-top:1px solid var(--rule);margin-top:36px}
+  h2{font-family:var(--serif);font-size:27px;letter-spacing:-.01em;color:var(--ink);margin:6px 0 4px;font-weight:600;
+    display:flex;gap:14px;align-items:baseline}
+  h2 .sn{font-family:var(--mono);color:var(--brand);font-size:15px;font-weight:500;font-variant-numeric:tabular-nums;
+    letter-spacing:0;position:relative;top:-2px}
+  h3{font-family:var(--serif);font-size:18.5px;color:var(--ink);margin:30px 0 9px;font-weight:600;letter-spacing:-.005em}
+  .lead{color:var(--muted);font-size:15.5px;margin:0 0 16px;max-width:74ch}
+  p{margin:0 0 13px}
+  a{color:var(--brand-d);text-underline-offset:2px}
+  code{font-family:var(--mono);font-size:.84em;background:#F4F3EF;border:1px solid var(--border);
+    padding:1px 5px;border-radius:5px;color:var(--brand-dd);white-space:nowrap}
+  strong{color:var(--ink);font-weight:650}
+  ul,ol{margin:0 0 14px;padding-left:22px}
+  li{margin:6px 0}
+  li::marker{color:var(--faint)}
+
+  /* ---------------- callouts ---------------- */
+  .note{position:relative;border:1px solid var(--brand-line);background:var(--brand-soft);border-radius:12px;
+    padding:14px 18px 14px 18px;margin:18px 0;font-size:14.5px;color:#2C3A33}
+  .note.teal{border-color:var(--accent-line);background:var(--accent-soft);color:#2A3A38}
+  .note.amber{border-color:#EAD9AE;background:var(--amber-soft);color:#4A3A1C}
+  .note p:last-child{margin-bottom:0}
+  .note .lbl{font-weight:700;color:var(--brand-d);text-transform:uppercase;letter-spacing:.08em;font-size:11px;
+    display:flex;align-items:center;gap:7px;margin-bottom:5px}
+  .note .lbl .ic{font-size:14px}
+  .note.teal .lbl{color:var(--accent-d)} .note.amber .lbl{color:var(--amber)}
+
+  /* ---------------- diagrams (CSS, print-safe) ---------------- */
+  .diagram{background:linear-gradient(180deg,#FCFCFA,#F8F8F5);border:1px solid var(--border);
+    border-radius:14px;padding:20px 20px 15px;margin:22px 0}
+  .diagram .cap{text-align:center;color:var(--muted);font-size:12.5px;margin-top:14px;line-height:1.55;max-width:64ch;margin-left:auto;margin-right:auto}
+  .lane-label{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin:0 0 10px;display:flex;align-items:center;gap:7px}
+  .lane-label.p{color:var(--brand-d)} .lane-label.e{color:#46505C;margin-top:18px}
+  .lane-label .ic{font-size:13px;opacity:.85}
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px}
+  .fbox{flex:1 1 0;min-width:98px;border:1px solid var(--border-s);border-radius:11px;padding:11px 10px;
+    background:var(--surface);text-align:center;display:flex;flex-direction:column;justify-content:center;
+    gap:3px;box-shadow:var(--shadow)}
+  .fbox .ft{font-weight:650;font-size:12px;color:var(--ink);line-height:1.25;display:flex;align-items:center;justify-content:center;gap:5px}
+  .fbox .ft .ic{font-size:13px}
+  .fbox .fs{font-size:10px;color:var(--muted);letter-spacing:.01em}
+  .fbox.p{background:var(--brand-soft);border-color:var(--brand-line)} .fbox.p .ft{color:var(--brand-d)}
+  .fbox.r{background:var(--accent-soft);border-color:var(--accent-line)} .fbox.r .ft{color:var(--accent-d)} .fbox.r .ft .ic{color:var(--accent)}
+  .fbox.e{background:#EEF1F4;border-color:#D9DEE4} .fbox.e .ft{color:#3C4753} .fbox.e .fs{color:#6B7682}
+  .fbox.n{flex:0 0 auto;min-width:56px;background:#F4F3EF;border-style:dashed} .fbox.n .ft{color:var(--muted);font-weight:600}
+  .farrow{flex:0 0 auto;display:flex;align-items:center;color:var(--faint);font-size:16px}
+  .handoff{display:flex;align-items:center;justify-content:center;gap:9px;color:var(--accent-d);font-weight:600;
+    font-size:12px;letter-spacing:.04em;text-transform:uppercase;margin:13px 0}
+  .handoff::before,.handoff::after{content:"";height:1px;width:46px;background:var(--accent-line)}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:9px}
+  .step{border:1px solid var(--border-s);border-radius:12px;padding:11px 12px;background:var(--surface);box-shadow:var(--shadow)}
+  .step .snum{font-family:var(--mono);font-weight:500;font-size:12px;color:var(--brand)}
+  .step .st2{font-weight:650;font-size:12.5px;color:var(--ink);display:flex;align-items:center;gap:5px;margin-top:3px}
+  .step .st2 .ic{font-size:13px}
+  .step .ss{font-size:10px;color:var(--muted);display:block;margin-top:3px}
+  .step.r{background:var(--accent-soft);border-color:var(--accent-line)} .step.r .snum{color:var(--accent-d)} .step.r .st2{color:var(--accent-d)} .step.r .st2 .ic{color:var(--accent)}
+  .step.p{background:var(--brand-soft);border-color:var(--brand-line)} .step.p .st2{color:var(--brand-d)} .step.p .snum{color:var(--brand-d)}
+  .own{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .own-col{border-radius:13px;padding:15px 15px 11px}
+  .own-col.p{background:var(--brand-soft);border:1px solid var(--brand-line)}
+  .own-col.e{background:#F1F4F7;border:1px solid #DCE1E7}
+  .own-h{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;margin:0 0 11px;display:flex;align-items:center;gap:7px}
+  .own-col.p .own-h{color:var(--brand-d)} .own-col.e .own-h{color:#3F4855}
+  .ochip{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px 11px;margin:7px 0;box-shadow:var(--shadow)}
+  .ochip b{font-size:12.5px;color:var(--ink);font-family:var(--mono);font-weight:500}
+  .ochip span{display:block;font-size:10.5px;color:var(--muted);margin-top:2px}
+  .auth-note{font-size:11.5px;color:var(--muted);text-align:center;margin:13px 0 0;line-height:1.5}
+
+  /* ---------------- stage cards ---------------- */
+  .stage{border:1px solid var(--border);border-radius:14px;margin:16px 0;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)}
+  .stage.rev{border-color:var(--accent-line)}
+  .stage-h{display:flex;align-items:center;gap:14px;padding:15px 18px;background:#FCFCFA;border-bottom:1px solid var(--rule)}
+  .stage.rev .stage-h{background:var(--accent-soft);border-bottom-color:var(--accent-line)}
+  .badge{flex:0 0 auto;width:38px;height:38px;border-radius:10px;background:var(--brand);color:#fff;
+    display:grid;place-items:center;font-family:var(--mono);font-weight:500;font-size:16px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+  .badge.tc{background:var(--brand-d)} .badge.gate{background:var(--accent)} .badge.rev{background:var(--accent)}
+  .stage-h .t{font-family:var(--serif);font-weight:600;color:var(--ink);font-size:16.5px;display:flex;align-items:center;gap:8px;letter-spacing:-.005em}
+  .stage-h .t .ic{font-size:16px;color:var(--accent)}
+  .stage-h .p{color:var(--muted);font-size:13px;margin:2px 0 0}
+  .stage-b{padding:16px 18px}
+  .youdo{font-size:13.5px;color:var(--ink);background:var(--accent-soft);border:1px solid var(--accent-line);
+    border-radius:10px;padding:10px 13px;margin:0 0 14px;display:flex;gap:9px}
+  .youdo .ic{font-size:15px;color:var(--accent);margin-top:2px}
+  .youdo b{color:var(--accent-d)}
+  .youdo.fresh{background:#E3F1EF}
+  .exit{font-size:13px;color:var(--brand-d);background:var(--brand-soft);border:1px solid var(--brand-line);
+    border-radius:10px;padding:9px 13px;margin-top:14px;display:flex;gap:9px;align-items:center}
+  .exit .ic{font-size:15px}
+  .exit b{color:var(--brand-d)}
+
+  /* ---------------- code blocks ---------------- */
+  .code{border-radius:12px;overflow:hidden;border:1px solid var(--ink-line);background:var(--ink-bg);margin:0;box-shadow:var(--shadow-m)}
+  .code-head{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;background:var(--ink-bar);border-bottom:1px solid var(--ink-line)}
+  .code-label{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-dim);font-weight:600;display:flex;gap:7px;align-items:center}
+  .code-label .ic{font-size:13px}
+  pre{background:transparent;color:var(--ink-text);padding:15px 16px;margin:0;overflow:auto;
+    font-family:var(--mono);font-size:12.4px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+  .copy{background:rgba(255,255,255,.06);color:#A9BACC;border:1px solid rgba(255,255,255,.16);
+    border-radius:7px;padding:4px 11px;font-size:11px;font-family:var(--sans);font-weight:600;cursor:pointer;transition:.14s;letter-spacing:.02em}
+  .copy:hover{background:rgba(255,255,255,.13);color:#fff}
+  .plabel{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:600;margin:0 0 8px}
+
+  /* ---------------- tables ---------------- */
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.4px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{background:transparent;color:var(--faint);font-weight:600;font-size:10.5px;letter-spacing:.09em;
+    text-transform:uppercase;border-bottom:1.5px solid var(--border-s)}
+  tbody tr:last-child td{border-bottom:none}
+  td code{white-space:normal}
+  .ra{font-weight:650;color:var(--brand-d)} .rb{color:var(--faint)} .em{color:var(--muted);font-style:italic}
+  .fresh-tag{color:var(--accent-d);font-weight:600;display:inline-flex;align-items:center;gap:5px}
+  .fresh-tag .ic{font-size:12px}
+
+  /* ---------------- checklist ---------------- */
+  .dor{list-style:none;padding:0;margin:16px 0}
+  .dor li{position:relative;padding:11px 14px 11px 42px;border:1px solid var(--border);border-radius:11px;margin:8px 0;background:var(--surface);font-size:14px;box-shadow:var(--shadow)}
+  .dor li::before{content:"";position:absolute;left:14px;top:13px;width:18px;height:18px;border-radius:6px;background:var(--brand)}
+  .dor li::after{content:"";position:absolute;left:19px;top:16px;width:8px;height:4.5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg)}
+
+  .foot{max-width:1080px;margin:0 auto;padding:0 40px 54px;color:var(--faint);font-size:12px;display:flex;gap:8px;align-items:center}
+  .foot .ic{font-size:13px;color:var(--brand)}
+  hr.soft{border:none;border-top:1px solid var(--rule);margin:24px 0}
+
+  /* ---------------- print / PDF ---------------- */
+  @page{size:A4;margin:15mm 15mm 17mm}
+  @media print{
+    *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+    body{background:#fff;font-size:10.4px;line-height:1.5}
+    .cover{padding:28px 0 22px;border-radius:0}
+    .cover h1{font-size:28px}.cover .lede{font-size:12px}
+    .toc{display:none}
+    .wrap{display:block;padding:0;max-width:none}
+    .content{border:none;border-radius:0;box-shadow:none;margin:0;padding:0}
+    .foot{padding:14px 0 0}
+    section{break-inside:avoid-page}
+    section+section{margin-top:16px;padding-top:14px}
+    .diagram,.flow,.steps,.own,.fbox,.step,.own-col,table,.note,.dor li,.exit,.youdo,.stage-h,.code{break-inside:avoid}
+    h2,h3{break-after:avoid}
+    pre{font-size:9px;white-space:pre-wrap}
+    .copy{display:none}
+    a{text-decoration:none}
+  }
+</style>
+</head>
+<body>
+
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-lens" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.1-4.1"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 14a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="8" r="2.4"/><path d="M6 8.4v7.2M18 10.4a6 6 0 0 1-6 6H6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3v5h5"/><path d="M19 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.2 5.2L3 18v3h3l6.5-6.5a4 4 0 0 0 5.2-5.2l-2.6 2.6-2.4-.6-.6-2.4z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V4s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+</svg>
+
+<header class="cover">
+  <div class="cover-inner">
+    <p class="kicker"><span class="dot"></span> SWP HRIS · Internal Engineering Handbook</p>
+    <h1>Product → Engineering Development Workflow</h1>
+    <p class="lede">You describe the idea; the AI agent writes the spec, designs the screens, and writes the
+       test cases. Two checkpoints run in an independent fresh session — one challenges the idea, one audits
+       the documents — then the agent creates the pull request.</p>
+    <div class="meta">
+      <span class="chip"><svg class="ic"><use href="#i-chat"/></svg> Agent interviews you · 7 steps</span>
+      <span class="chip"><svg class="ic"><use href="#i-lens"/></svg> 2 independent reviews</span>
+      <span class="chip"><svg class="ic"><use href="#i-branch"/></svg> Agent runs git + opens the PR</span>
+      <span class="chip ghost">v4 · 2026-06-17</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc">
+    <h4>Contents</h4>
+    <a href="#s0"><span class="n">00</span> Mental model</a>
+    <a href="#s1"><span class="n">01</span> One-time setup</a>
+    <a href="#s2"><span class="n">02</span> Unit of work</a>
+    <a href="#s3"><span class="n">03</span> The seven steps</a>
+    <a href="#s4"><span class="n">04</span> Ready-for-eng checks</a>
+    <a href="#s5"><span class="n">05</span> Engineering pickup</a>
+    <a href="#s6"><span class="n">06</span> Roles (RACI)</a>
+    <a href="#s7"><span class="n">07</span> Prompt library</a>
+  </nav>
+
+  <main class="content">
+
+  <!-- 0 -->
+  <section id="s0">
+    <h2><span class="sn">00</span> The mental model</h2>
+    <p class="lead">Read this first — it is the one idea everything else hangs on.</p>
+    <p>This repository is the single place where a feature is born, challenged, specified, designed, tested,
+       audited, and built. The docs <em>are</em> the spec, the <code>.pen</code> file <em>is</em> the
+       design, and code is generated against both.</p>
+    <div class="note">
+      <span class="lbl"><svg class="ic"><use href="#i-shield"/></svg> The golden rule</span>
+      <p><strong>Nothing reaches engineering that isn't traceable</strong> — every feature flows
+        <em>epic → feature → PRD → acceptance criteria → test cases → design frame</em>, each carrying
+        stable IDs the code and tests cite back. The author agent guarantees this and proves it's testable;
+        <strong>two independent review sessions</strong> make sure the idea is worth building and the
+        documents fit the existing system.</p>
+    </div>
+    <div class="note teal">
+      <span class="lbl"><svg class="ic"><use href="#i-lens"/></svg> Why a fresh session for the two reviews</span>
+      <p>The agent that interviewed you and wrote the spec is invested in its own work and blind to its own
+        gaps. Opening a <strong>new Claude Code session</strong> for the <strong>Challenge (02)</strong> and
+        the <strong>Audit (06)</strong> gives a reviewer that has <em>only</em> read the repo and the
+        documents — not your conversation — so the critique is genuinely independent.
+        <strong>Independence is the point — don't skip it.</strong></p>
+    </div>
+
+    <div class="diagram">
+      <div class="lane-label p"><svg class="ic"><use href="#i-pen"/></svg> Product — describe &amp; approve · teal = independent fresh-session review</div>
+      <div class="flow">
+        <div class="fbox p"><span class="ft">Describe idea</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox r"><span class="ft"><svg class="ic"><use href="#i-lens"/></svg> Challenge</span><span class="fs">fresh session</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox p"><span class="ft">Spec + design</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox p"><span class="ft">Test cases</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox r"><span class="ft"><svg class="ic"><use href="#i-lens"/></svg> Audit</span><span class="fs">fresh session</span></div>
+      </div>
+      <div class="handoff">the agent creates the pull request</div>
+      <div class="lane-label e"><svg class="ic"><use href="#i-tool"/></svg> Engineering — build &amp; ship</div>
+      <div class="flow">
+        <div class="fbox e"><span class="ft">Accept spec</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox e"><span class="ft">API + code</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox e"><span class="ft">Automate tests</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox e"><span class="ft">Merge → main</span></div>
+      </div>
+      <div class="cap">The whole loop. You describe and approve across the top; the two <b>teal</b> steps are independent fresh-session reviews. The agent creates the pull request; engineering owns the API contract + code and automates your test cases back to <code>main</code>.</div>
+    </div>
+
+    <h3>Who does what</h3>
+    <table>
+      <thead><tr><th style="width:120px">Area</th><th>Product — <span class="em">you describe &amp; approve</span></th><th>Engineering — <span class="em">builds</span></th></tr></thead>
+      <tbody>
+        <tr><td class="sb">Specs</td><td>answer the interview; approve the <b>FEATURE + PRD</b> the agent writes</td><td>—</td></tr>
+        <tr><td class="sb">Design</td><td>approve the <b>screens</b> the agent designs in <code>brainstorm.pen</code></td><td>—</td></tr>
+        <tr><td class="sb">Test cases</td><td>the agent generates <b>&amp; validates <code>TC-#</code></b>; you approve coverage</td><td>implements them as <b>automated tests</b></td></tr>
+        <tr><td class="sb">Independent review</td><td>run the <b>Challenge (02)</b> and <b>Audit (06)</b> sessions; act on the verdicts</td><td>—</td></tr>
+        <tr><td class="sb">Pull request</td><td>the agent <b>creates the PR</b> for your branch; you approve</td><td>reviews, completes, merges</td></tr>
+        <tr><td class="sb">API · data · code</td><td class="em">you never touch these</td><td>API contract, legacy data-mapping, code</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- 1 -->
+  <section id="s1">
+    <h2><span class="sn">01</span> One-time setup</h2>
+    <p class="lead">You do this once — an engineer can help in five minutes. After this you only ever talk to the agent.</p>
+    <ol>
+      <li>Get the project onto your machine and open it in <strong>Claude Code</strong> (the AI agent).
+          An engineer can clone it, confirm the <strong>Pencil</strong> design tool is connected, and
+          confirm the agent can open pull requests (the <code>gh</code> CLI).</li>
+      <li>That's it. You <strong>never type a git command or edit a file</strong>. For the two review steps
+          you open a <strong>new</strong> Claude Code session in the same project folder — still no terminal.</li>
+    </ol>
+    <div class="code">
+      <div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-tool"/></svg> Setup · run once by an engineer</span><button class="copy" data-prompt="setup">Copy</button></div>
+      <pre data-prompt="setup"></pre>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section id="s2">
+    <h2><span class="sn">02</span> One feature → one branch → one pull request</h2>
+    <p class="lead">Each idea becomes one feature on its own branch → one pull request. <b>The agent creates the branch and opens the PR.</b> Two independent review sessions bracket the build.</p>
+    <div class="diagram">
+      <div class="flow">
+        <div class="fbox n"><span class="ft">main</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox r"><span class="ft"><svg class="ic"><use href="#i-lens"/></svg> Challenge</span><span class="fs">before spec</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox p"><span class="ft">branch</span><span class="fs">spec · design · test cases</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox r"><span class="ft"><svg class="ic"><use href="#i-lens"/></svg> Audit</span><span class="fs">the docs</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox r"><span class="ft">Create PR</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox e"><span class="ft">API + code · tests</span></div>
+        <div class="farrow"><svg class="ic"><use href="#i-chevron"/></svg></div>
+        <div class="fbox n"><span class="ft">merge</span></div>
+      </div>
+      <div class="cap">The idea is <b>challenged</b> before the spec is written; the agent writes spec / design / test cases on the branch; an independent session <b>audits</b> them; then the agent <b>creates the pull request</b>. Engineering (slate) takes over on the same branch. <b>The agent runs every git command.</b></div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="s3">
+    <h2><span class="sn">03</span> The seven steps</h2>
+    <p class="lead">Seven prompts. Five go to your <b>author session</b>; the two <span class="fresh-tag"><svg class="ic"><use href="#i-lens"/></svg> teal</span> ones — Challenge and Audit — go to a <b>fresh, independent Claude Code session</b>.</p>
+
+    <div class="diagram">
+      <div class="steps">
+        <div class="step p"><span class="snum">01</span><span class="st2">Describe</span><span class="ss">interview</span></div>
+        <div class="step r"><span class="snum">02</span><span class="st2"><svg class="ic"><use href="#i-lens"/></svg> Challenge</span><span class="ss">fresh session</span></div>
+        <div class="step"><span class="snum">03</span><span class="st2">Build spec</span><span class="ss">FEATURE + PRD</span></div>
+        <div class="step"><span class="snum">04</span><span class="st2">Design</span><span class="ss">screens</span></div>
+        <div class="step p"><span class="snum">05</span><span class="st2">Test cases</span><span class="ss">validate TC-#</span></div>
+        <div class="step r"><span class="snum">06</span><span class="st2"><svg class="ic"><use href="#i-lens"/></svg> Audit</span><span class="ss">fresh session</span></div>
+        <div class="step r"><span class="snum">07</span><span class="st2">Create PR</span><span class="ss">opens it for eng</span></div>
+      </div>
+      <div class="cap">Five author-session steps + two independent fresh-session reviews (teal). The reviews bracket the build: challenge the idea up front, audit the documents before the pull request.</div>
+    </div>
+
+    <!-- 01 -->
+    <div class="stage">
+      <div class="stage-h"><div class="badge">01</div><div><div class="t">Describe your idea — the agent interviews you</div><p class="p">You talk; it asks one plain-language question at a time and figures out where it fits.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo"><svg class="ic"><use href="#i-chat"/></svg><span><b>You do:</b> paste this, fill in the one line, answer its questions. <b>Copy the summary it gives</b> — you'll paste it into step 02.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-doc"/></svg> Prompt · author session</span><button class="copy" data-prompt="a">Copy</button></div><pre data-prompt="a"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the agent shows a plain-language summary you agree with.</span></div>
+      </div>
+    </div>
+
+    <!-- 02 -->
+    <div class="stage rev">
+      <div class="stage-h"><div class="badge rev">02</div><div><div class="t"><svg class="ic"><use href="#i-lens"/></svg> Challenge the idea — independent fresh session</div><p class="p">A skeptic that hasn't seen your interview pressure-tests the idea before any spec is written.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo fresh"><svg class="ic"><use href="#i-lens"/></svg><span><b>You do: open a NEW Claude Code session</b> (independent eyes), paste this, and paste the idea + the summary from 01. If the verdict says simplify/reconsider, refine before building.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-lens"/></svg> Prompt · fresh session</span><button class="copy" data-prompt="challenge">Copy</button></div><pre data-prompt="challenge"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> you have a verdict (build / simplify / reconsider) and a sharpened problem statement.</span></div>
+      </div>
+    </div>
+
+    <!-- 03 -->
+    <div class="stage">
+      <div class="stage-h"><div class="badge">03</div><div><div class="t">Build the spec — the agent writes it, you approve</div><p class="p">It makes the branch and writes FEATURE + PRD, then explains it back in plain words.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo"><svg class="ic"><use href="#i-pen"/></svg><span><b>You do:</b> back in your author session, paste this (mention any change the Challenge produced), then approve or correct the summary.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-doc"/></svg> Prompt · author session</span><button class="copy" data-prompt="b">Copy</button></div><pre data-prompt="b"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the summary matches what you meant.</span></div>
+      </div>
+    </div>
+
+    <!-- 04 -->
+    <div class="stage">
+      <div class="stage-h"><div class="badge">04</div><div><div class="t">Design the screens — the agent draws them, you look</div><p class="p">It draws every screen and every state in the design file and shows you pictures.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo"><svg class="ic"><use href="#i-grid"/></svg><span><b>You do:</b> paste this, then look at the screenshots and approve the look or point at what to change.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-doc"/></svg> Prompt · author session</span><button class="copy" data-prompt="c">Copy</button></div><pre data-prompt="c"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the screenshots look right to you.</span></div>
+      </div>
+    </div>
+
+    <!-- 05 -->
+    <div class="stage">
+      <div class="stage-h"><div class="badge tc">05</div><div><div class="t">Write &amp; validate the test cases — the agent proves it's testable</div><p class="p">From the finished docs it generates <code>TC-#</code> and checks they cover every rule, scenario, edge case, and screen state.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo"><svg class="ic"><use href="#i-check"/></svg><span><b>You do:</b> paste this <b>after the spec and screens are settled</b>. If it flags a spec gap, fix it first.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-doc"/></svg> Prompt · author session</span><button class="copy" data-prompt="tc">Copy</button></div><pre data-prompt="tc"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the coverage table has no gaps.</span></div>
+      </div>
+    </div>
+
+    <!-- 06 -->
+    <div class="stage rev">
+      <div class="stage-h"><div class="badge rev">06</div><div><div class="t"><svg class="ic"><use href="#i-shield"/></svg> Audit completeness + cohesion — independent fresh session</div><p class="p">A strict reviewer that hasn't seen the build checks the docs are complete and fit the existing system.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo fresh"><svg class="ic"><use href="#i-shield"/></svg><span><b>You do: open a NEW Claude Code session</b> in the same project folder (the docs are on the branch). Paste this; fix whatever it lists, then re-run if needed.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-shield"/></svg> Prompt · fresh session</span><button class="copy" data-prompt="audit">Copy</button></div><pre data-prompt="audit"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the audit says <b>READY FOR ENGINEERING</b>.</span></div>
+      </div>
+    </div>
+
+    <!-- 07 -->
+    <div class="stage">
+      <div class="stage-h"><div class="badge gate">07</div><div><div class="t">Create the pull request — the agent opens it for engineering</div><p class="p">It does a final self-check, commits the spec + design + test cases, and <b>creates the pull request</b>.</p></div></div>
+      <div class="stage-b">
+        <div class="youdo"><svg class="ic"><use href="#i-branch"/></svg><span><b>You do:</b> paste this. The agent self-checks, commits, pushes, and creates the pull request, then gives you the link.</span></div>
+        <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-doc"/></svg> Prompt · author session</span><button class="copy" data-prompt="d">Copy</button></div><pre data-prompt="d"></pre></div>
+        <div class="exit"><svg class="ic"><use href="#i-check"/></svg><span><b>Done when:</b> the agent gives you the pull-request link. Engineering takes it from here.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section id="s4">
+    <h2><span class="sn">04</span> "Ready for engineering" — the checks behind the hand-off</h2>
+    <p class="lead">Two layers make a feature ready: the <b>independent audit</b> (Step 06, the real gate) and the author agent's <b>own self-check</b> (Step 07). Both confirm:</p>
+    <ul class="dor">
+      <li>The idea survived the <b>Challenge</b> (02) — worth building, scoped right, no duplication/conflict.</li>
+      <li>The idea is placed in the right area (new feature / change / decision).</li>
+      <li><b><code>FEATURE.md</code></b> has the feature: its workflow, the things involved, and the always-true rules.</li>
+      <li>The <b>PRD</b> is complete: problem, users, business rules, data needed, <b>acceptance criteria</b> (Given/When/Then), and edge cases.</li>
+      <li>Every screen exists with <b>all</b> states (normal, loading, empty, error, no-access) — no dead-flow.</li>
+      <li><b>Test cases</b> (<code>TC-#</code>) exist and are <b>validated</b>: full coverage, no gaps.</li>
+      <li><b>Cohesion</b> confirmed by the independent audit: nothing contradicts <code>EPICS.md §8</code>, invariants, existing features, the API conventions, or the design system; integration points named.</li>
+      <li>Any rule/policy that changed is a <b>dated decision</b>; copy is Bahasa; dates <code>Asia/Jakarta</code>; labour-law facts right.</li>
+    </ul>
+    <div class="note"><span class="lbl"><svg class="ic"><use href="#i-tool"/></svg> Then engineering adds — not your concern</span><p>The API contract, the legacy data-mapping, the typed client, the code, and the <b>automated tests that implement your <code>TC-#</code></b>.</p></div>
+  </section>
+
+  <!-- 5 -->
+  <section id="s5">
+    <h2><span class="sn">05</span> Engineering pickup</h2>
+    <p class="lead">Engineering takes the pull request and implements on the <b>same branch</b> — owning the API contract and the data-mapping, and <b>turning the product's <code>TC-#</code> test cases into automated tests</b>.</p>
+    <div class="code"><div class="code-head"><span class="code-label"><svg class="ic"><use href="#i-tool"/></svg> Prompt · engineering — implement from settled docs</span><button class="copy" data-prompt="eng">Copy</button></div><pre data-prompt="eng"></pre></div>
+    <div class="note teal"><span class="lbl"><svg class="ic"><use href="#i-check"/></svg> The acceptance criteria + test cases are the contract</span><p>If something is ambiguous during the build, the fix is to update the PRD/AC/test case (a small doc commit), <strong>not</strong> to decide it in code.</p></div>
+
+    <h3>What gets written, and by whom</h3>
+    <div class="diagram">
+      <div class="own">
+        <div class="own-col p">
+          <div class="own-h"><svg class="ic"><use href="#i-pen"/></svg> The agent writes — from your interview</div>
+          <div class="ochip"><b>FEATURE.md</b><span>workflow · entities · always-true rules</span></div>
+          <div class="ochip"><b>prds/&lt;slug&gt;.md</b><span>rules · acceptance criteria · edge cases</span></div>
+          <div class="ochip"><b>&lt;slug&gt;.test-cases.md</b><span>TC-# · traces to BR-#/AC/C-#</span></div>
+          <div class="ochip"><b>brainstorm.pen</b><span>screen frames (all states)</span></div>
+          <div class="ochip"><b>SCREEN-GENERATION-PLAN.md</b><span>build tracker</span></div>
+        </div>
+        <div class="own-col e">
+          <div class="own-h"><svg class="ic"><use href="#i-tool"/></svg> Engineering writes</div>
+          <div class="ochip"><b>api/E#/openapi.yaml</b><span>from the PRD · x-rbac · x-design-screens</span></div>
+          <div class="ochip"><b>DATA-MAPPING.md</b><span>legacy lumen_swp → Postgres</span></div>
+          <div class="ochip"><b>automated tests</b><span>Playwright / Vitest — implement each TC-#</span></div>
+          <div class="ochip"><b>E9 migration</b><span>transform-and-load at cutover</span></div>
+        </div>
+      </div>
+      <div class="auth-note"><code>EPICS.md §8</code> is the authority every layer reconciles to. Engineering derives the API contract + data-mapping from the PRD, and automates each <code>TC-#</code>.</div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section id="s6">
+    <h2><span class="sn">06</span> Roles &amp; responsibilities</h2>
+    <table>
+      <thead><tr><th>Step</th><th>Product</th><th>Eng</th><th>Driven by</th></tr></thead>
+      <tbody>
+        <tr><td>01 · Describe &amp; interview</td><td class="ra">R/A</td><td class="rb">—</td><td>author session (asks you)</td></tr>
+        <tr><td>02 · Challenge the idea</td><td class="ra">R/A</td><td class="rb">—</td><td class="fresh-tag"><svg class="ic"><use href="#i-lens"/></svg> independent fresh session</td></tr>
+        <tr><td>03 · Build the spec</td><td class="ra">A <span class="em">approve</span></td><td>C</td><td>author session (writes it)</td></tr>
+        <tr><td>04 · Design the screens</td><td class="ra">A <span class="em">approve</span></td><td>C</td><td>author session (draws it)</td></tr>
+        <tr><td>05 · Write &amp; validate test cases</td><td class="ra">A <span class="em">approve</span></td><td>C</td><td>author session</td></tr>
+        <tr><td>06 · Audit completeness + cohesion</td><td class="ra">R/A</td><td>C</td><td class="fresh-tag"><svg class="ic"><use href="#i-shield"/></svg> independent fresh session</td></tr>
+        <tr><td>07 · Create the pull request</td><td class="ra">A <span class="em">approve</span></td><td>C</td><td>author session (opens it)</td></tr>
+        <tr><td>Automate <code>TC-#</code> · API · data · code</td><td class="rb">—</td><td class="ra">R/A</td><td>engineering</td></tr>
+        <tr><td>Review + merge</td><td>C</td><td class="ra">R/A</td><td>engineering</td></tr>
+      </tbody>
+    </table>
+    <p style="color:var(--muted);font-size:12.5px"><b>R</b> responsible · <b>A</b> accountable · <b>C</b> consulted. The agent is the tool both sides drive; the human named <b>A</b> owns the outcome.</p>
+  </section>
+
+  <!-- 7 -->
+  <section id="s7">
+    <h2><span class="sn">07</span> Quick reference — the prompt library</h2>
+    <table>
+      <thead><tr><th style="width:44px">Step</th><th style="width:72px">Session</th><th>You paste…</th><th>The agent produces</th></tr></thead>
+      <tbody>
+        <tr><td class="ra">01</td><td>author</td><td>"Describe your idea"</td><td>an interview → a plain-language plan</td></tr>
+        <tr><td class="ra">02</td><td class="fresh-tag"><svg class="ic"><use href="#i-lens"/></svg> fresh</td><td>"Challenge the idea"</td><td>a skeptical verdict — build / simplify / reconsider</td></tr>
+        <tr><td class="ra">03</td><td>author</td><td>"Build the spec"</td><td>branch + <code>FEATURE.md</code> + PRD</td></tr>
+        <tr><td class="ra">04</td><td>author</td><td>"Design the screens"</td><td>the <code>.pen</code> screens + screenshots</td></tr>
+        <tr><td class="ra">05</td><td>author</td><td>"Write &amp; validate test cases"</td><td><code>&lt;slug&gt;.test-cases.md</code> + coverage table</td></tr>
+        <tr><td class="ra">06</td><td class="fresh-tag"><svg class="ic"><use href="#i-shield"/></svg> fresh</td><td>"Audit completeness + cohesion"</td><td>PASS/FAIL → <b>READY FOR ENGINEERING</b></td></tr>
+        <tr><td class="ra">07</td><td>author</td><td>"Create the pull request"</td><td>self-check + commits + the <b>PR</b> (link)</td></tr>
+        <tr><td class="ra">⚙</td><td>eng</td><td>"Implement from settled docs"</td><td>API + data-mapping + code + automated tests</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><span class="lbl"><svg class="ic"><use href="#i-flag"/></svg> Tips</span>
+      <p>Run 02 Challenge and 06 Audit in a <b>separate Claude Code session</b> — independence is what makes
+        them useful. Do 05 test cases and 06 audit <b>only after</b> the spec and screens are settled. If the
+        agent asks something you don't know, <em>"I'm not sure — what do you recommend?"</em> is a fine answer.</p></div>
+    <hr class="soft">
+    <p style="color:var(--muted);font-size:12.5px">Source of truth: <code>docs/workflow/PRODUCT-ENG-WORKFLOW.md</code>. This page and the PDF are renders of it — edit the Markdown, re-render.</p>
+  </section>
+
+  </main>
+</div>
+
+<footer class="foot"><svg class="ic"><use href="#i-branch"/></svg> SWP HRIS — Internal Engineering Handbook · Product → Engineering Development Workflow · v4 · 2026-06-17</footer>
+
+<script>
+const PROMPTS = {
+setup:`# One-time, run by an engineer to set the product teammate up:
+git clone <repo-url> hris-outsource
+cd hris-outsource
+#   then open the folder in Claude Code, confirm the Pencil (.pen) design tool
+#   is connected, and confirm the agent can open PRs (the gh CLI is authed).
+# After this, the product teammate never uses the terminal — the agent runs all git.
+# For the two review steps (02 Challenge, 06 Audit), open a NEW Claude Code session
+# in the same folder so the reviewer is independent of the author session.`,
+
+a:`I'm on the SWP HRIS product team and I have an idea I want to turn into a spec for engineering.
+Be my product analyst and INTERVIEW me — don't expect me to know the format, the IDs, or the structure.
+
+First, quietly read the project context so you understand what already exists: CLAUDE.md,
+docs/EPICS.md (especially the §8 decisions), docs/design/DESIGN-SYSTEM.md, and the existing
+FEATURE.md / PRDs for the area my idea touches. Don't dump any of that back at me.
+
+Then interview me to understand what I want:
+- Ask ONE question at a time, in plain everyday language — no technical jargon, no IDs, no schemas.
+- Whenever you can, give me concrete examples or a few options to pick from, so it's easy to answer.
+- Cover, over the conversation: the problem and who has it; which user it's for (super admin /
+  HR / shift leader / agent); where in the app it lives; the step-by-step happy path; the rules and
+  limits; what can go wrong; what each screen should show; what information is involved; and whether
+  this already exists in the current/old system.
+- If an answer is vague, gently dig deeper. Don't move on until you genuinely understand.
+
+My idea, in my own words: <DESCRIBE YOUR IDEA HOWEVER YOU LIKE — one sentence or a paragraph>
+
+When you have enough, STOP and show me, in plain language:
+  1. a short summary of what we're building and for whom;
+  2. where it fits (brand-new, or a change to something that exists);
+  3. the list of screens we'll need;
+  4. anything you still need me to decide.
+Then wait for me to say "go". (I'll also copy this summary for an independent challenge step.)`,
+
+challenge:`This is a FRESH session — you have NOT seen my earlier conversation, which is the point: I want an
+independent, skeptical review of an idea BEFORE we spend effort specifying it.
+
+Read the project context: CLAUDE.md, docs/EPICS.md (especially the §8 decisions and the existing
+epics/features), and the FEATURE.md / PRDs of the area this touches.
+
+Here is the idea and the plan so far:
+<PASTE the idea + the plain-language summary the author agent gave you in step 01>
+
+Now CHALLENGE it hard, like a tough product lead — don't be agreeable. Tell me, with specifics:
+- Is the problem real and worth solving now? Who actually feels the pain, and how often?
+- What's the SIMPLEST version that delivers most of the value? What can we cut?
+- Does this DUPLICATE or CONFLICT with something that already exists — an existing feature, a §8
+  decision, or an always-true rule (invariant)? Cite the specific one.
+- What does it BREAK or complicate elsewhere (scheduling, attendance, leave, overtime, payroll, migration)?
+- What's MISSING from the idea — an unhandled case, a role, a state, a labour-law constraint?
+- What's the riskiest assumption, and how could we cheaply test it?
+
+End with a clear verdict: BUILD AS-IS / BUILD SIMPLER (say how) / RECONSIDER (say why), plus a sharpened
+one-paragraph problem statement I can take back to refine the spec.`,
+
+b:`Go. Create the engineering specification from everything I told you (incorporating the points from the
+independent challenge: <paste the verdict / what changed, or say "no changes">). Do ALL the technical
+structuring yourself — I shouldn't have to think about formats, IDs, or git.
+
+On your own, without me touching anything:
+- create the feature branch and manage it (run the git yourself — I will never use the terminal);
+- add the feature to the right area's FEATURE.md — the workflow diagram, the things involved, and the
+  rules that must always hold — matching the exact structure of the features already there;
+- write the full PRD in the house format (context, the users, the business rules, the information the
+  feature needs, the acceptance criteria as clear Given/When/Then scenarios, and the edge cases) —
+  allocate all the IDs yourself;
+- ground every rule in our locked decisions (EPICS.md §8) and Indonesian labour law where relevant;
+- DO NOT touch the API / OpenAPI files or the legacy data-mapping — engineering owns those, not us.
+
+Then show me a PLAIN-LANGUAGE summary: what the feature does, the key rules you wrote, the acceptance
+criteria in everyday terms, and any assumption you had to make. Ask me to confirm or correct before we
+design the screens.`,
+
+c:`Now design the screens for this feature in our design file. Use the Pencil design tools (the design
+file is special — only you can edit it, through those tools). Follow our design system exactly: reuse
+the components that already exist, use our standard colours and spacing, keep ALL text in Bahasa
+Indonesia, and design EVERY state a real screen needs — normal, loading, empty, error, and no-access —
+so nothing is left undesigned. Start by copying an existing similar screen, then adapt it.
+
+When you're done, show me screenshots of each screen and each state, and tell me in plain language what
+the user does on each one. Keep a note of the screen ids so engineering can find them. Then ask me to
+approve the look or tell you what to change.`,
+
+tc:`Now that the spec and the screens are settled, generate the TEST CASES from the documentation — this is
+how we prove the feature is fully testable before engineering builds it.
+
+Read the finished FEATURE.md and the PRD (especially the business rules, the acceptance criteria, and
+the edge cases). Then:
+- write a test-case document next to the PRD at docs/epics/E<#>-<name>/prds/<slug>.test-cases.md, with a
+  numbered list of test cases (TC-#). For each: a clear title; the type (happy path / edge / negative);
+  the preconditions; the steps in plain language; the expected result; the screen + state it exercises;
+  and a trace back to what it checks (which business rule BR-#, which acceptance scenario, which C-#).
+- cover EVERYTHING: every business rule, every acceptance-criteria scenario, every edge case, and every
+  screen state must have at least one test case.
+
+Then VALIDATE the test cases against the documentation and tell me, in plain language:
+- a coverage table — each BR-# / acceptance scenario / C-# and the test case(s) that cover it;
+- anything NOT yet covered (a gap), and whether the gap is a missing test or a hole in the spec/design;
+- any test case you can't decide from the docs (the rule is ambiguous) — flag it so we settle it.
+
+If you find gaps in the spec or design, list them and ask me how to resolve them before we finalise.`,
+
+audit:`This is a FRESH session — you have NOT seen how these documents were written, which is the point: I want
+an INDEPENDENT audit of the documentation for feature F<#.#>, for COMPLETENESS and for COHESION with the
+existing system. Be a strict reviewer; assume nothing is right until you've checked it against the files.
+
+Read: the new FEATURE.md entry, the PRD (prds/<slug>.md), the test cases (prds/<slug>.test-cases.md), AND
+the things they must fit into — docs/EPICS.md §8 (the authoritative decision log), the sibling features in
+the same epic, the invariants (INV-#), docs/api/CONVENTIONS.md, and docs/design/DESIGN-SYSTEM.md.
+
+Produce a report with PASS/FAIL per item and, for each FAIL, the exact fix:
+
+COMPLETENESS
+- PRD has all sections in the house order; every business rule (BR-#) is testable and tied to an
+  acceptance-criteria scenario; every edge case (C-#) is captured.
+- Every BR-# / acceptance scenario / C-# / screen state has at least one test case (TC-#) — no gap.
+- Every screen has all its states designed (no dead-flow); frame ids are recorded.
+- Nothing is left as an unresolved "TBD" that should have been decided.
+
+COHESION WITH THE EXISTING SYSTEM
+- Nothing contradicts EPICS.md §8 (quote the exact decision it would violate, if any).
+- No clash with an existing feature, an invariant (INV-#), or the role/permission model; IDs don't collide.
+- Consistent with the API conventions and the design system (tokens, no-dead-flow, Bahasa, Asia/Jakarta).
+- Integration points with other epics (scheduling, attendance, leave, overtime, payroll, migration) are
+  named and consistent — flag anything this feature affects but doesn't mention.
+- Labour-law facts (PKWT/PKWTT, alih-daya) are correct.
+
+End with one line: READY FOR ENGINEERING, or a numbered list of what must be fixed first.`,
+
+d:`Send this to engineering by CREATING the pull request for our branch. First, do a final self-check: the
+rules, the acceptance criteria, the edge cases, every screen state, AND the test cases are all present,
+fully cover each other, the independent audit passed, and nothing contradicts EPICS.md §8. Fix any gap.
+
+Then:
+- commit the spec documents, the design, and the test cases with clear messages;
+- PUSH the branch and CREATE the pull request (open it as a Draft) titled with the feature name. Write
+  the description in plain language PLUS the technical detail engineers need: the problem, the rules, the
+  acceptance criteria, the test-case coverage (how many TC-#, and what they cover), the screen ids, and a
+  note that the independent challenge + audit passed;
+- state clearly in the PR that engineering owns the API contract, the data mapping, and the code, and
+  that they implement our TC-# test cases as automated tests.
+
+Finally, give me the pull-request link and one short paragraph: what you handed over and what happens next.`,
+
+eng:`Implement feature F<#.#> from its settled documentation. CODE task — follow docs/eng/ENGINEERING.md and
+docs/eng/WEB-STACK.md exactly.
+
+1. Read the PRD (docs/epics/E<#>-<name>/prds/<slug>.md) — the Gherkin AC is your acceptance contract —
+   the FEATURE.md (entities, INV-#), and the product test cases (prds/<slug>.test-cases.md, the TC-#).
+2. AUTHOR THE API CONTRACT the product side deliberately left to you: write/extend
+   docs/api/E<#>-<name>/openapi.yaml (OpenAPI 3.1) from the PRD — paths/verbs, schemas, and:
+     · x-rbac: self.* is a BASELINE (any authenticated employee, scope:self); elevations are
+       lead / hr_admin / super_admin; shift_leader is DERIVED from the E3 assignment, never stored.
+     · x-design-screens linking each operation to the .pen frame ids recorded in the PRD.
+     · errors mapped to BR-#/INV-#; CURSOR pagination only; Idempotency-Key on every write.
+   Inherit docs/api/CONVENTIONS.md (don't restate it; extend CONVENTIONS if a rule is missing).
+3. If the feature touches persisted legacy data, write/update docs/epics/E<#>-<name>/DATA-MAPPING.md
+   (legacy MySQL lumen_swp → Postgres: employee_contracts, companies.role=2 = client, users.id vs
+   employees.id, DBEncryption payroll columns) and note any new E9 transform.
+4. Regenerate the typed client (Orval). NEVER hand-edit generated files (E2); drift fails CI.
+5. Build screens from the cited .pen frames via the Pencil MCP (G0 — never from assumptions); assemble
+   from packages/ui + tokens; implement EVERY state variant (B2 no dead-flow); errors via classifyError
+   (B1); idempotency keys on mutations (C3).
+6. IMPLEMENT THE PRODUCT'S TEST CASES: turn each TC-# into an automated test — critical happy-path TC-#
+   as Playwright E2E, rule/edge TC-# (BR-#/C-#) as Vitest against MSW (F1/F2) — and keep the TC-# id in
+   the test name so coverage traces straight back to the product test-case doc. Every TC-# must have a
+   test; flag any TC-# you cannot automate and why.
+7. Cite F#/BR-#/C-#/TC-# + the .pen frame id in each commit. Push to the same branch; flip the PR to
+   Ready when pnpm typecheck && pnpm lint && pnpm test are green and every TC-# is covered.`
+};
+
+document.querySelectorAll('pre[data-prompt]').forEach(function(pre){
+  var k = pre.getAttribute('data-prompt');
+  if (PROMPTS[k]) pre.textContent = PROMPTS[k];
+});
+document.querySelectorAll('button.copy').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var k = btn.getAttribute('data-prompt'); var t = PROMPTS[k] || '';
+    navigator.clipboard.writeText(t).then(function(){
+      var old = btn.textContent; btn.textContent = 'Copied'; btn.style.color='#7CE0B0';
+      setTimeout(function(){ btn.textContent = old; btn.style.color=''; }, 1400);
+    });
+  });
+});
+var links = Array.from(document.querySelectorAll('.toc a'));
+var map = {}; links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+var obs = new IntersectionObserver(function(es){
+  es.forEach(function(e){ if(e.isIntersecting){ links.forEach(function(l){l.style.borderLeftColor='transparent';l.style.background='';l.style.color='';});
+    var a = map[e.target.id]; if(a){ a.style.borderLeftColor='#15784A'; a.style.color='#0E5A37'; } } });
+},{rootMargin:'-12% 0px -78% 0px'});
+document.querySelectorAll('section[id]').forEach(function(s){ obs.observe(s); });
+</script>
+</body>
+</html>
