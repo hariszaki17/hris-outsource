@@ -581,6 +581,28 @@ func (s *ApprovalService) Reject(ctx context.Context, id, reason string) (dom.In
 	return s.reread(ctx, out), nil
 }
 
+// CancelInstance terminally closes a still-PENDING instance WITHOUT a member decision —
+// the underlying request became moot (e.g. a direct attendance verify supersedes an open
+// correction). Runs on the CALLER's tx (no new tx); fires NO hook. Idempotent: a missing
+// or already-terminal instance is a no-op. No member/role check — the caller already
+// authorized the superseding action (the attendance verify path is scope-guarded).
+func (s *ApprovalService) CancelInstance(ctx context.Context, tx pgx.Tx, id, reason string) error {
+	inst, err := s.repo.GetInstanceForUpdate(ctx, tx, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if inst.Status != dom.InstanceStatusPending {
+		return nil // already terminal — nothing to close
+	}
+	if uerr := s.repo.UpdateInstanceProgress(ctx, tx, id, inst.CurrentLine, dom.InstanceStatusCancelled); uerr != nil {
+		return uerr
+	}
+	return audit.Record(ctx, tx, instAudit(id, "PENDING", "CANCELLED", actorUserIDPtr(ctx), "CANCEL_SUPERSEDED", inst.CurrentLine))
+}
+
 // Bypass force-approves a non-terminal instance, skipping remaining lines, even if
 // the caller is not a member (EX-6/INV-5). super_admin ONLY; reason required.
 // Terminal → 409. Records a BYPASS action, finalizes APPROVED, fires OnApproved.

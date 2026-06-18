@@ -468,11 +468,18 @@ func New(d Deps) http.Handler {
 
 			// Attendance/corrections WRITES + corrections reads: super_admin,
 			// hr_admin, shift_leader (the web verify/reject/corrections surface).
+			// Corrections READS: super_admin, hr_admin, shift_leader, lead, AND agent.
+			// Agent reads are SELF-scoped in the service (List forces requester_id = caller;
+			// Get → 404 on another agent's correction). Powers the agent's "Pengajuan ·
+			// Koreksi" self-service history (F5.6).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
-				// corrections reads
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
 				r.Get("/corrections", d.Attendance.ListCorrections)
 				r.Get("/corrections/{id}", d.Attendance.GetCorrection)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				// actions (idempotent per openapi — Idempotency-Key required)
 				r.With(d.Idempotency.Handler).Post("/attendance/{id}:verify", d.Attendance.VerifyAttendance)
 				r.With(d.Idempotency.Handler).Post("/attendance/{id}:reject", d.Attendance.RejectAttendance)

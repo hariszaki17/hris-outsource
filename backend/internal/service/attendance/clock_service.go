@@ -122,6 +122,10 @@ type ClockOutRow struct {
 // has a row) — the service maps that to ALREADY_CLOCKED_IN.
 type ClockRepository interface {
 	GetActivePlacement(ctx context.Context, employeeID string) (PlacementInfo, bool, error)
+	// EmployeeType returns "FIELD" | "INTERNAL" (migr 00067). Gates the no-shift clock-in
+	// rule: a FIELD agent with no scheduled shift today is blocked (NO_SCHEDULED_SHIFT);
+	// INTERNAL back-office staff may clock in unscheduled (flagged).
+	EmployeeType(ctx context.Context, employeeID string) (string, error)
 	// IsOnApprovedLeave reports whether the agent has an approved leave covering
 	// the Asia/Jakarta calendar date of now (hard-blocks clock-in as ON_LEAVE).
 	IsOnApprovedLeave(ctx context.Context, employeeID string, now time.Time) (bool, error)
@@ -295,6 +299,18 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 			status = string(att.StatusLate)
 		}
 	} else {
+		// No schedule today (EPICS §8 2026-06-18): a FIELD agent is BLOCKED — an SL/HR
+		// must roster the shift first (then F5.7 adopts any record). INTERNAL back-office
+		// staff (no fixed roster) may still clock in unscheduled, flagged for review.
+		etype, eterr := s.repo.EmployeeType(ctx, employeeID)
+		if eterr != nil {
+			return att.Attendance{}, false, apperr.Internal(eterr)
+		}
+		if etype != "INTERNAL" {
+			return att.Attendance{}, false, apperr.Rule("NO_SCHEDULED_SHIFT", map[string]string{
+				"company_id": pl.CompanyID,
+			})
+		}
 		flags = append(flags, string(att.FlagUnscheduled))
 	}
 	if haveGeo && !inside {

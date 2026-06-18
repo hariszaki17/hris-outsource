@@ -38,7 +38,7 @@ Agent (mobile), System (geofence check, persist, audit), Shift Leader (monitors,
 | CI-1 | Clock-in captures `check_in_at` (server time, Asia/Jakarta) + device `lat/lng`. |
 | CI-2 | The system resolves the **site geofence** from the agent's active placement's **`Site`** (E2 F2.6 — `site.lat`/`lng` + `site.geofence_radius_m`), not the company. A placement always has exactly one site (E3 INV-5). |
 | CI-3 | If GPS is **outside** the geofence, the clock-in is **still recorded** with `in_geofence_in=false` and flagged for verification (F5.3). |
-| CI-4 | The record links the agent's **scheduled shift** for that date; if none, it's recorded with `schedule_id=null` and flagged **unscheduled**. |
+| CI-4 | The record links the agent's **scheduled shift** for that date. **No shift today → a `FIELD` agent is blocked (`NO_SCHEDULED_SHIFT`, 422)** — an SL/HR must roster the shift first (F5.7 then auto-adopts any record). An `INTERNAL` employee (no fixed roster) may clock in with `schedule_id=null`, flagged **unscheduled**. *(Reversed 2026-06-18 — was "any agent may clock in unscheduled+flagged"; FIELD now requires a shift.)* |
 | CI-5 | An agent may have **only one open** attendance record (clocked-in, not out) at a time — a second clock-in is blocked until clock-out. |
 | CI-6 | Clock-out captures `check_out_at` + `lat/lng` + `in_geofence_out`; closes the open record. |
 | CI-7 | A default attendance code is applied at clock-in (configurable default, e.g., "Present"); leader/correction can change it. |
@@ -85,8 +85,13 @@ Feature: Clock in / out
     Then the clock-in is recorded with in_geofence_in false
     And it is flagged for shift-leader verification
 
-  Scenario: Unscheduled clock-in is flagged
-    Given I have no shift scheduled today
+  Scenario: FIELD agent with no shift is blocked
+    Given I am a FIELD agent with no shift scheduled today
+    When I clock in
+    Then clock-in is rejected with NO_SCHEDULED_SHIFT (422) and no record is created
+
+  Scenario: INTERNAL employee may clock in unscheduled
+    Given I am an INTERNAL employee with no shift scheduled today
     When I clock in
     Then the record is created with no schedule link and flagged "unscheduled"
 

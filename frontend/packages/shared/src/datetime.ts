@@ -76,6 +76,27 @@ export function addCalendarDays(isoDate: string, n: number): string {
 }
 
 /**
+ * Working-days (Mon–Fri) in the inclusive range [startIsoDate, endIsoDate], minus any date
+ * in `holidays` (a Set of "YYYY-MM-DD"). Mirrors the server's leave-duration fallback when an
+ * agent has no roster in the range (F6.2 hybrid, 2026-06-18). Returns 0 if end < start.
+ */
+export function workingDaysBetween(
+  startIsoDate: string,
+  endIsoDate: string,
+  holidays: Set<string> = new Set(),
+): number {
+  let d = Temporal.PlainDate.from(startIsoDate);
+  const end = Temporal.PlainDate.from(endIsoDate);
+  let n = 0;
+  while (Temporal.PlainDate.compare(d, end) <= 0) {
+    const iso = d.toString();
+    if (d.dayOfWeek < 6 && !holidays.has(iso)) n++; // dayOfWeek: Mon=1 … Sun=7
+    d = d.add({ days: 1 });
+  }
+  return n;
+}
+
+/**
  * An inclusive calendar-date range, both ends "YYYY-MM-DD". `from <= to` always.
  * The canonical shape for E5 attendance `date_from` / `date_to` query params.
  */

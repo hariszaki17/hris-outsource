@@ -134,12 +134,35 @@ type ApplyCorrectionParams struct {
 	IsPayable        *bool
 }
 
+// CorrectionDecision is the HR/super_admin inline ruling on a PENDING correction when
+// verifying a record that has one (FLOW D). Action is "" (none — bulk / no correction),
+// "ACCEPT" (apply the proposed fix) or "REJECT". Reason is required (min 5) on REJECT.
+type CorrectionDecision struct {
+	Action string
+	Reason string
+}
+
+// CorrectionResolver lets a direct verify settle the open correction (FLOW B) on the
+// record inline (FLOW D) — apply it (ACCEPT) or reject it (REJECT) + close its E11
+// instance, atomically in the verify tx. Implemented by *CorrectionService; injected
+// post-wiring (nil-safe — no resolver = verify ignores corrections).
+type CorrectionResolver interface {
+	// PendingForAttendance returns the open correction id on the record (found=false if none).
+	PendingForAttendance(ctx context.Context, attendanceID string) (correctionID string, found bool, err error)
+	// AcceptForVerify applies the correction's proposed values to the record, marks it
+	// APPLIED, and CANCELs its approval instance. Runs on the verify tx.
+	AcceptForVerify(ctx context.Context, tx pgx.Tx, correctionID string) error
+	// RejectForVerify marks the correction REJECTED (reason) + CANCELs its instance. tx.
+	RejectForVerify(ctx context.Context, tx pgx.Tx, correctionID, reason string) error
+}
+
 // AttendanceService implements the verification business logic.
 type AttendanceService struct {
-	repo     AttendanceRepository
-	txm      TxRunner
-	now      Clock
-	notifier jobs.Dispatcher // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
+	repo       AttendanceRepository
+	txm        TxRunner
+	now        Clock
+	notifier   jobs.Dispatcher    // E10 (11-02): transactional-outbox notify seam (nil-safe in unit tests)
+	correction CorrectionResolver // FLOW D: verify resolves a pending correction inline (nil-safe)
 }
 
 // NewAttendanceService wires the attendance service.
@@ -149,6 +172,10 @@ func NewAttendanceService(repo AttendanceRepository, txm TxRunner) *AttendanceSe
 
 // SetNotifier wires the E10 notification dispatcher (11-02). Additive + nil-safe.
 func (s *AttendanceService) SetNotifier(d jobs.Dispatcher) { s.notifier = d }
+
+// SetCorrectionResolver wires the FLOW-D inline correction resolver. Additive + nil-safe:
+// without it, a verify ignores any pending correction on the record.
+func (s *AttendanceService) SetCorrectionResolver(c CorrectionResolver) { s.correction = c }
 
 // SetClock overrides the time source (tests only).
 func (s *AttendanceService) SetClock(c Clock) { s.now = c }
@@ -239,7 +266,7 @@ func (s *AttendanceService) Get(ctx context.Context, id string) (att.Attendance,
 // terminal-state (409 CONFLICT when zero rows update). Audits in-tx.
 // When checkInAt is non-nil the record is also updated with the supplied times
 // (ABSENT/INCOMPLETE fill-in path) and status/lateness is recomputed server-side.
-func (s *AttendanceService) Verify(ctx context.Context, id string, note string, checkInAtStr, checkOutAtStr *string) (att.Attendance, error) {
+func (s *AttendanceService) Verify(ctx context.Context, id string, note string, checkInAtStr, checkOutAtStr *string, dec CorrectionDecision) (att.Attendance, error) {
 	actor := actorEmployeeID(ctx)
 	var out att.Attendance
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -252,6 +279,49 @@ func (s *AttendanceService) Verify(ctx context.Context, id string, note string, 
 		}
 		if serr := s.guardVerifiable(ctx, rec); serr != nil {
 			return serr
+		}
+
+		// FLOW D — a still-open correction on this record is a data dispute; a direct verify
+		// must rule on it (apply or reject) rather than settle blindly (no silent loss). The
+		// ruling runs first (it mutates the record's data), then the verification stamp below
+		// finalizes the now-settled row. Bulk verify supplies no decision → a record with a
+		// pending correction fails that item (must be resolved one-by-one).
+		if s.correction != nil {
+			corID, found, ferr := s.correction.PendingForAttendance(ctx, id)
+			if ferr != nil {
+				return ferr
+			}
+			if found {
+				// Governance: a shift_leader may not decide a correction inline (its chain may
+				// require HR). HR/super_admin decide; SL must escalate → 409.
+				if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleShiftLeader {
+					return correctionPendingConflict(corID)
+				}
+				switch dec.Action {
+				case "ACCEPT":
+					// ACCEPT applies the correction's own proposed values — it cannot be
+					// combined with manual verify-time edits in the same call.
+					if checkInAtStr != nil || checkOutAtStr != nil {
+						return apperr.Invalid(map[string]string{
+							"correction_decision": "Tidak dapat digabung dengan koreksi waktu manual.",
+						})
+					}
+					if aerr := s.correction.AcceptForVerify(ctx, tx, corID); aerr != nil {
+						return aerr
+					}
+				case "REJECT":
+					if len([]rune(dec.Reason)) < 5 {
+						return apperr.Invalid(map[string]string{
+							"correction_reject_reason": "Wajib diisi (minimum 5 karakter).",
+						})
+					}
+					if rerr := s.correction.RejectForVerify(ctx, tx, corID, dec.Reason); rerr != nil {
+						return rerr
+					}
+				default:
+					return correctionDecisionRequired(corID)
+				}
+			}
 		}
 
 		if checkInAtStr != nil {
@@ -428,7 +498,9 @@ type BulkResult struct {
 func (s *AttendanceService) BulkVerify(ctx context.Context, ids []string, note string) (BulkResult, error) {
 	var out BulkResult
 	for _, id := range ids {
-		rec, err := s.Verify(ctx, id, note, nil, nil)
+		// Bulk supplies no correction ruling — a record with a pending correction fails the
+		// item (CORRECTION_PENDING) and must be verified one-by-one with a decision (FLOW D).
+		rec, err := s.Verify(ctx, id, note, nil, nil, CorrectionDecision{})
 		if err == nil {
 			out.Succeeded = append(out.Succeeded, rec.ID)
 			continue
@@ -654,6 +726,29 @@ func terminalConflict(cur att.VerificationStatus) error {
 	}
 }
 
+// correctionPendingConflict (409) — the record has an open correction the caller cannot
+// decide inline (shift_leader, or a bulk item). Resolve it via the correction's approval
+// flow, or verify singly as HR/super with a decision.
+func correctionPendingConflict(correctionID string) error {
+	return &apperr.Error{
+		Code:       "CORRECTION_PENDING",
+		HTTPStatus: 409,
+		Message:    "Catatan memiliki koreksi yang belum diputuskan.",
+		Fields:     map[string]string{"correction_id": correctionID},
+	}
+}
+
+// correctionDecisionRequired (422) — HR/super verified a record with an open correction
+// but supplied no ruling. The client must send correction_decision = ACCEPT | REJECT.
+func correctionDecisionRequired(correctionID string) error {
+	return &apperr.Error{
+		Code:       "CORRECTION_DECISION_REQUIRED",
+		HTTPStatus: 422,
+		Message:    "Catatan memiliki koreksi terbuka — pilih terima atau tolak koreksi saat verifikasi.",
+		Fields:     map[string]string{"correction_id": correctionID},
+	}
+}
+
 // bulkMessage returns the Bahasa message for a failed bulk row, preferring the
 // apperr's own message when set.
 func bulkMessage(ae *apperr.Error) string {
@@ -667,6 +762,8 @@ func bulkMessage(ae *apperr.Error) string {
 		return "Catatan berada di luar perusahaan binaan Anda."
 	case "CONFLICT":
 		return "Catatan sudah diputuskan sebelumnya."
+	case "CORRECTION_PENDING":
+		return "Catatan memiliki koreksi terbuka — verifikasi satu per satu untuk memutuskan koreksi."
 	case "NOT_FOUND":
 		return "Catatan tidak ditemukan."
 	default:

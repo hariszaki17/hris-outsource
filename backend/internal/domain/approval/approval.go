@@ -50,6 +50,11 @@ type CreateInstanceInput struct {
 // submit creates no instance).
 type Engine interface {
 	CreateInstance(ctx context.Context, tx pgx.Tx, in CreateInstanceInput) (instanceID string, err error)
+	// CancelInstance terminally closes a still-PENDING instance WITHOUT a member
+	// decision — used when the underlying request becomes moot (e.g. a direct
+	// attendance verification supersedes an open correction). No-op if the instance
+	// is already terminal. Runs on the caller's tx; fires NO OnApproved/OnRejected hook.
+	CancelInstance(ctx context.Context, tx pgx.Tx, instanceID, reason string) error
 }
 
 // Hooks fire on a terminal transition, inside the engine's transaction (INV-8).
@@ -75,6 +80,9 @@ const (
 	InstanceStatusPending  InstanceStatus = "PENDING"
 	InstanceStatusApproved InstanceStatus = "APPROVED"
 	InstanceStatusRejected InstanceStatus = "REJECTED"
+	// InstanceStatusCancelled — terminally closed without a member decision (the
+	// underlying request became moot, e.g. superseded by a direct attendance verify).
+	InstanceStatusCancelled InstanceStatus = "CANCELLED"
 )
 
 // ActionType is the kind of decision recorded on the trail (openapi

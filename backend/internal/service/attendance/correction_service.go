@@ -93,6 +93,78 @@ func (s *CorrectionService) SetPayrollPeriodGuard(c LockedMonthChecker, a Adjust
 	s.locked, s.adjuster = c, a
 }
 
+// --- FLOW D: verify resolves a pending correction inline ---
+
+// PendingForAttendance returns the open PENDING correction id on the record (found=false
+// if none) — the verify-path reconciliation lookup (FLOW D).
+func (s *CorrectionService) PendingForAttendance(ctx context.Context, attendanceID string) (string, bool, error) {
+	return s.repo.GetPendingCorrectionForAttendance(ctx, attendanceID)
+}
+
+// AcceptForVerify applies the correction's proposed values to the record (reusing the
+// canonical OnApproved apply path — whitelist + re-eval + PC-9 carry-forward), marks it
+// APPLIED, then CANCELs its E11 instance (the data is already applied, so firing the engine
+// hook would double-apply). Runs on the verify tx. The HR/super authority was gated upstream.
+func (s *CorrectionService) AcceptForVerify(ctx context.Context, tx pgx.Tx, correctionID string) error {
+	instanceID, ierr := s.approvalInstanceID(ctx, correctionID)
+	if ierr != nil {
+		return ierr
+	}
+	if aerr := s.OnApproved(ctx, tx, correctionID); aerr != nil {
+		return aerr
+	}
+	return s.cancelInstance(ctx, tx, instanceID, "Diselesaikan saat verifikasi kehadiran (koreksi diterima).")
+}
+
+// RejectForVerify marks the correction REJECTED (HR's reason) without touching the record,
+// then CANCELs its E11 instance. Runs on the verify tx.
+func (s *CorrectionService) RejectForVerify(ctx context.Context, tx pgx.Tx, correctionID, reason string) error {
+	actor := actorEmployeeID(ctx)
+	cor, lerr := s.repo.GetCorrectionForUpdate(ctx, tx, correctionID)
+	if errors.Is(lerr, domain.ErrNotFound) {
+		return apperr.NotFound()
+	}
+	if lerr != nil {
+		return lerr
+	}
+	if cor.Status != att.CorrectionStatusPending {
+		return correctionTerminalConflict(cor.Status)
+	}
+	if _, n, rerr := s.repo.RejectCorrection(ctx, tx, correctionID, actor, reason); rerr != nil {
+		return rerr
+	} else if n == 0 {
+		return correctionTerminalConflict(cor.Status)
+	}
+	if aerr := audit.Record(ctx, tx, audit.Entry{
+		Action:     audit.ActionUpdate,
+		EntityType: "attendance_correction",
+		EntityID:   correctionID,
+		Before:     map[string]any{"status": "PENDING"},
+		After:      map[string]any{"status": "REJECTED", "decided_by": ptrStr(actor), "reason": reason},
+	}); aerr != nil {
+		return aerr
+	}
+	return s.cancelInstance(ctx, tx, cor.ApprovalInstanceID, "Diselesaikan saat verifikasi kehadiran (koreksi ditolak).")
+}
+
+// approvalInstanceID reads the correction's linked E11 instance id (nil if unlinked).
+func (s *CorrectionService) approvalInstanceID(ctx context.Context, correctionID string) (*string, error) {
+	cor, err := s.repo.GetCorrection(ctx, correctionID)
+	if err != nil {
+		return nil, err
+	}
+	return cor.ApprovalInstanceID, nil
+}
+
+// cancelInstance CANCELs the linked E11 instance (no-op if unlinked or engine unwired) so
+// the resolved correction drops out of the approval inbox.
+func (s *CorrectionService) cancelInstance(ctx context.Context, tx pgx.Tx, instanceID *string, reason string) error {
+	if instanceID == nil || s.engine == nil {
+		return nil
+	}
+	return s.engine.CancelInstance(ctx, tx, *instanceID, reason)
+}
+
 // --- list / get ---
 
 // List returns the corrections queue page. Leader scope is forced to their led
@@ -108,6 +180,12 @@ func (s *CorrectionService) List(ctx context.Context, f CorrectionFilter) ([]att
 		}
 		cid := p.CompanyID
 		f.CompanyID = &cid
+	}
+	// Agent self-service (F5.6 web/mobile): an agent sees ONLY their own corrections —
+	// force requester scope to the caller (mirrors leave List self-scope).
+	if p.Role == auth.RoleAgent {
+		eid := p.EmployeeID
+		f.EmployeeID = &eid
 	}
 
 	limit := clampLimit(f.Limit)
@@ -142,7 +220,13 @@ func (s *CorrectionService) Get(ctx context.Context, id string) (att.Correction,
 	if err != nil {
 		return att.Correction{}, apperr.Internal(err)
 	}
-	if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
+	// Agent may read ONLY their own correction (self-scope); others out-of-scope → 404.
+	// Staff are company-scoped via GuardCompany.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if cor.RequesterID != p.EmployeeID {
+			return att.Correction{}, apperr.NotFound()
+		}
+	} else if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
 		return att.Correction{}, apperr.NotFound()
 	}
 	cor.Diff = buildDiff(cor)

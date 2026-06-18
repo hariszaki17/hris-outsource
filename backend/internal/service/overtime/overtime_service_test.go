@@ -217,6 +217,8 @@ func (e *svcEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approval.Crea
 	return "SWP-API-000" + string(rune('0'+e.seq)), nil
 }
 
+func (e *svcEngine) CancelInstance(_ context.Context, _ pgx.Tx, _, _ string) error { return nil }
+
 var _ approval.Engine = (*svcEngine)(nil)
 
 type svcNotifier struct{ sent []jobs.NotificationArgs }

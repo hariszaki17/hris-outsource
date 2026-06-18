@@ -327,6 +327,10 @@ func run() error {
 	leaveSvc.SetApprovalEngine(approvalSvc)
 	overtimeSvc.SetApprovalEngine(approvalSvc)
 	correctionSvc.SetApprovalEngine(approvalSvc)
+	// FLOW D: a direct attendance verify resolves any open correction on that record inline
+	// (HR accepts → applies it, or rejects it) + CANCELs its approval instance. correctionSvc
+	// owns the engine, so wire it after SetApprovalEngine.
+	attendanceSvc.SetCorrectionResolver(correctionSvc)
 	approvalHandler := approvalhttp.NewHandler(approvalSvc)
 
 	// Payroll slice (10-02): E8 historical, read-only payslip archive + audit notes

@@ -141,17 +141,22 @@ export function ShiftPickerPopover({
   // offsets pins to the grid's top-left corner and gets clipped — i.e. clicking "+"
   // appeared to do nothing. Compute from the anchor cell's rect, clamped to the viewport.
   const POPOVER_W = 360;
-  const POPOVER_MAXH = 360;
-  const [pos, setPos] = React.useState<{ top: number; left: number } | null>(null);
+  // True max height = header + search + scrollable list + the (up to 3) quick-action rows.
+  // Must match the rendered popover or the bottom actions (Tandai Libur / Buat shift baru)
+  // overflow the viewport on low cells. The popover is a bounded flex column (list scrolls),
+  // so it never exceeds this; the clamp below reserves exactly this much space.
+  const POPOVER_MAXH = 460;
+  const [pos, setPos] = React.useState<{ top: number; left: number; maxH: number } | null>(null);
   React.useLayoutEffect(() => {
     if (!target || !anchorRef.current) {
       setPos(null);
       return;
     }
     const r = anchorRef.current.getBoundingClientRect();
-    const top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - POPOVER_MAXH - 8));
+    const maxH = Math.min(POPOVER_MAXH, window.innerHeight - 16);
+    const top = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - maxH - 8));
     const left = Math.max(8, Math.min(r.left, window.innerWidth - POPOVER_W - 8));
-    setPos({ top, left });
+    setPos({ top, left, maxH });
   }, [target, anchorRef]);
 
   // Close on outside mousedown (ENGINEERING.md combobox pattern)
@@ -361,12 +366,12 @@ export function ShiftPickerPopover({
   return (
     <div
       ref={popoverRef}
-      className="fixed z-50 w-[360px] rounded-xl border border-border bg-surface shadow-overlay"
-      style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
+      className="fixed z-50 flex w-[360px] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-overlay"
+      style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, maxHeight: pos?.maxH ?? POPOVER_MAXH }}
       aria-label={t('picker.title', { name: target.employeeName })}
     >
       {/* Header */}
-      <div className="border-b border-border-soft px-3.5 py-3">
+      <div className="shrink-0 border-b border-border-soft px-3.5 py-3">
         <p className="text-sm font-bold text-text">
           {t('picker.title', { name: target.employeeName })}
         </p>
@@ -374,7 +379,7 @@ export function ShiftPickerPopover({
       </div>
 
       {/* Search + filter */}
-      <div className="flex items-center gap-2 border-b border-border-soft bg-surface-2 px-3.5 py-2.5">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border-soft bg-surface-2 px-3.5 py-2.5">
         <div className="flex flex-1 items-center gap-1.5 rounded-[7px] border border-border bg-surface px-2.5 py-1.5">
           <Search aria-hidden className="size-3 text-text-3" />
           <input
@@ -387,8 +392,8 @@ export function ShiftPickerPopover({
         </div>
       </div>
 
-      {/* Shift list */}
-      <div className="max-h-[280px] overflow-y-auto">
+      {/* Shift list — flex-shrinks + scrolls so the quick-actions footer stays pinned/visible */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {shiftsQuery.isLoading && (
           <div className="flex items-center justify-center py-6">
             <Loader2 aria-hidden className="size-4 animate-spin text-text-3" />
@@ -406,7 +411,7 @@ export function ShiftPickerPopover({
       </div>
 
       {/* Quick actions */}
-      <div className="border-t border-border-soft bg-surface-2">
+      <div className="shrink-0 border-t border-border-soft bg-surface-2">
         <button
           type="button"
           disabled={saving}

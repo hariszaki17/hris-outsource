@@ -52,6 +52,18 @@ func (r *ClockRepo) GetActivePlacement(ctx context.Context, employeeID string) (
 	}, true, nil
 }
 
+// EmployeeType returns the employee's type ("FIELD" | "INTERNAL", migr 00067) — the
+// no-shift clock-in gate (FIELD requires a rostered shift). Raw query (no dedicated sqlc).
+func (r *ClockRepo) EmployeeType(ctx context.Context, employeeID string) (string, error) {
+	var t string
+	if err := r.pool.Pool.QueryRow(ctx,
+		`SELECT employee_type FROM employees WHERE id = $1`, employeeID,
+	).Scan(&t); err != nil {
+		return "", err
+	}
+	return t, nil
+}
+
 // GetSite returns the site's geofence center + radius. found=false when the site is
 // missing/soft-deleted (the service then skips the geofence check).
 func (r *ClockRepo) GetSite(ctx context.Context, siteID string) (*float64, *float64, int, bool, error) {

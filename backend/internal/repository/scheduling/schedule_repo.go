@@ -247,19 +247,38 @@ func (r *ScheduleRepo) CancelScheduleEntriesForLeave(ctx context.Context, tx pgx
 	return out, nil
 }
 
-// CountLeaveDuration is the server-authoritative F6.2 leave duration: every
-// scheduled-shift day in [start,end] (live schedule_entries, not a day off) —
-// INCLUDING shifts on a weekend or public holiday (2026-06-15; a holiday shift is
-// real work the agent is excused from, so it consumes quota). Days with no shift are
-// not counted. Backs leavesvc.SchedulePort so the leave Create path never
-// re-implements a naive day-count.
+// CountLeaveDuration is the server-authoritative F6.2 leave duration, HYBRID
+// (2026-06-18): when the agent HAS rostered shifts in [start,end], every scheduled
+// non-day-off day counts (incl. weekend/holiday shifts — a holiday shift is real work
+// the agent is excused from). When the range has NO roster at all (e.g. leave requested
+// before the roster is published), it falls back to calendar working-days — Mon–Fri in
+// [start,end] minus public holidays — so future leave still charges a sensible quota
+// instead of 0. Backs leavesvc.SchedulePort so the leave Create path never re-implements
+// a naive day-count.
 func (r *ScheduleRepo) CountLeaveDuration(ctx context.Context, employeeID string, start, end time.Time) (int, error) {
-	n, err := r.q.CountLeaveDurationDays(ctx, sqlcgen.CountLeaveDurationDaysParams{
-		EmployeeID: employeeID,
-		StartDate:  timeToPgDate(start),
-		EndDate:    timeToPgDate(end),
-	})
-	if err != nil {
+	const q = `
+WITH rostered AS (
+  SELECT count(*) AS n
+  FROM schedule_entries
+  WHERE employee_id = $1
+    AND work_date BETWEEN $2 AND $3
+    AND NOT is_day_off
+    AND status <> 'CANCELLED_BY_LEAVE'
+    AND deleted_at IS NULL
+),
+working AS (
+  SELECT count(*) AS n
+  FROM generate_series($2::date, $3::date, interval '1 day') AS d
+  WHERE extract(isodow FROM d) < 6                       -- Mon–Fri
+    AND d::date NOT IN (
+      SELECT holiday_date FROM holidays WHERE deleted_at IS NULL
+    )
+)
+SELECT CASE WHEN (SELECT n FROM rostered) > 0
+            THEN (SELECT n FROM rostered)
+            ELSE (SELECT n FROM working) END`
+	var n int64
+	if err := r.pool.Pool.QueryRow(ctx, q, employeeID, timeToPgDate(start), timeToPgDate(end)).Scan(&n); err != nil {
 		return 0, err
 	}
 	return int(n), nil

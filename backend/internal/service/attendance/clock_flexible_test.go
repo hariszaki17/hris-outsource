@@ -26,6 +26,15 @@ type fakeClockRepo struct {
 	inserted  *ClockInRow               // captured ClockIn insert
 	newID     string                    // id the insert returns
 	onLeave   bool                      // IsOnApprovedLeave result (true ⇒ ON_LEAVE block)
+	empType   string                    // "" ⇒ INTERNAL (unscheduled clock-in allowed)
+}
+
+// EmployeeType defaults to INTERNAL so the flexible/auto-close cases clock in unscheduled.
+func (f *fakeClockRepo) EmployeeType(_ context.Context, _ string) (string, error) {
+	if f.empType == "" {
+		return "INTERNAL", nil
+	}
+	return f.empType, nil
 }
 
 func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (PlacementInfo, bool, error) {
