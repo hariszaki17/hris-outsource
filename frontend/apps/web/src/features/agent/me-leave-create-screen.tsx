@@ -15,7 +15,8 @@ import {
   useCreateLeaveRequest,
   useGetEmployeeTypeBalances,
 } from '@swp/api-client/e6';
-import { addCalendarDays } from '@swp/shared/datetime';
+import { type Holiday, useListHolidays } from '@swp/api-client/e7';
+import { addCalendarDays, workingDaysBetween } from '@swp/shared/datetime';
 import { statutoryFixedDays } from '@swp/shared/leave';
 import {
   Button,
@@ -106,13 +107,31 @@ export function AgentLeaveCreateModal({
   );
   const scheduleEntries =
     (scheduleQ.data?.data as { data?: ScheduleEntry[] } | undefined)?.data ?? [];
-  const requestedDays = useMemo(() => {
+  const rosteredDays = useMemo(() => {
     const dates = new Set<string>();
     for (const e of scheduleEntries) {
       if (!e.is_day_off && e.status !== 'CANCELLED_BY_LEAVE') dates.add(e.work_date);
     }
     return dates.size;
   }, [scheduleEntries]);
+
+  // Hybrid duration (F6.2, 2026-06-18, mirrors the server): rostered shift-days when the agent
+  // has a roster in the range; otherwise fall back to calendar working-days (Mon–Fri minus public
+  // holidays) so leave requested BEFORE the roster is published still charges a sensible quota.
+  const needsFallback = rangeValid && !scheduleQ.isFetching && rosteredDays === 0;
+  const holidaysQ = useListHolidays(
+    { year: Number(start.slice(0, 4)) || undefined },
+    { query: { enabled: needsFallback } },
+  );
+  const holidaySet = useMemo(() => {
+    const hs = (holidaysQ.data?.data as { data?: Holiday[] } | undefined)?.data ?? [];
+    return new Set(hs.map((h) => h.date));
+  }, [holidaysQ.data]);
+  const requestedDays = useMemo(() => {
+    if (rosteredDays > 0) return rosteredDays;
+    if (!rangeValid) return 0; // empty/invalid dates → no Temporal parse
+    return workingDaysBetween(start, end, holidaySet);
+  }, [rosteredDays, rangeValid, start, end, holidaySet]);
 
   const durationReady = rangeValid && !scheduleQ.isFetching;
   // Block over-quota (capped types only): requested working-days must fit the remaining balance.
@@ -269,7 +288,7 @@ export function AgentLeaveCreateModal({
             <div className="flex items-center justify-between text-[13px]">
               <span className="text-text-2">{t('leaveDurationLabel')}</span>
               <span className="font-medium text-text tabular-nums">
-                {scheduleQ.isFetching
+                {scheduleQ.isFetching || (needsFallback && holidaysQ.isFetching)
                   ? t('loading')
                   : t('leaveDurationValue', { count: requestedDays })}
               </span>

@@ -181,6 +181,12 @@ func (s *CorrectionService) List(ctx context.Context, f CorrectionFilter) ([]att
 		cid := p.CompanyID
 		f.CompanyID = &cid
 	}
+	// Agent self-service (F5.6 web/mobile): an agent sees ONLY their own corrections —
+	// force requester scope to the caller (mirrors leave List self-scope).
+	if p.Role == auth.RoleAgent {
+		eid := p.EmployeeID
+		f.EmployeeID = &eid
+	}
 
 	limit := clampLimit(f.Limit)
 	f.Limit = limit + 1
@@ -214,7 +220,13 @@ func (s *CorrectionService) Get(ctx context.Context, id string) (att.Correction,
 	if err != nil {
 		return att.Correction{}, apperr.Internal(err)
 	}
-	if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
+	// Agent may read ONLY their own correction (self-scope); others out-of-scope → 404.
+	// Staff are company-scoped via GuardCompany.
+	if p, ok := auth.PrincipalFrom(ctx); ok && p.Role == auth.RoleAgent {
+		if cor.RequesterID != p.EmployeeID {
+			return att.Correction{}, apperr.NotFound()
+		}
+	} else if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
 		return att.Correction{}, apperr.NotFound()
 	}
 	cor.Diff = buildDiff(cor)
