@@ -75,7 +75,7 @@ erDiagram
 ```
 
 **Invariants:**
-- **INV-1:** an attendance record links to the agent's **scheduled shift** for that date when one exists; clock-ins with no schedule are **flagged** (exception).
+- **INV-1:** an attendance record links to the agent's **scheduled shift** for that date. A `FIELD` agent **cannot clock in without a shift** (`NO_SCHEDULED_SHIFT`) — must be rostered first (F5.7 then auto-adopts); an `INTERNAL` employee with no schedule may clock in and is **flagged** unscheduled (exception). *(Updated 2026-06-18 — FIELD now requires a shift.)*
 - **INV-2:** geofence is evaluated against the **placement's client-company location + radius** (radius is a ClientCompany config — see §6b).
 - **INV-3:** **exceptions-only verification** — a record needs leader verification iff `is_late` OR out-of-geofence OR `auto_closed` OR missing clock-in/out OR its attendance code `needs_verification`; otherwise `AutoApproved`.
 - **INV-4:** if no clock-out by the scheduled shift end, the system **auto-clocks-out** at shift end, sets `auto_closed`, and marks the record `Pending` verification.

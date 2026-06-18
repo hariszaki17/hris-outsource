@@ -27,7 +27,8 @@ type CorrectionRepository interface {
 	// (same tx as CreateCorrection — mirrors leave SetApprovalInstanceID).
 	SetCorrectionApprovalInstance(ctx context.Context, tx pgx.Tx, id, instanceID string) error
 	// GetPendingCorrectionForAttendance returns the active PENDING correction id for
-	// a target attendance (found=false when none) — the CREATE-path dedupe guard.
+	// a target attendance (found=false when none) — the CREATE-path dedupe guard AND the
+	// verify-path (FLOW D) reconciliation lookup.
 	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (id string, found bool, err error)
 }
 

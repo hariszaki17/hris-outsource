@@ -75,7 +75,14 @@ func (h *Handler) VerifyAttendance(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	rec, err := h.attendance.Verify(r.Context(), id, req.Note, req.CheckInAt, req.CheckOutAt)
+	dec := svc.CorrectionDecision{}
+	if req.CorrectionDecision != nil {
+		dec.Action = *req.CorrectionDecision
+	}
+	if req.CorrectionRejectReason != nil {
+		dec.Reason = *req.CorrectionRejectReason
+	}
+	rec, err := h.attendance.Verify(r.Context(), id, req.Note, req.CheckInAt, req.CheckOutAt, dec)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

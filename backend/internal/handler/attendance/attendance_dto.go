@@ -17,6 +17,11 @@ type verifyRequest struct {
 	Note       string  `json:"note"`
 	CheckInAt  *string `json:"check_in_at"`
 	CheckOutAt *string `json:"check_out_at"`
+	// FLOW D: ruling on a PENDING correction on the record. "ACCEPT" applies the proposed
+	// fix; "REJECT" needs CorrectionRejectReason (min 5). Required (HR/super) when the record
+	// has an open correction; ignored otherwise.
+	CorrectionDecision     *string `json:"correction_decision"`
+	CorrectionRejectReason *string `json:"correction_reject_reason"`
 }
 
 type rejectRequest struct {

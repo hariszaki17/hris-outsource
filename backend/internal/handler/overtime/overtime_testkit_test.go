@@ -410,6 +410,8 @@ func (e *fakeEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approval.Cre
 	return fmt.Sprintf("SWP-API-%04d", e.seq), nil
 }
 
+func (e *fakeEngine) CancelInstance(_ context.Context, _ pgx.Tx, _, _ string) error { return nil }
+
 var _ approval.Engine = (*fakeEngine)(nil)
 
 // ---------------------------------------------------------------------------

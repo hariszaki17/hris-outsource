@@ -671,6 +671,8 @@ func (fakeApprovalEngine) CreateInstance(_ context.Context, _ pgx.Tx, in approva
 	return "SWP-APV-" + in.RequestID, nil
 }
 
+func (fakeApprovalEngine) CancelInstance(_ context.Context, _ pgx.Tx, _, _ string) error { return nil }
+
 // countPending counts PENDING corrections on one attendance (the
 // CORRECTION_ALREADY_PENDING pre-check seam: the production create endpoint is
 // out of web scope, so this contract test drives the guard shape directly).
@@ -716,6 +718,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 	csvc := svc.NewCorrectionService(crepo, arepo, &fakeTxRunner{})
 	csvc.SetClock(func() time.Time { return fixedNow })
 	csvc.SetApprovalEngine(fakeApprovalEngine{})
+	asvc.SetCorrectionResolver(csvc) // FLOW D: verify resolves a pending correction inline
 
 	handler := attendancehandler.NewHandler(asvc, csvc)
 	idem := newStubIdempotency()

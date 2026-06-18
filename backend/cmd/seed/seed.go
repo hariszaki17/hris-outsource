@@ -1610,10 +1610,16 @@ func seedApprovals(ctx context.Context, pool *db.Pool) error {
 		INSERT INTO approval_line_members (line_id, user_id)
 		SELECT $1, u.id FROM users u WHERE u.email = $2
 		ON CONFLICT (line_id, user_id) DO NOTHING`
+	// super_admin is added to BOTH lines so the global admin login also exercises the
+	// inbox (otherwise it is empty for anyone who is not Rudi/Sari — the inbox is
+	// current-line-membership gated, INV-3). super_admin is never a requester, so the
+	// self-approval exclusion never hides rows from them.
 	members := []struct{ lineID, email string }{
 		{line1ID, "rudi.wijaya@swp.test"},
 		{line1ID, "sari.hadi@swp.test"},
+		{line1ID, "super.admin@swp.test"},
 		{line2ID, "sari.hadi@swp.test"},
+		{line2ID, "super.admin@swp.test"},
 	}
 	for _, m := range members {
 		if _, err := pool.Pool.Exec(ctx, memberQ, m.lineID, m.email); err != nil {

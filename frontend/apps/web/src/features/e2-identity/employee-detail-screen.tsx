@@ -23,6 +23,11 @@ import { ArrowLeft, KeyRound, MoreVertical, Pencil, Smartphone } from 'lucide-re
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { EmployeeLeaveEntitlementsSection } from '../e6-leave/employee-leave-entitlements-section.tsx';
+import {
+  EmployeeAttendanceSection,
+  EmployeeLeaveOvertimeSection,
+  EmployeePlacementsSection,
+} from './employee-cross-epic-sections.tsx';
 import { EditEmployeeScreen } from './employee-form.tsx';
 import { OffboardEmployeeConfirm, ReactivateEmployeeConfirm } from './employee-overlays.tsx';
 
@@ -96,20 +101,6 @@ function DetailCard({
 }
 
 // ---------------------------------------------------------------------------
-// Cross-epic tab placeholder
-// ---------------------------------------------------------------------------
-
-function CrossEpicPlaceholder({ tabName, epic }: { tabName: string; epic: string }) {
-  const { t } = useTranslation('employees');
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-      <p className="text-[14px] font-medium text-text-2">{t('crossEpicTitle', { tab: tabName })}</p>
-      <p className="max-w-[360px] text-[13px] text-text-3">{t('crossEpicBody', { epic })}</p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Inline mini-tab switch
 // ---------------------------------------------------------------------------
 
@@ -124,12 +115,12 @@ function DetailTabs({
 }) {
   const { t } = useTranslation('employees');
 
-  const tabs: { id: DetailTab; label: string; cross?: boolean }[] = [
+  const tabs: { id: DetailTab; label: string }[] = [
     { id: 'profil', label: t('tabDetailProfil') },
-    { id: 'penempatan', label: t('tabDetailPenempatan'), cross: true },
-    { id: 'kehadiran', label: t('tabDetailKehadiran'), cross: true },
+    { id: 'penempatan', label: t('tabDetailPenempatan') },
+    { id: 'kehadiran', label: t('tabDetailKehadiran') },
     { id: 'hak-cuti', label: t('tabDetailHakCuti') },
-    { id: 'cuti-lembur', label: t('tabDetailCutiLembur'), cross: true },
+    { id: 'cuti-lembur', label: t('tabDetailCutiLembur') },
   ];
 
   return (
@@ -147,7 +138,6 @@ function DetailTabs({
           ].join(' ')}
         >
           {tab.label}
-          {tab.cross && <span className="text-[11px] text-text-3">E→</span>}
         </button>
       ))}
     </div>
@@ -391,12 +381,8 @@ export function EmployeeDetailScreen() {
           </div>
         )}
 
-        {activeTab === 'penempatan' && (
-          <CrossEpicPlaceholder tabName={t('tabDetailPenempatan')} epic="E3" />
-        )}
-        {activeTab === 'kehadiran' && (
-          <CrossEpicPlaceholder tabName={t('tabDetailKehadiran')} epic="E5" />
-        )}
+        {activeTab === 'penempatan' && <EmployeePlacementsSection employeeId={employeeId} />}
+        {activeTab === 'kehadiran' && <EmployeeAttendanceSection employeeId={employeeId} />}
         {/* Hak Cuti — HR-assigned per-employee leave entitlements (F6, ELE-#, INV-7). SL is
             read-only (RBAC defense-in-depth). */}
         {activeTab === 'hak-cuti' && (
@@ -406,9 +392,7 @@ export function EmployeeDetailScreen() {
             </div>
           </DetailCard>
         )}
-        {activeTab === 'cuti-lembur' && (
-          <CrossEpicPlaceholder tabName={t('tabDetailCutiLembur')} epic="E6/E7" />
-        )}
+        {activeTab === 'cuti-lembur' && <EmployeeLeaveOvertimeSection employeeId={employeeId} />}
 
         {/* Role note */}
         <div className="flex items-center gap-[9px] rounded-lg border border-l-[3px] border-border bg-surface px-[14px] py-[10px]">

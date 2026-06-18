@@ -33,6 +33,16 @@ type fakeClockRepo struct {
 	newID     string
 	autoClose *svc.AutoCloseRow
 	inserted  bool
+	empType   string // "" ⇒ INTERNAL (unscheduled clock-in allowed)
+}
+
+// EmployeeType defaults to INTERNAL so the no-shift tests below clock in unscheduled; a
+// FIELD case sets empType to assert the NO_SCHEDULED_SHIFT block.
+func (f *fakeClockRepo) EmployeeType(_ context.Context, _ string) (string, error) {
+	if f.empType == "" {
+		return "INTERNAL", nil
+	}
+	return f.empType, nil
 }
 
 func (f *fakeClockRepo) GetActivePlacement(_ context.Context, _ string) (svc.PlacementInfo, bool, error) {
@@ -161,6 +171,26 @@ func TestClockInHandler_Contract(t *testing.T) {
 		}
 		if repo.autoClose.Status != string(att.StatusIncomplete) {
 			t.Errorf("auto-close status = %q, want INCOMPLETE", repo.autoClose.Status)
+		}
+	})
+
+	t.Run("FIELD agent with no scheduled shift is blocked (NO_SCHEDULED_SHIFT, 422)", func(t *testing.T) {
+		now := time.Now()
+		repo := &fakeClockRepo{
+			empType: "FIELD", // FIELD + unscheduled ⇒ blocked (EPICS §8 2026-06-18)
+			newID:   "SWP-ATT-NEW",
+			records: map[string]att.Attendance{"SWP-ATT-NEW": {ID: "SWP-ATT-NEW", CheckInAt: &now}},
+		}
+		rr := postClockIn(t, clockHarness(repo))
+
+		if rr.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422 (body: %s)", rr.Code, rr.Body.String())
+		}
+		if code := strOf(decodeBody(t, rr)["error"].(map[string]any)["code"]); code != "NO_SCHEDULED_SHIFT" {
+			t.Errorf("error.code = %q, want NO_SCHEDULED_SHIFT", code)
+		}
+		if repo.inserted {
+			t.Error("attendance row was inserted, want none (blocked before insert)")
 		}
 	})
 }
