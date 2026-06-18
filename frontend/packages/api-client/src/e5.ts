@@ -6,6 +6,7 @@
  */
 export * from './gen/e5/clock-in-out/clock-in-out.ts';
 export * from './gen/e5/attendance/attendance.ts';
+export * from './gen/e5/attendance-activities/attendance-activities.ts';
 export * from './gen/e5/attendance-records/attendance-records.ts';
 export * from './gen/e5/attendance-verification/attendance-verification.ts';
 export * from './gen/e5/corrections/corrections.ts';

@@ -28,12 +28,14 @@ import (
 
 // fakeClockRepo implements svc.ClockRepository for the clock-in handler test.
 type fakeClockRepo struct {
-	openID    string
-	records   map[string]att.Attendance
-	newID     string
-	autoClose *svc.AutoCloseRow
-	inserted  bool
-	empType   string // "" ⇒ INTERNAL (unscheduled clock-in allowed)
+	openID        string
+	records       map[string]att.Attendance
+	newID         string
+	autoClose     *svc.AutoCloseRow
+	inserted      bool
+	activityCount int64  // CountActivities result — the clock-out gate (AA-7)
+	clockedOut    bool   // set when ClockOut is invoked
+	empType       string // "" ⇒ INTERNAL (unscheduled clock-in allowed)
 }
 
 // EmployeeType defaults to INTERNAL so the no-shift tests below clock in unscheduled; a
@@ -71,7 +73,11 @@ func (f *fakeClockRepo) ClockIn(_ context.Context, _ pgx.Tx, _ svc.ClockInRow) (
 	return f.newID, true, nil
 }
 func (f *fakeClockRepo) ClockOut(_ context.Context, _ pgx.Tx, _ svc.ClockOutRow) (string, error) {
-	return "", nil
+	f.clockedOut = true
+	return f.openID, nil
+}
+func (f *fakeClockRepo) CountActivities(_ context.Context, _ string) (int64, error) {
+	return f.activityCount, nil
 }
 func (f *fakeClockRepo) AutoCloseAttendance(_ context.Context, _ pgx.Tx, p svc.AutoCloseRow) (string, bool, error) {
 	f.autoClose = &p

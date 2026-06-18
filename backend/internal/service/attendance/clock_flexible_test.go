@@ -87,6 +87,12 @@ func (f *fakeClockRepo) GetAttendance(_ context.Context, id string) (att.Attenda
 	return rec, nil
 }
 
+// CountActivities is unused on the flexible-check-in path (ClockIn never gates on
+// activities); return 0 to satisfy the ClockRepository interface.
+func (f *fakeClockRepo) CountActivities(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 // agentCtx returns a context carrying an agent principal with an employee id.
 func agentCtx() context.Context {
 	return auth.WithPrincipal(context.Background(), auth.Principal{

@@ -1,4 +1,5 @@
 import { AgentAkunScreen } from '@/features/agent/me-akun-screen.tsx';
+import { AgentKalenderScreen } from '@/features/agent/me-kalender-screen.tsx';
 import { AgentKehadiranScreen } from '@/features/agent/me-kehadiran-screen.tsx';
 import { AgentNotificationsScreen } from '@/features/agent/me-notifications-screen.tsx';
 import { AgentPengajuanScreen } from '@/features/agent/me-pengajuan-screen.tsx';
@@ -792,6 +793,11 @@ const mePengajuanRoute = createRoute({
   path: '/me/pengajuan',
   component: AgentPengajuanScreen,
 });
+const meKalenderRoute = createRoute({
+  getParentRoute: () => authedRoute,
+  path: '/me/kalender',
+  component: AgentKalenderScreen,
+});
 const meAkunRoute = createRoute({
   getParentRoute: () => authedRoute,
   path: '/me/akun',
@@ -874,6 +880,7 @@ const routeTree = rootRoute.addChildren([
     notificationsRoute,
     // Agent self-service (/me/*) — three merged homes + legacy redirects.
     meKehadiranRoute,
+    meKalenderRoute,
     mePengajuanRoute,
     meAkunRoute,
     meNotificationsRoute,

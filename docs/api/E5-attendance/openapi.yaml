@@ -352,7 +352,10 @@ paths:
                       message: Anda belum clock-in. Ajukan koreksi jika seharusnya bekerja.
                       request_id: req_01J5XK4VWXYZ12
         '422':
-          description: GPS rule violation.
+          description: |
+            Business-rule violation. `GPS_UNAVAILABLE` (location off) or `ACTIVITY_REQUIRED`
+            (F5.8 / INV-7 — an **agent** clock-out needs ≥1 activity logged on the open record;
+            system auto-close and HR/leader manual entry are exempt).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorEnvelope' }
@@ -363,6 +366,153 @@ paths:
                       code: GPS_UNAVAILABLE
                       message: Layanan lokasi tidak tersedia. Aktifkan GPS untuk clock-out.
                       request_id: req_01J5XK5345678
+                activity_required:
+                  value:
+                    error:
+                      code: ACTIVITY_REQUIRED
+                      message: Catat minimal satu aktivitas sebelum clock-out.
+                      fields:
+                        activity_count: '0'
+                      request_id: req_01J5XKACTIVITY01
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance/{id}/activities:
+    parameters:
+      - $ref: '#/components/parameters/AttendanceId'
+    post:
+      tags: [attendance-activities]
+      operationId: createAttendanceActivity
+      summary: Log an activity on an open attendance record.
+      description: |
+        Adds one free-text activity note to the caller's **own open** attendance record
+        (F5.8). The server stamps `recorded_at = now()` (Asia/Jakarta). Allowed **anytime
+        while the record is open** — from immediately after clock-in until clock-out (AA-3/AA-4).
+        Scope: self (the record must belong to the principal — AA-2).
+
+        Errors: `400 INVALID_REQUEST` (empty/over-500 note — AA-6); `403`/`404` (not the
+        caller's record — AA-2); `422 ATTENDANCE_CLOSED` (already clocked out) or
+        `422 ATTENDANCE_NOT_OPEN` (no clock-in / ABSENT) — AA-3.
+      x-rbac:
+        scope: self
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateActivityRequest' }
+            examples:
+              normal:
+                value:
+                  note: Patroli lantai 1
+      responses:
+        '201':
+          description: Activity logged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AttendanceActivity' }
+              examples:
+                created:
+                  value:
+                    data:
+                      id: SWP-ACT-5001
+                      attendance_id: SWP-ATT-10711
+                      employee_id: SWP-EMP-1042
+                      note: Patroli lantai 1
+                      recorded_at: '2026-06-18T07:05:11Z'
+                      created_at: '2026-06-18T07:05:11Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Record not open for activities (already closed, or no clock-in).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                closed:
+                  value:
+                    error:
+                      code: ATTENDANCE_CLOSED
+                      message: Catatan aktivitas tidak dapat ditambah setelah clock-out.
+                      request_id: req_01J5XKACT002
+                not_open:
+                  value:
+                    error:
+                      code: ATTENDANCE_NOT_OPEN
+                      message: Belum ada clock-in pada catatan kehadiran ini.
+                      request_id: req_01J5XKACT003
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    get:
+      tags: [attendance-activities]
+      operationId: listAttendanceActivities
+      summary: List the activities on an attendance record.
+      description: |
+        Cursor-paginated, chronological (`recorded_at:asc`) list of the record's non-deleted
+        activities (AA-13). Readable by anyone who may read the parent attendance: the agent for
+        their own record, and shift_leader / hr_admin / super_admin / lead within their attendance
+        scope (AA-10, F5.3/F5.5). Scope is server-enforced.
+      x-rbac:
+        scope: self_or_scoped
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200':
+          description: Activity list.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /attendance/{id}/activities/{activityId}:
+    parameters:
+      - $ref: '#/components/parameters/AttendanceId'
+      - $ref: '#/components/parameters/ActivityId'
+    delete:
+      tags: [attendance-activities]
+      operationId: deleteAttendanceActivity
+      summary: Delete an activity (creator, while the record is open).
+      description: |
+        Soft-deletes one activity. Only the **creator** may delete, and only while the record is
+        still **open** (AA-9). Excluded from lists and from the clock-out gate count thereafter.
+      x-rbac:
+        scope: self
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '204':
+          description: Deleted (idempotent).
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: Record already closed — activity log is immutable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                closed:
+                  value:
+                    error:
+                      code: ATTENDANCE_CLOSED
+                      message: Catatan aktivitas tidak dapat diubah setelah clock-out.
+                      request_id: req_01J5XKACT004
         '429': { $ref: '#/components/responses/RateLimited' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -1452,6 +1602,12 @@ components:
       required: true
       schema: { type: string, pattern: '^SWP-COR-[A-Za-z0-9]+$' }
       example: SWP-COR-2204
+    ActivityId:
+      in: path
+      name: activityId
+      required: true
+      schema: { type: string, pattern: '^SWP-ACT-[A-Za-z0-9]+$' }
+      example: SWP-ACT-5001
     IdempotencyKey:
       in: header
       name: Idempotency-Key
@@ -1944,6 +2100,58 @@ components:
         data:
           type: array
           items: { $ref: '#/components/schemas/Attendance' }
+        next_cursor:
+          type: [string, "null"]
+        has_more:
+          type: boolean
+
+    # -----------------------------------------------------------------------
+    # Attendance activity (F5.8) — timestamped notes logged during a shift
+    # -----------------------------------------------------------------------
+    AttendanceActivity:
+      type: object
+      description: |
+        One free-text activity note logged by the agent during an open shift (F5.8).
+        `recorded_at` is server-set (Asia/Jakarta) — the capture time.
+      required: [id, attendance_id, employee_id, note, recorded_at, created_at]
+      properties:
+        id:
+          type: string
+          pattern: '^SWP-ACT-[A-Za-z0-9]+$'
+        attendance_id:
+          type: string
+          pattern: '^SWP-ATT-[A-Za-z0-9]+$'
+        employee_id:
+          type: string
+          pattern: '^SWP-EMP-[A-Za-z0-9]+$'
+          description: Creator (the agent); set from the JWT principal (AA-2).
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
+        recorded_at:
+          type: string
+          format: date-time
+          description: Server-set capture time (AA-5).
+        created_at:
+          type: string
+          format: date-time
+    CreateActivityRequest:
+      type: object
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: What the agent did (1..500 chars, trimmed — AA-6).
+    ActivityPage:
+      type: object
+      required: [data, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceActivity' }
         next_cursor:
           type: [string, "null"]
         has_more:

@@ -129,18 +129,19 @@ func (q *Queries) CountFieldBlockers(ctx context.Context, arg CountFieldBlockers
 const countOpenClarifications = `-- name: CountOpenClarifications :one
 SELECT count(*)::int AS open_count
 FROM clarification_requests
-WHERE period_id = $1
+WHERE period_id = $1::text
   AND status = 'OPEN'
   AND deleted_at IS NULL
 `
 
-// CountOpenClarifications returns the number of OPEN clarifications for a period
-// (the "awaiting reply" badge on the cockpit header, PC-13 / F8.5).
+// Number of OPEN clarifications for a period (the "awaiting reply" badge on the
+// cockpit header, PC-13 / F8.5). Restored 2026-06-18 — the source query had drifted
+// out of periods.sql while the generated func + period_repo.go call remained.
 func (q *Queries) CountOpenClarifications(ctx context.Context, periodID string) (int32, error) {
 	row := q.db.QueryRow(ctx, countOpenClarifications, periodID)
-	var n int32
-	err := row.Scan(&n)
-	return n, err
+	var open_count int32
+	err := row.Scan(&open_count)
+	return open_count, err
 }
 
 const createClarificationRequest = `-- name: CreateClarificationRequest :one

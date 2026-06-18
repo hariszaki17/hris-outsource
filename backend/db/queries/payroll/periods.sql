@@ -180,6 +180,16 @@ WHERE (sqlc.narg(cursor_id)::text IS NULL OR e.id > sqlc.narg(cursor_id)::text)
 ORDER BY e.id ASC
 LIMIT sqlc.arg(page_limit);
 
+-- name: CountOpenClarifications :one
+-- Number of OPEN clarifications for a period (the "awaiting reply" badge on the
+-- cockpit header, PC-13 / F8.5). Restored 2026-06-18 — the source query had drifted
+-- out of periods.sql while the generated func + period_repo.go call remained.
+SELECT count(*)::int AS open_count
+FROM clarification_requests
+WHERE period_id = sqlc.arg(period_id)::text
+  AND status = 'OPEN'
+  AND deleted_at IS NULL;
+
 -- name: CountFieldBlockers :one
 -- The cockpit per-tab blocker tally (PC-7 gate) — FIELD employees ONLY (PC-5).
 -- Returns the three counts the lock precondition checks (attendance / overtime /

@@ -249,6 +249,14 @@ func run() error {
 	clockSvc := attendancesvc.NewClockService(clockRepo, txm)
 	clockHandler := attendancehttp.NewClockHandler(clockSvc)
 
+	// Attendance activity log (F5.8 / SWP-ACT-*): an agent logs free-text activity
+	// notes onto their own OPEN record; clock-out is gated on >=1 activity (the gate
+	// reads CountActivities via the clock repo above). Reuses the attendance repo for
+	// the parent-record scope + open/closed guards.
+	activityRepo := attendancerepo.NewActivityRepo(pool)
+	activitySvc := attendancesvc.NewActivityService(activityRepo, attendanceRepo, txm)
+	activityHandler := attendancehttp.NewActivityHandler(activitySvc)
+
 	// Clock-in/out selfie upload (F5.1 / CI-10): multipart photo store, returns an
 	// SWP-FILE-* id the client passes to clock-in/out as photo_id. In-DB bytea blob
 	// (mirrors agreement attachments). Selfies share the /files/{id} download route:
@@ -391,6 +399,7 @@ func run() error {
 		Scheduling:        schedulingHandler,
 		Attendance:        attendanceHandler,
 		Clock:             clockHandler,
+		Activity:          activityHandler,
 		AttendancePhoto:   photoHandler,
 		Leave:             leaveHandler,
 		Overtime:          overtimeHandler,

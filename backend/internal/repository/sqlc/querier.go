@@ -123,6 +123,9 @@ type Querier interface {
 	// =====================================================================
 	// user_access.active_users: login accounts with status 'active' (00002_users).
 	CountActiveUsers(ctx context.Context) (int64, error)
+	// Count of live activities on a record — the clock-out gate (AA-7). Read inside the
+	// clock-out transaction so a racing add/delete resolves on the persisted count (C-12).
+	CountActivitiesByAttendance(ctx context.Context, attendanceID string) (int64, error)
 	// Occurrence/lifetime gate source (PER_YEAR_COUNT, LIFETIME_ONCE): how many
 	// non-terminal-rejected requests of this type the employee already has in the
 	// window [from,to]. Counts PENDING_*/APPROVED (reserved or committed).
@@ -144,9 +147,6 @@ type Querier interface {
 	// is surfaced in ListPeriodCompleteness, this aggregate counts the record-level
 	// blockers which gate the same way).
 	CountFieldBlockers(ctx context.Context, arg CountFieldBlockersParams) (CountFieldBlockersRow, error)
-	// CountOpenClarifications returns the number of OPEN clarifications for a period
-	// (the "awaiting reply" badge, PC-13 / F8.5).
-	CountOpenClarifications(ctx context.Context, periodID string) (int32, error)
 	// E6 F6.2 server-authoritative leave duration: the count of days in
 	// [start_date, end_date] the agent would otherwise be ROSTERED for a shift
 	// (a live schedule_entries row: SCHEDULED/MODIFIED, not a day off, not
@@ -161,6 +161,10 @@ type Querier interface {
 	// bump (00038); updated_at carries the disable instant. We count disabled users
 	// whose tokens_valid_after (the revocation instant) falls in the last 30 days.
 	CountOffboardedUsers30d(ctx context.Context, nowTs time.Time) (int64, error)
+	// Number of OPEN clarifications for a period (the "awaiting reply" badge on the
+	// cockpit header, PC-13 / F8.5). Restored 2026-06-18 — the source query had drifted
+	// out of periods.sql while the generated func + period_repo.go call remained.
+	CountOpenClarifications(ctx context.Context, periodID string) (int32, error)
 	// HOLIDAY_IN_USE guard + the in_use_by_overtime DTO flag: count of APPROVED OT rows
 	// referencing this holiday (openapi: "True if any APPROVED OT references this holiday").
 	CountOvertimeUsingHoliday(ctx context.Context, holidayID *string) (int64, error)
@@ -207,6 +211,13 @@ type Querier interface {
 	// real inserts. Annotation is :one RETURNING id (not :execrows) so the created row's
 	// SWP-ATT id is available for the audit EntityID.
 	CreateAbsentAttendance(ctx context.Context, arg CreateAbsentAttendanceParams) (string, error)
+	// E5 attendance activity log queries (F5.8 / SWP-ACT-*). An agent logs free-text activity
+	// notes onto their own OPEN attendance record; agent clock-out is gated on >=1 non-deleted
+	// activity (INV-7 / AA-7). recorded_at is server-set (DB default now()). `make gen` writes
+	// internal/repository/sqlc (NEVER hand-edit).
+	// Insert one activity. id + recorded_at + created_at default server-side. Open-record and
+	// scope:self checks are enforced in the service before calling this.
+	CreateActivity(ctx context.Context, arg CreateActivityParams) (CreateActivityRow, error)
 	// Allocates the SWP-AG id inline from the per-prefix sequence.
 	CreateAgreement(ctx context.Context, arg CreateAgreementParams) (CreateAgreementRow, error)
 	// Allocates the SWP-FILE id inline from the per-prefix sequence.
@@ -350,6 +361,8 @@ type Querier interface {
 	GetActivePlacementForEmployee(ctx context.Context, employeeID string) (GetActivePlacementForEmployeeRow, error)
 	// INV-4 lock: the agent's active placement at a specific company, row-locked.
 	GetActivePlacementForEmployeeAtCompanyForUpdate(ctx context.Context, arg GetActivePlacementForEmployeeAtCompanyForUpdateParams) (GetActivePlacementForEmployeeAtCompanyForUpdateRow, error)
+	// One live activity by id — used for the delete ownership/while-open check.
+	GetActivity(ctx context.Context, id string) (GetActivityRow, error)
 	GetAgreementByID(ctx context.Context, id string) (GetAgreementByIDRow, error)
 	// ANNUAL_POOL entitlement source: the employee's active employment agreement
 	// (annual_leave_entitlement_days, migr. 00040). NULL when unset.
@@ -588,6 +601,9 @@ type Querier interface {
 	LeaderTodayStatus(ctx context.Context, arg LeaderTodayStatusParams) (LeaderTodayStatusRow, error)
 	// The set of companies the lead currently covers — drives Principal.CompanyIDs.
 	ListActiveLeadCompaniesForEmployee(ctx context.Context, employeeID string) ([]string, error)
+	// Chronological (recorded_at asc, id asc) live activities for one attendance record.
+	// Keyset cursor: pass cursor_recorded_at + cursor_id from the previous page tail.
+	ListActivitiesByAttendance(ctx context.Context, arg ListActivitiesByAttendanceParams) ([]ListActivitiesByAttendanceRow, error)
 	// Cursor page ordered by (created_at desc, id desc). Fetch limit+1 for has_more.
 	// Filters: employee_id, status, type, end_date__lte (agreements expiring on or before),
 	// q (free-text ILIKE over employee full_name / employee_id / agreement_no).
@@ -991,6 +1007,9 @@ type Querier interface {
 	// = clean+payable rows; approved_ot_minutes from APPROVED OT; paid/unpaid leave from
 	// approved_leave_days. Idempotent via ON CONFLICT DO NOTHING (a re-lock can't dup).
 	SnapshotPeriodSummaries(ctx context.Context, arg SnapshotPeriodSummariesParams) (int64, error)
+	// Soft-delete the creator's own live activity. Returns rows affected (0 → not found /
+	// not owner / already deleted → handler maps to 404). Scope:self enforced via employee_id.
+	SoftDeleteActivity(ctx context.Context, arg SoftDeleteActivityParams) (int64, error)
 	SoftDeleteAttendanceCode(ctx context.Context, id string) error
 	// DELETE /holidays/{id} (soft). The service first runs CountOvertimeUsingHoliday to
 	// guard HOLIDAY_IN_USE.

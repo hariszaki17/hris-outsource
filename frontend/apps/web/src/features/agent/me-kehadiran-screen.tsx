@@ -24,13 +24,17 @@ import {
 } from '@swp/api-client/e4';
 import {
   type Attendance,
+  type AttendanceActivity,
   type AttendancePage,
   AttendanceStatus,
   ClockInRequestMode,
   ClockInRequestPlatform,
   useClockIn,
   useClockOut,
+  useCreateAttendanceActivity,
+  useDeleteAttendanceActivity,
   useListAttendance,
+  useListAttendanceActivities,
 } from '@swp/api-client/e5';
 import { type AgentDashboard, type Dashboard, useGetMyDashboard } from '@swp/api-client/e10';
 import type { StatusTone } from '@swp/design-tokens';
@@ -39,6 +43,7 @@ import {
   Button,
   EmptyState,
   FilterSelect,
+  Input,
   Modal,
   ModalBody,
   ModalFooter,
@@ -53,13 +58,16 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Fingerprint,
   LogIn,
   LogOut,
   MapPin,
   Plane,
+  Plus,
   ScanFace,
   Timer,
+  Trash2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -99,6 +107,27 @@ function attendanceStatusTone(status: AttendanceStatus): StatusTone {
     default:
       return 'neutral';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Activity-gate logic (F5.8 · AA-6/AA-7) — pure, unit-tested in the .test.ts
+// ---------------------------------------------------------------------------
+
+/** Max note length (AA-6: 1..500 chars after trim). */
+export const ACTIVITY_NOTE_MAX = 500;
+
+/**
+ * Client-side clock-out guard (defense-in-depth, AA-7): an open record must have ≥1
+ * non-deleted activity. The server is the real gate (422 ACTIVITY_REQUIRED); this is UX only.
+ */
+export function canClockOut(activityCount: number): boolean {
+  return activityCount > 0;
+}
+
+/** A note is submittable when its trimmed length is within 1..ACTIVITY_NOTE_MAX (AA-6). */
+export function isValidNote(note: string): boolean {
+  const len = note.trim().length;
+  return len >= 1 && len <= ACTIVITY_NOTE_MAX;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +247,17 @@ export function AgentKehadiranScreen() {
   // check_out_at but no check_in_at either — it must NOT count as open.
   const open = items.find((a) => a.check_in_at && !a.check_out_at);
 
+  // ---- Activity log (F5.8) — only meaningful while a record is open ----
+  const activityList = useListAttendanceActivities(open?.id ?? '', undefined, {
+    query: { enabled: Boolean(open?.id) },
+  });
+  const activities: AttendanceActivity[] =
+    (activityList.data?.data as { data?: AttendanceActivity[] } | undefined)?.data ?? [];
+  const createActivity = useCreateAttendanceActivity();
+  const deleteActivity = useDeleteAttendanceActivity();
+  // Defense-in-depth clock-out guard (AA-7): the server is the real gate.
+  const clockOutGated = Boolean(open) && !canClockOut(activities.length);
+
   // ---- Clock handlers ----
   function handleClockError(e: unknown) {
     if (e instanceof ApiError) {
@@ -244,6 +284,13 @@ export function AgentKehadiranScreen() {
       }
       if (e.code === 'ON_LEAVE') {
         toast({ tone: 'error', title: t('onLeaveToday') });
+        return;
+      }
+      // Clock-out gate (AA-7): server rejects an open record with zero activities.
+      // The agent is still clocked in — prompt them to log an activity first.
+      if (e.code === 'ACTIVITY_REQUIRED') {
+        void activityList.refetch();
+        toast({ tone: 'error', title: t('activity.required') });
         return;
       }
     }
@@ -316,6 +363,34 @@ export function AgentKehadiranScreen() {
       }
     } finally {
       setBusy(false);
+    }
+  }
+
+  // ---- Activity handlers (F5.8) ----
+  async function doAddActivity(note: string) {
+    if (!open?.id || !isValidNote(note)) return;
+    try {
+      await createActivity.mutateAsync({ id: open.id, data: { note: note.trim() } });
+      await activityList.refetch();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'ATTENDANCE_CLOSED') {
+        // Record was closed out from under us — refresh so the panel disappears.
+        await list.refetch();
+        toast({ tone: 'error', title: t('clockError') });
+        return;
+      }
+      toast({ tone: 'error', title: t('activity.addError') });
+    }
+  }
+
+  async function doDeleteActivity(activityId: string) {
+    if (!open?.id) return;
+    try {
+      await deleteActivity.mutateAsync({ id: open.id, activityId });
+      await activityList.refetch();
+      toast({ tone: 'success', title: t('activity.deleted') });
+    } catch {
+      toast({ tone: 'error', title: t('activity.deleteError') });
     }
   }
 
@@ -510,6 +585,20 @@ export function AgentKehadiranScreen() {
         </section>
       </div>
 
+      {/* 4 · Activity log (F5.8) — only while a record is open */}
+      {open && (
+        <ActivityPanel
+          activities={activities}
+          isLoading={activityList.isLoading}
+          isError={activityList.isError}
+          onRetry={() => void activityList.refetch()}
+          adding={createActivity.isPending}
+          deletingId={deleteActivity.isPending ? deleteActivity.variables?.activityId : undefined}
+          onAdd={(note) => void doAddActivity(note)}
+          onDelete={(activityId) => void doDeleteActivity(activityId)}
+        />
+      )}
+
       {/* Absen modal (clock in/out) — frame GHxuN */}
       <AbsenModal
         open={absenOpen}
@@ -522,6 +611,7 @@ export function AgentKehadiranScreen() {
         checkIn={open ? timeOf(open.check_in_at) : '—'}
         checkOut="—"
         isOpenRecord={Boolean(open)}
+        clockOutGated={clockOutGated}
         mode={mode}
         onModeChange={setMode}
         pending={pending}
@@ -599,6 +689,8 @@ interface AbsenModalProps {
   checkIn: string;
   checkOut: string;
   isOpenRecord: boolean;
+  /** Clock-out gated (AA-7): open record with zero activities. */
+  clockOutGated: boolean;
   mode: ClockInRequestMode;
   onModeChange: (mode: ClockInRequestMode) => void;
   pending: boolean;
@@ -615,6 +707,7 @@ function AbsenModal({
   checkIn,
   checkOut,
   isOpenRecord,
+  clockOutGated,
   mode,
   onModeChange,
   pending,
@@ -706,13 +799,28 @@ function AbsenModal({
               <span className="text-[12px] font-medium text-text-2">{t('locationHint')}</span>
             </div>
           )}
+
+          {/* Clock-out gate hint (AA-7): block clock-out until ≥1 activity is logged. */}
+          {isOpenRecord && clockOutGated && (
+            <div className="flex items-center gap-2 rounded-lg border border-warn-bd bg-warn-bg px-3 py-2.5">
+              <ClipboardList size={14} className="shrink-0 text-warn-tx" aria-hidden />
+              <span className="text-[12px] font-medium text-warn-tx">
+                {t('activity.guardNoActivity')}
+              </span>
+            </div>
+          )}
         </div>
       </ModalBody>
       <ModalFooter>
         <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
           {t('cancel')}
         </Button>
-        <Button variant="primary" onClick={onConfirm} disabled={pending}>
+        <Button
+          variant="primary"
+          onClick={onConfirm}
+          disabled={pending || (isOpenRecord && clockOutGated)}
+          title={isOpenRecord && clockOutGated ? t('activity.guardNoActivity') : undefined}
+        >
           {isOpenRecord ? (
             <LogOut className="size-4" aria-hidden />
           ) : (
@@ -722,6 +830,117 @@ function AbsenModal({
         </Button>
       </ModalFooter>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ActivityPanel — the open-record activity log (F5.8). Add a note + list + delete.
+// Writes are only possible while the record is open (the panel only renders then).
+// ---------------------------------------------------------------------------
+
+interface ActivityPanelProps {
+  activities: AttendanceActivity[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  adding: boolean;
+  deletingId?: string;
+  onAdd: (note: string) => void;
+  onDelete: (activityId: string) => void;
+}
+
+function ActivityPanel({
+  activities,
+  isLoading,
+  isError,
+  onRetry,
+  adding,
+  deletingId,
+  onAdd,
+  onDelete,
+}: ActivityPanelProps) {
+  const { t } = useTranslation('agent');
+  const [note, setNote] = useState('');
+  const trimmedValid = isValidNote(note);
+
+  function submit() {
+    if (!trimmedValid || adding) return;
+    onAdd(note);
+    setNote('');
+  }
+
+  return (
+    <section className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface">
+      <header className="flex items-center gap-2 border-border-soft border-b bg-surface-2 px-[18px] py-3.5">
+        <ClipboardList size={16} className="text-text-3" aria-hidden />
+        <h2 className="text-[15px] font-bold text-text">{t('activity.title')}</h2>
+      </header>
+
+      {/* Add-note row */}
+      <div className="flex items-end gap-2 border-border-soft border-b p-[18px]">
+        <Input
+          aria-label={t('activity.placeholder')}
+          placeholder={t('activity.placeholder')}
+          value={note}
+          maxLength={ACTIVITY_NOTE_MAX}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          disabled={adding}
+        />
+        <Button variant="primary" onClick={submit} disabled={!trimmedValid || adding}>
+          <Plus className="size-4" aria-hidden />
+          {t('activity.addBtn')}
+        </Button>
+      </div>
+
+      {/* List / states */}
+      {isLoading ? (
+        <div className="p-6">
+          <StateView kind="loading" title={t('loading')} />
+        </div>
+      ) : isError ? (
+        <div className="p-6">
+          <StateView kind="error" title={t('errorGeneric')} onRetry={onRetry} />
+        </div>
+      ) : activities.length === 0 ? (
+        <div className="p-6">
+          <StateView kind="empty" title={t('activity.empty')} />
+        </div>
+      ) : (
+        <ul className="divide-y divide-border-soft">
+          {activities.map((a) => (
+            <li key={a.id} className="flex items-center gap-3 px-[18px] py-3">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[13px] text-text">{a.note}</span>
+                <span className="text-[12px] tabular-nums text-text-3">
+                  {t('activity.recordedAt', {
+                    time: formatInstant(a.recorded_at, {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    }),
+                  })}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onDelete(a.id)}
+                disabled={deletingId === a.id}
+                aria-label={t('activity.delete')}
+                title={t('activity.delete')}
+              >
+                <Trash2 size={16} aria-hidden />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

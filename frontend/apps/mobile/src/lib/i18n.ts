@@ -163,6 +163,16 @@ const mobileCopy = {
       gpsUnavailable: 'Lokasi tidak tersedia. Coba lagi.',
       error: 'Gagal absen. Coba lagi.',
     },
+    activity: {
+      title: 'Aktivitas Shift',
+      add: 'Tambah',
+      placeholder: 'Apa yang kamu kerjakan? (mis. Patroli lantai 1)',
+      empty: 'Belum ada aktivitas. Catat apa yang kamu kerjakan.',
+      deleted: 'Aktivitas dihapus.',
+      required: 'Catat aktivitas dulu sebelum clock-out.',
+      addError: 'Gagal menambah aktivitas. Coba lagi.',
+      deleteError: 'Gagal menghapus aktivitas. Coba lagi.',
+    },
     attendance: {
       title: 'Kehadiran',
       historyTitle: 'Riwayat kehadiran',
@@ -845,6 +855,16 @@ const mobileCopy = {
       notIn: 'You are not clocked in.',
       gpsUnavailable: 'Location unavailable. Try again.',
       error: 'Clock action failed. Try again.',
+    },
+    activity: {
+      title: 'Shift Activity',
+      add: 'Add',
+      placeholder: 'What did you do? (e.g. Patrol floor 1)',
+      empty: 'No activity yet. Log what you did.',
+      deleted: 'Activity deleted.',
+      required: 'Log an activity before clocking out.',
+      addError: 'Failed to add activity. Try again.',
+      deleteError: 'Failed to delete activity. Try again.',
     },
     attendance: {
       title: 'Attendance',

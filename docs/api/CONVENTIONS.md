@@ -61,6 +61,7 @@ All resource IDs are **opaque strings** with the prefix `SWP-<ENTITY>-<NUMERIC>`
 | `SWP-SCH` | Schedule entry (one shift assigned to one agent on one date) | E4 |
 | `SWP-ATT` | Attendance record | E5 |
 | `SWP-COR` | Attendance correction request | E5 |
+| `SWP-ACT` | Attendance activity (note logged during a shift) | E5 |
 | `SWP-LR` | Leave Request | E6 |
 | `SWP-LG` | Leave Grant (one grant-lot in the per-employee leave ledger) | E6 |
 | `SWP-LC` | Leave Consumption (one lot drawn-down row, links a request to a grant) | E6 |

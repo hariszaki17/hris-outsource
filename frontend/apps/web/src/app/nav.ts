@@ -2,6 +2,7 @@ import type { Permission, Role } from '@swp/shared';
 import {
   Banknote,
   Building2,
+  Calendar,
   CalendarClock,
   ChartColumn,
   ClipboardCheck,
@@ -116,6 +117,8 @@ export const AGENT_NAV_ITEMS: readonly NavItem[] = [
   // today's shift and recent history. Pengajuan merges leave + overtime (request tabs). Akun merges
   // profile + payslip + tiered Ubah Profil. See docs/eng/AGENT-WEB-ACCESS.md + E2 employee-profile.md.
   { to: '/me', labelKey: 'nav.meKehadiran', icon: Fingerprint, requires: 'self.attendance' },
+  // Kalender (read-only): own shift/attendance/leave/overtime/holiday on one month grid (E10 F10.5).
+  { to: '/me/kalender', labelKey: 'nav.meKalender', icon: Calendar, requires: 'self.calendar' },
   {
     to: '/me/pengajuan',
     labelKey: 'nav.mePengajuan',
@@ -241,6 +244,7 @@ const ROUTE_REQUIREMENTS: readonly [RegExp, Requirement][] = [
   // per-feature paths are kept as guarded redirect routes (router.tsx) so bookmarks survive —
   // their requirements stay listed here so a denied deep link still resolves to /forbidden.
   [/^\/me\/pengajuan/, { anyOf: ['self.leave', 'self.overtime'] }],
+  [/^\/me\/kalender/, 'self.calendar'],
   [/^\/me\/akun/, 'self.profile'],
   [/^\/me\/attendance/, 'self.attendance'],
   [/^\/me\/correction/, 'self.attendance'],

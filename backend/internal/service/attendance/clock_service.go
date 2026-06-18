@@ -54,10 +54,10 @@ type PlacementInfo struct {
 // ClockInParams is the decoded clock-in body (agent is always self; employee_id from
 // the request is ignored).
 type ClockInParams struct {
-	Lat                  float64
-	Lng                  float64
-	GPSAvailable         bool
-	WFO                  bool
+	Lat          float64
+	Lng          float64
+	GPSAvailable bool
+	WFO          bool
 	// Mode is where the clock event is captured (migr. 00067): "ONSITE" (default,
 	// geofenced) | "REMOTE" (work-from-home / off-site, geofence skipped).
 	Mode string
@@ -138,6 +138,10 @@ type ClockRepository interface {
 	// found=false (no error) when a concurrent clock-out already closed it.
 	AutoCloseAttendance(ctx context.Context, tx pgx.Tx, p AutoCloseRow) (id string, found bool, err error)
 	GetAttendance(ctx context.Context, id string) (att.Attendance, error)
+	// CountActivities returns the count of non-deleted activities on a record —
+	// the agent clock-out gate (AA-7 / INV-7). Auto-close + manual entry are exempt
+	// and never call this.
+	CountActivities(ctx context.Context, attendanceID string) (int64, error)
 }
 
 // AutoCloseRow is the UPDATE payload for auto-closing one stale open record (in-tx).
@@ -328,18 +332,18 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 	}
 
 	row := ClockInRow{
-		EmployeeID:         employeeID,
-		PlacementID:        pl.PlacementID,
-		ScheduleID:         schedulePtr,
-		CompanyID:          pl.CompanyID,
-		SiteID:             pl.SiteID,
-		Position:           pl.Position,
-		ShiftStartAt:       shiftStartPtr,
-		ShiftEndAt:         shiftEndPtr,
-		CheckInAt:          now,
-		LatIn:              req.Lat,
-		LngIn:              req.Lng,
-		PhotoInID:          req.PhotoID,
+		EmployeeID:   employeeID,
+		PlacementID:  pl.PlacementID,
+		ScheduleID:   schedulePtr,
+		CompanyID:    pl.CompanyID,
+		SiteID:       pl.SiteID,
+		Position:     pl.Position,
+		ShiftStartAt: shiftStartPtr,
+		ShiftEndAt:   shiftEndPtr,
+		CheckInAt:    now,
+		LatIn:        req.Lat,
+		LngIn:        req.Lng,
+		PhotoInID:    req.PhotoID,
 		// Back-compat: wfo mirrors the mode (ONSITE ⇒ at the work site).
 		WFO:                mode == "ONSITE",
 		Mode:               mode,
@@ -472,6 +476,19 @@ func (s *ClockService) ClockOut(ctx context.Context, req ClockOutParams) (att.At
 	rec, err := s.repo.GetAttendance(ctx, openID)
 	if err != nil {
 		return att.Attendance{}, apperr.Internal(err)
+	}
+
+	// Activity gate (AA-7 / INV-7): an AGENT clock-out is blocked unless the open
+	// record has >=1 non-deleted activity. This is the agent self clock-out path only
+	// — system auto-close (autoCloseStale / F5.2) and HR/leader manual entry (F5.6) are
+	// exempt and never reach here. Read before the clock-out tx so a racing add/delete
+	// resolves on the persisted count (C-12).
+	activityCount, cerr := s.repo.CountActivities(ctx, openID)
+	if cerr != nil {
+		return att.Attendance{}, apperr.Internal(cerr)
+	}
+	if activityCount < 1 {
+		return att.Attendance{}, apperr.Rule("ACTIVITY_REQUIRED", map[string]string{"activity_count": "0"})
 	}
 
 	now := s.now()
