@@ -32,6 +32,7 @@ erDiagram
     PLACEMENT ||--o{ ATTENDANCE : "under"
     ATTENDANCE_CODE ||--o{ ATTENDANCE : "classified"
     ATTENDANCE ||--o{ ATTENDANCE_CORRECTION : "corrected by"
+    ATTENDANCE ||--o{ ATTENDANCE_ACTIVITY : "logged during"
 
     ATTENDANCE {
         bigint id PK
@@ -72,6 +73,15 @@ erDiagram
         bigint decided_by FK
         datetime decided_at
     }
+    ATTENDANCE_ACTIVITY {
+        bigint id PK "SWP-ACT-*"
+        bigint attendance_id FK
+        bigint employee_id FK "creator = the agent (scope self)"
+        text note "what the agent did (1..500 chars)"
+        datetime recorded_at "server-set capture time (Asia/Jakarta)"
+        datetime created_at
+        datetime deleted_at "soft-delete (agent may remove while shift open)"
+    }
 ```
 
 **Invariants:**
@@ -81,6 +91,7 @@ erDiagram
 - **INV-4:** if no clock-out by the scheduled shift end, the system **auto-clocks-out** at shift end, sets `auto_closed`, and marks the record `Pending` verification.
 - **INV-5:** **`Absent` is set only for a scheduled shift with no clock-in by shift end** — the record carries `check_in_at = null` (and no clock-in geofence). An `Absent` record is **resolvable via a `check_in` correction (F5.4)**, whose approval re-evaluates `status` (`Absent → Present/Late` per `shift_start_at` + grace). An approved leave suppresses `Absent` → `On Leave` (F5.2, E6).
 - **INV-6:** **`shift_start_at` is fixed at clock-in; `shift_end_at` tracks master edits until clock-out, then fixed** (see E4 INV-5; detail in F5.1 CI-9). INV-4's auto-close and F5.2's lateness/early evaluation always use the entry's current effective end until checkout.
+- **INV-7:** **an agent clock-out requires ≥1 activity** on the record (F5.8) — an open attendance with zero activities is **blocked** from agent clock-out (`422 ACTIVITY_REQUIRED`). This gates **agent self clock-out only**; **system auto-close (INV-4) and HR/leader manual entry (F5.6) are exempt** (they never block, so coverage is never lost). Activities are addable **anytime while the record is open** (from immediately after clock-in until clock-out).
 
 **Denormalization:** `company_id`, `site_id`, and `position` (free-text) are **denormalized onto `Attendance`** (resolved from the agent's placement → site/position) so the high-volume records list (F5.5) can **filter and scope by company · site · position** without a JOIN — the same pattern as `company_id` carried for leader scope.
 
@@ -95,6 +106,7 @@ erDiagram
 | **F5.5** | Attendance Records & Dashboard | [attendance-records.md](prds/attendance-records.md) |
 | **F5.6** | Manual Attendance Entry | [manual-attendance.md](prds/manual-attendance.md) |
 | **F5.7** | Attendance Auto-Reconcile (late-roster linking) | [attendance-auto-reconcile.md](prds/attendance-auto-reconcile.md) |
+| **F5.8** | Attendance Activity Log (clock-out gate) | [attendance-activity.md](prds/attendance-activity.md) |
 
 ## 6. Platform / clients
 
@@ -342,6 +354,39 @@ flowchart TD
 
 ---
 
+### F5.8 — Attendance Activity Log (clock-out gate)
+
+While a shift is open, the agent logs one or more **activities** — short free-text notes of what they
+did — onto their attendance record. Each activity captures a server-set **`recorded_at`** (when it was
+logged), so the day reads as a timestamped activity trail. An activity may be added **anytime the record
+is open**, from immediately after clock-in until clock-out. **Agent clock-out requires ≥1 activity**
+(INV-7): with zero activities the clock-out is rejected (`422 ACTIVITY_REQUIRED`) and the app prompts
+the agent to log what they did first. The agent may delete their own activity while the record is still
+open (mistake fix). Read-only after clock-out.
+
+```mermaid
+flowchart TD
+    subgraph AG[Agent - mobile / web]
+        A1([Clock in]) --> A2[Open record]
+        A2 --> A3([Log activity: note])
+        A3 --> A2
+        A2 --> A4([Tap Clock Out])
+    end
+    subgraph SYS[System]
+        A3 --> S1[Create AttendanceActivity + recorded_at = now]
+        S1 --> S2[(Persist + audit)]
+        A4 --> S3{Activity count >= 1?}
+        S3 -- No --> S4[Reject: 422 ACTIVITY_REQUIRED]
+        S3 -- Yes --> S5[Proceed clock-out F5.1]
+    end
+```
+
+**Entities:** `AttendanceActivity` (create/list/delete), `Attendance` (clock-out guard reads count).
+**Depends on:** F5.1 (clock-out), E1 (scope:self, audit). **Exempt:** auto-close (INV-4) and manual
+entry (F5.6) never require activities.
+
+---
+
 ## 7. Decisions & open questions
 
 **Resolved (2026-05-29):**
@@ -360,6 +405,12 @@ flowchart TD
 - ✅ **Leaders' own exceptions** → escalate to HR (no self-verify).
 - ✅ **Self-correction window** = 7 days (older = HR only).
 - ✅ **Anti-spoofing** = post-v1; early clock-out flagged if >15 min early.
+
+**Resolved (2026-06-18):**
+- ✅ **Attendance Activity Log (F5.8, INV-7)** — agents log timestamped free-text activities while a
+  shift is open; **agent clock-out requires ≥1 activity** (`422 ACTIVITY_REQUIRED`). System auto-close
+  and HR/leader manual entry are **exempt** (never block coverage). New entity `AttendanceActivity`
+  (`SWP-ACT-*`); `recorded_at` is server-set. Web + mobile. See [attendance-activity.md](prds/attendance-activity.md).
 
 **Resolved (2026-06-08):**
 - ✅ **Site & position denormalized onto `Attendance`** (alongside company) so the records list (F5.5) filters and scopes by **company · site · position** (position is free-text). *(Service-line denormalization dropped 2026-06-12; `position_id` FK → `position` free-text — service line and the position master removed project-wide.)*

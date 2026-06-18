@@ -19,6 +19,11 @@ type correctionCursor struct {
 	ID        string    `json:"i"`
 }
 
+type activityCursor struct {
+	RecordedAt time.Time `json:"r"`
+	ID         string    `json:"i"`
+}
+
 // encodeAttendanceCursor serializes the tail (check_in_at, id) to an opaque cursor.
 func encodeAttendanceCursor(checkInAt time.Time, id string) (string, error) {
 	return httpx.EncodeCursor(attendanceCursor{CheckInAt: checkInAt, ID: id})
@@ -53,4 +58,23 @@ func DecodeCorrectionCursor(cursor string) (*time.Time, *string, error) {
 		return nil, nil, err
 	}
 	return &c.CreatedAt, &c.ID, nil
+}
+
+// encodeActivityCursor serializes the tail (recorded_at, id) to an opaque cursor
+// (chronological recorded_at:asc keyset, AA-13).
+func encodeActivityCursor(recordedAt time.Time, id string) (string, error) {
+	return httpx.EncodeCursor(activityCursor{RecordedAt: recordedAt, ID: id})
+}
+
+// DecodeActivityCursor parses an opaque activity cursor into (recorded_at, id)
+// pointers (both nil on the first page / empty cursor).
+func DecodeActivityCursor(cursor string) (*time.Time, *string, error) {
+	if cursor == "" {
+		return nil, nil, nil
+	}
+	var c activityCursor
+	if err := httpx.DecodeCursor(cursor, &c); err != nil {
+		return nil, nil, err
+	}
+	return &c.RecordedAt, &c.ID, nil
 }

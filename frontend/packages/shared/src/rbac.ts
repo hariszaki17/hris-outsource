@@ -102,6 +102,9 @@ export const PERMISSIONS = [
   'self.overtime',
   'self.profile',
   'self.payslip',
+  // Read-only unified self-service calendar (web /me/kalender; E10 F10.5). Aggregates the
+  // employee's OWN shift/attendance/leave/overtime/holiday — scope: self, server-enforced.
+  'self.calendar',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -126,9 +129,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   // except approvals.bypass (force-approve is super-admin only). hr_admin keeps
   // approvals.template.manage + approvals.act. The filter retains the self.* keys, so an HR
   // admin can also reach the /me self-service surface (clock-in, leave, OT, payslip).
-  hr_admin: PERMISSIONS.filter(
-    (p) => p !== 'settings.roles.manage' && p !== 'approvals.bypass',
-  ),
+  hr_admin: PERMISSIONS.filter((p) => p !== 'settings.roles.manage' && p !== 'approvals.bypass'),
   // Company-scoped operational approver over a set of assigned client companies (2026-06-12).
   // Placement lifecycle (create/transfer/end/renew — not SLA, not master edits), schedule, and
   // attendance verification; sees the E11 inbox via approvals.act (acting is line-membership-gated
@@ -155,6 +156,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'self.overtime',
     'self.profile',
     'self.payslip',
+    'self.calendar',
   ],
   // On-site supervisor: their site's daily operation only. No clients, contracts, payroll,
   // reports, master data, or settings. Scope (their one company) is enforced server-side.
@@ -185,6 +187,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'self.overtime',
     'self.profile',
     'self.payslip',
+    'self.calendar',
   ],
   // Agent self-service (mobile + web console under /me/*). These `self.*` keys gate the agent's
   // OWN records; data scope is server-enforced (scope: self). See docs/eng/AGENT-WEB-ACCESS.md.
@@ -196,6 +199,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'self.overtime',
     'self.profile',
     'self.payslip',
+    'self.calendar',
   ],
 };
 

@@ -21,18 +21,21 @@ import {
   Clock3,
   House,
   Info,
+  ListChecks,
   LogIn,
   LogOut,
   type LucideIcon,
   MapPin,
   MapPinCheck,
   MapPinOff,
+  Plus,
   Settings,
+  Trash2,
   TriangleAlert,
 } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError } from '@swp/api-client';
@@ -43,13 +46,18 @@ import {
   useGetScheduleByAgent,
 } from '@swp/api-client/e4';
 import {
+  type ActivityPage,
   type Attendance,
+  type AttendanceActivity,
   type AttendancePage,
   type ClockInRequestMode,
   type UploadedFile,
   useClockIn,
   useClockOut,
+  useCreateAttendanceActivity,
+  useDeleteAttendanceActivity,
   useListAttendance,
+  useListAttendanceActivities,
   useUploadAttendancePhoto,
 } from '@swp/api-client/e5';
 import { color } from '@swp/design-tokens';
@@ -270,6 +278,50 @@ export default function AttendanceScreen() {
     await qc.invalidateQueries({ queryKey: ['/attendance'] });
   }
 
+  // ── Activity log (F5.8) ──────────────────────────────────────────────────────
+  // Free-text activity notes attached to the OPEN attendance record. Clock-out is
+  // gated on ≥1 activity (INV-7 / AA-7) — the server is the real gate; the client
+  // guard in doClockOut is UX only. The list endpoint is enabled only when a record
+  // is open (query disabled when id === '').
+  const openId = open?.id ?? '';
+  const activityQ = useListAttendanceActivities(openId, undefined, {
+    query: { enabled: !!openId },
+  });
+  const activityBody = activityQ.data?.data as ActivityPage | undefined;
+  const activities: AttendanceActivity[] = activityBody?.data ?? [];
+  const createActivityMut = useCreateAttendanceActivity();
+  const deleteActivityMut = useDeleteAttendanceActivity();
+  const [noteDraft, setNoteDraft] = useState('');
+
+  async function refreshActivities() {
+    if (!openId) return;
+    await qc.invalidateQueries({ queryKey: [`/attendance/${openId}/activities`] });
+  }
+
+  async function addActivity() {
+    const note = noteDraft.trim();
+    // AA-6: note required, 1..500. Empty/whitespace → no-op (server also rejects 400).
+    if (!openId || note.length === 0) return;
+    try {
+      await createActivityMut.mutateAsync({ id: openId, data: { note } });
+      setNoteDraft('');
+      await refreshActivities();
+    } catch {
+      Alert.alert(t('m:activity.title'), t('m:activity.addError'));
+    }
+  }
+
+  async function removeActivity(activityId: string) {
+    if (!openId) return;
+    try {
+      await deleteActivityMut.mutateAsync({ id: openId, activityId });
+      await refreshActivities();
+      Alert.alert(t('m:activity.title'), t('m:activity.deleted'));
+    } catch {
+      Alert.alert(t('m:activity.title'), t('m:activity.deleteError'));
+    }
+  }
+
   // Capture a live photo + upload it; returns the SWP-FILE-* id for clock-in, or null
   // if the user denied permission / cancelled (the screen then aborts the clock-in).
   // Caches the uploaded file in `photo` so a retried clock-in reuses it.
@@ -327,6 +379,13 @@ export default function AttendanceScreen() {
         Alert.alert(t('m:clock.title'), t('m:clock.notIn'));
         return;
       }
+      if (e.code === 'ACTIVITY_REQUIRED') {
+        // AA-7 / INV-7: server is the real gate (e.g. client list was stale or the
+        // last activity was deleted concurrently). Re-sync the list and prompt.
+        void refreshActivities();
+        Alert.alert(t('m:activity.title'), t('m:activity.required'));
+        return;
+      }
     }
     Alert.alert(t('m:clock.title'), t('m:clock.error'));
   }
@@ -374,6 +433,13 @@ export default function AttendanceScreen() {
   }
 
   async function doClockOut() {
+    // Client-side UX guard for the activity gate (AA-7 / INV-7). The server is the
+    // authoritative gate (422 ACTIVITY_REQUIRED handled in handleApiError); this just
+    // avoids a round-trip when we already know the open record has zero activities.
+    if (open && activities.length === 0) {
+      Alert.alert(t('m:activity.title'), t('m:activity.required'));
+      return;
+    }
     setBusy(true);
     try {
       const coords = await getCurrentCoords();
@@ -404,8 +470,7 @@ export default function AttendanceScreen() {
   // present (no leading/trailing separator).
   const placementCompany =
     open?.company_name ?? lastClosed?.company_name ?? myPlacement?.client_company_name ?? '';
-  const placementSite =
-    open?.site_name ?? lastClosed?.site_name ?? myPlacement?.site_name ?? '';
+  const placementSite = open?.site_name ?? lastClosed?.site_name ?? myPlacement?.site_name ?? '';
   const siteName: string = [placementCompany, placementSite].filter(Boolean).join(' · ');
   // Placement existence is authoritative from /me/placement, not inferred from a
   // label string (a clocked-out agent with no site_name still HAS a placement).
@@ -425,9 +490,7 @@ export default function AttendanceScreen() {
     // No schedule today (warn-tinted card). The "no schedule" warning is already
     // surfaced under the Clock In button, so here we just show the placement (no dot).
     shiftDotColor = color.warn.text; // #B54708
-    shiftLabelText = hasPlacement
-      ? siteName
-      : t('m:absen.noPlacement');
+    shiftLabelText = hasPlacement ? siteName : t('m:absen.noPlacement');
     shiftSite = '';
     shiftCardBg = color.warn.bg;
     shiftCardBorder = color.warn.border;
@@ -719,6 +782,7 @@ export default function AttendanceScreen() {
           </View>
         ) : (
           <Pressable
+            testID="clock-action"
             disabled={actionDisabled || pending}
             onPress={actionOnPress}
             className="flex-row items-center justify-center gap-3 rounded-card px-5 py-4"
@@ -773,6 +837,96 @@ export default function AttendanceScreen() {
             </View>
           ))}
         </View>
+
+        {/* ── Activity log (F5.8) — shown only while a record is open. List of notes
+            (note + recorded_at), an add row, and per-row delete (creator, while open).
+            Clock-out is gated on ≥1 activity (the guard lives in doClockOut). ──────── */}
+        {open ? (
+          <View
+            className="rounded-card border border-border bg-surface"
+            style={{ padding: 14, gap: 12 }}
+          >
+            <View className="flex-row items-center gap-2">
+              <ListChecks size={16} color={color.text2} />
+              <Text variant="strong" weight="bold" className="flex-1">
+                {t('m:activity.title')}
+              </Text>
+            </View>
+
+            {/* Add row: note input + Tambah */}
+            <View className="flex-row items-center gap-2">
+              <TextInput
+                testID="activity-input"
+                value={noteDraft}
+                onChangeText={setNoteDraft}
+                placeholder={t('m:activity.placeholder')}
+                placeholderTextColor={color.text3}
+                maxLength={500}
+                multiline
+                className="flex-1 rounded-input border border-border bg-app-bg px-3 py-2.5"
+                style={{ color: color.text, fontSize: 14, minHeight: 42 }}
+              />
+              <Pressable
+                testID="activity-add"
+                disabled={noteDraft.trim().length === 0 || createActivityMut.isPending}
+                onPress={() => void addActivity()}
+                className="flex-row items-center gap-1.5 rounded-input px-3.5 py-2.5"
+                style={{
+                  backgroundColor: color.primary,
+                  opacity: noteDraft.trim().length === 0 || createActivityMut.isPending ? 0.5 : 1,
+                }}
+              >
+                {createActivityMut.isPending ? (
+                  <ActivityIndicator size="small" color={color.surface} />
+                ) : (
+                  <Plus size={16} color={color.surface} />
+                )}
+                <Text variant="strong" style={{ color: color.surface }}>
+                  {t('m:activity.add')}
+                </Text>
+              </Pressable>
+            </View>
+
+            {/* List / empty / loading */}
+            {activityQ.isLoading ? (
+              <View className="items-center py-3">
+                <ActivityIndicator />
+              </View>
+            ) : activities.length === 0 ? (
+              <Text variant="caption" className="text-text-3">
+                {t('m:activity.empty')}
+              </Text>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {activities.map((a) => (
+                  <View
+                    key={a.id}
+                    testID={`activity-row-${a.id}`}
+                    className="flex-row items-start gap-2.5 rounded-input border border-border bg-app-bg px-3 py-2.5"
+                  >
+                    <View className="flex-1" style={{ gap: 2 }}>
+                      <Text variant="subtitle" weight="regular" style={{ fontSize: 14 }}>
+                        {a.note}
+                      </Text>
+                      <Text variant="caption" className="text-text-3">
+                        {formatInstant(a.recorded_at, { timeStyle: 'short' })}
+                      </Text>
+                    </View>
+                    <Pressable
+                      testID={`activity-delete-${a.id}`}
+                      disabled={deleteActivityMut.isPending}
+                      onPress={() => void removeActivity(a.id)}
+                      hitSlop={8}
+                      style={{ paddingTop: 1 }}
+                    >
+                      <Trash2 size={16} color={color.bad.text} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ) : null}
 
         {/* ── GPS unavailable → open settings (.pen: red outline, settings icon).
             Hidden in REMOTE (WFH) — GPS isn't required there. ──────────────────── */}

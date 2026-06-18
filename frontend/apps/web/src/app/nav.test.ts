@@ -149,17 +149,24 @@ describe('section sub-nav (sub-features live under their parent module)', () => 
 
 /**
  * Agent self-service backbone (`/me/*`; docs/eng/AGENT-WEB-ACCESS.md). The agent-console redesign
- * (2026-06-10) merged the old five per-feature items into THREE homes: Kehadiran (/me),
- * Pengajuan (/me/pengajuan), Akun (/me/akun). The old per-feature paths survive as guarded
- * redirect routes, so their route-level requirements must still resolve (a denied deep link goes
- * to /forbidden, never a broken render — defense-in-depth, ENGINEERING.md C1).
+ * (2026-06-10) merged the old five per-feature items into three homes: Kehadiran (/me),
+ * Pengajuan (/me/pengajuan), Akun (/me/akun). The read-only Kalender (/me/kalender, E10 F10.5,
+ * 2026-06-18) was added as a fourth item between Kehadiran and Pengajuan. The old per-feature
+ * paths survive as guarded redirect routes, so their route-level requirements must still resolve
+ * (a denied deep link goes to /forbidden, never a broken render — defense-in-depth, ENGINEERING.md C1).
  */
-describe('AGENT_NAV_ITEMS (agent self-service backbone, 3 merged homes)', () => {
-  it('is exactly the three merged homes in canvas order', () => {
-    expect(AGENT_NAV_ITEMS).toHaveLength(3);
-    expect(AGENT_NAV_ITEMS.map((i) => i.to)).toEqual(['/me', '/me/pengajuan', '/me/akun']);
+describe('AGENT_NAV_ITEMS (agent self-service backbone)', () => {
+  it('is exactly the self-service homes in canvas order', () => {
+    expect(AGENT_NAV_ITEMS).toHaveLength(4);
+    expect(AGENT_NAV_ITEMS.map((i) => i.to)).toEqual([
+      '/me',
+      '/me/kalender',
+      '/me/pengajuan',
+      '/me/akun',
+    ]);
     expect(AGENT_NAV_ITEMS.map((i) => i.labelKey)).toEqual([
       'nav.meKehadiran',
+      'nav.meKalender',
       'nav.mePengajuan',
       'nav.meAkun',
     ]);
@@ -172,10 +179,11 @@ describe('AGENT_NAV_ITEMS (agent self-service backbone, 3 merged homes)', () => 
     }
   });
 
-  it('agent permissions reveal all three homes; Pengajuan is anyOf(self.leave, self.overtime)', () => {
+  it('agent permissions reveal all homes; Pengajuan is anyOf(self.leave, self.overtime)', () => {
     const perms = permissionsForRole('agent');
     expect(visibleNav(AGENT_NAV_ITEMS, perms).map((i) => i.to)).toEqual([
       '/me',
+      '/me/kalender',
       '/me/pengajuan',
       '/me/akun',
     ]);

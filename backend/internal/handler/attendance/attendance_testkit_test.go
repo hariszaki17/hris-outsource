@@ -691,6 +691,92 @@ func (r *fakeCorrectionRepo) countPending(attendanceID string) (string, int) {
 var _ svc.CorrectionRepository = (*fakeCorrectionRepo)(nil)
 
 // ---------------------------------------------------------------------------
+// fakeActivityRepo — in-memory svc.ActivityRepository (F5.8 / SWP-ACT-*).
+//
+// Create appends a live row (recorded_at = a deterministic increasing clock so the
+// chronological list order is stable); List returns the live rows recorded_at asc;
+// SoftDeleteActivity marks the creator's own row deleted (rows-affected 0 → 404).
+// ---------------------------------------------------------------------------
+
+type fakeActivityRepo struct {
+	rows map[string]att.AttendanceActivity
+	seq  int
+}
+
+func newFakeActivityRepo() *fakeActivityRepo {
+	return &fakeActivityRepo{rows: map[string]att.AttendanceActivity{}}
+}
+
+func (r *fakeActivityRepo) CreateActivity(_ context.Context, _ pgx.Tx, p svc.CreateActivityParams) (att.AttendanceActivity, error) {
+	r.seq++
+	id := "SWP-ACT-" + strconv.Itoa(r.seq)
+	// Monotonic recorded_at so list order is deterministic across inserts.
+	rec := fixedNow.Add(time.Duration(r.seq) * time.Minute)
+	a := att.AttendanceActivity{
+		ID:           id,
+		AttendanceID: p.AttendanceID,
+		EmployeeID:   p.EmployeeID,
+		Note:         p.Note,
+		RecordedAt:   rec,
+		CreatedAt:    rec,
+	}
+	r.rows[id] = a
+	return a, nil
+}
+
+func (r *fakeActivityRepo) ListActivities(_ context.Context, f svc.ActivityFilter) ([]att.AttendanceActivity, error) {
+	var out []att.AttendanceActivity
+	for _, a := range r.rows {
+		if a.AttendanceID == f.AttendanceID {
+			out = append(out, a)
+		}
+	}
+	// recorded_at asc, id asc (chronological day trail — AA-13).
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RecordedAt.Equal(out[j].RecordedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].RecordedAt.Before(out[j].RecordedAt)
+	})
+	if f.CursorRecordedAt != nil && f.CursorID != nil {
+		var trimmed []att.AttendanceActivity
+		for _, a := range out {
+			if a.RecordedAt.After(*f.CursorRecordedAt) ||
+				(a.RecordedAt.Equal(*f.CursorRecordedAt) && a.ID > *f.CursorID) {
+				trimmed = append(trimmed, a)
+			}
+		}
+		out = trimmed
+	}
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
+}
+
+func (r *fakeActivityRepo) SoftDeleteActivity(_ context.Context, _ pgx.Tx, id, attendanceID, employeeID string) (int64, error) {
+	a, ok := r.rows[id]
+	if !ok || a.AttendanceID != attendanceID || a.EmployeeID != employeeID {
+		return 0, nil // not found / not owner → 404
+	}
+	delete(r.rows, id)
+	return 1, nil
+}
+
+// countLive counts the live activities on one attendance (the AA-7 gate basis).
+func (r *fakeActivityRepo) countLive(attendanceID string) int64 {
+	var n int64
+	for _, a := range r.rows {
+		if a.AttendanceID == attendanceID {
+			n++
+		}
+	}
+	return n
+}
+
+var _ svc.ActivityRepository = (*fakeActivityRepo)(nil)
+
+// ---------------------------------------------------------------------------
 // harness — mounts the real services + handler over the fakes.
 // ---------------------------------------------------------------------------
 
@@ -698,6 +784,7 @@ type harness struct {
 	router     *chi.Mux
 	attendance *fakeAttendanceRepo
 	correction *fakeCorrectionRepo
+	activity   *fakeActivityRepo
 	csvc       *svc.CorrectionService
 	idem       *stubIdempotency
 	principal  auth.Principal
@@ -710,19 +797,23 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 	t.Helper()
 	arepo := newFakeAttendanceRepo()
 	crepo := newFakeCorrectionRepo()
+	actrepo := newFakeActivityRepo()
 
 	asvc := svc.NewAttendanceService(arepo, &fakeTxRunner{})
 	asvc.SetClock(func() time.Time { return fixedNow })
 	csvc := svc.NewCorrectionService(crepo, arepo, &fakeTxRunner{})
 	csvc.SetClock(func() time.Time { return fixedNow })
 	csvc.SetApprovalEngine(fakeApprovalEngine{})
+	actsvc := svc.NewActivityService(actrepo, arepo, &fakeTxRunner{})
 
 	handler := attendancehandler.NewHandler(asvc, csvc)
+	activityHandler := attendancehandler.NewActivityHandler(actsvc)
 	idem := newStubIdempotency()
 
 	h := &harness{
 		attendance: arepo,
 		correction: crepo,
+		activity:   actrepo,
 		csvc:       csvc,
 		idem:       idem,
 		principal: auth.Principal{
@@ -750,6 +841,14 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent))
 		r.Get("/attendance", handler.ListAttendance)
 		r.Get("/attendance/{id}", handler.GetAttendance)
+		// F5.8 activity log read (AA-10).
+		r.Get("/attendance/{id}/activities", activityHandler.ListActivities)
+	})
+	// F5.8 activity log WRITES (scope:self) — agent-inclusive, idempotency-wrapped.
+	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
+		r.With(idem.Handler).Post("/attendance/{id}/activities", activityHandler.CreateActivity)
+		r.With(idem.Handler).Delete("/attendance/{id}/activities/{activityId}", activityHandler.DeleteActivity)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))

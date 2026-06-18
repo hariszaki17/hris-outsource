@@ -214,3 +214,10 @@ func (r *ClockRepo) GetAttendance(ctx context.Context, id string) (att.Attendanc
 	}
 	return mapAttendanceFromGet(row), nil
 }
+
+// CountActivities returns the count of non-deleted activities on a record — the agent
+// clock-out gate (AA-7 / INV-7). Reads on the pool; the clock service reads it before
+// the clock-out tx so a racing add/delete resolves on the persisted count (C-12).
+func (r *ClockRepo) CountActivities(ctx context.Context, attendanceID string) (int64, error) {
+	return r.q.CountActivitiesByAttendance(ctx, attendanceID)
+}

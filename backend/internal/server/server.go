@@ -58,6 +58,9 @@ type Deps struct {
 	Attendance *attendancehttp.Handler
 	// ATTENDANCE clock slice (F5.1): agent mobile clock-in/out (E5).
 	Clock *attendancehttp.ClockHandler
+	// ATTENDANCE activity log slice (F5.8 / SWP-ACT-*): agent logs free-text activity
+	// notes onto their own open record; clock-out is gated on >=1 activity (E5).
+	Activity *attendancehttp.ActivityHandler
 	// ATTENDANCE photo slice (F5.1 / CI-10): agent clock-in/out selfie upload (E5).
 	AttendancePhoto *attendancehttp.PhotoHandler
 	// LEAVE slice (08-02): approval state machine + quotas + calendar (E6).
@@ -425,6 +428,18 @@ func New(d Deps) http.Handler {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/attendance", d.Attendance.ListAttendance)
 				r.Get("/attendance/{id}", d.Attendance.GetAttendance)
+				// F5.8 — activity log read (AA-10): anyone who may read the parent
+				// attendance may list its activities; scope enforced in the service.
+				r.Get("/attendance/{id}/activities", d.Activity.ListActivities)
+			})
+
+			// F5.8 — activity log WRITES (scope:self). An agent logs/deletes activity
+			// notes on their OWN open record (employee_id derived from the token in the
+			// service). Own group so agents are admitted; idempotent per openapi.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin, auth.RoleLead))
+				r.With(d.Idempotency.Handler).Post("/attendance/{id}/activities", d.Activity.CreateActivity)
+				r.With(d.Idempotency.Handler).Delete("/attendance/{id}/activities/{activityId}", d.Activity.DeleteActivity)
 			})
 
 			// CLOCK-IN/OUT (F5.1, mobile, scope:self). Idempotent per openapi.
@@ -649,36 +664,36 @@ func New(d Deps) http.Handler {
 			})
 			// PAYROLL slice end (10-02). Phase 10+ appends after this line.
 
-				// ---------------------------------------------------------------
-				// PAYROLL PERIOD CLOSE slice (F8.5): the month-end reconciliation
-				// gate (PC-1..PC-15). Review/lock/reopen/raise-clarification =
-				// hr_admin + super_admin, global (PC-15). Force-lock + reopen are
-				// super_admin-only — enforced IN-SERVICE (the route admits both, the
-				// service rejects a non-super forced lock / reopen with 403).
-				// Clarification :answer is scope-checked in the service to the target
-				// (resolved SL/agent), so SL/lead/agent are admitted on that ONE route.
-				// chi matches the `:lock`/`:reopen`/`:answer`/`:resolve`/`:cancel`
-				// action suffixes natively.
-				// ---------------------------------------------------------------
-				r.Group(func(r chi.Router) {
-					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-					r.Get("/payroll-periods/{year}/{month}", d.PayrollPeriod.GetPeriod)
-					r.Get("/payroll-periods/{year}/{month}/completeness", d.PayrollPeriod.GetCompleteness)
-					r.Get("/payroll-periods/{year}/{month}/summary", d.PayrollPeriod.GetSummary)
-					r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:lock", d.PayrollPeriod.LockPeriod)
-					r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:reopen", d.PayrollPeriod.ReopenPeriod)
-					// Raise + close the clarification loop (HR).
-					r.With(d.Idempotency.Handler).Post("/clarifications", d.PayrollPeriod.RaiseClarification)
-					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:resolve", d.PayrollPeriod.ResolveClarification)
-					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:cancel", d.PayrollPeriod.CancelClarification)
-				})
-				// Clarification :answer — the target replies. All roles admitted; the
-				// service scope-checks to the resolved target (SL/agent) or HR/super.
-				r.Group(func(r chi.Router) {
-					r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
-					r.With(d.Idempotency.Handler).Post("/clarifications/{id}:answer", d.PayrollPeriod.AnswerClarification)
-				})
-				// PAYROLL PERIOD CLOSE slice end (F8.5). Phase 10+ appends after this line.
+			// ---------------------------------------------------------------
+			// PAYROLL PERIOD CLOSE slice (F8.5): the month-end reconciliation
+			// gate (PC-1..PC-15). Review/lock/reopen/raise-clarification =
+			// hr_admin + super_admin, global (PC-15). Force-lock + reopen are
+			// super_admin-only — enforced IN-SERVICE (the route admits both, the
+			// service rejects a non-super forced lock / reopen with 403).
+			// Clarification :answer is scope-checked in the service to the target
+			// (resolved SL/agent), so SL/lead/agent are admitted on that ONE route.
+			// chi matches the `:lock`/`:reopen`/`:answer`/`:resolve`/`:cancel`
+			// action suffixes natively.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Get("/payroll-periods/{year}/{month}", d.PayrollPeriod.GetPeriod)
+				r.Get("/payroll-periods/{year}/{month}/completeness", d.PayrollPeriod.GetCompleteness)
+				r.Get("/payroll-periods/{year}/{month}/summary", d.PayrollPeriod.GetSummary)
+				r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:lock", d.PayrollPeriod.LockPeriod)
+				r.With(d.Idempotency.Handler).Post("/payroll-periods/{year}/{month}:reopen", d.PayrollPeriod.ReopenPeriod)
+				// Raise + close the clarification loop (HR).
+				r.With(d.Idempotency.Handler).Post("/clarifications", d.PayrollPeriod.RaiseClarification)
+				r.With(d.Idempotency.Handler).Post("/clarifications/{id}:resolve", d.PayrollPeriod.ResolveClarification)
+				r.With(d.Idempotency.Handler).Post("/clarifications/{id}:cancel", d.PayrollPeriod.CancelClarification)
+			})
+			// Clarification :answer — the target replies. All roles admitted; the
+			// service scope-checks to the resolved target (SL/agent) or HR/super.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead, auth.RoleAgent))
+				r.With(d.Idempotency.Handler).Post("/clarifications/{id}:answer", d.PayrollPeriod.AnswerClarification)
+			})
+			// PAYROLL PERIOD CLOSE slice end (F8.5). Phase 10+ appends after this line.
 
 			// ---------------------------------------------------------------
 			// E10 REPORTING slice — NOTIFICATIONS (11-02). The caller's in-app

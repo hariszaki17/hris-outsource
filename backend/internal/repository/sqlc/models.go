@@ -126,6 +126,16 @@ type Attendance struct {
 	Mode               string
 }
 
+type AttendanceActivity struct {
+	ID           string
+	AttendanceID string
+	EmployeeID   string
+	Note         string
+	RecordedAt   time.Time
+	CreatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
 type AttendanceCode struct {
 	ID                string
 	Code              string

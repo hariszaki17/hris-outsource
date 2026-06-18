@@ -66,6 +66,7 @@ erDiagram
 | **F10.2** | Role-Based Dashboards | [dashboards.md](prds/dashboards.md) |
 | **F10.3** | Attendance & Billable-Hours Report | [attendance-billable-report.md](prds/attendance-billable-report.md) |
 | **F10.4** | Export Framework | [export-framework.md](prds/export-framework.md) |
+| **F10.5** | Agent Web Calendar (`/me/calendar`) | [agent-calendar.md](prds/agent-calendar.md) |
 
 ## 6. Platform / clients
 
@@ -175,6 +176,34 @@ flowchart TD
 
 ---
 
+### F10.5 — Agent Web Calendar (`/me/calendar`)
+
+A **read-only** month calendar on the web self-service console that overlays an employee's **own**
+shifts (E4), attendance (E5), leave/cuti (E6), overtime/lembur (E7), and the applicable **public
+holidays** (E7 `HolidayCalendar`) on one grid, color-coded by the design-system status map. It creates
+no records — every event deep-links to its existing detail surface. Scope:self. **Web only — the mobile
+`Jadwal` (F4.3) is untouched.**
+
+```mermaid
+flowchart TD
+    subgraph U[Employee]
+        K1([Open /me/calendar]) --> K2[Pick month / select day]
+        K2 --> K5{Tap an event?}
+    end
+    subgraph SYS[System]
+        K2 --> Q1[Fetch month window, scope self]
+        Q1 --> Q2[Overlay shift, attendance, leave, overtime, holiday]
+        Q2 --> Q3[Color-code via status map + day agenda panel]
+        K5 -- Yes --> Q4[Deep-link to existing detail: schedule / leave / overtime / attendance]
+    end
+```
+
+**Entities:** read projections across E4–E7 (`Schedule`, `Attendance`, `Leave`, `OvertimeRecord`,
+`HolidayCalendar`). **No new entity.** **Depends on:** E4, E5, E6, E7 (data), E1 (scope:self),
+AGENT-WEB-ACCESS (the `/me/*` surface, `self.*` baseline keys, AW-6 design deviation).
+
+---
+
 ## 7. Decisions & open questions
 
 **Resolved (2026-05-29):**
@@ -192,5 +221,13 @@ flowchart TD
 - ✅ **Super Admin dashboard = HR cockpit superset** (DB-7) — adds an admin-only widget section (users & access, recent audit feed, org rollups by position, pending grants) on `HrDashboard.admin`, present only for `super_admin`. Extends the earlier "same body, distinct label" stance into a true superset.
 - ✅ **Shift-leader dashboard is dual-surface** (DB-8) — the existing `LeaderDashboard` payload backs both the web team dashboard and a mobile Beranda; no new endpoint.
 
+**Resolved (2026-06-18):**
+- ✅ **F10.5 Agent Web Calendar** added — a **read-only** `/me/calendar` month view overlaying own
+  shift/attendance/leave/overtime/holiday, scope:self, **web only** (mobile `Jadwal` F4.3 untouched).
+  New baseline key `self.calendar`; no new entity; follows the AW-6 G0 deviation (no `.pen` frame for
+  `/me/*` web screens). See [agent-calendar.md](prds/agent-calendar.md).
+
 **Deferred to build/tech phase:**
 1. Push provider (FCM/APNs) setup + reminder lead times.
+2. F10.5: holiday read-endpoint scope (self vs HR-only today) and aggregation strategy (client merge
+   vs `GET /calendar/me`).
