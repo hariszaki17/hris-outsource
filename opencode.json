@@ -1,0 +1,163 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "model": "deepseek/deepseek-v4-pro",
+  "small_model": "deepseek/deepseek-v4-flash",
+
+  "provider": {
+    "deepseek": {
+      "models": {
+        "deepseek-v4-pro": {
+          "options": {
+            "thinking": { "type": "enabled" },
+            "reasoning_effort": "max"
+          },
+          "variants": {
+            "think-max": {
+              "thinking": { "type": "enabled" },
+              "reasoning_effort": "max"
+            },
+            "think-high": {
+              "thinking": { "type": "enabled" },
+              "reasoning_effort": "high"
+            },
+            "no-think": {
+              "thinking": { "type": "disabled" }
+            }
+          }
+        },
+        "deepseek-v4-flash": {
+          "options": {
+            "thinking": { "type": "disabled" }
+          },
+          "variants": {
+            "think": {
+              "thinking": { "type": "enabled" },
+              "reasoning_effort": "high"
+            },
+            "fast": {
+              "thinking": { "type": "disabled" }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "agent": {
+    "plan": {
+      "model": "deepseek/deepseek-v4-flash:think",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": {
+          "*": "allow",
+          "spec-editor": "allow",
+          "explore": "allow"
+        }
+      }
+    },
+
+    "build": {
+      "model": "deepseek/deepseek-v4-pro:think-max",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow",
+        "task": {
+          "*": "allow",
+          "code-reviewer": "allow",
+          "docs-writer": "allow",
+          "spec-editor": "allow",
+          "explore": "allow",
+          "general": "allow"
+        }
+      }
+    },
+
+    "explore": {
+      "model": "deepseek/deepseek-v4-flash:fast",
+      "temperature": 0.0
+    },
+
+    "general": {
+      "model": "deepseek/deepseek-v4-flash:think",
+      "temperature": 0.1
+    },
+
+    "code-reviewer": {
+      "description": "Reviews diffs for bugs, security, invariants, and spec compliance. Mirrors cavecrew-reviewer + gsd-code-review. Use after every build step.",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-pro:think-high",
+      "temperature": 0.0,
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "grep*": "allow"
+        }
+      },
+      "color": "#eab308"
+    },
+
+    "docs-writer": {
+      "description": "Writes and updates documentation, README, CHANGELOG, API docs. Mirrors gsd-docs-update. Use for all doc tasks.",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash:fast",
+      "temperature": 0.0,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow",
+          "git log*": "allow"
+        }
+      },
+      "color": "#3b82f6"
+    },
+
+    "spec-editor": {
+      "description": "Authors and edits specs, PRDs, FEATURE docs, data-mappings. Follows CLAUDE.md doc conventions. Mirrors the former Opus role for spec work. Use for brainstorming, domain modeling, PRD writing.",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-pro:think-max",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow",
+          "git log*": "allow"
+        }
+      },
+      "color": "#22c55e"
+    },
+
+    "screen-builder": {
+      "description": "Generates React screens from brainstorm.pen frames following design-system tokens. Mirrors the Sonnet role for screen assembly. Use for screen generation tasks.",
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash:think",
+      "temperature": 0.0,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow"
+        }
+      },
+      "color": "#8b5cf6"
+    }
+  },
+
+  "instructions": [
+    "CLAUDE.md",
+    ".opencode/agents/*.md"
+  ],
+
+  "compaction": {
+    "auto": true,
+    "tail_turns": 2
+  }
+}
