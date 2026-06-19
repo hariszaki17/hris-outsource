@@ -1,0 +1,42 @@
+# Error-path login → wrong password shows the "invalid" error banner, stays on login.
+# Asserts the banner title (login.errorInvalidTitle, Bahasa default — src/lib/i18n.ts).
+appId: com.hariszaki17.swphris
+env:
+  EMAIL: agent.budi@swp.test
+  PASSWORD: wrong-password-000
+---
+- launchApp:
+    clearState: true
+# Dev-client only — see login.yaml for why. Skipped on standalone/release builds.
+- runFlow:
+    when:
+      visible: "Development Build"
+    commands:
+      - tapOn:
+          text: ".*:8081"
+      - extendedWaitUntil:
+          visible: "Continue"
+          timeout: 60000
+      - tapOn: "Continue"
+      - tapOn:
+          point: "50%,8%"
+- extendedWaitUntil:
+    visible:
+      id: "login-email"
+    timeout: 30000
+- tapOn:
+    id: "login-email"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "login-password"
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit"
+# 401 → banner. Default locale is Bahasa: "Email atau kata sandi salah".
+- extendedWaitUntil:
+    visible: "Email atau kata sandi salah"
+    timeout: 15000
+# Still on the login screen (no redirect).
+- assertVisible:
+    id: "login-submit"

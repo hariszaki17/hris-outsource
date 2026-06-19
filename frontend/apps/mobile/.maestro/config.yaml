@@ -1,0 +1,4 @@
+# Maestro test-suite config. `maestro test .maestro` picks this up.
+# Runs every flow under flows/ unless you pass a specific file.
+flows:
+  - flows/*.yaml

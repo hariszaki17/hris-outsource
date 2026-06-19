@@ -169,6 +169,7 @@ export default function Login() {
             {/* Form */}
             <View className="gap-3.5">
               <TextField
+                testID="login-email"
                 label={t('m:login.emailLabel')}
                 value={identifier}
                 onChangeText={setIdentifier}
@@ -182,6 +183,7 @@ export default function Login() {
               </TextField>
 
               <TextField
+                testID="login-password"
                 label={t('m:login.passwordLabel')}
                 value={password}
                 onChangeText={setPassword}
@@ -218,6 +220,7 @@ export default function Login() {
                   </Pressable>
 
                   <Button
+                    testID="login-submit"
                     label={t('m:login.submit')}
                     onPress={() => void onSubmit()}
                     loading={login.isPending}

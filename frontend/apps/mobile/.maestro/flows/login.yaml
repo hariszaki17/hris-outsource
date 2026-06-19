@@ -1,0 +1,51 @@
+# Happy-path login → lands on the agent Beranda (Absen / clock-in) screen.
+# Anchors: testIDs added in app/(auth)/login.tsx (login-email/password/submit)
+# and the clock button (clock-action) in app/(app)/attendance.tsx.
+#
+# Requires: Go API reachable at EXPO_PUBLIC_API_BASE_URL + seeded agent persona
+# (backend/cmd/seed). Override creds with --env on the CLI for other personas.
+#
+# NOTE: appId is the dev-build / standalone bundle id. Maestro does NOT interpolate
+# env vars in this field, so it is hardcoded. For Expo Go, change to host.exp.Exponent.
+appId: com.hariszaki17.swphris
+env:
+  EMAIL: agent.budi@swp.test
+  PASSWORD: Ag3nt-Budi-2026!
+---
+- launchApp:
+    clearState: true
+# Dev-client only: clearState drops to the Expo dev-launcher + the first-run dev menu.
+# Pick the Metro server, wait for the JS bundle, dismiss the dev menu. A standalone /
+# release build shows none of this, so the whole block is skipped.
+- runFlow:
+    when:
+      visible: "Development Build"
+    commands:
+      - tapOn:
+          text: ".*:8081"
+      - extendedWaitUntil:
+          visible: "Continue"
+          timeout: 60000
+      - tapOn: "Continue"
+      # "Continue" closes the intro tooltip but leaves the dev-menu sheet open
+      # underneath — tap the dimmed area above it to dismiss.
+      - tapOn:
+          point: "50%,8%"
+- extendedWaitUntil:
+    visible:
+      id: "login-email"
+    timeout: 30000
+- tapOn:
+    id: "login-email"
+- inputText: ${EMAIL}
+- tapOn:
+    id: "login-password"
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn:
+    id: "login-submit"
+# Auth round-trips the API → wait for the home (Absen) screen's clock button.
+- extendedWaitUntil:
+    visible:
+      id: "clock-action"
+    timeout: 15000
