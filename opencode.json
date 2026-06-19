@@ -4,6 +4,8 @@
   "model": "deepseek/deepseek-v4-pro",
   "small_model": "deepseek/deepseek-v4-flash",
 
+  "lsp": true,
+
   "provider": {
     "deepseek": {
       "models": {
