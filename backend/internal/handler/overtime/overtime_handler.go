@@ -96,22 +96,6 @@ func (h *Handler) GetOvertime(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, dataResponse[overtimeResponse]{Data: toOvertimeResponse(rec, calc, true)})
 }
 
-// Confirm handles POST /overtime/{id}:confirm (optional note).
-func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req noteRequest
-	if err := decodeOptionalJSON(r, &req); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	rec, calc, err := h.overtime.Confirm(r.Context(), id, req.Note)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, dataResponse[overtimeResponse]{Data: toOvertimeResponse(rec, calc, true)})
-}
-
 // Withdraw handles POST /overtime/{id}:withdraw (no body, 204).
 func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -120,5 +104,31 @@ func (h *Handler) Withdraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AggregateOvertime handles GET /overtime:aggregate. Returns APPROVED OT totals
+// grouped by agent or day_type, scoped by company and date range.
+func (h *Handler) AggregateOvertime(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	groupBy := q.Get("group_by")
+	if groupBy == "" {
+		groupBy = "agent"
+	}
+	p := svc.AggregateParams{
+		CompanyID: strPtrParam(q.Get("company_id")),
+		DateFrom:  parseDateParam(q.Get("date_from")),
+		DateTo:    parseDateParam(q.Get("date_to")),
+		GroupBy:   groupBy,
+	}
+	rows, err := h.overtime.Aggregate(r.Context(), p)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items := make([]aggregateResponse, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toAggregateResponse(row))
+	}
+	httpx.WriteJSON(w, http.StatusOK, dataResponse[[]aggregateResponse]{Data: items})
 }
 

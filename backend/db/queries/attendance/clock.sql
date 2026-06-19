@@ -8,6 +8,9 @@
 -- TZ layer); cross_midnight adds a day to the end. `make gen` writes
 -- internal/repository/sqlc (NEVER hand-edit).
 
+-- name: GetDefaultAttendanceCode :one
+SELECT id, code, name FROM attendance_codes WHERE code = $1 AND status = 'ACTIVE' AND deleted_at IS NULL LIMIT 1;
+
 -- name: GetOpenAttendanceForEmployee :one
 -- The caller's currently-open record (clocked in, not yet clocked out). Drives
 -- ALREADY_CLOCKED_IN (clock-in) / NOT_CLOCKED_IN (clock-out). Most-recent first so a
@@ -59,7 +62,7 @@ INSERT INTO attendance (
     check_in_at, lat_in, lng_in, photo_in_id,
     wfo, is_late, late_minutes,
     in_geofence, in_distance_m, geofence_radius_m,
-    status, verification_status, flags, mode
+    status, verification_status, flags, mode, attendance_code_id
 )
 VALUES (
     sqlc.arg(employee_id), sqlc.arg(placement_id), sqlc.arg(schedule_id),
@@ -69,7 +72,7 @@ VALUES (
     sqlc.arg(check_in_at), sqlc.arg(lat_in), sqlc.arg(lng_in), sqlc.arg(photo_in_id),
     sqlc.arg(wfo), sqlc.arg(is_late), sqlc.arg(late_minutes),
     sqlc.arg(in_geofence), sqlc.arg(in_distance_m), sqlc.arg(geofence_radius_m),
-    sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags), sqlc.arg(mode)
+    sqlc.arg(status), sqlc.arg(verification_status), sqlc.arg(flags), sqlc.arg(mode), sqlc.narg(attendance_code_id)
 )
 ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
 DO NOTHING

@@ -53,11 +53,11 @@ LIMIT 1;
 INSERT INTO attendance_corrections (
     attendance_id, work_date, requester_id, company_id, type,
     proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
-    reason, evidence_file_id, attendance_shift_date, status
+    reason, evidence_file_id, attendance_shift_date, status, original_snapshot
 ) VALUES (
     sqlc.narg(attendance_id), sqlc.narg(work_date), sqlc.arg(requester_id), sqlc.arg(company_id), sqlc.arg(type),
     sqlc.narg(proposed_check_in_at), sqlc.narg(proposed_check_out_at), sqlc.narg(proposed_attendance_code_id),
-    sqlc.arg(reason), sqlc.narg(evidence_file_id), sqlc.arg(attendance_shift_date), 'PENDING'
+    sqlc.arg(reason), sqlc.narg(evidence_file_id), sqlc.arg(attendance_shift_date), 'PENDING', sqlc.narg(original_snapshot)::jsonb
 )
 RETURNING id;
 
@@ -114,6 +114,11 @@ RETURNING id, attendance_id, work_date, requester_id, company_id, type,
           proposed_check_in_at, proposed_check_out_at, proposed_attendance_code_id,
           reason, evidence_file_id, status, approval_instance_id, decided_by, decided_at,
           reject_reason, original_snapshot, attendance_shift_date, created_at, updated_at;
+
+-- name: CancelCorrection :execrows
+UPDATE attendance_corrections
+SET status='CANCELLED', decided_by=$2, decided_at=NOW(), reject_reason=$3, updated_at=NOW()
+WHERE id=$1 AND status='PENDING' AND deleted_at IS NULL;
 
 -- name: RejectCorrection :one
 -- Reject a PENDING correction (reason from the E11 approval action). Same PENDING guard.

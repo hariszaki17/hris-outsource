@@ -51,6 +51,12 @@ type transferRequest struct {
 	TransferNote       *string `json:"transfer_note"`
 }
 
+// endPlacementRequest is the body of POST /placements/{id}:end.
+type endPlacementRequest struct {
+	Reason        string  `json:"reason"`
+	EffectiveDate *string `json:"effective_date"`
+}
+
 // --- response DTOs ---
 
 // placementResponse is the openapi Placement object (snake_case, nullable

@@ -27,6 +27,7 @@ type CompanyRepository interface {
 	ListClientCompanies(ctx context.Context, f domain.CompanyFilter) ([]domain.ClientCompany, error)
 	GetCompanyByID(ctx context.Context, id string) (domain.ClientCompany, error)
 	CountActiveSitesForCompany(ctx context.Context, companyID string) (int64, error)
+	CountActivePlacementsForCompany(ctx context.Context, companyID string) (int, error)
 	// Client company writes take the active transaction.
 	CreateCompany(ctx context.Context, tx pgx.Tx, p CreateCompanyParams) (domain.ClientCompany, error)
 	UpdateCompany(ctx context.Context, tx pgx.Tx, p UpdateCompanyParams) (domain.ClientCompany, error)
@@ -34,6 +35,7 @@ type CompanyRepository interface {
 	// Site reads run on the pool.
 	ListSitesForCompany(ctx context.Context, companyID string, f domain.SiteFilter) ([]domain.Site, error)
 	GetSiteByID(ctx context.Context, id string) (domain.Site, error)
+	CountActivePlacementsForSite(ctx context.Context, siteID string) (int, error)
 	// Site writes take the active transaction.
 	CreateSite(ctx context.Context, tx pgx.Tx, p CreateSiteParams) (domain.Site, error)
 	UpdateSite(ctx context.Context, tx pgx.Tx, p UpdateSiteParams) (domain.Site, error)
@@ -288,8 +290,8 @@ func (s *Service) UpdateClientCompany(ctx context.Context, p UpdateCompanyParams
 }
 
 // DeactivateClientCompany sets a company to inactive.
-// CC-5: active-placement guard — Phase 3 has no placements so active_placement_count=0,
-// the guard never trips. TODO(Phase-5): return COMPANY_HAS_ACTIVE_PLACEMENTS when count>0 && !force.
+// CC-5: active-placement guard — rejects with 409 COMPANY_HAS_ACTIVE_PLACEMENTS
+// when the company still has active/expiring/pending-start placements.
 func (s *Service) DeactivateClientCompany(ctx context.Context, id, reason string, force bool) (domain.ClientCompany, error) {
 	current, err := s.repo.GetCompanyByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -302,7 +304,14 @@ func (s *Service) DeactivateClientCompany(ctx context.Context, id, reason string
 		return domain.ClientCompany{}, apperr.Conflict("CONFLICT")
 	}
 
-	// TODO(Phase-5): check active_placement_count > 0; if !force return COMPANY_HAS_ACTIVE_PLACEMENTS.
+	count, err := s.repo.CountActivePlacementsForCompany(ctx, id)
+	if err != nil {
+		return domain.ClientCompany{}, apperr.Internal(err)
+	}
+	if count > 0 && !force {
+		return domain.ClientCompany{}, apperr.ConflictWithDetails("COMPANY_HAS_ACTIVE_PLACEMENTS",
+			nil, map[string]any{"active_placement_count": count})
+	}
 
 	var updated domain.ClientCompany
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
@@ -543,8 +552,8 @@ func (s *Service) UpdateSite(ctx context.Context, siteID string, p UpdateSitePar
 }
 
 // DeactivateSite sets a site to inactive.
-// ST-6: blocks if active placements exist (stubbed in Phase 3 — count=0 so guard never trips).
-// TODO(Phase-5): add SITE_HAS_ACTIVE_PLACEMENTS and SITE_IS_LAST_ACTIVE guards.
+// ST-6: blocks if active placements exist (409 SITE_HAS_ACTIVE_PLACEMENTS).
+// ST-7: blocks if this is the company's last active site (409 SITE_IS_LAST_ACTIVE).
 func (s *Service) DeactivateSite(ctx context.Context, id string) (domain.Site, error) {
 	current, err := s.repo.GetSiteByID(ctx, id)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -557,8 +566,22 @@ func (s *Service) DeactivateSite(ctx context.Context, id string) (domain.Site, e
 		return domain.Site{}, apperr.Conflict("CONFLICT")
 	}
 
-	// TODO(Phase-5): check active_placement_count > 0 → return SITE_HAS_ACTIVE_PLACEMENTS.
-	// TODO(Phase-5): check last active site → return SITE_IS_LAST_ACTIVE.
+	activeCount, err := s.repo.CountActivePlacementsForSite(ctx, id)
+	if err != nil {
+		return domain.Site{}, apperr.Internal(err)
+	}
+	if activeCount > 0 {
+		return domain.Site{}, apperr.ConflictWithDetails("SITE_HAS_ACTIVE_PLACEMENTS",
+			nil, map[string]any{"active_placement_count": activeCount})
+	}
+
+	activeSites, err := s.repo.CountActiveSitesForCompany(ctx, current.ClientCompanyID)
+	if err != nil {
+		return domain.Site{}, apperr.Internal(err)
+	}
+	if activeSites <= 1 {
+		return domain.Site{}, apperr.Conflict("SITE_IS_LAST_ACTIVE")
+	}
 
 	var updated domain.Site
 	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {

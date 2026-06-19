@@ -338,6 +338,14 @@ func (r *fakeCompanyRepo) SetSiteStatus(_ context.Context, _ pgx.Tx, id, status 
 	return s, nil
 }
 
+func (r *fakeCompanyRepo) CountActivePlacementsForCompany(_ context.Context, companyID string) (int, error) {
+	return 0, nil
+}
+
+func (r *fakeCompanyRepo) CountActivePlacementsForSite(_ context.Context, siteID string) (int, error) {
+	return 0, nil
+}
+
 // Compile-time interface check.
 var _ orgsvc.CompanyRepository = (*fakeCompanyRepo)(nil)
 
@@ -922,6 +930,16 @@ func TestDeactivateSite_200_Then_409(t *testing.T) {
 	companies := h.seedCompany(1)
 	companyID := companies[0].ID
 	site := h.seedSite(companyID)
+	// Add a second site so SITE_IS_LAST_ACTIVE guard doesn't block.
+	h.repo.addSite(domain.Site{
+		ID:              "SWP-SITE-002",
+		ClientCompanyID: companyID,
+		Name:            "Secondary Site",
+		Status:          "active",
+		IsPrimary:       false,
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	})
 
 	rr := h.do("POST", "/sites/"+site.ID+":deactivate", nil)
 	if rr.Code != http.StatusOK {

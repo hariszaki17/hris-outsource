@@ -125,3 +125,14 @@ func (h *Handler) GetCorrection(w http.ResponseWriter, r *http.Request) {
 // opens an E11 approval_instance on submit (request_type=CORRECTION); decisions go through
 // POST /approval-instances/{id}:approve|:reject, which fire CorrectionService.OnApproved /
 // OnRejected on the engine's terminal transition.
+
+// CancelCorrection handles POST /corrections/{id}:cancel (agent self-cancel).
+func (h *Handler) CancelCorrection(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	cor, err := h.corrections.Cancel(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, dataResponse[correctionResponse]{Data: toCorrectionResponse(cor)})
+}

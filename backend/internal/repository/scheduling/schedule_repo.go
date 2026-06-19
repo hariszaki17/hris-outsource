@@ -129,20 +129,62 @@ func (r *ScheduleRepo) ListSchedule(ctx context.Context, f domain.ScheduleFilter
 // ListScheduleByAgent returns one agent's schedule across ALL their placements
 // for the date window (F4.3 "Jadwal Saya"). No company filter — by-agent spans
 // companies; scope is enforced upstream in the service.
+// Uses raw SQL so site/geo columns are available before make gen regenerates the
+// sqlc ListScheduleByAgentRow type.
 func (r *ScheduleRepo) ListScheduleByAgent(ctx context.Context, employeeID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
-	rows, err := r.q.ListScheduleByAgent(ctx, sqlcgen.ListScheduleByAgentParams{
-		EmployeeID: employeeID,
-		StartDate:  timeToPgDate(start),
-		EndDate:    timeToPgDate(end),
-	})
+	rows, err := r.pool.Pool.Query(ctx,
+		`SELECT se.id, se.employee_id, se.placement_id,
+		        se.shift_master_id, se.start_time, se.end_time, se.cross_midnight,
+		        se.work_date, se.status, se.is_day_off, se.replaced_entry_id,
+		        se.created_by, se.created_at, se.updated_at,
+		        e.full_name AS employee_name,
+		        p.client_company_id AS company_id,
+		        c.name AS company_name,
+		        sm.name AS shift_master_name,
+		        cs.id AS site_id,
+		        cs.name AS site_name,
+		        cs.geo_lat AS site_geo_lat,
+		        cs.geo_lng AS site_geo_lng
+		 FROM schedule_entries se
+		 JOIN placements p             ON p.id  = se.placement_id
+		 LEFT JOIN client_companies c  ON c.id  = p.client_company_id
+		 LEFT JOIN employees e         ON e.id  = se.employee_id
+		 LEFT JOIN shift_masters sm    ON sm.id = se.shift_master_id
+		 LEFT JOIN client_sites cs     ON cs.id = p.site_id
+		 WHERE se.deleted_at IS NULL
+		   AND se.employee_id = $1
+		   AND se.work_date BETWEEN $2 AND $3
+		 ORDER BY se.work_date ASC, se.start_time ASC, se.id ASC`,
+		employeeID, start, end,
+	)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]domain.ScheduleEntry, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, mapScheduleFromByAgent(row))
+	defer rows.Close()
+	var out []domain.ScheduleEntry
+	for rows.Next() {
+		var e domain.ScheduleEntry
+		var wo time.Time
+		if err := rows.Scan(
+			&e.ID, &e.EmployeeID, &e.PlacementID,
+			&e.ShiftMasterID, &e.StartTime, &e.EndTime, &e.CrossMidnight,
+			&wo, &e.Status, &e.IsDayOff, &e.ReplacedEntryID,
+			&e.CreatedBy, &e.CreatedAt, &e.UpdatedAt,
+			&e.EmployeeName,
+			&e.CompanyID,
+			&e.CompanyName,
+			&e.ShiftMasterName,
+			&e.SiteID,
+			&e.SiteName,
+			&e.SiteGeoLat,
+			&e.SiteGeoLng,
+		); err != nil {
+			return nil, err
+		}
+		e.WorkDate = wo
+		out = append(out, e)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // GetActivePlacementCompanyForEmployee resolves the company an agent is currently
@@ -211,6 +253,53 @@ func (r *ScheduleRepo) UpdateScheduleEntry(ctx context.Context, tx pgx.Tx, p svc
 
 func (r *ScheduleRepo) SoftDeleteScheduleEntry(ctx context.Context, tx pgx.Tx, id string) (int64, error) {
 	return r.q.WithTx(tx).SoftDeleteScheduleEntry(ctx, id)
+}
+
+// CancelFutureSchedulesForEmployee cancels all future live schedule entries for an
+// employee after a given date. Used by the placement service on :end to clear the
+// agent's future roster.
+func (r *ScheduleRepo) CancelFutureSchedulesForEmployee(ctx context.Context, tx pgx.Tx, employeeID string, afterDate time.Time) error {
+	_, err := r.pool.Pool.Exec(ctx,
+		`UPDATE schedule_entries SET status = 'CANCELLED', updated_at = now()
+		 WHERE employee_id = $1 AND work_date > $2::date
+		   AND status IN ('SCHEDULED', 'OFF') AND deleted_at IS NULL`,
+		employeeID, afterDate,
+	)
+	return err
+}
+
+// ListScheduleForAggregate returns schedule entries for a company over a date range
+// with employee and shift names for aggregation.
+func (r *ScheduleRepo) ListScheduleForAggregate(ctx context.Context, companyID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	rows, err := r.pool.Pool.Query(ctx,
+		`SELECT se.id, se.employee_id, se.shift_master_id, se.work_date, se.start_time, se.end_time,
+		        se.status, se.is_day_off,
+		        e.full_name AS employee_name,
+		        sm.name AS shift_name
+		 FROM schedule_entries se
+		 LEFT JOIN employees e ON e.id = se.employee_id
+		 LEFT JOIN shift_masters sm ON sm.id = se.shift_master_id
+		 WHERE se.company_id = $1
+		   AND se.work_date BETWEEN $2 AND $3
+		   AND se.deleted_at IS NULL
+		 ORDER BY se.work_date, se.start_time`,
+		companyID, start, end,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ScheduleEntry
+	for rows.Next() {
+		var e domain.ScheduleEntry
+		if err := rows.Scan(&e.ID, &e.EmployeeID, &e.ShiftMasterID, &e.WorkDate,
+			&e.StartTime, &e.EndTime, &e.Status, &e.IsDayOff,
+			&e.EmployeeName, &e.ShiftMasterName); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // --- INV-3 loop-closer (E6 / Phase 8) ---

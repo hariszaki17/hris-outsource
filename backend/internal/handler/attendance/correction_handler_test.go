@@ -340,3 +340,62 @@ func TestCorrectionAlreadyPending_Seam(t *testing.T) {
 		t.Errorf("fields.pending_correction_id = %q, want SWP-COR-8001", emitted.Fields["pending_correction_id"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// POST /corrections/{id}:cancel — agent self-cancel
+// ---------------------------------------------------------------------------
+
+func TestCancelCorrection_AgentSelf_200(t *testing.T) {
+	h := newHarness(t, auth.RoleAgent, "", "SWP-EMP-1042")
+	h.seedCorrection("SWP-COR-8101", "SWP-ATT-9004", cmpLed, att.CorrectionStatusPending, shiftRecent, att.CorrectionTypeCheckOut)
+
+	rr := h.do("POST", "/corrections/SWP-COR-8101:cancel", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	d := decodeBody(t, rr)["data"].(map[string]any)
+	if d["status"] != "CANCELLED" {
+		t.Errorf("status = %v, want CANCELLED", d["status"])
+	}
+	if got := h.correction.records["SWP-COR-8101"].Status; got != att.CorrectionStatusCancelled {
+		t.Errorf("record status = %v, want CANCELLED", got)
+	}
+}
+
+func TestCancelCorrection_NotPending_409(t *testing.T) {
+	h := newHarness(t, auth.RoleAgent, "", "SWP-EMP-1042")
+	h.seedCorrection("SWP-COR-8102", "SWP-ATT-9004", cmpLed, att.CorrectionStatusApproved, shiftRecent, att.CorrectionTypeCheckOut)
+
+	rr := h.do("POST", "/corrections/SWP-COR-8102:cancel", nil)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := errCode(t, rr); got != "CONFLICT" {
+		t.Errorf("code = %q, want CONFLICT", got)
+	}
+}
+
+func TestCancelCorrection_OtherAgent_403(t *testing.T) {
+	h := newHarness(t, auth.RoleAgent, "", "SWP-EMP-9999") // different agent
+	h.seedCorrection("SWP-COR-8103", "SWP-ATT-9004", cmpLed, att.CorrectionStatusPending, shiftRecent, att.CorrectionTypeCheckOut)
+
+	rr := h.do("POST", "/corrections/SWP-COR-8103:cancel", nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := errCode(t, rr); got != "NOT_FOUND" {
+		t.Errorf("code = %q, want NOT_FOUND", got)
+	}
+}
+
+func TestCancelCorrection_NotFound_404(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", "")
+
+	rr := h.do("POST", "/corrections/SWP-COR-NONEXIST:cancel", nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := errCode(t, rr); got != "NOT_FOUND" {
+		t.Errorf("code = %q, want NOT_FOUND", got)
+	}
+}

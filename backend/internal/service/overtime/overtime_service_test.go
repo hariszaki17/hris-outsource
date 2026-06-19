@@ -19,6 +19,7 @@ import (
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/jobs"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
@@ -141,6 +142,21 @@ func (r *svcRepo) FindOvertimeRule(context.Context) (OvertimeRule, error) {
 		return *r.rule, nil
 	}
 	return OvertimeRule{}, domain.ErrNotFound
+}
+
+func (r *svcRepo) ExistsActiveOvertimeForAgentDate(_ context.Context, employeeID string, workDate time.Time) (bool, error) {
+	for _, rec := range r.records {
+		if rec.EmployeeID == employeeID && rec.WorkDate.Equal(workDate) {
+			if rec.Status != dom.OvertimeStatusCancelled && rec.Status != dom.OvertimeStatusRejected {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (r *svcRepo) AggregateOvertime(_ context.Context, p AggregateParams) ([]OvertimeAggregateRow, error) {
+	return nil, nil
 }
 
 var (
@@ -302,39 +318,6 @@ func TestService_Create_EntersPendingAndLinksInstance(t *testing.T) {
 	}
 }
 
-// --- (b) Confirm PENDING_AGENT_CONFIRM → PENDING + engine instance ---
-
-func TestService_Confirm_EntersApprovalChain(t *testing.T) {
-	kit := newSvcKit(t, svcSchedule{})
-	kit.repo.records["SWP-OT-1"] = dom.Overtime{
-		ID:         "SWP-OT-1",
-		EmployeeID: "SWP-EMP-3001",
-		CompanyID:  sp("SWP-CMP-0021"),
-		Status:     dom.OvertimeStatusPendingAgentConfirm,
-		DayType:    dom.OvertimeTierWorkday,
-		WorkDate:   svcYMD(2026, time.June, 2),
-		CreatedAt:  svcNow,
-		UpdatedAt:  svcNow,
-	}
-
-	rec, _, err := kit.svc.Confirm(agentCtx("SWP-EMP-3001"), "SWP-OT-1", "Konfirmasi.")
-	if err != nil {
-		t.Fatalf("Confirm returned error: %v", err)
-	}
-	if rec.Status != dom.OvertimeStatusPending {
-		t.Errorf("status = %s, want PENDING", rec.Status)
-	}
-	if len(kit.engine.calls) != 1 {
-		t.Fatalf("engine.CreateInstance calls = %d, want 1", len(kit.engine.calls))
-	}
-	if kit.engine.calls[0].RequestID != "SWP-OT-1" {
-		t.Errorf("RequestID = %s, want SWP-OT-1", kit.engine.calls[0].RequestID)
-	}
-	if got := kit.repo.records["SWP-OT-1"].ApprovalInstanceID; got == nil || *got == "" {
-		t.Errorf("instance id not linked after confirm: %v", got)
-	}
-}
-
 // --- (c) Withdraw → CANCELLED ---
 
 func TestService_Withdraw_Cancels(t *testing.T) {
@@ -435,5 +418,116 @@ func TestService_OnRejected_FinalizesAndNotifies(t *testing.T) {
 	}
 	if kit.notifier.sent[0].NotifKind != "OT_REJECTED" {
 		t.Errorf("notif kind = %s, want OT_REJECTED", kit.notifier.sent[0].NotifKind)
+	}
+}
+
+// --- duplicate detection ---
+
+func TestCreate_DuplicateActive_409(t *testing.T) {
+	workDate := svcYMD(2026, time.June, 10)
+	// No placement stub needed — duplicate check fails before placement lookup.
+	kit := newSvcKit(t, svcSchedule{})
+
+	kit.repo.records["SWP-OT-DUP1"] = dom.Overtime{
+		ID:         "SWP-OT-DUP1",
+		EmployeeID: "SWP-EMP-3001",
+		WorkDate:   workDate,
+		Status:     dom.OvertimeStatusPending,
+		CreatedAt:  svcNow,
+		UpdatedAt:  svcNow,
+	}
+
+	_, _, err := kit.svc.Create(agentCtx("SWP-EMP-3001"), CreateOvertimeInput{
+		WorkDate:         workDate,
+		PlannedStartTime: "15:00",
+		PlannedEndTime:   "17:00",
+		Reason:           "Cover for absent colleague.",
+	})
+	if err == nil {
+		t.Fatal("expected OT_ALREADY_EXISTS error")
+	}
+	ae, ok := err.(*apperr.Error)
+	if !ok || ae.Code != "OT_ALREADY_EXISTS" {
+		t.Errorf("error = %v, want OT_ALREADY_EXISTS", err)
+	}
+}
+
+func TestCreate_DuplicateCancelled_Ok(t *testing.T) {
+	workDate := svcYMD(2026, time.June, 10)
+	kit := newSvcKit(t, svcSchedule{
+		placement: &schedulingsvc.PlacementCover{PlacementID: "SWP-PL-5001", CompanyID: "SWP-CMP-0021"},
+		live:      &schedulingsvc.LiveEntry{ID: "SWP-SCH-1", Status: "PUBLISHED"},
+	})
+
+	kit.repo.records["SWP-OT-CAN1"] = dom.Overtime{
+		ID:         "SWP-OT-CAN1",
+		EmployeeID: "SWP-EMP-3001",
+		WorkDate:   workDate,
+		Status:     dom.OvertimeStatusCancelled,
+		CreatedAt:  svcNow,
+		UpdatedAt:  svcNow,
+	}
+
+	_, _, err := kit.svc.Create(agentCtx("SWP-EMP-3001"), CreateOvertimeInput{
+		WorkDate:         workDate,
+		PlannedStartTime: "15:00",
+		PlannedEndTime:   "17:00",
+		Reason:           "Cover for absent colleague.",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error on cancelled duplicate: %v", err)
+	}
+}
+
+func TestCreate_DifferentAgent_SameDate_Ok(t *testing.T) {
+	workDate := svcYMD(2026, time.June, 10)
+	kit := newSvcKit(t, svcSchedule{
+		placement: &schedulingsvc.PlacementCover{PlacementID: "SWP-PL-5001", CompanyID: "SWP-CMP-0021"},
+		live:      &schedulingsvc.LiveEntry{ID: "SWP-SCH-1", Status: "PUBLISHED"},
+	})
+
+	kit.repo.records["SWP-OT-AA1"] = dom.Overtime{
+		ID:         "SWP-OT-AA1",
+		EmployeeID: "SWP-EMP-3001",
+		WorkDate:   workDate,
+		Status:     dom.OvertimeStatusPending,
+		CreatedAt:  svcNow,
+		UpdatedAt:  svcNow,
+	}
+
+	_, _, err := kit.svc.Create(agentCtx("SWP-EMP-3002"), CreateOvertimeInput{
+		WorkDate:         workDate,
+		PlannedStartTime: "15:00",
+		PlannedEndTime:   "17:00",
+		Reason:           "Cover for absent colleague.",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error for different agent: %v", err)
+	}
+}
+
+func TestCreate_DifferentDate_SameAgent_Ok(t *testing.T) {
+	kit := newSvcKit(t, svcSchedule{
+		placement: &schedulingsvc.PlacementCover{PlacementID: "SWP-PL-5001", CompanyID: "SWP-CMP-0021"},
+		live:      &schedulingsvc.LiveEntry{ID: "SWP-SCH-1", Status: "PUBLISHED"},
+	})
+
+	kit.repo.records["SWP-OT-DD1"] = dom.Overtime{
+		ID:         "SWP-OT-DD1",
+		EmployeeID: "SWP-EMP-3001",
+		WorkDate:   svcYMD(2026, time.June, 15),
+		Status:     dom.OvertimeStatusPending,
+		CreatedAt:  svcNow,
+		UpdatedAt:  svcNow,
+	}
+
+	_, _, err := kit.svc.Create(agentCtx("SWP-EMP-3001"), CreateOvertimeInput{
+		WorkDate:         svcYMD(2026, time.June, 16),
+		PlannedStartTime: "15:00",
+		PlannedEndTime:   "17:00",
+		Reason:           "Cover for absent colleague.",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error for different date: %v", err)
 	}
 }

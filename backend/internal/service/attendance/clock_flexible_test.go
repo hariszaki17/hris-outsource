@@ -93,6 +93,10 @@ func (f *fakeClockRepo) CountActivities(_ context.Context, _ string) (int64, err
 	return 0, nil
 }
 
+func (f *fakeClockRepo) GetDefaultAttendanceCode(_ context.Context, code string) (id, name string, err error) {
+	return "", "", nil
+}
+
 // agentCtx returns a context carrying an agent principal with an employee id.
 func agentCtx() context.Context {
 	return auth.WithPrincipal(context.Background(), auth.Principal{

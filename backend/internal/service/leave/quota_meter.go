@@ -389,11 +389,18 @@ func (m *QuotaMeter) entitlementFor(ctx context.Context, cap dom.LeaveTypeCap, e
 		if aerr != nil {
 			return 0, aerr
 		}
+		days := 0
 		if annual != nil {
-			return *annual, nil
+			days = *annual
+		} else if cap.CapValue != nil {
+			days = *cap.CapValue
 		}
-		if cap.CapValue != nil {
-			return *cap.CapValue, nil
+		if days > 0 {
+			info, gerr := m.reader.GetEmployeeGateInfo(ctx, employeeID)
+			if gerr != nil {
+				return 0, gerr
+			}
+			return proRateAnnualPool(days, info.JoinAt), nil
 		}
 		return 0, nil
 	}
@@ -406,6 +413,18 @@ func (m *QuotaMeter) entitlementFor(ctx context.Context, cap dom.LeaveTypeCap, e
 }
 
 const noDayCapEntitlement = 36500 // ~100y; effectively uncapped on days
+
+// proRateAnnualPool applies mid-year-joiner pro-rating to the annual pool
+// entitlement (2026-06-19). If joined in January, returns the full amount;
+// otherwise returns floor(remaining_months * annualDays / 12).
+// remaining_months = 12 - join_month + 1.
+func proRateAnnualPool(annualDays int, joinAt time.Time) int {
+	if joinAt.Month() == time.January {
+		return annualDays
+	}
+	remaining := 12 - int(joinAt.Month()) + 1
+	return (remaining * annualDays) / 12
+}
 
 // --- pure helpers (unit-tested without IO) ---
 

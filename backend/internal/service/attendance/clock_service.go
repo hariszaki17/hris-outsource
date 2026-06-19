@@ -97,6 +97,7 @@ type ClockInRow struct {
 	InGeofence         *bool
 	InDistanceM        *int
 	GeofenceRadiusM    int
+	AttendanceCodeID   *string
 	Status             string
 	VerificationStatus string
 	Flags              []string
@@ -142,6 +143,8 @@ type ClockRepository interface {
 	// the agent clock-out gate (AA-7 / INV-7). Auto-close + manual entry are exempt
 	// and never call this.
 	CountActivities(ctx context.Context, attendanceID string) (int64, error)
+	// GetDefaultAttendanceCode returns the default active attendance code (e.g. "PRESENT").
+	GetDefaultAttendanceCode(ctx context.Context, code string) (id, name string, err error)
 }
 
 // AutoCloseRow is the UPDATE payload for auto-closing one stale open record (in-tx).
@@ -331,20 +334,26 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		inDistancePtr = &dm
 	}
 
+	// Resolve the default "PRESENT" attendance code for clock-in.
+	var attCodeIDPtr *string
+	codeID, _, cerr := s.repo.GetDefaultAttendanceCode(ctx, "PRESENT")
+	if cerr == nil {
+		attCodeIDPtr = &codeID
+	}
+
 	row := ClockInRow{
-		EmployeeID:   employeeID,
-		PlacementID:  pl.PlacementID,
-		ScheduleID:   schedulePtr,
-		CompanyID:    pl.CompanyID,
-		SiteID:       pl.SiteID,
-		Position:     pl.Position,
-		ShiftStartAt: shiftStartPtr,
-		ShiftEndAt:   shiftEndPtr,
-		CheckInAt:    now,
-		LatIn:        req.Lat,
-		LngIn:        req.Lng,
-		PhotoInID:    req.PhotoID,
-		// Back-compat: wfo mirrors the mode (ONSITE ⇒ at the work site).
+		EmployeeID:         employeeID,
+		PlacementID:        pl.PlacementID,
+		ScheduleID:         schedulePtr,
+		CompanyID:          pl.CompanyID,
+		SiteID:             pl.SiteID,
+		Position:           pl.Position,
+		ShiftStartAt:       shiftStartPtr,
+		ShiftEndAt:         shiftEndPtr,
+		CheckInAt:          now,
+		LatIn:              req.Lat,
+		LngIn:              req.Lng,
+		PhotoInID:          req.PhotoID,
 		WFO:                mode == "ONSITE",
 		Mode:               mode,
 		IsLate:             isLate,
@@ -352,6 +361,7 @@ func (s *ClockService) ClockIn(ctx context.Context, req ClockInParams) (att.Atte
 		InGeofence:         inGeofencePtr,
 		InDistanceM:        inDistancePtr,
 		GeofenceRadiusM:    radiusM,
+		AttendanceCodeID:   attCodeIDPtr,
 		Status:             status,
 		VerificationStatus: verification,
 		Flags:              flags,

@@ -523,6 +523,25 @@ func (r *fakeScheduleRepo) SoftDeleteScheduleEntry(_ context.Context, _ pgx.Tx, 
 	return 1, nil
 }
 
+func (r *fakeScheduleRepo) CancelFutureSchedulesForEmployee(_ context.Context, _ pgx.Tx, employeeID string, afterDate time.Time) error {
+	return nil
+}
+
+func (r *fakeScheduleRepo) ListScheduleForAggregate(_ context.Context, companyID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	var out []domain.ScheduleEntry
+	for _, e := range r.entries {
+		if e.CompanyID != companyID {
+			continue
+		}
+		if e.WorkDate.Before(start) || e.WorkDate.After(end) {
+			continue
+		}
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 var _ svc.ScheduleRepository = (*fakeScheduleRepo)(nil)
 
 // ---------------------------------------------------------------------------
@@ -575,6 +594,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID string) *
 		r.Get("/shift-masters", handler.ListShiftMasters)
 		r.Get("/shift-masters/{id}", handler.GetShiftMaster)
 		r.Get("/schedule", handler.ListSchedule)
+		r.Get("/schedule:aggregate", handler.AggregateSchedule)
 		r.Post("/schedule", handler.CreateScheduleEntry)
 		r.Patch("/schedule/{id}", handler.UpdateScheduleEntry)
 		r.Delete("/schedule/{id}", handler.DeleteScheduleEntry)

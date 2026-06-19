@@ -355,8 +355,143 @@ func TestBulkApply_WeekdaysMask(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DELETE — 204 + leader past-date 403
+// Aggregate schedule tests
 // ---------------------------------------------------------------------------
+
+func TestAggregateSchedule_ByDay_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "")
+	seedHappyAgent(h, "SWP-EMP-1108", "SWP-CMP-0021")
+	seedHappyAgent(h, "SWP-EMP-3001", "SWP-CMP-0021")
+
+	// Week 2026-06-01 (Mon) .. 2026-06-07 (Sun).
+	// Seed entries for Mon 06-01 and Wed 06-03.
+	h.seedLiveEntry("SWP-SCH-AG01", "SWP-EMP-1108", "SWP-CMP-0021", ymd(2026, 6, 1), "Pagi")
+	h.seedLiveEntry("SWP-SCH-AG02", "SWP-EMP-3001", "SWP-CMP-0021", ymd(2026, 6, 1), "Pagi")
+	h.seedLiveEntry("SWP-SCH-AG03", "SWP-EMP-1108", "SWP-CMP-0021", ymd(2026, 6, 3), "Pagi")
+
+	rr := h.do("GET", "/schedule:aggregate?company_id=SWP-CMP-0021&week_start=2026-06-01&group_by=day", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("data is not an array: %T", body["data"])
+	}
+	if len(data) != 7 {
+		t.Fatalf("expected 7 days in week, got %d", len(data))
+	}
+
+	// Mon 2026-06-01 (index 0) should have 2 agents.
+	mon := data[0].(map[string]any)
+	if mon["date"] != "2026-06-01" {
+		t.Errorf("mon date = %v, want 2026-06-01", mon["date"])
+	}
+	stats := mon["stats"].(map[string]any)
+	if total := stats["total_agents"]; total.(float64) != 2 {
+		t.Errorf("mon total_agents = %v, want 2", total)
+	}
+
+	// Wed 2026-06-03 (index 2) should have 1 agent.
+	wed := data[2].(map[string]any)
+	if wed["date"] != "2026-06-03" {
+		t.Errorf("wed date = %v, want 2026-06-03", wed["date"])
+	}
+	wedStats := wed["stats"].(map[string]any)
+	if total := wedStats["total_agents"]; total.(float64) != 1 {
+		t.Errorf("wed total_agents = %v, want 1", total)
+	}
+
+	// Tue 2026-06-02 (index 1) should have 0 agents.
+	tue := data[1].(map[string]any)
+	tueStats := tue["stats"].(map[string]any)
+	if total := tueStats["total_agents"]; total.(float64) != 0 {
+		t.Errorf("tue total_agents = %v, want 0", total)
+	}
+}
+
+func TestAggregateSchedule_DefaultGroupBy_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "SWP-CMP-0021")
+	seedHappyAgent(h, "SWP-EMP-1108", "SWP-CMP-0021")
+	h.seedLiveEntry("SWP-SCH-AG11", "SWP-EMP-1108", "SWP-CMP-0021", ymd(2026, 6, 1), "Pagi")
+
+	rr := h.do("GET", "/schedule:aggregate?company_id=SWP-CMP-0021&week_start=2026-06-01", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok || len(data) != 7 {
+		t.Fatalf("data should be a 7-element array, got len=%v", len(data))
+	}
+}
+
+func TestAggregateSchedule_EmptyWeek_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "SWP-CMP-0021")
+
+	rr := h.do("GET", "/schedule:aggregate?company_id=SWP-CMP-0021&week_start=2026-06-01", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("data is not an array: %T", body["data"])
+	}
+	if len(data) != 7 {
+		t.Fatalf("expected 7 days, got %d", len(data))
+	}
+	for _, d := range data {
+		day := d.(map[string]any)
+		stats := day["stats"].(map[string]any)
+		if total := stats["total_agents"]; total.(float64) != 0 {
+			t.Errorf("%s total_agents = %v, want 0", day["date"], total)
+		}
+	}
+}
+
+func TestAggregateSchedule_MissingCompanyID_400(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "")
+
+	rr := h.do("GET", "/schedule:aggregate?week_start=2026-06-01", nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAggregateSchedule_LeaderAutoPin_200(t *testing.T) {
+	// Shift leader scoped to CMP-0021; passes company_id=CMP-0022 but the service
+	// pins it to CMP-0021. Verify the leader can only see their own company's data.
+	h := newHarness(t, auth.RoleShiftLeader, "SWP-CMP-0021")
+	seedHappyAgent(h, "SWP-EMP-1108", "SWP-CMP-0021")
+	h.seedLiveEntry("SWP-SCH-LS01", "SWP-EMP-1108", "SWP-CMP-0021", ymd(2026, 6, 1), "Pagi")
+
+	// Despite requesting CMP-0022, the service pins to CMP-0021.
+	rr := h.do("GET", "/schedule:aggregate?company_id=SWP-CMP-0022&week_start=2026-06-01", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (auto-pinned to leader's company), got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data := body["data"].([]any)
+	mon := data[0].(map[string]any)
+	stats := mon["stats"].(map[string]any)
+	if total := stats["total_agents"]; total.(float64) != 1 {
+		t.Errorf("expected 1 agent in leader's company, got %v (queried wrong company)", total)
+	}
+}
+
+func TestAggregateSchedule_OutOfScope_403(t *testing.T) {
+	// Shift leader with empty company_id cannot access any company aggregate.
+	h := newHarness(t, auth.RoleShiftLeader, "")
+
+	rr := h.do("GET", "/schedule:aggregate?company_id=SWP-CMP-0021&week_start=2026-06-01", nil)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if code := errCode(t, rr); code != "OUT_OF_SCOPE" {
+		t.Errorf("error.code = %q, want OUT_OF_SCOPE", code)
+	}
+}
 
 func TestDelete_204(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "")

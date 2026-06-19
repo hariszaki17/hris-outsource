@@ -1,13 +1,15 @@
 # E7 — Overtime Tracking · Feature Document
 
-> **Epic:** E7 Overtime Tracking · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
-> Capture overtime (pre-request + auto-detect from attendance), classify hours into day-type tiers, approve leader → HR, and record hours (no pay calc in v1).
+> **Epic:** E7 Overtime Tracking · **Status:** Draft v2 · **Parent:** [EPICS.md](../../EPICS.md)
+> Capture overtime (request-only — no auto-detection from attendance), classify hours into day-type tiers, approve leader → HR, and record hours (no pay calc in v1).
 
 ---
 
 ## 1. Goal & outcome
 
-Track overtime hours for placed agents: agents/leaders can **pre-request** OT, and the system **auto-detects** work beyond the scheduled shift from verified attendance (E5). OT is classified into **day-type tiers** (workday / rest day / public holiday) per configurable rules, approved through **shift leader → HR**, and recorded as **hours** (the regulation multipliers are stored as reference for a future payroll run; **no monetary calc in v1**).
+Track overtime hours for placed agents: agents/leaders can **request** OT. OT is classified into **day-type tiers** (workday / rest day / public holiday) per configurable rules, approved through **shift leader → HR**, and recorded as **hours** (the regulation multipliers are stored as reference for a future payroll run; **no monetary calc in v1**).
+
+> **No auto-detection.** All overtime must be explicitly requested — the system does not auto-detect OT from attendance records. *(Resolved 2026-06-19 — OC-2 removed.)*
 
 ## 2. Actors & roles
 
@@ -16,12 +18,12 @@ Track overtime hours for placed agents: agents/leaders can **pre-request** OT, a
 | **Agent** | Requests OT, confirms auto-detected OT, views own OT (mobile). |
 | **Approval line members** | Approve/reject OT where they sit on the agent company's **E11 approval line** (routing by membership, not role — may be the on-site shift leader, lead, HR, …). |
 | **HR / Super Admin** | Manage OT rules + holiday calendar; configure the E11 template; super admin may **bypass**; reporting. |
-| **System** | Auto-detects OT from attendance, classifies day type, **creates an E11 approval instance**, fires the count-by-day-type hook on approval, audits. |
+| **System** | Classifies day type, **creates an E11 approval instance**, fires the count-by-day-type hook on approval, audits. |
 
 ## 3. Scope
 
-**In scope:** OT rules (tiered), OT capture (request + auto-detect), two-level approval, OT records & reporting (hours by tier).
-**Out of scope:** actual OT **pay** computation/payroll runs (E8 read-only / future); attendance capture (E5); leave (E6).
+**In scope:** OT rules (tiered), OT capture (request-only), two-level approval, OT records & reporting (hours by tier).
+**Out of scope:** actual OT **pay** computation/payroll runs (E8 read-only / future); attendance capture (E5); leave (E6); **auto-detection of OT from attendance records** *(removed 2026-06-19)*.
 
 ## 4. Domain entities
 
@@ -68,8 +70,7 @@ erDiagram
 - **INV-1:** every OT record is classified into a **day_type** (Workday / RestDay / Holiday), derived from the schedule (E4) + the public-holiday calendar (§6b).
 - **INV-2:** OT is recorded as **hours/minutes only**; the rule `multiplier` is stored as reference, **not applied to pay** in v1.
 - **INV-3:** approval is **routed through the E11 engine** (per-company configurable chain) *(reworked 2026-06-14)* — `OvertimeRecord.status` tracks the E11 instance (`Pending → Approved | Rejected`); OT contributes only the `OnApproved` (count-by-day-type) side-effect. *(Supersedes the old fixed two-level `Pending → LeaderApproved → Approved`.)*
-- **INV-4:** auto-detected OT is a **candidate** requiring confirmation/approval; it never counts until approved.
-- **INV-5:** OT below a rule's `min_minutes` is **not counted** (ignored or flagged).
+- **INV-4:** all OT must be **explicitly requested** — there is no auto-detection from attendance records. *(Resolved 2026-06-19.)*
 
 ## 5. Features
 
@@ -119,9 +120,9 @@ flowchart TD
 
 ---
 
-### F7.2 — Overtime Capture (request + auto-detect)
+### F7.2 — Overtime Capture (request-only)
 
-Two paths into an OT record: an agent/leader **pre-requests** OT, or the system **auto-detects** worked time beyond the scheduled shift end from **verified attendance** (E5) and raises a candidate. Both classify day type and enter the approval flow.
+Agent/leader **requests** OT. The system classifies day type and enters the approval flow. **No auto-detection from attendance.**
 
 ```mermaid
 flowchart TD
@@ -130,24 +131,20 @@ flowchart TD
     end
     subgraph SYS[System]
         B2 --> C1[Classify day_type + duration]
-        D1([Verified attendance beyond shift end]) --> D2{Excess >= min_minutes?}
-        D2 -- No --> D3[Ignore]
-        D2 -- Yes --> D4[Create candidate OT source=AutoDetected]
         C1 --> C2[Create OT source=Requested]
-        D4 --> C3[Status=Pending]
-        C2 --> C3
+        C2 --> C3[Status=Pending]
         C3 --> C4[(Persist + audit)]
-        C4 --> C5[Notify approver / agent to confirm]
+        C4 --> C5[Notify approver]
     end
 ```
 
-**Entities:** `OvertimeRecord` (create). **Depends on:** F7.1, E5 (verified attendance), E4 (shift end).
+**Entities:** `OvertimeRecord` (create). **Depends on:** F7.1, E4 (shift end).
 
 ---
 
 ### F7.3 — Approval Workflow (via the E11 engine)
 
-*(Reworked 2026-06-14.)* OT routes through the **E11 configurable approval engine** (per-company chain), not a fixed two-level flow. Auto-detected candidates are confirmed by the agent first (F7.2 OC-7), then an E11 instance is created. Only approved OT counts in reporting; the count-by-day-type runs as OT's `OnApproved` hook.
+*(Reworked 2026-06-14.)* OT routes through the **E11 configurable approval engine** (per-company chain), not a fixed two-level flow. Only approved OT counts in reporting; the count-by-day-type runs as OT's `OnApproved` hook.
 
 ```mermaid
 flowchart TD
@@ -187,8 +184,13 @@ flowchart LR
 
 ## 7. Decisions & open questions
 
+**Resolved (2026-06-19 — no auto-detection, no min_minutes):**
+- ✅ **No OT auto-detection.** All overtime must be **explicitly requested** — the system does not auto-detect OT from attendance records. OC-2 removed.
+- ✅ **No `min_minutes` enforcement.** SL/HR determine OT validity, not a system threshold. `min_minutes` removed from OvertimeRule.
+- ✅ **`OvertimeRule` fields reduced** — `min_minutes` removed; `multiplier` (reference) and `requires_preapproval` remain.
+
 **Resolved (2026-05-29):**
-- ✅ **Capture = request + auto-detect** (from verified attendance beyond shift end).
+- ✅ **Capture = request only** (no auto-detect).
 - ✅ **Hours only** — record OT hours; multipliers stored as reference, **no pay calc** in v1.
 - ~~✅ **Two-level approval** (shift leader → HR).~~ — **superseded 2026-06-14**: OT routes through the **E11 configurable approval engine** (per-company chain); see F7.3 + [overtime-approval PRD](prds/overtime-approval.md).
 - ✅ **Day-type tiers** (workday / rest day / holiday), **global only** (one rule per day type). *(Service-line scoping + precedence dropped 2026-06-12 — service line removed project-wide.)*
@@ -196,7 +198,4 @@ flowchart LR
 **Resolved — open-items review (2026-05-29), see [EPICS.md §8](../../EPICS.md):**
 - ✅ **Public-holiday calendar** = **HR-maintained in-app** master (recurring + one-off); shared with E6 duration counting.
 - ✅ **Rest-day** = a day the agent has **no scheduled shift**.
-- ✅ **Auto-detected OT** = **agent confirms, then leader approves**.
-- ✅ **`min_minutes`** = **60**.
-- ✅ **Pre-approval** = worked-without-request OT still approvable after the fact (flagged).
 - ✅ Holiday tier beats Rest-day when both apply; cross-midnight OT → start date.

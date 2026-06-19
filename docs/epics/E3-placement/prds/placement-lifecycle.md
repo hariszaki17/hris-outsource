@@ -1,25 +1,24 @@
 # PRD · F3.2 — Placement Lifecycle & Status
 
-> **Epic:** E3 Placement Management · **Feature:** F3.2 · **Status:** Draft v1
+> **Epic:** E3 Placement Management · **Feature:** F3.2 · **Status:** Draft v2
 > **Parent:** [FEATURE.md](../FEATURE.md) · **Owner:** _TBD_
 
 ---
 
 ## 1. Context & problem
 
-A placement is not static — it activates, ages toward its end date, gets renewed, or is cut short by termination or resignation. Without an explicit, enforced state machine, the system can't reliably tell who is *currently* placed, surface contracts about to expire, or keep a clean history. This PRD owns the **placement state machine** and every transition into and out of it.
+A placement is not static — it can be ended, renewed, or cut short by termination or resignation. Without an explicit, enforced state machine, the system can't reliably tell who is *currently* placed or keep a clean history. Placement is **not date-bounded** — there is no Scheduled/future-dated state, no Expiring flag, and no auto-activate. Placement starts as `Active` immediately on create. **End** is a manual HR action (the only way a placement is closed by end-of-term). This PRD owns the **placement state machine** and every transition into and out of it. *(Resolved 2026-06-19.)*
 
 ## 2. Goals & non-goals
 
 **Goals**
 - A single, enforced status model for every placement.
-- System-driven transitions: auto-activate scheduled placements, flag expiring ones (30 days) — then await an HR decision. The system **never auto-ends** a placement on expiry; it stays `Expiring` (grace) until HR acts.
-- HR-driven transitions: terminate early, record resignation, **renew via a linked successor**.
+- HR-driven transitions: **End** (manual close), terminate early, record resignation, **renew via a linked successor**.
 - Every transition is audited and notifies the right people.
 
 **Non-goals**
 - Creating the first placement → F3.1.
-- Moving an agent to a *different* company/site/position → F3.3 (transfer).
+- Moving an agent to a *different* company/site → F3.3 (transfer).
 - Assigning/vacating the shift leader → F3.4 (this PRD only *triggers* a vacancy check).
 
 ## 3. Actors
@@ -33,23 +32,11 @@ A placement is not static — it activates, ages toward its end date, gets renew
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Draft
-    Draft --> Scheduled: start in future
-    Draft --> Active: start today/immediate
-    Scheduled --> Active: start reached (system)
-    Active --> Expiring: 30d before end (system)
+    [*] --> Active: immediate on create
+    Active --> Ended: HR End decision (manual)
     Active --> Terminated: HR ends early
     Active --> Resigned: agent resigns
     Active --> Superseded: renewed (successor)
-    note right of Expiring
-      Persists under grace once end_date passes —
-      no system auto-end; login stays valid until
-      HR decides (Continue=renew / End=offboard, F2.7).
-    end note
-    Expiring --> Terminated: HR ends early
-    Expiring --> Resigned: agent resigns
-    Expiring --> Superseded: renewed (successor)
-    Scheduled --> Terminated: cancelled before start
     Ended --> [*]
     Terminated --> [*]
     Resigned --> [*]
@@ -60,16 +47,14 @@ stateDiagram-v2
 
 | Ref | Rule |
 |-----|------|
-| LC-1 | Status ∈ {`Draft`, `Scheduled`, `Active`, `Expiring`, `Ended`, `Terminated`, `Resigned`, `Superseded`}. `Ended`/`Terminated`/`Resigned`/`Superseded` are **terminal & immutable** (Super Admin override only). |
-| LC-2 | A `Scheduled` placement auto-transitions to `Active` on its `start_date` (system job, Asia/Jakarta). |
-| LC-3 | An `Active` placement with an `end_date` auto-transitions to `Expiring` **30 days** before `end_date` (hardcoded). **Open-ended placements never expire.** Once `end_date` passes the placement **remains `Expiring`** — there is **no auto-end** — under grace until HR acts (see LC-4, F2.7 OB-6). |
-| LC-4 | There is **no system auto-end**. Once `end_date` passes, an `Expiring` placement **stays `Expiring`** (grace); HR explicitly ends it via the Inbox decision task — **Continue** = renew (LC-7) or **End** = offboard (closes the EmploymentAgreement, E2/F2.7). The agent's **login stays valid** throughout the grace window until HR ends employment (F2.7 OB-6). |
-| LC-5 | HR admin may **terminate** an `Active`/`Expiring`/`Scheduled` placement early with a **reason** + effective date → `Terminated`. |
-| LC-6 | Recording an agent **resignation** closes the active placement → `Resigned` with `resign_at`. (The employment agreement itself is closed in E2.) |
-| LC-7 | **Renewal** (same company + site + position) creates a **successor placement** (`predecessor_id` → old) and sets the prior placement to `Superseded` effective the successor's `start_date`. The successor obeys F3.1 rules (incl. the 1-day buffer). |
-| LC-8 | Any transition into a terminal state for a placement whose agent is that company's **shift leader** triggers a **leader-vacancy check** (F3.4). |
-| LC-9 | Every transition writes an audit-log entry (actor or `system`, before/after, reason) and fires the matching notification (E10). |
-| LC-10 | `Expiring`/expiry notifications go to HR admin + the company shift leader; activation notifications go to the agent + shift leader. |
+| LC-1 | Status ∈ {`Active`, `Ended`, `Terminated`, `Resigned`, `Superseded`}. `Ended`/`Terminated`/`Resigned`/`Superseded` are **terminal & immutable** (Super Admin override only). |
+| LC-2 | HR admin may **End** an `Active` placement — sets `ended_reason = EndOfTerm`, `ended_at`. |
+| LC-3 | HR admin may **terminate** an `Active` placement early with a **reason** + effective date → `Terminated`. |
+| LC-4 | Recording an agent **resignation** closes the active placement → `Resigned` with `resign_at`. (The employment agreement itself is closed in E2.) |
+| LC-5 | **Renewal** (same company + site) creates a **successor placement** (`predecessor_id` → old) and sets the prior placement to `Superseded`. The successor obeys F3.1 rules. |
+| LC-6 | Any transition into a terminal state for a placement whose agent is that company's **shift leader** triggers a **leader-vacancy check** (F3.4). |
+| LC-7 | Every transition writes an audit-log entry (actor, before/after, reason) and fires the matching notification (E10). |
+| LC-8 | Activation notifications go to the agent + shift leader; end/termination notifications go to the agent + shift leader. |
 
 ## 6. Data model (lifecycle fields on Placement)
 
@@ -89,30 +74,11 @@ stateDiagram-v2
 ```gherkin
 Feature: Placement lifecycle
 
-  Scenario: Scheduled placement auto-activates on its start date
-    Given a placement for "Budi" with status "Scheduled" starting today
-    When the daily activation job runs in Asia/Jakarta time
-    Then the placement status becomes "Active"
-    And "Budi" and the company shift leader are notified
-
-  Scenario: Active placement is flagged Expiring 30 days before end
-    Given an active placement ending in 30 days
-    When the expiry job runs
-    Then the placement status becomes "Expiring"
-    And HR admin and the shift leader receive an expiring notification
-
-  Scenario: Open-ended placement never expires
-    Given an active placement with no end date
-    When the expiry job runs
-    Then the placement remains "Active"
-
-  Scenario: Expiring placement persists under grace after its end date (no auto-end)
-    Given an expiring placement whose end date passed yesterday
-    And no HR decision has been recorded
-    When the daily job runs
-    Then the placement status remains "Expiring"
-    And the agent's login stays valid
-    And the HR Inbox still shows a pending Continue/End decision (F2.7 OB-6)
+  Scenario: HR ends a placement
+    Given an active placement for "Budi"
+    When an HR admin ends it with reason EndOfTerm
+    Then the placement status becomes "Ended"
+    And the agent and shift leader are notified
 
   Scenario: HR terminates a placement early
     Given an active placement for "Budi"
@@ -121,11 +87,11 @@ Feature: Placement lifecycle
     And the reason is stored and audited
 
   Scenario: Renewal creates a linked successor
-    Given an expiring placement P1 for "Budi" at "Plaza Senayan" as "Parking Attendant"
-    When an HR admin renews it with a new period starting the day after P1 ends
+    Given an active placement P1 for "Budi" at "Plaza Senayan"
+    When an HR admin renews it
     Then a new placement P2 is created with predecessor set to P1
-    And P1 becomes "Superseded" effective P2's start date
-    And P2 satisfies the 1-day buffer rule
+    And P1 becomes "Superseded"
+    And P2 has status "Active"
 
   Scenario: Terminal placements are immutable
     Given a placement with status "Ended"
@@ -135,7 +101,7 @@ Feature: Placement lifecycle
 
   Scenario: Ending the shift leader's own placement triggers a vacancy
     Given "Budi" is the shift leader of "Plaza Senayan"
-    And his placement there is terminated
+    And his placement there is ended
     Then a shift-leader vacancy is raised for "Plaza Senayan" (F3.4)
 ```
 
@@ -143,27 +109,23 @@ Feature: Placement lifecycle
 
 | # | Case | Expected behavior |
 |---|------|-------------------|
-| C-1 | Renewal period leaves a gap (successor starts >1 day after old end) | Allowed; old placement still ends naturally, successor `Scheduled`. |
-| C-2 | Renewal with same/overlapping dates as predecessor | Rejected by the 1-day buffer (F3.1 BR-2). |
-| C-3 | Terminate a `Scheduled` (not yet active) placement | Allowed → `Terminated`; never activates. |
-| C-4 | Resignation effective before `end_date` | Placement `Resigned` at `resign_at`; remaining schedule (E4) is cancelled. |
-| C-5 | end_date edited to the past on an active placement | Treated as immediate end-of-term on next job run (or blocked — see §10). |
-| C-6 | System job missed a day (downtime) | Job is **catch-up safe**: evaluates all due transitions by date, not "today only". |
-| C-7 | Multiple placements of one agent over time | Only one is ever non-terminal at a time (INV-1); history chain readable via predecessor/successor. |
-| C-8 | Auto-cap interaction: PKWT agreement extended after renewal | Successor placement may extend up to the new agreement end (F3.1 BR-1b). |
+| C-1 | Resignation | Placement `Resigned` at `resign_at`; remaining schedule (E4) is cancelled. |
+| C-2 | System job missed a day (downtime) | No system-driven transitions in this model; not applicable. |
+| C-3 | Multiple placements of one agent over time | Only one is ever non-terminal at a time (INV-1); history chain readable via predecessor/successor. |
 
 ## 9. Dependencies
 
 - **F3.1** — placement creation (successor reuses it).
-- **F3.4** — leader-vacancy trigger (LC-8).
+- **F3.4** — leader-vacancy trigger (LC-6).
 - **E4** — ending a placement cancels future schedules.
 - **E1 / E10** — audit log + notifications.
-- A **scheduled job runner** (platform) for LC-2/3/4.
 
 ## 10. Decisions & open questions
 
+- ✅ **No Scheduled/Draft state** — placement starts `Active` immediately (no future-dated, no auto-activate). *(Resolved 2026-06-19.)*
+- ✅ **No Expiring state** — placement is not date-bounded; END is manual by HR (LC-2). No system-driven expiry, no grace window. *(Resolved 2026-06-19.)*
+- ✅ **End** is a manual HR transition — `Active → Ended` with `ended_reason = EndOfTerm`. *(Added 2026-06-19.)*
 - ✅ Renewal = linked successor (`predecessor_id`); prior → `Superseded`.
-- ✅ Expiring = 30 days, hardcoded; open-ended never expires.
-- ✅ **No placement auto-end (Resolved 2026-06-06).** The prior LC-4 auto-end (`EndOfTerm` once `end_date` passes) was **removed** in favor of an HR Inbox decision (Continue=renew / End=offboard) + a grace window where the placement stays `Expiring`. **Login revocation is tied to EMPLOYMENT-end (F2.7), not to any placement transition** — placement-end (transfer/renewal/supersede/expiry) never revokes a session.
-- **Open:** C-5 — should editing `end_date` into the past be allowed (immediate end) or blocked? (default: blocked, use Terminate instead.)
-- **Open:** does resignation always close the placement immediately, or allow a future-dated last working day? (assumed: effective `resign_at`, may be future.)
+- ✅ **Placement-end never revokes login** — login revocation is tied to EMPLOYMENT-end (F2.7), not to any placement transition.
+
+_No open questions remain for this feature._

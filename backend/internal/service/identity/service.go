@@ -7,6 +7,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 	"unicode"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
+	"github.com/hariszaki17/hris-outsource/backend/internal/platform/audit"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 )
 
@@ -36,6 +38,10 @@ type Repository interface {
 	UpdatePassword(ctx context.Context, tx pgx.Tx, id, hash string) error
 	InsertResetToken(ctx context.Context, tx pgx.Tx, userID, tokenHash string, expiresAt time.Time) (domain.PasswordResetToken, error)
 	MarkResetTokenUsed(ctx context.Context, tx pgx.Tx, id int64) error
+	// Login lockout (E1 F1.5)
+	GetLoginAttempt(ctx context.Context, identifier string) (domain.LoginAttempt, error)
+	UpsertLoginAttempt(ctx context.Context, tx pgx.Tx, identifier string, count int, lockedUntil *time.Time) error
+	DeleteLoginAttempt(ctx context.Context, tx pgx.Tx, identifier string) error
 }
 
 // NewRefreshToken carries the fields needed to persist a rotated token.
@@ -85,23 +91,35 @@ type Result struct {
 }
 
 // Login verifies credentials and issues a token pair. Records last_login_at (AU-3).
-// The identifier is a phone number or an email (D2).
+// The identifier is a phone number or an email (D2). Five consecutive failed
+// attempts lock the identifier for 15 minutes (E1 F1.5).
 func (s *Service) Login(ctx context.Context, identifier, password, userAgent, ip string) (Result, error) {
+	identifier = normalizeIdentifier(identifier)
+
+	attempt, err := s.repo.GetLoginAttempt(ctx, identifier)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return Result{}, apperr.Internal(err)
+	}
+	if attempt.IsLocked(s.now()) {
+		return Result{}, errAccountLocked()
+	}
+
 	user, err := s.repo.GetUserByIdentifier(ctx, identifier)
 	if errors.Is(err, domain.ErrNotFound) {
+		_ = s.recordFailedLogin(ctx, identifier, attempt.AttemptCount)
 		return Result{}, errInvalidCredentials()
 	}
 	if err != nil {
 		return Result{}, apperr.Internal(err)
 	}
 	if err := auth.VerifyPassword(password, user.PasswordHash); err != nil {
-		// Same generic error whether the identifier or the password was wrong.
+		_ = s.recordFailedLogin(ctx, identifier, attempt.AttemptCount)
 		return Result{}, errInvalidCredentials()
 	}
 	if !user.IsActive() {
 		return Result{}, errAccountDisabled()
 	}
-	return s.issuePair(ctx, user, uuid.NewString(), nil, userAgent, ip)
+	return s.issuePair(ctx, user, uuid.NewString(), nil, userAgent, ip, identifier)
 }
 
 // Refresh rotates a refresh token. A revoked/expired token triggers family
@@ -135,7 +153,7 @@ func (s *Service) Refresh(ctx context.Context, plaintext, userAgent, ip string) 
 	if !user.IsActive() {
 		return Result{}, errAccountDisabled()
 	}
-	return s.issuePair(ctx, user, current.FamilyID, &current.ID, userAgent, ip)
+	return s.issuePair(ctx, user, current.FamilyID, &current.ID, userAgent, ip, "")
 }
 
 // Logout revokes the presented refresh token (idempotent).
@@ -248,8 +266,8 @@ func (s *Service) ResetPassword(ctx context.Context, plaintext, newPassword stri
 
 // issuePair mints an access token + a new refresh token. When rotatedFrom is
 // set, the old token is revoked in the SAME tx as the new one is inserted.
-// Also records last_login_at (AU-3) in the same transaction.
-func (s *Service) issuePair(ctx context.Context, user domain.User, familyID string, rotatedFrom *int64, userAgent, ip string) (Result, error) {
+// Also records last_login_at (AU-3) and clears login_attempts (E1 F1.5) in the same transaction.
+func (s *Service) issuePair(ctx context.Context, user domain.User, familyID string, rotatedFrom *int64, userAgent, ip, loginIdentifier string) (Result, error) {
 	now := s.now()
 	principal := user.Principal()
 
@@ -280,7 +298,14 @@ func (s *Service) issuePair(ctx context.Context, user domain.User, familyID stri
 			return err
 		}
 		// AU-3: record the last login time in the same tx.
-		return s.repo.SetLastLogin(ctx, tx, user.ID)
+		if err := s.repo.SetLastLogin(ctx, tx, user.ID); err != nil {
+			return err
+		}
+		// E1 F1.5: clear login attempts on successful login.
+		if loginIdentifier != "" {
+			return s.repo.DeleteLoginAttempt(ctx, tx, loginIdentifier)
+		}
+		return nil
 	})
 	if err != nil {
 		return Result{}, apperr.Internal(err)
@@ -325,6 +350,38 @@ func validatePasswordPolicy(pw string) error {
 	return nil
 }
 
+// --- login lockout helpers (E1 F1.5) ---
+
+const maxLoginAttempts = 5
+const loginLockDuration = 15 * time.Minute
+
+func normalizeIdentifier(identifier string) string {
+	return strings.ToLower(strings.TrimSpace(identifier))
+}
+
+func (s *Service) recordFailedLogin(ctx context.Context, identifier string, previousCount int) error {
+	count := previousCount + 1
+	var lockedUntil *time.Time
+	auditAction := audit.Action("login.failed")
+	if count >= maxLoginAttempts {
+		lockTime := s.now().Add(loginLockDuration)
+		lockedUntil = &lockTime
+		auditAction = audit.Action("login.locked")
+	}
+	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		if err := s.repo.UpsertLoginAttempt(ctx, tx, identifier, count, lockedUntil); err != nil {
+			return err
+		}
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     auditAction,
+			EntityType: "login_attempt",
+			EntityID:   identifier,
+			Before:     nil,
+			After:      map[string]any{"attempt_count": count},
+		})
+	})
+}
+
 // --- domain-specific errors (i18n messages live in platform/i18n) ---
 
 func errInvalidCredentials() *apperr.Error {
@@ -332,6 +389,9 @@ func errInvalidCredentials() *apperr.Error {
 }
 func errAccountDisabled() *apperr.Error {
 	return &apperr.Error{Code: "ACCOUNT_DISABLED", HTTPStatus: 403}
+}
+func errAccountLocked() *apperr.Error {
+	return &apperr.Error{Code: "ACCOUNT_LOCKED", HTTPStatus: 429}
 }
 func errInvalidRefresh() *apperr.Error {
 	return &apperr.Error{Code: "INVALID_REFRESH", HTTPStatus: 401}

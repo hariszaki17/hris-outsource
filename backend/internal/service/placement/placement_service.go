@@ -138,10 +138,17 @@ type PlacementRepository interface {
 
 // PlacementService implements the placement business logic.
 type PlacementService struct {
-	repo   PlacementRepository
-	leader *ShiftLeaderService // for current-leader joins + auto-vacate on resolution
-	txm    TxRunner
-	now    Clock
+	repo         PlacementRepository
+	leader       *ShiftLeaderService // for current-leader joins + auto-vacate on resolution
+	schedulePort ScheduleCancelPort
+	txm          TxRunner
+	now          Clock
+}
+
+// ScheduleCancelPort is the scheduling dependency for placement lifecycle actions
+// that need to cancel future schedule entries (end placement).
+type ScheduleCancelPort interface {
+	CancelFutureSchedulesForEmployee(ctx context.Context, tx pgx.Tx, employeeID string, afterDate time.Time) error
 }
 
 // NewPlacementService wires the placement service. leader may be set after
@@ -156,6 +163,10 @@ func (s *PlacementService) SetClock(c Clock) { s.now = c }
 // SetLeaderService wires the shift-leader service for current-leader resolution
 // and auto-vacate on placement resolution (SL-6).
 func (s *PlacementService) SetLeaderService(l *ShiftLeaderService) { s.leader = l }
+
+// SetScheduleCancelPort wires the scheduling port for placement lifecycle to
+// cancel future schedule entries (end placement).
+func (s *PlacementService) SetScheduleCancelPort(p ScheduleCancelPort) { s.schedulePort = p }
 
 // --- terminal-state helpers ---
 
@@ -814,6 +825,107 @@ func (s *PlacementService) TransferPlacement(ctx context.Context, p TransferPara
 		}
 	}
 	return result, nil
+}
+
+// --- end placement ---
+
+// EndPlacementParams carries the end-placement request fields.
+type EndPlacementParams struct {
+	ID            string
+	Reason        string
+	EffectiveDate *string
+	ActorUserID   *string
+}
+
+// EndPlacement ends a placement (lifecycle=ENDED), recording history, auto-vacating
+// shift leader, and cancelling future schedule entries.
+func (s *PlacementService) EndPlacement(ctx context.Context, p EndPlacementParams) (domain.Placement, error) {
+	cur, err := s.repo.GetPlacementByID(ctx, p.ID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return domain.Placement{}, apperr.NotFound()
+	}
+	if err != nil {
+		return domain.Placement{}, apperr.Internal(err)
+	}
+	if isTerminal(cur.LifecycleStatus) {
+		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
+	}
+	if !isActiveLifecycle(cur.LifecycleStatus) {
+		return domain.Placement{}, apperr.Conflict("TERMINAL_STATE_IMMUTABLE")
+	}
+
+	// Scope guard: a lead must own the company to end a placement (no-op for super/hr = global).
+	if serr := rbac.GuardCompany(ctx, cur.ClientCompanyID); serr != nil {
+		return domain.Placement{}, serr
+	}
+
+	// Resolve effective date: default today.
+	effectiveDate := s.today()
+	if p.EffectiveDate != nil && *p.EffectiveDate != "" {
+		ed, derr := time.Parse("2006-01-02", *p.EffectiveDate)
+		if derr != nil {
+			return domain.Placement{}, apperr.Invalid(map[string]string{"effective_date": "Format tanggal tidak valid (YYYY-MM-DD)."})
+		}
+		effectiveDate = ed
+	}
+
+	reason := p.Reason
+	before := cur.LifecycleStatus
+	endedAt := effectiveDate
+
+	var updated domain.Placement
+	if err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		var inErr error
+		updated, inErr = s.repo.SetPlacementLifecycle(ctx, tx, SetLifecycleParams{
+			ID:              cur.ID,
+			LifecycleStatus: "ENDED",
+			EndedReason:     &reason,
+			EndedAt:         &endedAt,
+		})
+		if inErr != nil {
+			return inErr
+		}
+
+		// Auto-vacate shift leader if the agent led the company.
+		if s.leader != nil {
+			if inErr := s.leader.autoVacateForEmployeeAtCompany(ctx, tx, cur.EmployeeID, cur.ClientCompanyID); inErr != nil {
+				return inErr
+			}
+		}
+
+		// Cancel future schedule entries.
+		if s.schedulePort != nil {
+			if inErr := s.schedulePort.CancelFutureSchedulesForEmployee(ctx, tx, cur.EmployeeID, effectiveDate); inErr != nil {
+				return inErr
+			}
+		}
+
+		// History row.
+		statusAfter := "ENDED"
+		if inErr := s.repo.InsertPlacementHistory(ctx, tx, PlacementHistoryParams{
+			PlacementID:   cur.ID,
+			Action:        "end",
+			ActorUserID:   p.ActorUserID,
+			Reason:        &reason,
+			EffectiveDate: &effectiveDate,
+			StatusBefore:  &before,
+			StatusAfter:   &statusAfter,
+		}); inErr != nil {
+			return inErr
+		}
+
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.Action("placement.end"),
+			EntityType: "placement",
+			EntityID:   cur.ID,
+			Before:     map[string]any{"lifecycle_status": before},
+			After:      map[string]any{"lifecycle_status": "ENDED", "ended_reason": reason, "ended_at": endedAt},
+		})
+	}); err != nil {
+		return domain.Placement{}, asAppErr(err)
+	}
+
+	return updated, nil
 }
 
 // --- helpers ---

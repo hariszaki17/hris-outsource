@@ -223,6 +223,34 @@ func (r *Repository) CountActiveSitesForCompany(ctx context.Context, companyID s
 	return r.q.CountActiveSitesForCompany(ctx, companyID)
 }
 
+// CountActivePlacementsForCompany returns the count of active/expiring/pending-start
+// placements at a company (CC-5: deactivate guard).
+func (r *Repository) CountActivePlacementsForCompany(ctx context.Context, companyID string) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx,
+		`SELECT count(*)::int FROM placements
+		 WHERE client_company_id = $1
+		   AND lifecycle_status IN ('ACTIVE', 'EXPIRING', 'PENDING_START')
+		   AND deleted_at IS NULL`,
+		companyID,
+	).Scan(&count)
+	return count, mapErr(err)
+}
+
+// CountActivePlacementsForSite returns the count of active/expiring/pending-start
+// placements at a site (ST-6: deactivate guard).
+func (r *Repository) CountActivePlacementsForSite(ctx context.Context, siteID string) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx,
+		`SELECT count(*)::int FROM placements
+		 WHERE site_id = $1
+		   AND lifecycle_status IN ('ACTIVE', 'EXPIRING', 'PENDING_START')
+		   AND deleted_at IS NULL`,
+		siteID,
+	).Scan(&count)
+	return count, mapErr(err)
+}
+
 // --- Client Sites ---
 
 // ListSitesForCompany returns a page of sites for a company (primary first).

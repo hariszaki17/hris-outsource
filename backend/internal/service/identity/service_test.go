@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
@@ -14,15 +15,35 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Fake TxRunner — executes the closure with a nil tx.
-// The fakeRepo methods accept pgx.Tx but never dereference it.
+// Fake TxRunner — executes the closure with a no-op fake tx so audit.Record
+// (which needs a pgconn.CommandTag from Exec) doesn't panic.
 // ---------------------------------------------------------------------------
+
+type fakeTx struct{}
+
+func (f *fakeTx) Begin(_ context.Context) (pgx.Tx, error)                      { return f, nil }
+func (f *fakeTx) Commit(_ context.Context) error                               { return nil }
+func (f *fakeTx) Rollback(_ context.Context) error                             { return nil }
+func (f *fakeTx) Conn() *pgx.Conn                                              { return nil }
+func (f *fakeTx) LargeObjects() pgx.LargeObjects                               { panic("n/a") }
+func (f *fakeTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error)  { panic("n/a") }
+func (f *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row         { panic("n/a") }
+func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+func (f *fakeTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	panic("n/a")
+}
+func (f *fakeTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults { panic("n/a") }
+func (f *fakeTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
+	panic("n/a")
+}
+
+var _ pgx.Tx = (*fakeTx)(nil)
 
 type fakeTxRunner struct{}
 
-func (f *fakeTxRunner) InTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	return fn(nil)
-}
+func (f *fakeTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error { return fn(&fakeTx{}) }
 
 // ---------------------------------------------------------------------------
 // Fake repository
@@ -34,21 +55,29 @@ type fakeRepo struct {
 	refreshTokens map[string]domain.RefreshToken        // keyed by hash
 	resetTokens   map[string]domain.PasswordResetToken  // keyed by hash
 	resetNextID   int64
+	loginAttempts map[string]domain.LoginAttempt        // keyed by lower-cased identifier
 
 	// call tracking
-	setLastLoginCalls       []string
-	updatePasswordCalls     []updatePasswordCall
-	insertResetTokenCalls   []insertResetTokenCall
-	markResetTokenUsedCalls []int64
-	revokeAllForUserCalls   []string
-	revokeTokenCalls        []int64
-	revokeFamilyCalls       []string
+	setLastLoginCalls        []string
+	updatePasswordCalls      []updatePasswordCall
+	insertResetTokenCalls    []insertResetTokenCall
+	markResetTokenUsedCalls  []int64
+	revokeAllForUserCalls    []string
+	revokeTokenCalls         []int64
+	revokeFamilyCalls        []string
+	upsertLoginAttemptCalls  []upsertLoginAttemptCall
+	deleteLoginAttemptCalls  []string
 }
 
 type updatePasswordCall struct{ userID, hash string }
 type insertResetTokenCall struct {
 	userID, tokenHash string
 	expiresAt         time.Time
+}
+type upsertLoginAttemptCall struct {
+	identifier  string
+	count       int
+	lockedUntil *time.Time
 }
 
 func newFakeRepo() *fakeRepo {
@@ -57,6 +86,7 @@ func newFakeRepo() *fakeRepo {
 		usersByID:     make(map[string]domain.User),
 		refreshTokens: make(map[string]domain.RefreshToken),
 		resetTokens:   make(map[string]domain.PasswordResetToken),
+		loginAttempts: make(map[string]domain.LoginAttempt),
 	}
 }
 
@@ -173,6 +203,34 @@ func (f *fakeRepo) GetResetTokenByHash(_ context.Context, hash string) (domain.P
 
 func (f *fakeRepo) MarkResetTokenUsed(_ context.Context, _ pgx.Tx, id int64) error {
 	f.markResetTokenUsedCalls = append(f.markResetTokenUsedCalls, id)
+	return nil
+}
+
+func (f *fakeRepo) GetLoginAttempt(_ context.Context, identifier string) (domain.LoginAttempt, error) {
+	a, ok := f.loginAttempts[lower(identifier)]
+	if !ok {
+		return domain.LoginAttempt{}, domain.ErrNotFound
+	}
+	return a, nil
+}
+
+func (f *fakeRepo) UpsertLoginAttempt(_ context.Context, _ pgx.Tx, identifier string, count int, lockedUntil *time.Time) error {
+	f.loginAttempts[lower(identifier)] = domain.LoginAttempt{
+		Identifier:   lower(identifier),
+		AttemptCount: count,
+		LockedUntil:  lockedUntil,
+	}
+	f.upsertLoginAttemptCalls = append(f.upsertLoginAttemptCalls, upsertLoginAttemptCall{
+		identifier:  lower(identifier),
+		count:       count,
+		lockedUntil: lockedUntil,
+	})
+	return nil
+}
+
+func (f *fakeRepo) DeleteLoginAttempt(_ context.Context, _ pgx.Tx, identifier string) error {
+	delete(f.loginAttempts, lower(identifier))
+	f.deleteLoginAttemptCalls = append(f.deleteLoginAttemptCalls, lower(identifier))
 	return nil
 }
 
@@ -440,6 +498,179 @@ func TestForgotPassword_DisabledEmail_NoToken(t *testing.T) {
 	}
 	if len(repo.insertResetTokenCalls) != 0 {
 		t.Errorf("expected 0 InsertResetToken calls for disabled account, got %d", len(repo.insertResetTokenCalls))
+	}
+}
+
+// --- E1 F1.5 Login lockout tests ---
+
+func TestLogin_LockedOut_ErrorAccountLocked(t *testing.T) {
+	repo := newFakeRepo()
+	pw := "Pass1ng-Garuda!"
+	hash, _ := auth.HashPassword(pw)
+	repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari@test.swp",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+	})
+	fixed := time.Date(2026, 6, 3, 7, 14, 52, 0, time.UTC)
+	futureLock := fixed.Add(time.Hour)
+	repo.loginAttempts["sari@test.swp"] = domain.LoginAttempt{
+		Identifier:   "sari@test.swp",
+		AttemptCount: 5,
+		LockedUntil:  &futureLock,
+	}
+
+	s := newTestService(t, repo, fixed)
+	_, err := s.Login(context.Background(), "sari@test.swp", pw, "go-test", "127.0.0.1")
+	if err == nil {
+		t.Fatal("expected ACCOUNT_LOCKED error")
+	}
+	if err.Error() != "ACCOUNT_LOCKED" {
+		t.Errorf("error = %q, want ACCOUNT_LOCKED", err.Error())
+	}
+}
+
+func TestLogin_LockoutExpired_Success(t *testing.T) {
+	repo := newFakeRepo()
+	pw := "Pass1ng-Garuda!"
+	hash, _ := auth.HashPassword(pw)
+	repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari@test.swp",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+	})
+	fixed := time.Date(2026, 6, 3, 7, 14, 52, 0, time.UTC)
+	pastLock := fixed.Add(-time.Hour)
+	repo.loginAttempts["sari@test.swp"] = domain.LoginAttempt{
+		Identifier:   "sari@test.swp",
+		AttemptCount: 5,
+		LockedUntil:  &pastLock,
+	}
+
+	s := newTestService(t, repo, fixed)
+	_, err := s.Login(context.Background(), "sari@test.swp", pw, "go-test", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if len(repo.deleteLoginAttemptCalls) != 1 {
+		t.Errorf("expected 1 DeleteLoginAttempt call, got %d", len(repo.deleteLoginAttemptCalls))
+	}
+	if repo.deleteLoginAttemptCalls[0] != "sari@test.swp" {
+		t.Errorf("DeleteLoginAttempt called with %q, want sari@test.swp", repo.deleteLoginAttemptCalls[0])
+	}
+}
+
+func TestLogin_SuccessClearsAttempt(t *testing.T) {
+	repo := newFakeRepo()
+	pw := "Pass1ng-Garuda!"
+	hash, _ := auth.HashPassword(pw)
+	repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari@test.swp",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+	})
+	repo.loginAttempts["sari@test.swp"] = domain.LoginAttempt{
+		Identifier:   "sari@test.swp",
+		AttemptCount: 3,
+	}
+
+	s := newTestService(t, repo, time.Now())
+	_, err := s.Login(context.Background(), "sari@test.swp", pw, "go-test", "127.0.0.1")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if len(repo.deleteLoginAttemptCalls) != 1 {
+		t.Errorf("expected 1 DeleteLoginAttempt call, got %d", len(repo.deleteLoginAttemptCalls))
+	}
+	if repo.deleteLoginAttemptCalls[0] != "sari@test.swp" {
+		t.Errorf("DeleteLoginAttempt called with %q, want sari@test.swp", repo.deleteLoginAttemptCalls[0])
+	}
+}
+
+func TestLogin_FailedIncrements(t *testing.T) {
+	t.Run("first_fail_count_1", func(t *testing.T) {
+		repo := newFakeRepo()
+		s := newTestService(t, repo, time.Now())
+		_, err := s.Login(context.Background(), "nobody@test.swp", "wrong", "", "")
+		if err == nil {
+			t.Fatal("expected INVALID_CREDENTIALS error")
+		}
+		if len(repo.upsertLoginAttemptCalls) != 1 {
+			t.Fatalf("UpsertLoginAttempt calls = %d, want 1", len(repo.upsertLoginAttemptCalls))
+		}
+		c := repo.upsertLoginAttemptCalls[0]
+		if c.count != 1 {
+			t.Errorf("count = %d, want 1", c.count)
+		}
+		if c.lockedUntil != nil {
+			t.Error("lockedUntil should be nil for first fail")
+		}
+	})
+
+	t.Run("fifth_fail_locks", func(t *testing.T) {
+		repo := newFakeRepo()
+		fixed := time.Date(2026, 6, 3, 7, 14, 52, 0, time.UTC)
+		repo.loginAttempts["nobody@test.swp"] = domain.LoginAttempt{
+			Identifier:   "nobody@test.swp",
+			AttemptCount: 4,
+		}
+		s := newTestService(t, repo, fixed)
+		_, err := s.Login(context.Background(), "nobody@test.swp", "wrong", "", "")
+		if err == nil {
+			t.Fatal("expected INVALID_CREDENTIALS error")
+		}
+		if len(repo.upsertLoginAttemptCalls) != 1 {
+			t.Fatalf("UpsertLoginAttempt calls = %d, want 1", len(repo.upsertLoginAttemptCalls))
+		}
+		c := repo.upsertLoginAttemptCalls[0]
+		if c.count != 5 {
+			t.Errorf("count = %d, want 5", c.count)
+		}
+		if c.lockedUntil == nil {
+			t.Fatal("lockedUntil should be set on 5th fail")
+		}
+		expectedLock := fixed.Add(15 * time.Minute)
+		if !c.lockedUntil.Equal(expectedLock) {
+			t.Errorf("lockedUntil = %v, want %v", *c.lockedUntil, expectedLock)
+		}
+	})
+}
+
+func TestLogin_LockedBeforePasswordCheck(t *testing.T) {
+	repo := newFakeRepo()
+	pw := "Pass1ng-Garuda!"
+	hash, _ := auth.HashPassword(pw)
+	repo.addUser(domain.User{
+		ID:           "SWP-USR-1042",
+		Email:        "sari@test.swp",
+		PasswordHash: hash,
+		Role:         auth.RoleHRAdmin,
+		Status:       "active",
+	})
+	fixed := time.Date(2026, 6, 3, 7, 14, 52, 0, time.UTC)
+	futureLock := fixed.Add(time.Hour)
+	repo.loginAttempts["sari@test.swp"] = domain.LoginAttempt{
+		Identifier:   "sari@test.swp",
+		AttemptCount: 5,
+		LockedUntil:  &futureLock,
+	}
+
+	s := newTestService(t, repo, fixed)
+	_, err := s.Login(context.Background(), "sari@test.swp", "WrongPassword!!", "", "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "ACCOUNT_LOCKED" {
+		t.Errorf("error = %q, want ACCOUNT_LOCKED (not INVALID_CREDENTIALS)", err.Error())
+	}
+	if len(repo.upsertLoginAttemptCalls) != 0 {
+		t.Errorf("UpsertLoginAttempt should NOT be called when locked, got %d calls", len(repo.upsertLoginAttemptCalls))
 	}
 }
 

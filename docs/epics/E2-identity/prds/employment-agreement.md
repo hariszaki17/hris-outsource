@@ -1,6 +1,6 @@
 # PRD · F2.2 — Employment Agreement (PKWT/PKWTT + comp)
 
-> **Epic:** E2 Identity, Org & Master Data · **Feature:** F2.2 · **Status:** Draft v1
+> **Epic:** E2 Identity, Org & Master Data · **Feature:** F2.2 · **Status:** Draft v2
 > **Parent:** [FEATURE.md](../FEATURE.md) · **Owner:** _TBD_
 
 ---
@@ -9,17 +9,18 @@
 
 Under Indonesian alih-daya law, the employment relationship is between the agent and **SWP** — a fixed-term `PKWT` or indefinite `PKWTT` agreement. This is distinct from a *placement* (E3), which is just a work designation to a client. The agreement is the legal anchor and the source of **current compensation** (base salary, BPJS, tax) that overtime and leave logic read. Legacy buried all of this in the encrypted `employee_contracts` blob mixed with placement data; this feature gives it a clean home.
 
+> **Document-only for placement (Resolved 2026-06-19).** The employment agreement has **no system impact** on placement, scheduling, or offboarding. It does NOT drive: expiry detection, offboarding cascade, period validation on placement, or reactivation checks. It is purely a **document management feature** (CRUD) — a legal record of the SWP↔agent employment contract. The `employment_agreement_id` reference on Placement has been removed.
+
 ## 2. Goals & non-goals
 
 **Goals**
 - Model PKWT (period-bound) and PKWTT (open-ended) agreements, one active per agent.
 - Hold current compensation terms (encrypted), referenced by E7/E8.
 - Renew via a linked successor; close on resignation/termination.
-- Bound placement validity (E3 reads this for its window/auto-cap).
 
 **Non-goals**
 - Placement (E3). Payslip generation/history (E8 — read-only). Payroll runs (out of scope, v1).
-- **Auto-ending employment:** a `PKWT` reaching its `end_date` does **not** auto-close the agreement and does **not** revoke login — it only flags `expiring` and asks HR to decide (EA-8/EA-9; offboarding mechanics in F2.7).
+- **System impact on placement.** Agreement does NOT drive expiry detection, offboarding cascade, or period validation on placement — it is a document-only feature. *(Resolved 2026-06-19.)*
 - **Agreement document/attachment upload (deferred post-MVP):** object/bucket storage is not provisioned for MVP, so the agreement-create form has **no file upload** ("Berkas Perjanjian") and an agreement is created **without** an attached PDF. The agreement-attachments capability (migration `00018` / any attachment endpoints) is **deferred post-MVP**. *(2026-06-07 — EPICS §8.)*
 - **Draft lifecycle (not in MVP):** there is **no "Save as Draft"** and **no DRAFT status** — agreements are created **directly active** (the create UI offers only Cancel + "Activate Agreement"). *(2026-06-07 — EPICS §8.)*
 
@@ -43,13 +44,10 @@ HR/Placement Admin & Super Admin (author), **Agent** (view own summary), System 
 | EA-3 | Renewal creates a **linked successor** (`predecessor_id`); the prior agreement is closed (status `Superseded`). |
 | EA-4 | Compensation fields (`base_salary`, `bpjs_terms`, `tax_profile`) are **encrypted at rest** and visible only to authorized roles. |
 | EA-5 | Closing an agreement (resign/terminate/end-of-term/deceased/retired/absconded) requires a reason + effective date and cascades to active placements (E3) for review. **Closing the agreement = employment-end: it is the only event that triggers offboarding + login/session revocation (F2.7 OB-1).** Placement transfer/renewal/supersede do **not** close the agreement and do **not** revoke login. |
-| EA-6 | An agreement's validity **bounds placement periods** (E3 BR-1b): PKWT placements auto-cap to the agreement end. |
-| EA-7 | All actions audited; comp changes audited with old/new (values masked in the log). |
-| EA-8 | A `PKWT` within **30 days** of its `end_date` is flagged `expiring` and raises an **HR Inbox decision task** (Continue = renew per EA-3 / End = offboard per EA-5). There is **no auto-close** of the agreement (F2.7 OB-4). |
-| EA-9 | **Grace:** if a `PKWT` `end_date` passes with no HR decision, the agreement **stays `expiring`** and the linked login **stays valid** until HR explicitly ends it (F2.7 OB-4/OB-6). |
-| EA-10 | The agreement carries the **annual-leave entitlement** as `annual_leave_entitlement_days` (int, `>= 0`, nullable; null → org default). This is an **employment-agreement term, not a placement term** (2026-06-07, EPICS §8) — **E6 leave-quota sources the per-year annual entitlement from here** (subject to E6 pro-ration for probation/mid-year joiners). Renewal (EA-3) copies it onto the successor; HR may adjust it on the successor. |
-| EA-11 | **MVP — created directly active, no draft.** The status set is **`active | superseded | closed`** (DB `status` CHECK) — there is **no DRAFT** state and **no "Save as Draft"** step; an agreement is **created `active`** in one step (create UI = Cancel + "Activate Agreement"). *(2026-06-07, EPICS §8.)* |
-| EA-12 | **MVP — list display & search.** The agreements list **displays the employee name** (joined) alongside the employee id, and is **searchable by employee name, employee id, or agreement number** via a free-text `q` filter. The list is kept minimal: **type + status filters + search** only — it **drops** the successor/"Pengganti" column, the per-row kebab/actions menu, and the filter "Reset" button. *(2026-06-07, EPICS §8.)* |
+| EA-6 | All actions audited; comp changes audited with old/new (values masked in the log). |
+| EA-7 | The agreement carries the **annual-leave entitlement** as `annual_leave_entitlement_days` (int, `>= 0`, nullable; null → org default). This is an **employment-agreement term, not a placement term** (2026-06-07, EPICS §8) — **E6 leave-quota sources the per-year annual entitlement from here** (subject to E6 pro-ration for probation/mid-year joiners). Renewal (EA-3) copies it onto the successor; HR may adjust it on the successor. |
+| EA-8 | **MVP — created directly active, no draft.** The status set is **`active | superseded | closed`** (DB `status` CHECK) — there is **no DRAFT** state and **no "Save as Draft"** step; an agreement is **created `active`** in one step (create UI = Cancel + "Activate Agreement"). *(2026-06-07, EPICS §8.)* |
+| EA-9 | **MVP — list display & search.** The agreements list **displays the employee name** (joined) alongside the employee id, and is **searchable by employee name, employee id, or agreement number** via a free-text `q` filter. The list is kept minimal: **type + status filters + search** only — it **drops** the successor/"Pengganti" column, the per-row kebab/actions menu, and the filter "Reset" button. *(2026-06-07, EPICS §8.)* |
 
 ## 6. Data model
 
@@ -116,6 +114,7 @@ F2.1 (employee), E1 (RBAC/audit), E3 (placement window/auto-cap), E7 (OT base), 
 
 ## 10. Decisions & open questions
 
+- ✅ **Agreement is document-only for placement.** No system impact on placement validation, expiry detection, offboarding cascade, or reactivation checks. *(Resolved 2026-06-19.)*
 - ✅ Agreement carries current comp; PKWT bounds placement; renewal = successor.
 - ✅ Mid-agreement comp changes are **effective-dated and historized** via `CompensationRecord` (not overwrite-in-place).
 - ✅ Agents view their **own historical payslips (summary)** on mobile (E8); the live agreement compensation amounts remain hidden on mobile.

@@ -274,6 +274,7 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 	// the denormalized attendance_shift_date. Both resolved per branch below.
 	var companyID string
 	var shiftDate time.Time
+	var originalSnapshot map[string]any
 
 	if isNewEntry {
 		// NEW_ENTRY: no target record. Resolve the requester's active placement on
@@ -340,6 +341,20 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 		default:
 			shiftDate = s.now()
 		}
+
+		// Capture the original snapshot of the attendance record before correction.
+		originalSnapshot = map[string]any{}
+		if rec.CheckInAt != nil {
+			originalSnapshot["check_in_at"] = rec.CheckInAt.UTC().Format(time.RFC3339)
+		}
+		if rec.CheckOutAt != nil {
+			originalSnapshot["check_out_at"] = rec.CheckOutAt.UTC().Format(time.RFC3339)
+		}
+		if rec.AttendanceCodeID != nil {
+			originalSnapshot["attendance_code_id"] = *rec.AttendanceCodeID
+		}
+		originalSnapshot["auto_closed"] = rec.AutoClosed
+		originalSnapshot["status"] = string(rec.Status)
 	}
 
 	// 7-day window (HR/super exempt). Basis: the target shift date for existing records,
@@ -349,6 +364,7 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 	}
 
 	shiftDateOnly := time.Date(shiftDate.Year(), shiftDate.Month(), shiftDate.Day(), 0, 0, 0, 0, time.UTC)
+
 	var newID string
 	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
 		id, cerr := s.repo.CreateCorrection(ctx, tx, CreateCorrectionParams{
@@ -363,6 +379,7 @@ func (s *CorrectionService) Create(ctx context.Context, in CreateCorrectionInput
 			Reason:                   in.Reason,
 			EvidenceFileID:           in.EvidenceFileID,
 			AttendanceShiftDate:      shiftDateOnly,
+			OriginalSnapshot:         originalSnapshot,
 		})
 		if cerr != nil {
 			return cerr
@@ -712,6 +729,74 @@ func CheckCorrectionWindow(shiftDate time.Time, isHR bool, now time.Time) error 
 		}
 	}
 	return nil
+}
+
+// --- cancel (agent self-cancel) ---
+
+// Cancel marks a PENDING correction CANCELLED. scope=self — an agent cancels
+// only their own correction. Guards PENDING only; cancels the linked E11 instance.
+func (s *CorrectionService) Cancel(ctx context.Context, id string) (att.Correction, error) {
+	principal, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return att.Correction{}, apperr.Unauthenticated()
+	}
+
+	var cor att.Correction
+	var lerr error
+	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
+		cor, lerr = s.repo.GetCorrectionForUpdate(ctx, tx, id)
+		if errors.Is(lerr, domain.ErrNotFound) {
+			return apperr.NotFound()
+		}
+		if lerr != nil {
+			return lerr
+		}
+
+		// Scope: agent may cancel only their own correction; staff may cancel within their scope.
+		if principal.Role == auth.RoleAgent {
+			if cor.RequesterID != principal.EmployeeID {
+				return apperr.NotFound()
+			}
+		} else {
+			if serr := rbac.GuardCompany(ctx, cor.CompanyID); serr != nil {
+				return serr
+			}
+		}
+
+		if cor.Status != att.CorrectionStatusPending {
+			return correctionTerminalConflict(cor.Status)
+		}
+
+		actor := principal.EmployeeID
+		reason := "Dibatalkan oleh pengaju."
+		n, cerr := s.repo.CancelCorrection(ctx, tx, id, &actor, reason)
+		if cerr != nil {
+			return cerr
+		}
+		if n == 0 {
+			return correctionTerminalConflict(cor.Status)
+		}
+
+		// Cancel the linked E11 instance.
+		if s.engine != nil && cor.ApprovalInstanceID != nil {
+			if ierr := s.engine.CancelInstance(ctx, tx, *cor.ApprovalInstanceID, reason); ierr != nil {
+				return ierr
+			}
+		}
+
+		return audit.Record(ctx, tx, audit.Entry{
+			Action:     audit.ActionUpdate,
+			EntityType: "attendance_correction",
+			EntityID:   id,
+			Before:     map[string]any{"status": string(cor.Status)},
+			After:      map[string]any{"status": "CANCELLED", "decided_by": actor},
+		})
+	})
+	if err != nil {
+		return att.Correction{}, asAppErr(err)
+	}
+
+	return s.repo.GetCorrection(ctx, id)
 }
 
 // --- helpers ---

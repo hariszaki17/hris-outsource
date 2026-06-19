@@ -87,6 +87,10 @@ func (f *fakeClockRepo) GetAttendance(_ context.Context, id string) (att.Attenda
 	return f.records[id], nil
 }
 
+func (f *fakeClockRepo) GetDefaultAttendanceCode(_ context.Context, code string) (id, name string, err error) {
+	return "", "", nil
+}
+
 // clockHarness mounts ClockHandler.ClockIn over the fake repo with an agent principal.
 func clockHarness(repo *fakeClockRepo) http.Handler {
 	csvc := svc.NewClockService(repo, &fakeTxRunner{})

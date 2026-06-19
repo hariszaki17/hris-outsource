@@ -174,7 +174,9 @@ flowchart TD
 
 ### F2.2 — Employment Agreement (PKWT/PKWTT + comp)
 
-The legal employment relationship between the agent and **SWP** — fixed-term `PKWT` (with end date) or indefinite `PKWTT` (open-ended). Holds the agreement reference, period, and **current compensation terms** (base salary, BPJS, tax) that overtime/leave calculations read. Renewals create linked successors; one active at a time. Placement designations (E3) must sit within an active agreement.
+The legal employment relationship between the agent and **SWP** — fixed-term `PKWT` (with end date) or indefinite `PKWTT` (open-ended). Holds the agreement reference, period, and **current compensation terms** (base salary, BPJS, tax) that overtime/leave calculations read. Renewals create linked successors; one active at a time.
+
+> **Document-only for placement.** The employment agreement has **no system impact** on placement, scheduling, or offboarding. It does NOT drive: expiry detection, offboarding cascade, period validation on placement, or reactivation checks. It is purely a **document management feature** (CRUD) — a legal record of the SWP↔agent employment contract. *(Resolved 2026-06-19 — agreement is document-only.)*
 
 ```mermaid
 flowchart TD
@@ -259,7 +261,9 @@ flowchart TD
 
 ### F2.5 — Operational Master Data (leave / attendance / overtime)
 
-Admin-managed master definitions consumed by the time-tracking epics: **leave types** (annual flag, document-required), **attendance codes** (workday/payable/**billable**/needs-verification + color), and **overtime rules** (multipliers, min duration, pre-approval) — the latter net-new (no legacy source). E2 owns the definitions; the *behavior* lives in E5/E6/E7.
+Admin-managed master definitions consumed by the time-tracking epics: **leave types** (annual flag, document-required, **un-deletable**), **attendance codes** (workday/payable/**billable**/needs-verification + color), and **overtime rules** (multipliers, min duration, pre-approval) — the latter net-new (no legacy source). E2 owns the definitions; the *behavior* lives in E5/E6/E7.
+
+> **Leave type is un-deletable.** Master data cannot be deleted — only deactivated. Leave entitlements (per-employee) CAN be deleted. *(Resolved 2026-06-19.)*
 
 ```mermaid
 flowchart LR

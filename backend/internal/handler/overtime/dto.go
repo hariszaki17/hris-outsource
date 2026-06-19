@@ -226,3 +226,37 @@ func derefStr(p *string) string {
 	}
 	return *p
 }
+
+// --- response: OvertimeAggregate ---
+
+type aggregateResponse struct {
+	GroupKey       string `json:"group_key"`
+	EmployeeID     string `json:"employee_id"`
+	EmployeeName   string `json:"employee_name"`
+	DayType        string `json:"day_type"`
+	TotalMinutes   int    `json:"total_minutes"`
+	TotalApproved  int    `json:"total_approved_count"`
+	WorkdayCount   int    `json:"workday_count"`
+	RestdayCount   int    `json:"restday_count"`
+	HolidayCount   int    `json:"holiday_count"`
+	WorkdayMinutes int    `json:"workday_minutes"`
+	RestdayMinutes int    `json:"restday_minutes"`
+	HolidayMinutes int    `json:"holiday_minutes"`
+}
+
+func toAggregateResponse(r svc.OvertimeAggregateRow) aggregateResponse {
+	return aggregateResponse{
+		GroupKey:       r.GroupKey,
+		EmployeeID:     r.EmployeeID,
+		EmployeeName:   r.EmployeeName,
+		DayType:        r.DayType,
+		TotalMinutes:   r.TotalMinutes,
+		TotalApproved:  r.TotalApproved,
+		WorkdayCount:   r.WorkdayCount,
+		RestdayCount:   r.RestdayCount,
+		HolidayCount:   r.HolidayCount,
+		WorkdayMinutes: r.WorkdayMinutes,
+		RestdayMinutes: r.RestdayMinutes,
+		HolidayMinutes: r.HolidayMinutes,
+	}
+}

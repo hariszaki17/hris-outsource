@@ -662,6 +662,23 @@ func (r *fakeCorrectionRepo) SetCorrectionApprovalInstance(_ context.Context, _ 
 	return nil
 }
 
+func (r *fakeCorrectionRepo) CancelCorrection(_ context.Context, _ pgx.Tx, id string, decidedBy *string, reason string) (int64, error) {
+	c, ok := r.records[id]
+	if !ok {
+		return 0, domain.ErrNotFound
+	}
+	if c.Status != att.CorrectionStatusPending {
+		return 0, nil
+	}
+	c.Status = att.CorrectionStatusCancelled
+	c.DecidedBy = decidedBy
+	dt := fixedNow
+	c.DecidedAt = &dt
+	c.RejectReason = strp(reason)
+	r.records[id] = c
+	return 1, nil
+}
+
 // fakeApprovalEngine is a no-op approval.Engine: it stamps a deterministic instance id
 // at submit so the correction CREATE path links one. Decisions are driven directly in
 // tests via CorrectionService.OnApproved / OnRejected.
@@ -871,6 +888,7 @@ func newHarness(t *testing.T, principalRole auth.Role, leaderCompanyID, leaderEm
 	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 		r.With(idem.Handler).Post("/corrections", handler.CreateCorrection)
+		r.With(idem.Handler).Post("/corrections/{id}:cancel", handler.CancelCorrection)
 	})
 
 	h.router = r

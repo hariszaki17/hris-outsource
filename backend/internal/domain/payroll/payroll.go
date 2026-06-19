@@ -148,3 +148,99 @@ type ExportJob struct {
 	CompletedAt      *time.Time
 	PollURL          string
 }
+
+// RunStatus is the payroll-run lifecycle state (F8.3). Pinned to openapi.
+type RunStatus string
+
+const (
+	RunStatusDraft  RunStatus = "DRAFT"
+	RunStatusPosted RunStatus = "POSTED"
+)
+
+// PayrollRun is a monthly compute-assist payroll run (F8.3 / SWP-PRR-*).
+// HR opens a DRAFT run, assembles, reviews, then POSTs to make payslips immutable.
+type PayrollRun struct {
+	ID         string
+	Year       int
+	Month      int
+	Status     RunStatus
+	CutoffDate time.Time
+	CreatedBy  string
+	PostedBy   *string
+	PostedAt   *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// IsPosted reports whether the run has been posted (payslips immutable).
+func (r PayrollRun) IsPosted() bool { return r.Status == RunStatusPosted }
+
+// EmployeeRunLine is an in-memory assembly row for one employee in a run draft.
+// It is never persisted directly — the service assembles these, HR reviews/adjusts,
+// then PostRun materialises them into immutable Payslip rows.
+type EmployeeRunLine struct {
+	EmployeeID   string
+	EmployeeName string
+	EmployeeType string // FIELD | INTERNAL
+
+	BaseSalaryIDR *float64 // from active EmploymentAgreement
+	WorkingDays   *int
+
+	// Decrypted Money strings for the draft totals before posting.
+	GrossEarnings   string
+	GrossDeductions string
+	TakeHomePay     string
+
+	AdjustmentIDs []string // PENDING PayrollAdjustment IDs to be marked APPLIED on post
+}
+
+// RunSummary is the aggregate header for a payroll run view.
+type RunSummary struct {
+	Run             PayrollRun
+	PayslipCount    int
+	TotalTakeHomePay string // sum of take-home across payslips, encrypted
+}
+
+// PaymentMethod is the channel used to transfer wages (F8.4).
+type PaymentMethod string
+
+const (
+	PaymentMethodBankTransfer PaymentMethod = "BankTransfer"
+	PaymentMethodCash         PaymentMethod = "Cash"
+)
+
+// PayrollPayment is one recorded payment against a payslip (F8.4 / SWP-PPY-*).
+// Amount is the DECRYPTED Money string (decrypted at the read boundary).
+type PayrollPayment struct {
+	ID             string
+	PayslipID      string
+	Amount         *string // decrypted Money string; nil on decrypt-fail
+	AmountEnc      []byte  // raw ciphertext from repo
+	Method         PaymentMethod
+	ReferenceNo    *string
+	EvidenceFileID *string
+	PaidOn         time.Time
+	PaidBy         string
+	VoidedAt       *time.Time
+	VoidReason     *string
+	CreatedAt      time.Time
+}
+
+// PaymentStatus is the payslip payment settlement state (F8.4).
+type PaymentStatus string
+
+const (
+	PaymentStatusUnpaid PaymentStatus = "Unpaid"
+	PaymentStatusPaid   PaymentStatus = "Paid"
+)
+
+// SourceType distinguishes migrated from generated payslips.
+type SourceType string
+
+const (
+	SourceTypeMigrated  SourceType = "Migrated"
+	SourceTypeGenerated SourceType = "Generated"
+)
+
+// PayslipSourceSystemGenerated is the source_system value used for generated payslips.
+const PayslipSourceSystemGenerated = "swp-hris"

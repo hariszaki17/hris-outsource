@@ -21,9 +21,7 @@ import (
 	"testing"
 	"time"
 
-	approval "github.com/hariszaki17/hris-outsource/backend/internal/domain/approval"
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
-	"github.com/hariszaki17/hris-outsource/backend/internal/platform/apperr"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
 )
@@ -212,61 +210,6 @@ func TestGetOvertime_CrossScope404(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// :confirm → PENDING_AGENT_CONFIRM → PENDING + engine CreateInstance; wrong-state 409
-// ---------------------------------------------------------------------------
-
-func TestConfirm_AgentConfirmEntersApprovalChain(t *testing.T) {
-	// Web confirm is staff-triggered on a seeded auto-detected candidate (CONTEXT).
-	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedOvertime("SWP-OT-30001", cmpLed, empAgent, dom.OvertimeStatusPendingAgentConfirm, dom.OvertimeTierWorkday)
-
-	rr := h.do("POST", "/overtime/SWP-OT-30001:confirm", map[string]any{"note": "Konfirmasi lembur."})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	d := dataObject(t, rr)
-	if d["status"] != "PENDING" {
-		t.Errorf("status = %v, want PENDING", d["status"])
-	}
-	// confirming creates the E11 ApprovalInstance for this OT and links it.
-	if len(h.engine.calls) != 1 {
-		t.Fatalf("engine.CreateInstance calls = %d, want 1", len(h.engine.calls))
-	}
-	call := h.engine.calls[0]
-	if call.RequestType != approval.RequestTypeOvertime || call.RequestID != "SWP-OT-30001" {
-		t.Errorf("CreateInstance input = %+v, want {OVERTIME, SWP-OT-30001}", call)
-	}
-	if call.RequesterID != empAgent {
-		t.Errorf("CreateInstance requester = %s, want %s", call.RequesterID, empAgent)
-	}
-	if d["approval_instance_id"] == nil || d["approval_instance_id"] == "" {
-		t.Errorf("approval_instance_id not linked after confirm: %v", d["approval_instance_id"])
-	}
-	if got := deref(h.overtime.records["SWP-OT-30001"].ApprovalInstanceID); got == "" {
-		t.Errorf("instance id not persisted on the record")
-	}
-}
-
-func TestConfirm_WrongState409(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedOvertime("SWP-OT-30002", cmpLed, empAgent, dom.OvertimeStatusPending, dom.OvertimeTierWorkday)
-	rr := h.do("POST", "/overtime/SWP-OT-30002:confirm", nil)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if got := errCode(t, rr); got != "CONFLICT" {
-		t.Errorf("code = %s, want CONFLICT", got)
-	}
-	if f := errFields(t, rr); f["status"] != "PENDING" {
-		t.Errorf("fields.status = %v, want PENDING", f["status"])
-	}
-	// no instance is created on a rejected transition.
-	if len(h.engine.calls) != 0 {
-		t.Errorf("engine.CreateInstance should not run on a wrong-state confirm: %d calls", len(h.engine.calls))
-	}
-}
-
-// ---------------------------------------------------------------------------
 // :withdraw → PENDING → 204 (CANCELLED); APPROVED → 409
 // ---------------------------------------------------------------------------
 
@@ -286,18 +229,6 @@ func TestWithdraw_FromPending_204(t *testing.T) {
 	}
 }
 
-func TestWithdraw_FromPendingAgentConfirm_204(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedOvertime("SWP-OT-30009", cmpLed, empAgent, dom.OvertimeStatusPendingAgentConfirm, dom.OvertimeTierWorkday)
-	rr := h.do("POST", "/overtime/SWP-OT-30009:withdraw", nil)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if got := h.overtime.records["SWP-OT-30009"].Status; got != dom.OvertimeStatusCancelled {
-		t.Errorf("status = %s, want CANCELLED", got)
-	}
-}
-
 func TestWithdraw_FromApproved_409(t *testing.T) {
 	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
 	h.seedOvertime("SWP-OT-30007", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)
@@ -307,49 +238,6 @@ func TestWithdraw_FromApproved_409(t *testing.T) {
 	}
 	if got := errCode(t, rr); got != "CONFLICT" {
 		t.Errorf("code = %s, want CONFLICT", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// OT_BELOW_MIN — counted_minutes < rule.min_minutes → 422 + field errors.
-//
-// The openapi returns OT_BELOW_MIN on the create path (mobile/system, OUT of web
-// scope); E7 exposes it as the exported EnforceMinMinutes seam. We drive the REAL
-// service method directly + assert the apperr wire shape (422, code, fields).
-// ---------------------------------------------------------------------------
-
-func TestEnforceMinMinutes_BelowMin422WithFields(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedRule("", 30) // single GLOBAL rule, min_minutes = 30
-
-	err := h.otSvc.EnforceMinMinutes(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected OT_BELOW_MIN error for counted 20 < min 30, got nil")
-	}
-	ae, ok := apperr.As(err)
-	if !ok {
-		t.Fatalf("expected *apperr.Error, got %T: %v", err, err)
-	}
-	if ae.Status() != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want 422", ae.Status())
-	}
-	if ae.Code != "OT_BELOW_MIN" {
-		t.Errorf("code = %s, want OT_BELOW_MIN", ae.Code)
-	}
-	// error.fields carries counted_minutes + min_minutes (INV-5).
-	if ae.Fields["counted_minutes"] != "20" {
-		t.Errorf("fields.counted_minutes = %q, want \"20\"", ae.Fields["counted_minutes"])
-	}
-	if ae.Fields["min_minutes"] != "30" {
-		t.Errorf("fields.min_minutes = %q, want \"30\"", ae.Fields["min_minutes"])
-	}
-}
-
-func TestEnforceMinMinutes_AtOrAboveMin_OK(t *testing.T) {
-	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
-	h.seedRule("", 30)
-	if err := h.otSvc.EnforceMinMinutes(context.Background(), 30); err != nil {
-		t.Errorf("counted 30 >= min 30 should pass, got %v", err)
 	}
 }
 
@@ -382,5 +270,89 @@ func TestClassifyDayType_NoScheduleNoHoliday_Restday(t *testing.T) {
 	}
 	if holidayID != nil {
 		t.Errorf("holidayID = %v, want nil on a non-holiday", holidayID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GET /overtime:aggregate — APPROVED OT totals grouped by agent or day_type
+// ---------------------------------------------------------------------------
+
+func TestAggregateOvertime_ByAgent_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	h.seedOvertime("SWP-OT-3010", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)
+	h.seedOvertime("SWP-OT-3011", cmpLed, "SWP-EMP-3002", dom.OvertimeStatusApproved, dom.OvertimeTierRestday)
+
+	rr := h.do("GET", "/overtime:aggregate?group_by=agent&company_id="+cmpLed, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("data missing/not an array: %T", body["data"])
+	}
+	if len(data) != 2 {
+		t.Fatalf("data length = %d, want 2 (two agents)", len(data))
+	}
+	for _, raw := range data {
+		row := raw.(map[string]any)
+		if _, ok := row["employee_id"]; !ok {
+			t.Errorf("aggregate row missing employee_id")
+		}
+		if _, ok := row["total_minutes"]; !ok {
+			t.Errorf("aggregate row missing total_minutes")
+		}
+	}
+}
+
+func TestAggregateOvertime_ByDayType_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+	h.seedOvertime("SWP-OT-3012", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierWorkday)
+	h.seedOvertime("SWP-OT-3013", cmpLed, empAgent, dom.OvertimeStatusApproved, dom.OvertimeTierRestday)
+
+	rr := h.do("GET", "/overtime:aggregate?group_by=day_type&company_id="+cmpLed, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("data missing/not an array: %T", body["data"])
+	}
+	if len(data) < 1 {
+		t.Fatalf("data is empty, want at least 1 row")
+	}
+	row := data[0].(map[string]any)
+	if _, ok := row["day_type"]; !ok {
+		t.Errorf("aggregate row missing day_type key")
+	}
+}
+
+func TestAggregateOvertime_Empty_200(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+
+	rr := h.do("GET", "/overtime:aggregate?group_by=agent&company_id="+cmpLed, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	data, ok := body["data"].([]any)
+	if !ok {
+		t.Fatalf("data missing/not an array: %T", body["data"])
+	}
+	if len(data) != 0 {
+		t.Errorf("data length = %d, want 0 (no APPROVED OT)", len(data))
+	}
+}
+
+func TestAggregateOvertime_InvalidGroupBy_400(t *testing.T) {
+	h := newHarness(t, auth.RoleHRAdmin, "", empHR)
+
+	rr := h.do("GET", "/overtime:aggregate?group_by=foo", nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := errCode(t, rr); got != "INVALID_REQUEST" {
+		t.Errorf("code = %q, want INVALID_REQUEST", got)
 	}
 }

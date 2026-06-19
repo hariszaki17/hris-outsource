@@ -137,3 +137,41 @@ SET approval_instance_id = sqlc.narg(approval_instance_id),
     updated_at           = now()
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
+
+-- name: ExistsActiveOvertimeForAgentDate :one
+-- Duplicate detection (2026-06-19): an agent may not have more than one active
+-- (not REJECTED, not CANCELLED) OT for the same work_date.
+SELECT EXISTS(
+    SELECT 1 FROM overtime
+    WHERE employee_id = sqlc.arg(employee_id)
+      AND work_date   = sqlc.arg(work_date)::date
+      AND status NOT IN ('REJECTED', 'CANCELLED')
+      AND deleted_at IS NULL
+) AS exists;
+
+-- name: AggregateOvertime :many
+-- Returns APPROVED OT totals grouped by agent or day_type, scoped by company and
+-- date range. result.EXISTS = false when no matching rows (empty set).
+SELECT
+    CASE WHEN sqlc.arg(group_by) = 'agent' THEN o.employee_id ELSE o.day_type END AS group_key,
+    o.employee_id,
+    COALESCE(e.full_name, '') AS employee_name,
+    o.day_type,
+    COALESCE(SUM(o.counted_minutes), 0)::int AS total_minutes,
+    CAST(COUNT(*) AS int) AS total_approved_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'WORKDAY') AS int) AS workday_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'RESTDAY') AS int) AS restday_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'HOLIDAY') AS int) AS holiday_count,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'WORKDAY'), 0)::int AS workday_minutes,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'RESTDAY'), 0)::int AS restday_minutes,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'HOLIDAY'), 0)::int AS holiday_minutes
+FROM overtime o
+LEFT JOIN employees e ON e.id = o.employee_id
+WHERE (sqlc.narg(company_id)::text IS NULL OR o.company_id = sqlc.narg(company_id)::text)
+  AND (sqlc.narg(date_from)::date IS NULL OR o.work_date >= sqlc.narg(date_from)::date)
+  AND (sqlc.narg(date_to)::date IS NULL OR o.work_date <= sqlc.narg(date_to)::date)
+  AND o.status = 'APPROVED'
+  AND o.deleted_at IS NULL
+GROUP BY CASE WHEN sqlc.arg(group_by) = 'agent' THEN o.employee_id ELSE o.day_type END,
+         o.employee_id, e.full_name, o.day_type
+ORDER BY total_minutes DESC;

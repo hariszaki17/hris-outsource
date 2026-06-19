@@ -57,6 +57,10 @@ type scheduleEntryResponse struct {
 	Status          string  `json:"status"`
 	IsDayOff        bool    `json:"is_day_off"`
 	ReplacedEntryID *string `json:"replaced_entry_id"`
+	SiteID          *string `json:"site_id"`
+	SiteName        *string `json:"site_name"`
+	SiteGeoLat      *float64 `json:"site_geo_lat"`
+	SiteGeoLng      *float64 `json:"site_geo_lng"`
 	CreatedBy       *string `json:"created_by"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
@@ -136,6 +140,10 @@ func toScheduleEntryResponse(e domain.ScheduleEntry) scheduleEntryResponse {
 		Status:          e.Status,
 		IsDayOff:        e.IsDayOff,
 		ReplacedEntryID: e.ReplacedEntryID,
+		SiteID:          e.SiteID,
+		SiteName:        e.SiteName,
+		SiteGeoLat:      e.SiteGeoLat,
+		SiteGeoLng:      e.SiteGeoLng,
 		CreatedBy:       e.CreatedBy,
 		CreatedAt:       e.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       e.UpdatedAt.UTC().Format(time.RFC3339),

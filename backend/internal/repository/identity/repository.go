@@ -166,6 +166,40 @@ func (r *Repository) RevokeAllRefreshForUser(ctx context.Context, tx pgx.Tx, use
 	return mapErr(r.q.WithTx(tx).RevokeAllRefreshForUser(ctx, userID))
 }
 
+// GetLoginAttempt fetches a login attempt by normalized identifier (E1 F1.5).
+func (r *Repository) GetLoginAttempt(ctx context.Context, identifier string) (domain.LoginAttempt, error) {
+	var a domain.LoginAttempt
+	row := r.pool.QueryRow(ctx,
+		`SELECT id, identifier, attempt_count, locked_until FROM login_attempts WHERE identifier = $1`,
+		identifier,
+	)
+	err := row.Scan(&a.ID, &a.Identifier, &a.AttemptCount, &a.LockedUntil)
+	if err != nil {
+		return domain.LoginAttempt{}, mapErr(err)
+	}
+	return a, nil
+}
+
+// UpsertLoginAttempt inserts or updates a login attempt record (E1 F1.5).
+func (r *Repository) UpsertLoginAttempt(ctx context.Context, tx pgx.Tx, identifier string, count int, lockedUntil *time.Time) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO login_attempts (identifier, attempt_count, locked_until, updated_at)
+		 VALUES ($1, $2, $3, now())
+		 ON CONFLICT (identifier) DO UPDATE SET
+		     attempt_count = EXCLUDED.attempt_count,
+		     locked_until  = EXCLUDED.locked_until,
+		     updated_at    = now()`,
+		identifier, count, lockedUntil,
+	)
+	return mapErr(err)
+}
+
+// DeleteLoginAttempt removes the login attempt row for the identifier (E1 F1.5).
+func (r *Repository) DeleteLoginAttempt(ctx context.Context, tx pgx.Tx, identifier string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM login_attempts WHERE identifier = $1`, identifier)
+	return mapErr(err)
+}
+
 // --- mapping helpers ---
 
 func toDomainUserFromIdentifier(u sqlcgen.GetUserByIdentifierRow) domain.User {

@@ -130,6 +130,14 @@ func (r *recFakeRepo) SoftDeleteScheduleEntry(_ context.Context, _ pgx.Tx, _ str
 	return 1, nil
 }
 
+func (r *recFakeRepo) CancelFutureSchedulesForEmployee(_ context.Context, _ pgx.Tx, employeeID string, afterDate time.Time) error {
+	return nil
+}
+
+func (r *recFakeRepo) ListScheduleForAggregate(_ context.Context, companyID string, start, end time.Time) ([]domain.ScheduleEntry, error) {
+	return nil, nil
+}
+
 var _ ScheduleRepository = (*recFakeRepo)(nil)
 
 func hrCtx() context.Context {

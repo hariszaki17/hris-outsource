@@ -158,7 +158,7 @@ flowchart TD
 
 ### F5.2 — Attendance Evaluation & Auto-Close
 
-System logic over records: compute **lateness** vs the scheduled shift start (+ grace), assign **status** and a default attendance code, and **auto-clock-out** open records at the scheduled shift end.
+System logic over records: compute **lateness** vs the scheduled shift start (+ grace), assign **status** and a default attendance code, and **auto-clock-out** open records at the scheduled shift end. A **cron job** closes unfinalized attendance records (no clock-out past shift end). *(Auto-close is cron-driven, resolved 2026-06-19.)*
 
 ```mermaid
 flowchart TD

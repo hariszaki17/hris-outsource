@@ -158,18 +158,6 @@ func (h *MasterDataHandler) UpdateLeaveType(w http.ResponseWriter, r *http.Reque
 	httpx.WriteJSON(w, http.StatusOK, toLeaveTypeResponse(lt))
 }
 
-// SoftDeleteLeaveType handles DELETE /leave-types/{leave_type_id}. Returns 204.
-// RBAC: super_admin, hr_admin.
-func (h *MasterDataHandler) SoftDeleteLeaveType(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "leave_type_id")
-
-	if err := h.svc.SoftDeleteLeaveType(r.Context(), id); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // =============================================================================
 // Attendance Codes
 // =============================================================================

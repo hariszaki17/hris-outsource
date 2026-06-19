@@ -85,7 +85,7 @@ Religious leave (`CIH`/`CIU`/`CPR`) requires applying ≥1 month ahead (`notice_
 ### Common
 | Ref | Rule |
 |-----|------|
-| MD-1 | All three are **deactivated, not deleted**, when referenced. |
+| MD-1 | All three are **deactivated, not deleted**, when referenced. **Leave types are un-deletable entirely** — master data cannot be deleted, only deactivated. Leave entitlements (per-employee) CAN be deleted. *(Resolved 2026-06-19.)* |
 | MD-2 | Names are unique within each master list. |
 | MD-3 | All actions audited (E1). |
 

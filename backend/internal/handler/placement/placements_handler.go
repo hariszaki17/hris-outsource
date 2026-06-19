@@ -319,6 +319,27 @@ func (h *Handler) UpdatePlacement(w http.ResponseWriter, r *http.Request) {
 
 // --- lifecycle actions ---
 
+// EndPlacement handles POST /placements/{id}:end.
+func (h *Handler) EndPlacement(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req endPlacementRequest
+	if err := decodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	updated, err := h.placements.EndPlacement(r.Context(), svc.EndPlacementParams{
+		ID:            id,
+		Reason:        req.Reason,
+		EffectiveDate: req.EffectiveDate,
+		ActorUserID:   actorPtr(r),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toPlacementResponse(updated, jakartaToday()))
+}
+
 // TransferPlacement handles POST /placements/{id}:transfer (201).
 func (h *Handler) TransferPlacement(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")

@@ -136,30 +136,33 @@ func (r *ClockRepo) ClockIn(ctx context.Context, tx pgx.Tx, p svc.ClockInRow) (s
 	checkIn := p.CheckInAt
 	latIn := p.LatIn
 	lngIn := p.LngIn
-	id, err := r.q.WithTx(tx).ClockInAttendance(ctx, sqlcgen.ClockInAttendanceParams{
-		EmployeeID:         p.EmployeeID,
-		PlacementID:        p.PlacementID,
-		ScheduleID:         p.ScheduleID,
-		CompanyID:          p.CompanyID,
-		SiteID:             p.SiteID,
-		Position:           p.Position,
-		ShiftStartAt:       p.ShiftStartAt,
-		ShiftEndAt:         p.ShiftEndAt,
-		CheckInAt:          &checkIn,
-		LatIn:              &latIn,
-		LngIn:              &lngIn,
-		PhotoInID:          p.PhotoInID,
-		Wfo:                p.WFO,
-		Mode:               p.Mode,
-		IsLate:             p.IsLate,
-		LateMinutes:        int32(p.LateMinutes),
-		InGeofence:         p.InGeofence,
-		InDistanceM:        intPtrToI32Ptr(p.InDistanceM),
-		GeofenceRadiusM:    int32(p.GeofenceRadiusM),
-		Status:             p.Status,
-		VerificationStatus: p.VerificationStatus,
-		Flags:              p.Flags,
-	})
+	var id string
+	err := tx.QueryRow(ctx,
+		`INSERT INTO attendance (
+		     employee_id, placement_id, schedule_id, company_id,
+		     site_id, position,
+		     shift_start_at, shift_end_at,
+		     check_in_at, lat_in, lng_in, photo_in_id,
+		     wfo, is_late, late_minutes,
+		     in_geofence, in_distance_m, geofence_radius_m,
+		     status, verification_status, flags, mode, attendance_code_id
+		 ) VALUES (
+		     $1, $2, $3, $4, $5, $6,
+		     $7, $8, $9, $10, $11, $12,
+		     $13, $14, $15, $16, $17, $18,
+		     $19, $20, $21, $22, $23
+		 )
+		 ON CONFLICT (schedule_id) WHERE schedule_id IS NOT NULL AND deleted_at IS NULL
+		 DO NOTHING
+		 RETURNING id`,
+		p.EmployeeID, p.PlacementID, p.ScheduleID,
+		p.CompanyID, p.SiteID, p.Position,
+		p.ShiftStartAt, p.ShiftEndAt,
+		&checkIn, &latIn, &lngIn, p.PhotoInID,
+		p.WFO, p.IsLate, int32(p.LateMinutes),
+		p.InGeofence, intPtrToI32Ptr(p.InDistanceM), int32(p.GeofenceRadiusM),
+		p.Status, p.VerificationStatus, p.Flags, p.Mode, p.AttendanceCodeID,
+	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", false, nil // ON CONFLICT DO NOTHING — schedule already has a row
@@ -232,4 +235,20 @@ func (r *ClockRepo) GetAttendance(ctx context.Context, id string) (att.Attendanc
 // the clock-out tx so a racing add/delete resolves on the persisted count (C-12).
 func (r *ClockRepo) CountActivities(ctx context.Context, attendanceID string) (int64, error) {
 	return r.q.CountActivitiesByAttendance(ctx, attendanceID)
+}
+
+// GetDefaultAttendanceCode returns the id and name of the default active attendance code
+// (e.g. "PRESENT"). Used at clock-in to set the attendance_code_id on the new record.
+func (r *ClockRepo) GetDefaultAttendanceCode(ctx context.Context, code string) (string, string, error) {
+	var id, name string
+	err := r.pool.Pool.QueryRow(ctx,
+		`SELECT id, name FROM attendance_codes
+		 WHERE code = $1 AND status = 'ACTIVE' AND deleted_at IS NULL
+		 LIMIT 1`,
+		code,
+	).Scan(&id, &name)
+	if err != nil {
+		return "", "", err
+	}
+	return id, name, nil
 }

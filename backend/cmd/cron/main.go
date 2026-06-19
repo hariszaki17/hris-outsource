@@ -24,12 +24,33 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/config"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
 	applog "github.com/hariszaki17/hris-outsource/backend/internal/platform/log"
 	attendancerepo "github.com/hariszaki17/hris-outsource/backend/internal/repository/attendance"
 	attendancesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/attendance"
 )
+
+// defaultAutoCloseGrace is the grace period for auto-closing stale open attendance
+// records (48h default). Mirrors the constant in auto_close_sweep.go.
+const defaultAutoCloseGrace = 48 * time.Hour
+
+// autoCloseSweepRepoAdapter combines AttendanceRepo (ListStaleOpenAttendances)
+// and ClockRepo (AutoCloseAttendance) to satisfy AutoCloseSweepRepository.
+type autoCloseSweepRepoAdapter struct {
+	att *attendancerepo.AttendanceRepo
+	clk *attendancerepo.ClockRepo
+}
+
+func (a *autoCloseSweepRepoAdapter) ListStaleOpenAttendances(ctx context.Context, cutoff time.Time, limit int) ([]attendancesvc.StaleOpenAttendance, error) {
+	return a.att.ListStaleOpenAttendances(ctx, cutoff, limit)
+}
+
+func (a *autoCloseSweepRepoAdapter) AutoCloseAttendance(ctx context.Context, tx pgx.Tx, p attendancesvc.AutoCloseRow) (string, bool, error) {
+	return a.clk.AutoCloseAttendance(ctx, tx, p)
+}
 
 // maxRunDuration bounds a single sweep invocation so a runaway job can't hang a
 // scheduler slot forever.
@@ -79,10 +100,36 @@ func run() error {
 		return nil
 	}
 
+	runAutoClose := func() error {
+		attRepo := attendancerepo.NewAttendanceRepo(pool)
+		clkRepo := attendancerepo.NewClockRepo(pool)
+		svc := attendancesvc.NewAutoCloseSweepService(&autoCloseSweepRepoAdapter{att: attRepo, clk: clkRepo}, txm, defaultAutoCloseGrace, 0)
+		n, err := svc.Sweep(ctx)
+		if err != nil {
+			return fmt.Errorf("auto-close-sweep: %w", err)
+		}
+		slog.Info("auto-close-sweep done", "closed", n)
+		return nil
+	}
+
+	runAll := func() error {
+		if err := runAbsence(); err != nil {
+			return err
+		}
+		if err := runAutoClose(); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	switch job {
-	case "absence-sweep", "all":
+	case "absence-sweep":
 		return runAbsence()
+	case "auto-close-sweep":
+		return runAutoClose()
+	case "all":
+		return runAll()
 	default:
-		return fmt.Errorf("unknown job %q (want absence-sweep|all)", job)
+		return fmt.Errorf("unknown job %q (want absence-sweep|auto-close-sweep|all)", job)
 	}
 }

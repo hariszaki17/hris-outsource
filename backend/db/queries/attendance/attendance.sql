@@ -291,6 +291,16 @@ WHERE p.employee_id = sqlc.arg(employee_id)
   AND p.lifecycle_status IN ('ACTIVE', 'EXPIRING', 'EXTENDED')
 LIMIT 1;
 
+-- name: ListStaleOpenAttendances :many
+SELECT id, check_in_at, shift_end_at, flags
+FROM attendance
+WHERE check_out_at IS NULL
+  AND shift_end_at IS NOT NULL
+  AND shift_end_at < $1
+  AND deleted_at IS NULL
+ORDER BY shift_end_at ASC
+LIMIT $2;
+
 -- name: SetAttendancePayable :one
 -- Flag a no-shift attendance day payable/not (SL/HR/super; F5.4 CR-13). The service
 -- guards that the day has no scheduled shift (a shift-backed day is auto-payable →

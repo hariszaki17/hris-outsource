@@ -62,10 +62,3 @@ WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
 RETURNING id, name, code, description, default_annual_quota, is_annual,
           requires_document, cap_basis, cap_value, cap_unit, color, status, applies_to, common, created_at, updated_at;
-
--- name: SoftDeleteLeaveType :exec
-UPDATE leave_types
-SET deleted_at = now(),
-    updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND deleted_at IS NULL;

@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/hariszaki17/hris-outsource/backend/internal/domain"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/auth"
@@ -30,13 +31,41 @@ import (
 // Fake TxRunner
 // ---------------------------------------------------------------------------
 
+type fakeTx struct{}
+
+func (f *fakeTx) Begin(_ context.Context) (pgx.Tx, error)                      { return f, nil }
+func (f *fakeTx) Commit(_ context.Context) error                               { return nil }
+func (f *fakeTx) Rollback(_ context.Context) error                             { return nil }
+func (f *fakeTx) Conn() *pgx.Conn                                              { return nil }
+func (f *fakeTx) LargeObjects() pgx.LargeObjects                               { panic("n/a") }
+func (f *fakeTx) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error)  { panic("n/a") }
+func (f *fakeTx) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row         { panic("n/a") }
+func (f *fakeTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
+}
+func (f *fakeTx) CopyFrom(_ context.Context, _ pgx.Identifier, _ []string, _ pgx.CopyFromSource) (int64, error) {
+	panic("n/a")
+}
+func (f *fakeTx) SendBatch(_ context.Context, _ *pgx.Batch) pgx.BatchResults { panic("n/a") }
+func (f *fakeTx) Prepare(_ context.Context, _, _ string) (*pgconn.StatementDescription, error) {
+	panic("n/a")
+}
+
+var _ pgx.Tx = (*fakeTx)(nil)
+
 type fakeTxRunner struct{}
 
-func (f *fakeTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error { return fn(nil) }
+func (f *fakeTxRunner) InTx(_ context.Context, fn func(pgx.Tx) error) error { return fn(&fakeTx{}) }
 
 // ---------------------------------------------------------------------------
 // Fake repository (mirrors the one in service_test.go — same package boundary)
 // ---------------------------------------------------------------------------
+
+type loginAttemptCall struct {
+	identifier  string
+	count       int
+	lockedUntil *time.Time
+}
 
 type fakeRepo struct {
 	users         map[string]domain.User
@@ -44,6 +73,12 @@ type fakeRepo struct {
 	refreshTokens map[string]domain.RefreshToken
 	resetTokens   map[string]domain.PasswordResetToken
 	resetNextID   int64
+
+	loginAttempt          domain.LoginAttempt
+	loginAttemptErr       error
+	upsertCalls           []loginAttemptCall
+	deleteCalls           []string
+	loginAttemptCleared   string
 }
 
 func newFakeRepo() *fakeRepo {
@@ -130,6 +165,24 @@ func (f *fakeRepo) GetResetTokenByHash(_ context.Context, hash string) (domain.P
 		return domain.PasswordResetToken{}, domain.ErrNotFound
 	}
 	return t, nil
+}
+
+func (f *fakeRepo) GetLoginAttempt(_ context.Context, identifier string) (domain.LoginAttempt, error) {
+	if f.loginAttemptErr != nil {
+		return domain.LoginAttempt{}, f.loginAttemptErr
+	}
+	return f.loginAttempt, nil
+}
+
+func (f *fakeRepo) UpsertLoginAttempt(_ context.Context, _ pgx.Tx, identifier string, count int, lockedUntil *time.Time) error {
+	f.upsertCalls = append(f.upsertCalls, loginAttemptCall{identifier: identifier, count: count, lockedUntil: lockedUntil})
+	return nil
+}
+
+func (f *fakeRepo) DeleteLoginAttempt(_ context.Context, _ pgx.Tx, identifier string) error {
+	f.deleteCalls = append(f.deleteCalls, identifier)
+	f.loginAttemptCleared = identifier
+	return nil
 }
 
 var _ identitysvc.Repository = (*fakeRepo)(nil)
@@ -372,6 +425,113 @@ func TestLogin_DisabledAccount_403(t *testing.T) {
 	errObj, _ := body["error"].(map[string]any)
 	if errObj["code"] != "ACCOUNT_DISABLED" {
 		t.Errorf("error.code = %v, want ACCOUNT_DISABLED", errObj["code"])
+	}
+}
+
+func TestLogin_LockedOut_429(t *testing.T) {
+	h := newHarness(t)
+	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
+
+	lockTime := time.Now().Add(10 * time.Minute)
+	h.repo.loginAttempt = domain.LoginAttempt{
+		Identifier:   "sari.hadi@swp.test",
+		AttemptCount: 5,
+		LockedUntil:  &lockTime,
+	}
+
+	rr := h.doJSON("POST", "/auth/login", map[string]any{
+		"identifier": "sari.hadi@swp.test",
+		"password":   "Pass1ng-Garuda!",
+	})
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	errObj, _ := body["error"].(map[string]any)
+	if errObj["code"] != "ACCOUNT_LOCKED" {
+		t.Errorf("error.code = %v, want ACCOUNT_LOCKED", errObj["code"])
+	}
+}
+
+func TestLogin_SuccessClearsAttempt_200(t *testing.T) {
+	h := newHarness(t)
+	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
+
+	h.repo.loginAttempt = domain.LoginAttempt{
+		Identifier:   "sari.hadi@swp.test",
+		AttemptCount: 3,
+		LockedUntil:  nil,
+	}
+
+	rr := h.doJSON("POST", "/auth/login", map[string]any{
+		"identifier": "sari.hadi@swp.test",
+		"password":   "Pass1ng-Garuda!",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if len(h.repo.deleteCalls) != 1 || h.repo.deleteCalls[0] != "sari.hadi@swp.test" {
+		t.Errorf("DeleteLoginAttempt not called with expected identifier: calls=%v", h.repo.deleteCalls)
+	}
+}
+
+func TestLogin_FailedIncrementsCounter_401(t *testing.T) {
+	h := newHarness(t)
+	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
+
+	h.repo.loginAttemptErr = domain.ErrNotFound
+
+	rr := h.doJSON("POST", "/auth/login", map[string]any{
+		"identifier": "sari.hadi@swp.test",
+		"password":   "wrongpassword",
+	})
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if len(h.repo.upsertCalls) != 1 {
+		t.Fatalf("expected 1 UpsertLoginAttempt call, got %d", len(h.repo.upsertCalls))
+	}
+	call := h.repo.upsertCalls[0]
+	if call.identifier != "sari.hadi@swp.test" {
+		t.Errorf("UpsertLoginAttempt.identifier = %v, want sari.hadi@swp.test", call.identifier)
+	}
+	if call.count != 1 {
+		t.Errorf("UpsertLoginAttempt.count = %v, want 1", call.count)
+	}
+	if call.lockedUntil != nil {
+		t.Errorf("UpsertLoginAttempt.lockedUntil = %v, want nil", call.lockedUntil)
+	}
+}
+
+func TestLogin_5thFailedAttemptLocks_401(t *testing.T) {
+	h := newHarness(t)
+	h.addActiveUser("SWP-USR-1042", "sari.hadi@swp.test", "Pass1ng-Garuda!", "hr_admin", "Sari Hadi", "")
+
+	h.repo.loginAttempt = domain.LoginAttempt{
+		Identifier:   "sari.hadi@swp.test",
+		AttemptCount: 4,
+		LockedUntil:  nil,
+	}
+
+	rr := h.doJSON("POST", "/auth/login", map[string]any{
+		"identifier": "sari.hadi@swp.test",
+		"password":   "wrongpassword",
+	})
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if len(h.repo.upsertCalls) != 1 {
+		t.Fatalf("expected 1 UpsertLoginAttempt call, got %d", len(h.repo.upsertCalls))
+	}
+	call := h.repo.upsertCalls[0]
+	if call.count != 5 {
+		t.Errorf("UpsertLoginAttempt.count = %v, want 5", call.count)
+	}
+	if call.lockedUntil == nil {
+		t.Errorf("UpsertLoginAttempt.lockedUntil is nil, want non-nil (5th attempt locks)")
 	}
 }
 

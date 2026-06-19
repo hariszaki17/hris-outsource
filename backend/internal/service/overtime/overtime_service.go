@@ -1,16 +1,16 @@
-// Package overtime — OvertimeService: the two-level OT approval state machine
-// (PENDING_AGENT_CONFIRM → PENDING_L1 → PENDING_HR → APPROVED; reject → REJECTED;
-// withdraw → WITHDRAWN), the bulk approve/reject partial-success engine, OT_BELOW_MIN
-// enforcement against the EXISTING E2 overtime_rules, day_type classification
-// (schedule + holiday calendar with HOLIDAY>RESTDAY>WORKDAY precedence), GuardCompany
-// scope (OUT_OF_SCOPE) + SELF_APPROVAL_FORBIDDEN, audit-in-tx + notify stub.
+// Package overtime — OvertimeService: the OT approval state machine (PENDING →
+// APPROVED via E11; reject → REJECTED; withdraw → CANCELLED), day_type classification
+// (schedule + holiday calendar with HOLIDAY>RESTDAY>WORKDAY precedence), duplicate
+// detection, aggregation, GuardCompany scope (OUT_OF_SCOPE), audit-in-tx + notify stub.
 //
 // V1 records HOURS/MINUTES ONLY (INV-2): the reference multiplier from the applied
 // rule is exposed in the calculation block as reference metadata, NEVER applied to
 // any money figure.
 //
-// Mirrors the Phase-8 leave service (two-level approval) + Phase-7 attendance service
-// (bulk partial-success) EXACTLY.
+// PENDING_AGENT_CONFIRM and AUTO_DETECTED source were removed 2026-06-19 —
+// all OT now enters via DIRECT create with PENDING status.
+//
+// Mirrors the Phase-8 leave service + Phase-7 attendance service.
 package overtime
 
 import (
@@ -183,6 +183,21 @@ func (s *OvertimeService) Create(ctx context.Context, in CreateOvertimeInput) (d
 	}
 	crossMidnight := endMin < startMin
 
+	// Duplicate detection: an agent may not have more than one active (not REJECTED/
+	// CANCELLED) OT for the same work_date.
+	exists, derr := s.repo.ExistsActiveOvertimeForAgentDate(ctx, employeeID, in.WorkDate)
+	if derr != nil {
+		return dom.Overtime{}, Calculation{}, apperr.Internal(derr)
+	}
+	if exists {
+		return dom.Overtime{}, Calculation{}, &apperr.Error{
+			HTTPStatus: 409,
+			Code:       "OT_ALREADY_EXISTS",
+			Message:    "Sudah ada lembur aktif pada tanggal tersebut.",
+			Fields:     map[string]string{"work_date": in.WorkDate.Format("2006-01-02")},
+		}
+	}
+
 	// OC-6: work_date must fall within an ACTIVE placement.
 	cover, perr := s.schedule.FindActivePlacementForAgentDate(ctx, employeeID, in.WorkDate)
 	if errors.Is(perr, domain.ErrNotFound) {
@@ -354,57 +369,6 @@ func (s *OvertimeService) Get(ctx context.Context, id string) (dom.Overtime, Cal
 	return rec, s.computeCalculation(ctx, rec), nil
 }
 
-// --- transitions ---
-
-// Confirm forwards PENDING_AGENT_CONFIRM → PENDING (OC-2 / OA-6): the agent confirms
-// an auto-detected OT, which enters the E11 approval chain (creates the ApprovalInstance
-// + links it). Only the OT's own agent may confirm (openapi x-rbac agent/self); HR/
-// leader cannot confirm on behalf → 403. Wrong-state → 409.
-func (s *OvertimeService) Confirm(ctx context.Context, id, note string) (dom.Overtime, Calculation, error) {
-	_ = note // the agent-confirm marker note is no longer persisted to a decision trail (chain owned by E11)
-	actor := actorEmployeeID(ctx)
-	var out dom.Overtime
-	err := s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		rec, lerr := s.lock(ctx, tx, id)
-		if lerr != nil {
-			return lerr
-		}
-		if rec.Status != dom.OvertimeStatusPendingAgentConfirm {
-			return stateConflict(rec.Status)
-		}
-		if serr := s.guardConfirmActor(ctx, rec); serr != nil {
-			return serr
-		}
-		if s.engine == nil {
-			return apperr.Rule("RULE_VIOLATION", map[string]string{"approval": "Approval engine tidak aktif."})
-		}
-		updated, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusPending)
-		if uerr != nil {
-			return uerr
-		}
-		out = updated
-		// Confirming enters the E11 chain: create the ApprovalInstance + link it.
-		instanceID, cerr := s.engine.CreateInstance(ctx, tx, approval.CreateInstanceInput{
-			RequestType: approval.RequestTypeOvertime,
-			RequestID:   id,
-			CompanyID:   deref(rec.CompanyID),
-			RequesterID: rec.EmployeeID,
-		})
-		if cerr != nil {
-			return cerr
-		}
-		if lerr := s.repo.SetApprovalInstanceID(ctx, tx, id, instanceID); lerr != nil {
-			return lerr
-		}
-		out.ApprovalInstanceID = &instanceID
-		return audit.Record(ctx, tx, otAudit(id, string(rec.Status), "PENDING", actor, "CONFIRM"))
-	})
-	if err != nil {
-		return dom.Overtime{}, Calculation{}, asAppErr(err)
-	}
-	return s.reread(ctx, out)
-}
-
 // --- E11 hooks (called by the approval engine on terminal transition, in its tx) ---
 
 // OnApproved finalizes the OT record when its E11 ApprovalInstance reaches a terminal
@@ -489,7 +453,7 @@ func (s *OvertimeService) Withdraw(ctx context.Context, id string) error {
 		if lerr != nil {
 			return lerr
 		}
-		if rec.Status != dom.OvertimeStatusPendingAgentConfirm && rec.Status != dom.OvertimeStatusPending {
+		if rec.Status != dom.OvertimeStatusPending {
 			return stateConflict(rec.Status)
 		}
 		if _, uerr := s.repo.UpdateOvertimeStatus(ctx, tx, id, dom.OvertimeStatusCancelled); uerr != nil {
@@ -506,7 +470,7 @@ func (s *OvertimeService) Withdraw(ctx context.Context, id string) error {
 	return nil
 }
 
-// --- day_type classification + OT_BELOW_MIN (exported seams for 09-03 + seed) ---
+// --- day_type classification (exported seams for 09-03 + seed) ---
 
 // ClassifyDayType resolves the OT tier for (employee, work_date):
 // GetHolidayForDate → HOLIDAY (+ holiday id); else a live schedule entry → WORKDAY;
@@ -532,23 +496,55 @@ func (s *OvertimeService) ClassifyDayType(ctx context.Context, employeeID string
 	return resolved, holidayID
 }
 
-// EnforceMinMinutes returns OT_BELOW_MIN (422 with field errors, INV-5) when the
-// counted minutes fall below the applicable rule's min_minutes. Exposed as a seam
-// for 09-03 contract tests + the seed validation path (the openapi returns this on
-// the create path, which is OUT of web scope).
-func (s *OvertimeService) EnforceMinMinutes(ctx context.Context, countedMinutes int) error {
-	rule, err := s.rules.FindOvertimeRule(ctx)
-	min := 30
-	if err == nil && rule.MinMinutes > 0 {
-		min = rule.MinMinutes
+// --- aggregation (E7) ---
+
+// OvertimeAggregateRow is one row of the aggregated OT report.
+type OvertimeAggregateRow struct {
+	GroupKey        string
+	EmployeeID      string
+	EmployeeName    string
+	DayType         string
+	TotalMinutes    int
+	TotalApproved   int
+	WorkdayCount    int
+	RestdayCount    int
+	HolidayCount    int
+	WorkdayMinutes  int
+	RestdayMinutes  int
+	HolidayMinutes  int
+}
+
+// AggregateParams carries the aggregation filters.
+type AggregateParams struct {
+	CompanyID *string
+	DateFrom  *time.Time
+	DateTo    *time.Time
+	GroupBy   string // "agent" or "day_type"
+}
+
+// Aggregate returns APPROVED OT totals grouped by agent or day_type, scoped to the
+// caller's company (HR/super global; leader → own company only → 403 on mismatch).
+func (s *OvertimeService) Aggregate(ctx context.Context, p AggregateParams) ([]OvertimeAggregateRow, error) {
+	principal, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return nil, apperr.Unauthenticated()
 	}
-	if countedMinutes < min {
-		return apperr.Rule("OT_BELOW_MIN", map[string]string{
-			"counted_minutes": itoa(countedMinutes),
-			"min_minutes":     itoa(min),
-		})
+	if p.GroupBy != "agent" && p.GroupBy != "day_type" {
+		return nil, apperr.Invalid(map[string]string{"group_by": "Harus 'agent' atau 'day_type'."})
 	}
-	return nil
+	// Leader scope: restrict to own company.
+	if principal.Role == auth.RoleShiftLeader {
+		if p.CompanyID != nil && *p.CompanyID != principal.CompanyID {
+			return nil, apperr.OutOfScope()
+		}
+		cid := principal.CompanyID
+		p.CompanyID = &cid
+	}
+	rows, err := s.repo.AggregateOvertime(ctx, p)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return rows, nil
 }
 
 // --- helpers ---
@@ -572,22 +568,6 @@ func (s *OvertimeService) reread(ctx context.Context, fallback dom.Overtime) (do
 		rec = full
 	}
 	return rec, s.computeCalculation(ctx, rec), nil
-}
-
-// guardConfirmActor enforces the openapi x-rbac (agent/self) on :confirm: when the
-// actor is an agent, they must be the OT's own agent (else 403). Staff roles
-// (HR/super/leader) pass for the web-triggered confirm seam per CONTEXT.
-func (s *OvertimeService) guardConfirmActor(ctx context.Context, rec dom.Overtime) error {
-	p, ok := auth.PrincipalFrom(ctx)
-	if !ok {
-		return apperr.Unauthenticated()
-	}
-	if p.Role == auth.RoleAgent {
-		if p.EmployeeID == "" || p.EmployeeID != rec.EmployeeID {
-			return apperr.Forbidden()
-		}
-	}
-	return nil
 }
 
 func otAudit(id, before, after string, actor *string, action string) audit.Entry {

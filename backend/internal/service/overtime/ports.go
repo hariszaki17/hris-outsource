@@ -75,6 +75,13 @@ type OvertimeRepository interface {
 	// SetApprovalInstanceID links the freshly-created E11 ApprovalInstance to the OT
 	// record (called inside the create/confirm tx after engine.CreateInstance).
 	SetApprovalInstanceID(ctx context.Context, tx pgx.Tx, id, instanceID string) error
+
+	// ExistsActiveOvertimeForAgentDate reports whether the agent already has an active
+	// OT for work_date (duplicate detection, 2026-06-19).
+	ExistsActiveOvertimeForAgentDate(ctx context.Context, employeeID string, workDate time.Time) (bool, error)
+
+	// AggregateOvertime returns APPROVED OT totals grouped by agent or day_type (2026-06-19).
+	AggregateOvertime(ctx context.Context, p AggregateParams) ([]OvertimeAggregateRow, error)
 }
 
 // OvertimeInsertParams carries one overtime INSERT for the F7.2 request path. The

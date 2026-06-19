@@ -42,6 +42,8 @@ type ScheduleRepository interface {
 	CreateScheduleEntry(ctx context.Context, tx pgx.Tx, p CreateScheduleEntryParams) (domain.ScheduleEntry, error)
 	UpdateScheduleEntry(ctx context.Context, tx pgx.Tx, p UpdateScheduleEntryParams) (domain.ScheduleEntry, error)
 	SoftDeleteScheduleEntry(ctx context.Context, tx pgx.Tx, id string) (int64, error)
+	CancelFutureSchedulesForEmployee(ctx context.Context, tx pgx.Tx, employeeID string, afterDate time.Time) error
+	ListScheduleForAggregate(ctx context.Context, companyID string, start, end time.Time) ([]domain.ScheduleEntry, error)
 }
 
 // CreateScheduleEntryParams carries the insert columns.
@@ -164,6 +166,91 @@ func (s *ScheduleService) GetScheduleByAgent(ctx context.Context, employeeID str
 		return nil, apperr.Internal(err)
 	}
 	return rows, nil
+}
+
+// --- schedule aggregate ---
+
+// AggregateScheduleParams carries the aggregate query parameters.
+type AggregateScheduleParams struct {
+	CompanyID string
+	WeekStart time.Time
+	GroupBy   string // "day" | "week"
+}
+
+// DayAggregate is one day's schedule aggregate.
+type DayAggregate struct {
+	Date        string         `json:"date"`
+	TotalAgents int            `json:"total_agents"`
+	OnLeave     int            `json:"on_leave"`
+	Off         int            `json:"off"`
+	Stats       AggregateStats `json:"stats"`
+}
+
+// AggregateStats holds the count breakdowns for a day.
+type AggregateStats struct {
+	TotalAgents int `json:"total_agents"`
+	OnLeave     int `json:"on_leave"`
+	Off         int `json:"off"`
+}
+
+// AggregateScheduleResponse is the response for GET /schedule:aggregate.
+type AggregateScheduleResponse struct {
+	Data []DayAggregate `json:"data"`
+}
+
+// AggregateSchedule returns schedule aggregation grouped by day for a company over
+// a week window.
+func (s *ScheduleService) AggregateSchedule(ctx context.Context, p AggregateScheduleParams) (AggregateScheduleResponse, error) {
+	// Leader scope: pin company to the leader's own company.
+	if pr, ok := auth.PrincipalFrom(ctx); ok && pr.Role == auth.RoleShiftLeader && pr.CompanyID != "" {
+		p.CompanyID = pr.CompanyID
+	}
+	if serr := rbac.GuardCompany(ctx, p.CompanyID); serr != nil {
+		return AggregateScheduleResponse{}, serr
+	}
+
+	start := p.WeekStart
+	end := start.AddDate(0, 0, 6)
+
+	entries, err := s.repo.ListScheduleForAggregate(ctx, p.CompanyID, start, end)
+	if err != nil {
+		return AggregateScheduleResponse{}, apperr.Internal(err)
+	}
+
+	// Group by day.
+	dayMap := map[string]*DayAggregate{}
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		dayMap[key] = &DayAggregate{Date: key}
+	}
+
+	for _, e := range entries {
+		key := e.WorkDate.Format("2006-01-02")
+		day, ok := dayMap[key]
+		if !ok {
+			day = &DayAggregate{Date: key}
+			dayMap[key] = day
+		}
+		day.TotalAgents++
+		if e.IsDayOff {
+			day.Off++
+		}
+	}
+
+	// Compute stats.
+	var result []DayAggregate
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		day := dayMap[key]
+		day.Stats = AggregateStats{
+			TotalAgents: day.TotalAgents,
+			OnLeave:     day.OnLeave,
+			Off:         day.Off,
+		}
+		result = append(result, *day)
+	}
+
+	return AggregateScheduleResponse{Data: result}, nil
 }
 
 // --- single-cell create ---

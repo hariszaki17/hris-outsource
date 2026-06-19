@@ -493,6 +493,7 @@ func newPlacementHarness(t *testing.T) *placementHarness {
 		r.Post("/placements/{id}/agreement", handler.SetPlacementAgreement)
 		r.Patch("/placements/{id}", handler.UpdatePlacement)
 		r.Post("/placements/{id}:transfer", handler.TransferPlacement)
+		r.Post("/placements/{id}:end", handler.EndPlacement)
 		r.Post("/shift-leader-assignments", handler.CreateShiftLeaderAssignment)
 		r.Post("/shift-leader-assignments/{id}:replace", handler.ReplaceShiftLeaderAssignment)
 		r.Post("/shift-leader-assignments/{id}:end", handler.EndShiftLeaderAssignment)
@@ -1090,6 +1091,73 @@ func TestTransferPlacement_SameCompanySameLine_422(t *testing.T) {
 	}
 	if errObject(t, decodeBody(t, rr))["code"] != "RULE_VIOLATION" {
 		t.Errorf("error.code != RULE_VIOLATION")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: lifecycle actions :end
+// ---------------------------------------------------------------------------
+
+func TestEndPlacement_Happy_200(t *testing.T) {
+	h := newPlacementHarness(t)
+	h.seedActivePlacement("SWP-PL-END1", "SWP-EMP-1042", "SWP-CMP-0021")
+
+	rr := h.doJSON("POST", "/placements/SWP-PL-END1:end", map[string]any{
+		"reason": "Kontrak berakhir.",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := decodeBody(t, rr)
+	if body["lifecycle_status"] != "ENDED" {
+		t.Errorf("lifecycle_status = %v, want ENDED", body["lifecycle_status"])
+	}
+	if body["ended_reason"] != "Kontrak berakhir." {
+		t.Errorf("ended_reason = %v, want \"Kontrak berakhir.\"", body["ended_reason"])
+	}
+
+	p, ok := h.repo.placements["SWP-PL-END1"]
+	if !ok {
+		t.Fatal("placement deleted from repo")
+	}
+	if p.LifecycleStatus != "ENDED" {
+		t.Errorf("repo lifecycle_status = %q, want ENDED", p.LifecycleStatus)
+	}
+}
+
+func TestEndPlacement_AlreadyEnded_409(t *testing.T) {
+	h := newPlacementHarness(t)
+	h.seedCompany("SWP-CMP-0021", "Plaza Senayan", "active")
+	end := jktDate(2027, 6, 30)
+	h.seedPlacement(domain.Placement{
+		ID: "SWP-PL-END2", EmployeeID: "SWP-EMP-1042", ClientCompanyID: "SWP-CMP-0021",
+		SiteID: "SWP-SITE-0001",
+		AgreementID: strp("SWP-AG-7002"), StartDate: jktDate(2026, 1, 1), EndDate: &end,
+		LifecycleStatus: "ENDED",
+	})
+
+	rr := h.doJSON("POST", "/placements/SWP-PL-END2:end", map[string]any{
+		"reason": "Sudah.",
+	})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 TERMINAL_STATE_IMMUTABLE, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if errObject(t, decodeBody(t, rr))["code"] != "TERMINAL_STATE_IMMUTABLE" {
+		t.Errorf("error.code != TERMINAL_STATE_IMMUTABLE")
+	}
+}
+
+func TestEndPlacement_NotFound_404(t *testing.T) {
+	h := newPlacementHarness(t)
+
+	rr := h.doJSON("POST", "/placements/SWP-PL-GHOST:end", map[string]any{
+		"reason": "Tidak ada.",
+	})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if errObject(t, decodeBody(t, rr))["code"] != "NOT_FOUND" {
+		t.Errorf("error.code != NOT_FOUND")
 	}
 }
 

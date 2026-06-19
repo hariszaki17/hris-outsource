@@ -226,6 +226,35 @@ func (r *AttendanceRepo) SetAttendancePayable(ctx context.Context, tx pgx.Tx, id
 	return mapAttendanceFromSetPayable(row), nil
 }
 
+// ListStaleOpenAttendances finds open attendance records where shift_end_at has
+// elapsed past the cutoff (auto-close sweep).
+func (r *AttendanceRepo) ListStaleOpenAttendances(ctx context.Context, cutoff time.Time, limit int) ([]svc.StaleOpenAttendance, error) {
+	rows, err := r.pool.Pool.Query(ctx,
+		`SELECT id, check_in_at, shift_end_at, flags
+		 FROM attendance
+		 WHERE check_out_at IS NULL
+		   AND shift_end_at IS NOT NULL
+		   AND shift_end_at < $1
+		   AND deleted_at IS NULL
+		 ORDER BY shift_end_at ASC
+		 LIMIT $2`,
+		cutoff, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []svc.StaleOpenAttendance
+	for rows.Next() {
+		var a svc.StaleOpenAttendance
+		if err := rows.Scan(&a.ID, &a.CheckInAt, &a.ShiftEndAt, &a.Flags); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (r *AttendanceRepo) GetManualAutofillData(ctx context.Context, employeeID string, refDate time.Time) (svc.ManualAutofillData, bool, error) {
 	refPG := pgtype.Date{Time: refDate, Valid: true}
 	row, err := r.q.GetManualAutofillData(ctx, sqlcgen.GetManualAutofillDataParams{

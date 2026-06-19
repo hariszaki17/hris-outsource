@@ -30,6 +30,8 @@ type CorrectionRepository interface {
 	// a target attendance (found=false when none) — the CREATE-path dedupe guard AND the
 	// verify-path (FLOW D) reconciliation lookup.
 	GetPendingCorrectionForAttendance(ctx context.Context, attendanceID string) (id string, found bool, err error)
+	// CancelCorrection marks a PENDING correction CANCELLED (agent self-cancel).
+	CancelCorrection(ctx context.Context, tx pgx.Tx, id string, decidedBy *string, reason string) (int64, error)
 }
 
 // CreateCorrectionParams is the repo-layer insert payload for a new correction
@@ -46,4 +48,5 @@ type CreateCorrectionParams struct {
 	Reason                   string
 	EvidenceFileID           *string
 	AttendanceShiftDate      time.Time
+	OriginalSnapshot         map[string]any
 }

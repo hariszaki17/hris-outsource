@@ -26,7 +26,6 @@ type MasterDataRepository interface {
 	GetLeaveTypeByID(ctx context.Context, id string) (domain.LeaveType, error)
 	CreateLeaveType(ctx context.Context, tx pgx.Tx, p CreateLeaveTypeParams) (domain.LeaveType, error)
 	UpdateLeaveType(ctx context.Context, tx pgx.Tx, p UpdateLeaveTypeParams) (domain.LeaveType, error)
-	SoftDeleteLeaveType(ctx context.Context, tx pgx.Tx, id string) error
 	// Attendance codes
 	ListAttendanceCodes(ctx context.Context, f domain.AttendanceCodeFilter) ([]domain.AttendanceCode, error)
 	GetAttendanceCodeByID(ctx context.Context, id string) (domain.AttendanceCode, error)
@@ -257,33 +256,6 @@ func (s *MasterDataService) UpdateLeaveType(ctx context.Context, p UpdateLeaveTy
 		return domain.LeaveType{}, mapMDConflict(err)
 	}
 	return updated, nil
-}
-
-// SoftDeleteLeaveType sets deleted_at on the leave type (status→INACTIVE, 204 at handler).
-// TODO(Phase 7/8): guard against LT_IN_USE when referenced by leave requests.
-func (s *MasterDataService) SoftDeleteLeaveType(ctx context.Context, id string) error {
-	_, err := s.repo.GetLeaveTypeByID(ctx, id)
-	if errors.Is(err, domain.ErrNotFound) {
-		return apperr.NotFound()
-	}
-	if err != nil {
-		return apperr.Internal(err)
-	}
-
-	// TODO(Phase 7/8): check leave_requests references → return apperr.Conflict("LT_IN_USE")
-
-	return s.txm.InTx(ctx, func(tx pgx.Tx) error {
-		if err := s.repo.SoftDeleteLeaveType(ctx, tx, id); err != nil {
-			return err
-		}
-		return audit.Record(ctx, tx, audit.Entry{
-			Action:     audit.Action("leave_type.delete"),
-			EntityType: "leave_type",
-			EntityID:   id,
-			Before:     map[string]any{"status": "active"},
-			After:      map[string]any{"status": "inactive"},
-		})
-	})
 }
 
 // =============================================================================

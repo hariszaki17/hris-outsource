@@ -382,6 +382,44 @@ func (r *fakeOvertimeRepo) FindOvertimeRule(_ context.Context) (svc.OvertimeRule
 	return svc.OvertimeRule{}, domain.ErrNotFound
 }
 
+func (r *fakeOvertimeRepo) ExistsActiveOvertimeForAgentDate(_ context.Context, employeeID string, workDate time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeOvertimeRepo) AggregateOvertime(_ context.Context, p svc.AggregateParams) ([]svc.OvertimeAggregateRow, error) {
+	var out []svc.OvertimeAggregateRow
+	for _, rec := range r.records {
+		if rec.Status != dom.OvertimeStatusApproved {
+			continue
+		}
+		if p.CompanyID != nil && deref(rec.CompanyID) != *p.CompanyID {
+			continue
+		}
+		wd := time.Date(rec.WorkDate.Year(), rec.WorkDate.Month(), rec.WorkDate.Day(), 0, 0, 0, 0, time.UTC)
+		if p.DateFrom != nil && wd.Before(*p.DateFrom) {
+			continue
+		}
+		if p.DateTo != nil && wd.After(*p.DateTo) {
+			continue
+		}
+		out = append(out, svc.OvertimeAggregateRow{
+			GroupKey:       rec.EmployeeID,
+			EmployeeID:     rec.EmployeeID,
+			EmployeeName:   derefStr(rec.EmployeeName),
+			DayType:        string(rec.DayType),
+			TotalMinutes:   rec.CountedMinutes,
+			TotalApproved:  1,
+			WorkdayCount:   dayCount(rec.DayType, dom.OvertimeTierWorkday),
+			RestdayCount:   dayCount(rec.DayType, dom.OvertimeTierRestday),
+			HolidayCount:   dayCount(rec.DayType, dom.OvertimeTierHoliday),
+			WorkdayMinutes: dayMin(rec.DayType, dom.OvertimeTierWorkday, rec.CountedMinutes),
+			RestdayMinutes: dayMin(rec.DayType, dom.OvertimeTierRestday, rec.CountedMinutes),
+			HolidayMinutes: dayMin(rec.DayType, dom.OvertimeTierHoliday, rec.CountedMinutes),
+		})
+	}
+	return out, nil
+}
+
 var (
 	_ svc.OvertimeRepository = (*fakeOvertimeRepo)(nil)
 	_ svc.RuleRepository     = (*fakeOvertimeRepo)(nil)
@@ -608,7 +646,7 @@ type harness struct {
 	schedule  *fakeScheduleRepo
 	engine    *fakeEngine
 	idem      *stubIdempotency
-	otSvc     *svc.OvertimeService // the REAL service, exposed for the EnforceMinMinutes/ClassifyDayType seams
+	otSvc     *svc.OvertimeService
 	principal auth.Principal
 }
 
@@ -674,9 +712,12 @@ func newHarness(t *testing.T, principalRole auth.Role, companyID, employeeID str
 		r.Get("/holidays", handler.ListHolidays)
 	})
 	r.Group(func(r chi.Router) {
+		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader))
+		r.Get("/overtime:aggregate", handler.AggregateOvertime)
+	})
+	r.Group(func(r chi.Router) {
 		r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 		r.With(idem.Handler).Post("/overtime", handler.CreateOvertime)
-		r.With(idem.Handler).Post("/overtime/{id}:confirm", handler.Confirm)
 		r.With(idem.Handler).Post("/overtime/{id}:withdraw", handler.Withdraw)
 	})
 	r.Group(func(r chi.Router) {
@@ -789,6 +830,27 @@ func deref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func dayCount(tier dom.OvertimeTier, target dom.OvertimeTier) int {
+	if tier == target {
+		return 1
+	}
+	return 0
+}
+
+func dayMin(tier dom.OvertimeTier, target dom.OvertimeTier, minutes int) int {
+	if tier == target {
+		return minutes
+	}
+	return 0
 }
 
 func itoa(n int) string {

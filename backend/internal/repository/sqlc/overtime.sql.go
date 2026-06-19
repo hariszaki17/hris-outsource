@@ -592,3 +592,108 @@ func (q *Queries) UpdateOvertimeStatus(ctx context.Context, arg UpdateOvertimeSt
 	)
 	return i, err
 }
+
+// --- Duplicate detection + Aggregation (2026-06-19) ---
+
+const existsActiveOvertimeForAgentDate = `-- name: ExistsActiveOvertimeForAgentDate :one
+SELECT EXISTS(
+    SELECT 1 FROM overtime
+    WHERE employee_id = $1
+      AND work_date   = $2::date
+      AND status NOT IN ('REJECTED', 'CANCELLED')
+      AND deleted_at IS NULL
+) AS exists
+`
+
+func (q *Queries) ExistsActiveOvertimeForAgentDate(ctx context.Context, employeeID string, workDate pgtype.Date) (bool, error) {
+	row := q.db.QueryRow(ctx, existsActiveOvertimeForAgentDate, employeeID, workDate)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const aggregateOvertime = `-- name: AggregateOvertime :many
+SELECT
+    CASE WHEN $1 = 'agent' THEN o.employee_id ELSE o.day_type END AS group_key,
+    o.employee_id,
+    COALESCE(e.full_name, '') AS employee_name,
+    o.day_type,
+    COALESCE(SUM(o.counted_minutes), 0)::int AS total_minutes,
+    CAST(COUNT(*) AS int) AS total_approved_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'WORKDAY') AS int) AS workday_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'RESTDAY') AS int) AS restday_count,
+    CAST(COUNT(*) FILTER (WHERE o.day_type = 'HOLIDAY') AS int) AS holiday_count,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'WORKDAY'), 0)::int AS workday_minutes,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'RESTDAY'), 0)::int AS restday_minutes,
+    COALESCE(SUM(o.counted_minutes) FILTER (WHERE o.day_type = 'HOLIDAY'), 0)::int AS holiday_minutes
+FROM overtime o
+LEFT JOIN employees e ON e.id = o.employee_id
+WHERE ($2::text IS NULL OR o.company_id = $2::text)
+  AND ($3::date IS NULL OR o.work_date >= $3::date)
+  AND ($4::date IS NULL OR o.work_date <= $4::date)
+  AND o.status = 'APPROVED'
+  AND o.deleted_at IS NULL
+GROUP BY CASE WHEN $1 = 'agent' THEN o.employee_id ELSE o.day_type END,
+         o.employee_id, e.full_name, o.day_type
+ORDER BY total_minutes DESC
+`
+
+type AggregateOvertimeParams struct {
+	GroupBy   string
+	CompanyID *string
+	DateFrom  pgtype.Date
+	DateTo    pgtype.Date
+}
+
+type AggregateOvertimeRow struct {
+	GroupKey           string
+	EmployeeID         string
+	EmployeeName       string
+	DayType            string
+	TotalMinutes       int32
+	TotalApprovedCount int32
+	WorkdayCount       int32
+	RestdayCount       int32
+	HolidayCount       int32
+	WorkdayMinutes     int32
+	RestdayMinutes     int32
+	HolidayMinutes     int32
+}
+
+func (q *Queries) AggregateOvertime(ctx context.Context, arg AggregateOvertimeParams) ([]AggregateOvertimeRow, error) {
+	rows, err := q.db.Query(ctx, aggregateOvertime,
+		arg.GroupBy,
+		arg.CompanyID,
+		arg.DateFrom,
+		arg.DateTo,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AggregateOvertimeRow{}
+	for rows.Next() {
+		var i AggregateOvertimeRow
+		if err := rows.Scan(
+			&i.GroupKey,
+			&i.EmployeeID,
+			&i.EmployeeName,
+			&i.DayType,
+			&i.TotalMinutes,
+			&i.TotalApprovedCount,
+			&i.WorkdayCount,
+			&i.RestdayCount,
+			&i.HolidayCount,
+			&i.WorkdayMinutes,
+			&i.RestdayMinutes,
+			&i.HolidayMinutes,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

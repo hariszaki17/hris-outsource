@@ -34,7 +34,7 @@ System/background — no direct UI; results surface in F5.3 (queue) and F5.5 (re
 |-----|------|
 | EV-1 | **Lateness:** if `check_in_at` > scheduled shift `start_at` + **grace period**, set `is_late=true`, `late_minutes`, `status=Late`; else `status=Present`. |
 | EV-2 | **Grace period** is a single configurable value (proposed default 15 min; see §10). |
-| EV-3 | **Auto-clock-out:** a scheduled job at each shift's end closes any still-open record at `check_out_at = shift end`, sets `auto_closed=true`, `status=Incomplete`. |
+| EV-3 | **Auto-clock-out:** a **cron job** at/after each shift's end closes any still-open record at `check_out_at = shift end`, sets `auto_closed=true`, `status=Incomplete`. *(Resolved 2026-06-19 — auto-close is cron-driven.)* |
 | EV-4 | **Absent:** a scheduled shift with **no clock-in** by shift end (+ small buffer) is recorded `status=Absent`. |
 | EV-5 | **Exceptions routing (INV-3):** `verification_status=Pending` if `is_late` OR `in_geofence_in/out=false` OR `auto_closed` OR `status∈{Incomplete,Absent}` OR the attendance code `needs_verification`; **otherwise `AutoApproved`**. |
 | EV-6 | **Unscheduled** records (no `schedule_id`) skip lateness (nothing to compare) but are always `Pending` (flagged). |

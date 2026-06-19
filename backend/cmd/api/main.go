@@ -59,8 +59,11 @@ import (
 	payrollsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/payroll"
 	peoplesvc "github.com/hariszaki17/hris-outsource/backend/internal/service/people"
 	placementsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/placement"
+	calendarsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/calendar"
 	reportingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/reporting"
 	schedulingsvc "github.com/hariszaki17/hris-outsource/backend/internal/service/scheduling"
+
+	calendarhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/calendar"
 )
 
 func main() {
@@ -364,6 +367,18 @@ func run() error {
 	correctionSvc.SetPayrollPeriodGuard(payrollPeriodRepo, payrollClarificationSvc)
 	payrollPeriodHandler := payrollhttp.NewPeriodHandler(payrollPeriodSvc, payrollClarificationSvc)
 
+	// Payroll run slice (F8.3): compute-assist payroll run — open → assemble → post.
+	// Encrypts payslip money at write; decrypts at read (same payrollCipher).
+	payrollRunRepo := payrollrepo.NewRunRepo(pool)
+	payrollRunSvc := payrollsvc.NewRunService(payrollRunRepo, txm, payrollCipher)
+	payrollRunHandler := payrollhttp.NewRunHandler(payrollRunSvc)
+
+	// Payroll payment slice (F8.4): manual payment recording + transfer evidence.
+	// Encrypts payment amounts at write; decrypts at read (same payrollCipher).
+	payrollPaymentRepo := payrollrepo.NewPaymentRepo(pool)
+	payrollPaymentSvc := payrollsvc.NewPaymentService(payrollPaymentRepo, txm, payrollCipher)
+	payrollPaymentHandler := payrollhttp.NewPaymentHandler(payrollPaymentSvc)
+
 	// Reporting slice (11-02): E10 notifications (list/mark-read/mark-all-read).
 	// scope=self — the service derives the recipient set from the principal. The
 	// auto-dispatched notifications (leave/OT/attendance retro-wire) land here via
@@ -382,6 +397,17 @@ func run() error {
 	reportingBillableSvc := reportingsvc.NewBillableService(reportingBillableRepo)
 	reportingExportSvc := reportingsvc.NewExportService(reportingExportRepo, reportingBillableRepo, txm, jobsClient)
 	reportingHandler := reportinghttp.NewHandler(reportingNotifSvc, reportingDashboardSvc, reportingBillableSvc, reportingExportSvc)
+
+	// Agent Web Calendar (E10 F10.5): aggregates schedule + leave + holidays +
+	// attendance per day for the agent's month view. Thin adapters wrap the pool
+	// to satisfy the calendar service ports.
+	agentCalendarSvc := calendarsvc.NewAgentCalendarService(
+		calendarsvc.NewScheduleCalendarAdapter(pool),
+		calendarsvc.NewLeaveCalendarAdapter(pool),
+		calendarsvc.NewHolidayCalendarAdapter(pool),
+		calendarsvc.NewAttendanceCalendarAdapter(pool),
+	)
+	agentCalendarHandler := calendarhttp.NewAgentCalendarHandler(agentCalendarSvc)
 
 	handler := server.New(server.Deps{
 		AllowedOrigins:    cfg.HTTP.AllowedOrigins,
@@ -405,7 +431,10 @@ func run() error {
 		Overtime:          overtimeHandler,
 		Payroll:           payrollHandler,
 		PayrollPeriod:     payrollPeriodHandler,
+		PayrollRun:        payrollRunHandler,
+		PayrollPayment:    payrollPaymentHandler,
 		Reporting:         reportingHandler,
+		AgentCalendar:     agentCalendarHandler,
 		Authn:             authn,
 		Idempotency:       idempotency.New(pool),
 		Obs:               observ,

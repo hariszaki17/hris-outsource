@@ -165,11 +165,6 @@ func (r *MasterDataRepository) UpdateLeaveType(ctx context.Context, tx pgx.Tx, p
 	}, nil
 }
 
-// SoftDeleteLeaveType sets deleted_at on the leave type (hard soft-delete).
-func (r *MasterDataRepository) SoftDeleteLeaveType(ctx context.Context, tx pgx.Tx, id string) error {
-	return r.q.WithTx(tx).SoftDeleteLeaveType(ctx, id)
-}
-
 // =============================================================================
 // Attendance Codes
 // =============================================================================

@@ -1,13 +1,13 @@
 # E3 — Placement Management · Feature Document
 
-> **Epic:** E3 Placement Management (the differentiator) · **Status:** Draft v1 · **Parent:** [EPICS.md](../../EPICS.md)
-> Placing agents at client companies, in a free-text position, for a contract period — with history, lifecycle, and the per-company shift leader.
+> **Epic:** E3 Placement Management (the differentiator) · **Status:** Draft v2 · **Parent:** [EPICS.md](../../EPICS.md)
+> Placing agents at client companies — with history, lifecycle, and the per-company shift leader. Position is held on the Employee record (E2), not on the placement. Placement is a "currently active at company X" record, not a date-bounded contract.
 
 ---
 
 ## 1. Goal & outcome
 
-Make **placement a first-class entity** (in the legacy system it was just a string on `employee_contracts`). After this epic, SWP can place an agent at a client company in a (free-text) position for a defined period, track the full placement history of every agent, and know exactly which shift leader owns each company's on-site team. Every downstream module (shift scheduling, attendance, leave, overtime) hangs off the placement record.
+Make **placement a first-class entity** (in the legacy system it was just a string on `employee_contracts`). After this epic, SWP can place an agent at a client company, track the full placement history of every agent, and know exactly which shift leader owns each company's on-site team. Placement is a **"currently active at company X"** record — `start_date` is always today, `end_date` is always nil (open-ended); no Scheduled/future-dated state, no backdating, no period validation. The agent's **position** lives on `Employee.position` (E2), not on the placement. Transfer does not change position. Every downstream module (shift scheduling, attendance, leave, overtime) hangs off the placement record.
 
 ## 2. Actors & roles
 
@@ -22,24 +22,28 @@ Make **placement a first-class entity** (in the legacy system it was just a stri
 
 ## 3. Scope
 
-**In scope:** placement creation (located at a **Site**, E2 F2.6), lifecycle/status, re-placement & transfer with history, shift-leader assignment (1 per **leadership unit** — company or site, per `leader_scope`), company roster view.
+**In scope:** placement creation (located at a **Site**, E2 F2.6), lifecycle/status (including manual End by HR), re-placement & transfer with history, shift-leader assignment (1 per **company** — company-wide only), company roster view.
 **Out of scope (other epics):** the shift master & rostering (E4), attendance (E5), leave (E6), overtime (E7), payroll figures (E8 read-only), and the migration of legacy placement data (E9).
 
-> **Position** is a **free-text string per placement** *(2026-06-12, EPICS §8 — `service_line` and the Position master are removed entirely)*. There is no service line and no Position master/FK; a typeahead endpoint searches `DISTINCT` existing position values for entry consistency only (BR-9).
+> **Position** is held on `Employee.position` (E2), not on Placement. There is no position field on the placement record. *(Resolved 2026-06-19 — position moves to Employee as the single source of truth; transfer does not change position.)*
 
 ## 4. Domain entities
 
 ```mermaid
 erDiagram
     EMPLOYEE ||--o{ EMPLOYMENT_AGREEMENT : "employed under"
-    EMPLOYMENT_AGREEMENT |o--o{ PLACEMENT : "designated via (optional; backfillable)"
+    EMPLOYEE ||--o{ PLACEMENT : "placed at"
     CLIENT_COMPANY ||--o{ PLACEMENT : "hosts"
     CLIENT_COMPANY ||--|{ SITE : "has one or more"
     SITE ||--o{ PLACEMENT : "located at"
-    CLIENT_COMPANY ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit (scope)"
-    SITE ||--o{ SHIFT_LEADER_ASSIGNMENT : "leadership unit when scope=site"
+    CLIENT_COMPANY ||--o{ SHIFT_LEADER_ASSIGNMENT : "has"
     EMPLOYEE ||--o{ SHIFT_LEADER_ASSIGNMENT : "serves as"
 
+    EMPLOYEE {
+        bigint id PK
+        bigint user_id FK
+        string position "free-text; single source of truth"
+    }
     EMPLOYMENT_AGREEMENT {
         bigint id PK
         bigint employee_id FK
@@ -52,14 +56,11 @@ erDiagram
     PLACEMENT {
         bigint id PK
         bigint employee_id FK
-        bigint employment_agreement_id FK "nullable; null = awaiting agreement (backfillable)"
         bigint client_company_id FK
         bigint site_id FK "required; site.client_company_id = client_company_id"
-        string position "free-text; no master/FK"
-        date start_date
-        date end_date "null = open-ended"
+        date start_date "always today"
+        date end_date "always nil (open-ended)"
         string status
-        boolean awaiting_agreement "derived: employment_agreement_id is null"
         string ended_reason
         bigint predecessor_id FK "renewal or transfer chain"
         bigint created_by FK
@@ -67,22 +68,21 @@ erDiagram
     SHIFT_LEADER_ASSIGNMENT {
         bigint id PK
         bigint client_company_id FK
-        bigint site_id FK "null when leader_scope=company; set when =site"
         bigint employee_id FK
         datetime assigned_at
         datetime unassigned_at
     }
 ```
 
-> **Employment vs placement (Indonesian labor law):** In outsourcing (alih daya), the employment relationship is between the agent and **SWP**, not the client. So the **EmploymentAgreement** (`PKWT` fixed-term / `PKWTT` indefinite) lives at the employee↔SWP level (modeled in E2), and a **Placement** is only a *work designation* to a client site. A placement **may** reference its employment agreement, but the reference is **optional at create and backfillable** *(EPICS §8 2026-06-11)* — an agent often starts work before the PKWT/PKWTT is finalized, so a placement created without one is flagged `awaiting_agreement` until it is attached. When an agreement **is** present, for `PKWT` the placement period must fall within the agreement's validity, while `PKWTT` agreements allow **open-ended** placements; when none is present the period check is skipped and the placement may be open-ended.
+> **Employment vs placement (Indonesian labor law):** In outsourcing (alih daya), the employment relationship is between the agent and **SWP**, not the client. So the **EmploymentAgreement** (`PKWT` fixed-term / `PKWTT` indefinite) lives at the employee↔SWP level (modeled in E2), and a **Placement** is only a *work designation* to a client site. Placement is **not date-bounded**: `start_date` is always today (immediate activation) and `end_date` is always nil (open-ended). There is no Scheduled/future-dated state, no backdating, no period validation. END is still supported (manual end by HR). The employment agreement is a **document-only** record (E2 F2.2) — it has no system impact on placement validation, expiry detection, or offboarding cascade.
 
-**Invariants (confirmed 2026-05-29; INV-2/3/4 + INV-5 revised 2026-06-03 for client sites — see §7):**
+**Invariants:**
 - **INV-1:** an agent has **at most one *active* placement** at any moment (no split/multi-site agents). ✅
 - **INV-5:** a placement is located at **exactly one `Site`** (`Placement.site_id` required, E2 F2.6), and that site belongs to the placement's client company. ✅
-- A company's **leadership unit** depends on `ClientCompany.leader_scope` (E2): `company` → the company; `site` → each active site. INV-2/3/4 are stated per *leadership unit*:
-  - **INV-2:** a leadership unit with active placements has **exactly one** shift leader.
-  - **INV-3:** a shift leader leads **exactly one** leadership unit (one company **or** one site) — strict 1:1. ✅
-  - **INV-4:** the designated shift leader must themselves be an agent **actively placed within that unit** (at the company / at that site).
+- A shift leader is **company-wide** (always 1 per company, no per-site leaders):
+  - **INV-2:** a company with active placements has **exactly one** shift leader.
+  - **INV-3:** a shift leader leads **exactly one** company — strict 1:1. ✅
+  - **INV-4:** the designated shift leader must themselves be an agent **actively placed within that company**.
 
 ## 5. Features
 
@@ -98,30 +98,23 @@ erDiagram
 
 ### F3.1 — Agent Placement (create & activate)
 
-HR admin places an agent at a client company, for a contract period, **optionally** referencing the agent's employment agreement (PKWT/PKWTT) and entering the per-placement **free-text position**. The **employment agreement is optional at create and may be backfilled** *(2026-06-11, EPICS §8 — supersedes the prior mandatory rule)*: a placement created without one is flagged `awaiting_agreement` and the agreement is attached later (re-running the period validation). Compensation (base salary) and annual-leave entitlement are **employment-agreement (E2) terms, not placement terms** *(2026-06-07, EPICS §8)*. The placement starts as `Draft`, validates against the invariants, then activates on/after its start date.
+HR admin places an agent at a client company. Placement is a **"currently active at company X"** record: `start_date` is always today, `end_date` is always nil (open-ended). There is no Scheduled/future-dated state, no backdating, no period validation. The agent's **position** is read from `Employee.position` (E2 F2.1), not entered on the placement. The **employment agreement is document-only** (E2 F2.2) — it has no bearing on placement creation or validation. Placement starts as `Active` immediately; END is still supported (manual end by HR via F3.2).
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         A1([Start: new placement]) --> A2[Select agent]
         A2 --> A3[Select client company + site]
-        A3 --> A4[Set period + position<br/>free-text + dates]
-        A4 --> A5{Employment agreement<br/>finalized yet?}
-        A5 -- Yes --> A4b[Attach agreement<br/>PKWT/PKWTT ref]
-        A5 -- "No (paperwork pending)" --> A7
-        A4b --> A7[Submit placement]
-        A6[Resolve existing:<br/>end or transfer] --> A4
+        A3 --> A4[Agent position shown from Employee.position - read-only]
+        A4 --> A6[Resolve existing:<br/>end or transfer]
+        A4 --> A7[Submit placement]
     end
     subgraph SYS[System]
-        A7 --> S1{Valid? dates, company active,<br/>no overlapping active placement}
+        A7 --> S1{Valid? company active,<br/>no overlapping active placement}
         S1 -- Invalid: overlap --> S2[Block: agent already placed] --> A6
-        S1 -- Invalid: data --> S3[Show field errors] --> A4
-        S1 -- Valid --> S4[Create Placement = Draft<br/>awaiting_agreement = true if no agreement<br/>period check BR-1b only if agreement set]
-        S4 --> S5{Start date <= today?}
-        S5 -- Yes --> S6[Status = Active]
-        S5 -- No --> S7[Status = Scheduled<br/>activate on start date]
-        S6 --> S8[(Persist + audit log)]
-        S7 --> S8
+        S1 -- Invalid: data --> S3[Show field errors] --> A3
+        S1 -- Valid --> S4[Create Placement = Active]
+        S4 --> S8[(Persist + audit log)]
         S8 --> S9[Notify agent + company shift leader]
     end
     subgraph AG[Agent]
@@ -132,30 +125,21 @@ flowchart TD
     end
 ```
 
-**Entities:** `Placement` (create), reads `Employee`, `ClientCompany`, `Site`. **Depends on:** E2 (master data).
+**Entities:** `Placement` (create), reads `Employee`, `ClientCompany`, `Site`. **Depends on:** E2 (master data, Employee.position).
 
 ---
 
 ### F3.2 — Placement Lifecycle & Status
 
-Manages the placement state machine and the transitions HR admins trigger (renewal, termination, resignation) plus system-driven transitions (auto-activate on start date, flag **Expiring** at **30 days** before end — hardcoded). The system **never auto-ends** a placement: when an `Expiring` placement reaches its `end_date` with no HR decision it **stays `Expiring`** (grace) until HR explicitly acts via an **Inbox decision task** — **Continue** (renew) or **End**. **Renewal creates a linked successor placement** (a new record whose `predecessor_id` points to the old one); the prior placement is closed as `Superseded`. History is never edited in place. Placement-end here is a *work-designation* change only — it **never revokes the agent's login**; login revocation is employment-end only (E2 [F2.7](../E2-identity/prds/offboarding.md), INV-6 / OB-2).
+Manages the placement state machine and the transitions HR admins trigger (end, renewal, termination, resignation). Placement is not date-bounded — there is no Scheduled/future-dated state, no Expiring flag, and no auto-activate. Placement starts as `Active` immediately on creation. **End** is a manual HR action that closes the placement. **Renewal creates a linked successor placement** (a new record whose `predecessor_id` points to the old one); the prior placement is closed as `Superseded`. History is never edited in place. Placement-end here is a *work-designation* change only — it **never revokes the agent's login**; login revocation is employment-end only (E2 [F2.7](../E2-identity/prds/offboarding.md), INV-6 / OB-2).
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Draft
-    Draft --> Scheduled: start date in future
-    Draft --> Active: start date today / immediate
-    Scheduled --> Active: start date reached (system)
-    Active --> Expiring: 30 days before end (system)
-    Active --> Ended: HR End decision
+    [*] --> Active: immediate on create
+    Active --> Ended: HR End decision (manual)
     Active --> Terminated: HR ends early
     Active --> Resigned: agent resigns
     Active --> Superseded: renewed (successor created)
-    Expiring --> Expiring: end_date passed, no HR decision (grace; login stays valid)
-    Expiring --> Ended: HR End decision (no auto-end)
-    Expiring --> Terminated: HR ends early
-    Expiring --> Resigned: agent resigns
-    Expiring --> Superseded: renewed (successor created)
     Ended --> [*]
     Terminated --> [*]
     Resigned --> [*]
@@ -168,13 +152,13 @@ stateDiagram-v2
 
 ### F3.3 — Re-placement & Transfer (with history)
 
-Move an agent from one company (or site/position) to another. Ends the current placement (reason = `Transferred`) and opens a new one, preserving the full chain so an agent's placement history is always queryable.
+Move an agent from one company (or site) to another. Ends the current placement (reason = `Transferred`) and opens a new one, preserving the full chain so an agent's placement history is always queryable. Transfer does **not** change position — position lives on `Employee.position` (E2) and is unchanged.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
         T1([Start: transfer agent]) --> T2[Pick agent w/ active placement]
-        T2 --> T3[Choose new company + site + position + period]
+        T2 --> T3[Choose new company + site]
         T3 --> T6[Confirm transfer]
     end
     subgraph SYS[System]
@@ -183,7 +167,7 @@ flowchart TD
         V1 -- Yes --> V3[Proceed]
         V2 --> V3
         V3 --> V4[End current placement<br/>reason = Transferred]
-        V4 --> V5[Create new placement = Active/Scheduled]
+        V4 --> V5[Create new placement = Active]
         V5 --> V6[(Persist both + link history + audit)]
         V6 --> V7[Notify agent, old leader, new leader]
     end
@@ -199,12 +183,12 @@ flowchart TD
 
 ### F3.4 — Shift-Leader Assignment
 
-Designate exactly one shift leader per client company. The leader must be an agent actively placed at that company (INV-4). Reassignment ends the prior assignment.
+Designate exactly one shift leader per client company (company-wide). The leader must be an agent actively placed at that company (INV-4). Reassignment ends the prior assignment.
 
 ```mermaid
 flowchart TD
     subgraph HR[HR / Placement Admin]
-        D1([Start: assign shift leader]) --> D2[Select client company]
+        D1([Assign shift leader]) --> D2[Select client company]
         D2 --> D3[Pick agent placed at this company]
         D3 --> D6[Confirm assignment]
     end
@@ -231,15 +215,15 @@ flowchart TD
 
 ### F3.5 — Company Placement Roster
 
-A per-company view listing all agents placed there, their position, status, period, and the company's shift leader — with filters and export. This is the HR admin's and shift leader's day-to-day view.
+A per-company view listing all agents placed there, their position (from Employee.position, E2), status, and the company's shift leader — with filters and export. This is the HR admin's and shift leader's day-to-day view.
 
 ```mermaid
 flowchart LR
     subgraph User[HR Admin / Shift Leader]
-        R1([Open company]) --> R2[Apply filters:<br/>position, status, period]
+        R1([Open company]) --> R2[Apply filters:<br/>position, status]
     end
     subgraph SYS[System]
-        R2 --> Q1[Query active + historical placements]
+        R2 --> Q1[Query active + historical placements<br/>join Employee.position]
         Q1 --> Q2[Resolve shift leader]
         Q2 --> Q3[Return roster + counts]
         Q3 --> R3[Render roster table]
@@ -257,44 +241,25 @@ flowchart LR
 
 - All state changes write an **audit log** entry (who, when, before/after) — see E1.
 - **History is never destroyed:** ending/transferring a placement closes the record, never deletes it.
-- Notifications (E10) fire on: placement activated, expiring soon, ended/terminated, transfer, shift-leader (re)assigned.
+- Notifications (E10) fire on: placement activated, ended/terminated, transfer, shift-leader (re)assigned.
 
 ## 7. Decisions & open questions
 
-**Resolved (2026-06-11 — employment agreement optional at placement create, EPICS §8):**
-- ✅ **`employment_agreement_id` is optional at create and backfillable** — supersedes the prior mandatory rule (F3.1 BR-1). An agent may be placed and start work before the PKWT/PKWTT is finalized; a placement created without an agreement is flagged **`awaiting_agreement`** (derived, = the reference is null) — an **orthogonal compliance flag, not a lifecycle state** (the F3.2 state machine is unchanged). The period-within-agreement check (BR-1b) and PKWT auto-cap run **only when an agreement is present**; otherwise the period is unconstrained and `end_date` may be open-ended. The agreement is attached later via a **backfill** action (`POST /placements/{id}/agreement`), which re-runs BR-1b; **renew/transfer of a pending placement propagates the pending flag** to the successor (no auto-cap). A finalized agreement remains legally required for the employment overall (alih-daya) — only the placement-create precondition is relaxed. → F3.1 BR-1 / BR-1b / BR-10, [agent-placement.md](prds/agent-placement.md), [EPICS §8](../../EPICS.md) 2026-06-11.
+**Resolved (2026-06-19 — placement decoupled from time, position on Employee, leader company-wide):**
+- ✅ **Placement is decoupled from time** — `start_date` is always today, `end_date` is always nil (open-ended). No Scheduled state, no future-dated placements, no backdating, no period validation. Placement is a "currently active at company X" record, not a date-bounded contract. END is still supported (manual end by HR, F3.2).
+- ✅ **Position is on Employee, not Placement** — `Employee.position` (E2 F2.1) is the single source of truth. Placement no longer has its own position field. Transfer does not change position.
+- ✅ **Leader scope is company-wide only** — `leader_scope` removed from `ClientCompany`; shift leader always covers the entire company. No per-site leaders. INV-2/3/4 simplified accordingly.
+- ✅ **Employment agreement is document-only** (E2 F2.2) — it has no system impact on placement validation, expiry detection, or offboarding cascade. The employment_agreement_id and awaiting_agreement fields are removed from Placement.
 
-**Resolved (2026-06-08 — shift-leader identity model shipped):**
-- ✅ **Derived role/scope.** A shift leader is an Employee with an active `shift_leader_assignments` row (keyed by `employee_id`); the auth role + single-company scope are **derived at request time** by server middleware from that assignment, **not stored on `users`** — consistent with INV-2/3/4. Reassign/revoke is effective on the next request (no re-login). → [F3.4](prds/shift-leader-assignment.md) SL-10.
-- ✅ **Single entry point** = the client-company detail **"Pemimpin Shift" tab** (E2 [F2.3](../E2-identity/prds/client-company-directory.md)); the placement-detail shift-leader card is **read-only** and links there, and the F3.5 roster "Ganti" action links to the same tab. → F3.4 SL-11.
-
-**Resolved (2026-06-07 — comp/leave are E2 terms, EPICS §8):**
-- ✅ **`annual_leave_entitlement` and `base_salary_ref` removed from `Placement`.** Under alih-daya law the employment relationship is SWP↔agent and a placement is only a work *designation*; base salary stays the single source on E2 `CompensationRecord`, and the annual leave entitlement moves to the **EmploymentAgreement** (`annual_leave_entitlement_days`, E2 [employment-agreement.md](../E2-identity/prds/employment-agreement.md)). E6 leave-quota already sources the entitlement from E2. **BR-9 (position is selected per placement) is unaffected.**
-
-**Resolved (2026-06-06 — reconcile with E2 F2.7 offboarding):**
-- ✅ **No auto-end of placement at expiry.** At `end_date` an `Expiring` placement **stays `Expiring`** (grace) until HR decides via an **Inbox task** — **Continue** (renew → successor / `Superseded`) or **End**. The state machine has no system-driven `Expiring/Active → Ended` transition. → F3.2.
-- ✅ **Placement-end never revokes login.** Transfer / renewal / supersede / any placement close changes only the *work designation*; login revocation is **employment-end only** (E2 [F2.7](../E2-identity/prds/offboarding.md), INV-6 / OB-2).
-
-**Resolved (2026-06-03 — client sites, EPICS §8):**
-- ✅ **Placement targets a `Site`** (E2 F2.6), not just a company — `Placement.site_id` required (INV-5); every company has ≥1 site (auto "Main Site"). E5 geofence resolves from `placement.site`.
-- ✅ **Shift-leader scope = configurable** via `ClientCompany.leader_scope` (`company` | `site`, default `company`). INV-2/3/4 now apply per **leadership unit** (company or site). `ShiftLeaderAssignment` gains a nullable `site_id`. → F3.4.
-
-**Resolved (2026-05-29):**
+**Resolved (previous rounds — reconciled 2026-06-19):**
 - ✅ **INV-1** — one active placement per agent (no split/multi-site).
-- ✅ **INV-3** — shift leader strictly 1:1 with a leadership unit *(2026-06-03: unit = company **or** site per `leader_scope`; was company-only)*.
+- ✅ **INV-3** — shift leader strictly 1:1 with a company.
 - ✅ **Renewal** creates a **linked successor** placement (`predecessor_id`), never an in-place extension. → F3.2
-- ✅ **Expiring threshold = 30 days**, hardcoded (no config yet).
-- ✅ **Headcount targets** are **reporting only** (E10) — not modeled at placement level.
-- ✅ **1-day buffer** between placements — no overlap, no same-day handover. → F3.1 / PRD BR-2
-- ✅ **Position** is **free-text, set per placement** *(2026-06-12, EPICS §8 — supersedes "comes from master data"; the Position master and `service_line` are removed entirely)*, so the same agent may hold a different position string at a different company. A typeahead over `DISTINCT` existing values aids entry; nothing is enforced (BR-9).
-- ✅ **Backdating** allowed for **HR admin** (with reason + audit), not Super Admin only.
-- ✅ **Employment agreement (PKWT/PKWTT)** is separate from placement and tied to SWP↔employee (E2); placement `end_date` may be open-ended (PKWTT) and, for PKWT, must sit within the agreement period *(2026-06-11: the agreement reference is now **optional at create** — this period constraint applies **only when an agreement is present**; see the 2026-06-11 decision above)*.
-
-**Resolved (round 2):**
-- ✅ **Service line removed entirely** *(2026-06-12, EPICS §8 — supersedes the prior "manual classification later")* — no ServiceLine entity/scope anywhere; the legacy `recruitment_roles.role` label copies straight into the free-text `Placement.position`. → [DATA-MAPPING.md](DATA-MAPPING.md).
-- ✅ **Sub-companies** (`role=4`) → **not used by SWP; ignore**. ClientCompany = `companies.role=2` only. → G-6. *(Sites, added 2026-06-03 as E2 F2.6, are **net-new** — not migrated from `role=4`; see E9.)*
-- ✅ **PKWT overrun** → **auto-cap** placement end to agreement end (PRD BR-1b).
-- ✅ **Buffer** → next day after prior end is sufficient.
+- ✅ **Position** is a **free-text string on Employee** (E2 F2.1) — the Position master and `service_line` are removed entirely.
+- ✅ **Compensation & annual-leave entitlement are E2 terms, not placement terms** *(2026-06-07)*.
+- ✅ **Placement-end never revokes login.** Transfer / renewal / supersede / any placement close changes only the *work designation*; login revocation is **employment-end only** (E2 F2.7, INV-6 / OB-2).
+- ✅ **Shift leader identified by active `shift_leader_assignments` row**; role + scope derived at request time *(2026-06-08)*.
+- ✅ **Single entry point** for leader assignment = client-company detail "Pemimpin Shift" tab.
 
 **Still open (data verification, deferred to E9):**
 1. Confirm how legacy distinguishes PKWT vs PKWTT (likely `contract_status_id` / absence of `contract_end_at`). → DATA-MAPPING.md G-4.

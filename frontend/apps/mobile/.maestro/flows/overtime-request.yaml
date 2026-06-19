@@ -1,0 +1,13 @@
+appId: com.hariszaki17.swphris
+---
+- launchApp
+- tapOn: "Email"
+- inputText: "${EMAIL:-agent@swp.test}"
+- tapOn: "Kata Sandi"
+- inputText: "${PASSWORD:-password123}"
+- tapOn: "Masuk"
+- extendedWaitUntil:
+    visible: "Pengajuan"
+    timeout: 10000
+- tapOn: "Pengajuan"
+- assertVisible: "Lembur"

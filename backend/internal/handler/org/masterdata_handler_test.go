@@ -134,14 +134,7 @@ func (r *fakeMasterDataRepo) UpdateLeaveType(_ context.Context, _ pgx.Tx, p orgs
 	return lt, nil
 }
 
-func (r *fakeMasterDataRepo) SoftDeleteLeaveType(_ context.Context, _ pgx.Tx, id string) error {
-	_, ok := r.leaveTypes[id]
-	if !ok {
-		return domain.ErrNotFound
-	}
-	delete(r.leaveTypes, id)
-	return nil
-}
+// SoftDeleteLeaveType removed — leave types are un-deletable master data (2026-06-19).
 
 // --- Attendance Codes ---
 
@@ -374,7 +367,8 @@ func newMasterDataHarness(t *testing.T) *masterDataHarness {
 		r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
 		r.Post("/leave-types", h.CreateLeaveType)
 		r.Patch("/leave-types/{leave_type_id}", h.UpdateLeaveType)
-		r.Delete("/leave-types/{leave_type_id}", h.SoftDeleteLeaveType)
+		// Leave types are master data — un-deletable (2026-06-19).
+		// r.Delete("/leave-types/{leave_type_id}", h.SoftDeleteLeaveType)
 		r.Post("/attendance-codes", h.CreateAttendanceCode)
 		r.Patch("/attendance-codes/{attendance_code_id}", h.UpdateAttendanceCode)
 		r.Delete("/attendance-codes/{attendance_code_id}", h.SoftDeleteAttendanceCode)
@@ -561,27 +555,7 @@ func TestUpdateLeaveType_200(t *testing.T) {
 	}
 }
 
-func TestSoftDeleteLeaveType_204(t *testing.T) {
-	h := newMasterDataHarness(t)
-	lt := h.seedLeaveType("Delete Me", "DEL", false)
-
-	rr := h.do("DELETE", "/leave-types/"+lt.ID, nil)
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if strings.TrimSpace(rr.Body.String()) != "" {
-		t.Errorf("expected empty body on 204, got: %s", rr.Body.String())
-	}
-}
-
-func TestSoftDeleteLeaveType_404(t *testing.T) {
-	h := newMasterDataHarness(t)
-
-	rr := h.do("DELETE", "/leave-types/SWP-LT-GHOST", nil)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
+// TestSoftDeleteLeaveType removed — leave types are un-deletable master data (2026-06-19).
 
 // ---------------------------------------------------------------------------
 // Task 3: Attendance Codes

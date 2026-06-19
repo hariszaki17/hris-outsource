@@ -11,7 +11,8 @@
 // approval engine): the OT record only carries an ApprovalInstanceID linking to the
 // E11 ApprovalInstance. The old two-level (PENDING_L1 → PENDING_HR) state machine +
 // the overtime_approvals decision trail were ripped out — clients read the chain via
-// GET /approval-instances/{id}.
+// GET /approval-instances/{id}. PENDING_AGENT_CONFIRM was removed 2026-06-19 along
+// with AUTO_DETECTED source.
 //
 // V1 records HOURS/MINUTES ONLY (INV-2): ReferenceMultiplier is a STORED reference
 // from the applied E2 OvertimeRule — it is NEVER applied (no monetary method).
@@ -26,11 +27,10 @@ import "time"
 type OvertimeStatus string
 
 const (
-	OvertimeStatusPendingAgentConfirm OvertimeStatus = "PENDING_AGENT_CONFIRM"
-	OvertimeStatusPending             OvertimeStatus = "PENDING"
-	OvertimeStatusApproved            OvertimeStatus = "APPROVED"
-	OvertimeStatusRejected            OvertimeStatus = "REJECTED"
-	OvertimeStatusCancelled           OvertimeStatus = "CANCELLED"
+	OvertimeStatusPending   OvertimeStatus = "PENDING"
+	OvertimeStatusApproved  OvertimeStatus = "APPROVED"
+	OvertimeStatusRejected  OvertimeStatus = "REJECTED"
+	OvertimeStatusCancelled OvertimeStatus = "CANCELLED"
 )
 
 // OvertimeSource is how the OT entered the system (openapi schemas.OvertimeSource).
@@ -38,7 +38,6 @@ type OvertimeSource string
 
 const (
 	OvertimeSourceRequested            OvertimeSource = "REQUESTED"
-	OvertimeSourceAutoDetected         OvertimeSource = "AUTO_DETECTED"
 	OvertimeSourceWorkedWithoutRequest OvertimeSource = "WORKED_WITHOUT_REQUEST"
 )
 
@@ -125,7 +124,7 @@ type Overtime struct {
 	Reason               *string
 
 	// ApprovalInstanceID links the E11 ApprovalInstance tracking this OT's approval
-	// chain (null while PENDING_AGENT_CONFIRM, set at :confirm / direct create).
+	// chain (set at create).
 	ApprovalInstanceID *string
 
 	CreatedBy *string

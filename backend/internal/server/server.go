@@ -13,6 +13,7 @@ import (
 	attendancehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/attendance"
 	foundationshttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/foundations"
 	identityhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/identity"
+	calendarhttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/calendar"
 	leavehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/leave"
 	orghttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/org"
 	overtimehttp "github.com/hariszaki17/hris-outsource/backend/internal/handler/overtime"
@@ -72,15 +73,22 @@ type Deps struct {
 	// PAYROLL period-close slice (F8.5): month-end reconciliation gate — period FSM,
 	// completeness, lock/reopen, immutable summary, clarification back-channel (E8).
 	PayrollPeriod *payrollhttp.PeriodHandler
+	// PAYROLL run slice (F8.3): compute-assist payroll run — open → assemble → post.
+	PayrollRun *payrollhttp.RunHandler
+	// PAYROLL payment slice (F8.4): manual payment recording + transfer evidence.
+	PayrollPayment *payrollhttp.PaymentHandler
 	// APPROVAL slice (E11): configurable per-company approval engine — templates +
 	// instances/actions. Single source of truth for leave/overtime approval.
 	Approval *approvalhttp.Handler
 	// REPORTING slice (11-02): E10 notifications (list/mark-read/mark-all-read).
 	// 11-02b extends the SAME handler with dashboard/billable-report/export methods.
-	Reporting   *reportinghttp.Handler
-	Authn       *auth.Authenticator
-	Idempotency *idempotency.Middleware
-	Obs         *obs.Providers
+	Reporting *reportinghttp.Handler
+	// Agent Web Calendar (E10 F10.5): agent's own month-view calendar aggregating
+	// schedule + leave + holidays + attendance per day.
+	AgentCalendar *calendarhttp.AgentCalendarHandler
+	Authn         *auth.Authenticator
+	Idempotency   *idempotency.Middleware
+	Obs           *obs.Providers
 }
 
 // New builds the root HTTP handler.
@@ -211,11 +219,10 @@ func New(d Deps) http.Handler {
 			// All master-data writes: super_admin, hr_admin.
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
-				// Leave types
-				r.With(d.Idempotency.Handler).Post("/leave-types", d.OrgMasterData.CreateLeaveType)
-				r.Patch("/leave-types/{leave_type_id}", d.OrgMasterData.UpdateLeaveType)
-				r.Delete("/leave-types/{leave_type_id}", d.OrgMasterData.SoftDeleteLeaveType)
-				// Attendance codes
+			// Leave types
+			r.With(d.Idempotency.Handler).Post("/leave-types", d.OrgMasterData.CreateLeaveType)
+			r.Patch("/leave-types/{leave_type_id}", d.OrgMasterData.UpdateLeaveType)
+			// Attendance codes
 				r.With(d.Idempotency.Handler).Post("/attendance-codes", d.OrgMasterData.CreateAttendanceCode)
 				r.Patch("/attendance-codes/{attendance_code_id}", d.OrgMasterData.UpdateAttendanceCode)
 				r.Delete("/attendance-codes/{attendance_code_id}", d.OrgMasterData.SoftDeleteAttendanceCode)
@@ -301,6 +308,9 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Patch("/me/profile", d.PeopleSelfProfile.UpdateMyProfile)
 				r.Post("/me/profile/photo-upload-init", d.PeopleSelfProfile.InitProfilePhotoUpload)
+				// Agent web calendar (E10 F10.5): month-view aggregating schedule,
+				// leave, holidays, and attendance per day.
+				r.Get("/me/calendar", d.AgentCalendar.GetAgentCalendar)
 			})
 			// PEOPLE change-requests slice end (04-04). Phase 5+ appends after this line.
 
@@ -350,6 +360,7 @@ func New(d Deps) http.Handler {
 				// (which cascades to close placements), so :end / :resign / :terminate
 				// are removed. Cross-company moves remain via :transfer.
 				r.With(d.Idempotency.Handler).Post("/placements/{id}:transfer", d.Placement.TransferPlacement)
+				r.With(d.Idempotency.Handler).Post("/placements/{id}:end", d.Placement.EndPlacement)
 			})
 
 			// Placement edit + agreement backfill + shift-leader-assignment (SLA)
@@ -387,6 +398,7 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
 				r.Get("/schedule", d.Scheduling.ListSchedule)
+				r.Get("/schedule:aggregate", d.Scheduling.AggregateSchedule)
 				r.With(d.Idempotency.Handler).Post("/schedule", d.Scheduling.CreateScheduleEntry)
 				r.With(d.Idempotency.Handler).Patch("/schedule/{id}", d.Scheduling.UpdateScheduleEntry)
 				r.With(d.Idempotency.Handler).Delete("/schedule/{id}", d.Scheduling.DeleteScheduleEntry)
@@ -464,6 +476,7 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 				r.With(d.Idempotency.Handler).Post("/corrections", d.Attendance.CreateCorrection)
+				r.With(d.Idempotency.Handler).Post("/corrections/{id}:cancel", d.Attendance.CancelCorrection)
 			})
 
 			// Attendance/corrections WRITES + corrections reads: super_admin,
@@ -577,6 +590,7 @@ func New(d Deps) http.Handler {
 				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/overtime", d.Overtime.ListOvertime)
 				r.Get("/overtime/{id}", d.Overtime.GetOvertime)
+				r.Get("/overtime:aggregate", d.Overtime.AggregateOvertime)
 			})
 
 			// Holiday reads: super_admin, hr_admin, shift_leader.
@@ -585,13 +599,12 @@ func New(d Deps) http.Handler {
 				r.Get("/holidays", d.Overtime.ListHolidays)
 			})
 
-			// Agent-write group: POST /overtime (create / F7.2), :confirm, :withdraw.
+			// Agent-write group: POST /overtime (create / F7.2), :withdraw.
 			// Roles agent, shift_leader, hr_admin, super_admin (x-rbac scope:self);
 			// the agent self-check + leader company scope are enforced in-service.
 			r.Group(func(r chi.Router) {
 				r.Use(rbac.RequireRole(auth.RoleAgent, auth.RoleShiftLeader, auth.RoleHRAdmin, auth.RoleSuperAdmin))
 				r.With(d.Idempotency.Handler).Post("/overtime", d.Overtime.CreateOvertime)
-				r.With(d.Idempotency.Handler).Post("/overtime/{id}:confirm", d.Overtime.Confirm)
 				r.With(d.Idempotency.Handler).Post("/overtime/{id}:withdraw", d.Overtime.Withdraw)
 			})
 
@@ -701,6 +714,42 @@ func New(d Deps) http.Handler {
 				r.With(d.Idempotency.Handler).Post("/clarifications/{id}:answer", d.PayrollPeriod.AnswerClarification)
 			})
 			// PAYROLL PERIOD CLOSE slice end (F8.5). Phase 10+ appends after this line.
+
+			// ---------------------------------------------------------------
+			// PAYROLL RUN slice (F8.3): compute-assist payroll run —
+			// open → assemble → post (PR-1..PR-3). HR/super-admin only.
+			// chi matches the `:assemble`/`:post` action suffixes natively.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/payroll-runs", d.PayrollRun.OpenRun)
+				r.Get("/payroll-runs", d.PayrollRun.ListRuns)
+				r.Get("/payroll-runs/{id}", d.PayrollRun.GetRun)
+				r.With(d.Idempotency.Handler).Post("/payroll-runs/{id}:assemble", d.PayrollRun.AssembleRun)
+				r.With(d.Idempotency.Handler).Post("/payroll-runs/{id}:post", d.PayrollRun.PostRun)
+				r.Get("/payroll-runs/{id}/payslips", d.PayrollRun.ListRunPayslips)
+			})
+
+			// PAYROLL RUN slice end (F8.3). F8.4 payments appends after this line.
+
+			// ---------------------------------------------------------------
+			// PAYROLL PAYMENT slice (F8.4): manual payment recording +
+			// transfer evidence (PPY-1..PPY-3). HR/super-admin only.
+			// chi matches the `:void`/`:batch` action suffixes natively.
+			// ---------------------------------------------------------------
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.With(d.Idempotency.Handler).Post("/payments", d.PayrollPayment.RecordPayment)
+				r.With(d.Idempotency.Handler).Post("/payments:batch", d.PayrollPayment.RecordBatchPayment)
+				r.With(d.Idempotency.Handler).Post("/payments/{id}:void", d.PayrollPayment.VoidPayment)
+			})
+			// List payments attaches to the payslip detail resource.
+			r.Group(func(r chi.Router) {
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin))
+				r.Get("/payslips/{id}/payments", d.PayrollPayment.ListPayments)
+			})
+
+			// PAYROLL PAYMENT slice end (F8.4). Phase 10+ appends after this line.
 
 			// ---------------------------------------------------------------
 			// E10 REPORTING slice — NOTIFICATIONS (11-02). The caller's in-app

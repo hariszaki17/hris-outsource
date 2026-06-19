@@ -6,8 +6,10 @@ package overtime
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	dom "github.com/hariszaki17/hris-outsource/backend/internal/domain/overtime"
 	"github.com/hariszaki17/hris-outsource/backend/internal/platform/db"
@@ -160,4 +162,50 @@ func ruleFromList(r sqlcgen.ListOvertimeRulesRow) svc.OvertimeRule {
 		HolidayRate: float64(r.HolidayRate),
 		MinMinutes:  int(r.MinMinutes),
 	}
+}
+
+// --- duplicate detection + aggregation (2026-06-19) ---
+
+// ExistsActiveOvertimeForAgentDate reports whether the agent already has an active
+// (not REJECTED, not CANCELLED) OT for work_date.
+func (r *OvertimeRepo) ExistsActiveOvertimeForAgentDate(ctx context.Context, employeeID string, workDate time.Time) (bool, error) {
+	return r.q.ExistsActiveOvertimeForAgentDate(ctx, employeeID, timeToPgDate(workDate))
+}
+
+// AggregateOvertime returns APPROVED OT totals grouped by agent or day_type.
+func (r *OvertimeRepo) AggregateOvertime(ctx context.Context, p svc.AggregateParams) ([]svc.OvertimeAggregateRow, error) {
+	var dateFrom, dateTo pgtype.Date
+	if p.DateFrom != nil {
+		dateFrom = timeToPgDate(*p.DateFrom)
+	}
+	if p.DateTo != nil {
+		dateTo = timeToPgDate(*p.DateTo)
+	}
+	rows, err := r.q.AggregateOvertime(ctx, sqlcgen.AggregateOvertimeParams{
+		GroupBy:   p.GroupBy,
+		CompanyID: p.CompanyID,
+		DateFrom:  dateFrom,
+		DateTo:    dateTo,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]svc.OvertimeAggregateRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, svc.OvertimeAggregateRow{
+			GroupKey:       row.GroupKey,
+			EmployeeID:     row.EmployeeID,
+			EmployeeName:   row.EmployeeName,
+			DayType:        row.DayType,
+			TotalMinutes:   int(row.TotalMinutes),
+			TotalApproved:  int(row.TotalApprovedCount),
+			WorkdayCount:   int(row.WorkdayCount),
+			RestdayCount:   int(row.RestdayCount),
+			HolidayCount:   int(row.HolidayCount),
+			WorkdayMinutes: int(row.WorkdayMinutes),
+			RestdayMinutes: int(row.RestdayMinutes),
+			HolidayMinutes: int(row.HolidayMinutes),
+		})
+	}
+	return out, nil
 }

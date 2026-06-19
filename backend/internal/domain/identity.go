@@ -75,3 +75,19 @@ type PasswordResetToken struct {
 func (t PasswordResetToken) IsLive(now time.Time) bool {
 	return t.UsedAt == nil && t.ExpiresAt.After(now)
 }
+
+// LoginAttempt tracks consecutive failed login attempts per normalized identifier.
+// After 5 failures the identifier is locked for 15 minutes.
+type LoginAttempt struct {
+	ID           int64
+	Identifier   string
+	AttemptCount int
+	LockedUntil  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// IsLocked reports whether the identifier is currently locked out.
+func (a LoginAttempt) IsLocked(now time.Time) bool {
+	return a.LockedUntil != nil && a.LockedUntil.After(now)
+}

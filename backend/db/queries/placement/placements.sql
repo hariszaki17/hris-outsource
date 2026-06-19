@@ -379,3 +379,15 @@ WHERE p.client_company_id = sqlc.arg(client_company_id)
   AND p.deleted_at IS NULL
   AND p.lifecycle_status IN ('ACTIVE','EXPIRING','PENDING_START')
 GROUP BY e.position;
+
+-- name: CountActivePlacementsForCompany :one
+SELECT count(*)::int FROM placements
+WHERE client_company_id = sqlc.arg(client_company_id)
+  AND lifecycle_status IN ('ACTIVE', 'EXPIRING', 'PENDING_START')
+  AND deleted_at IS NULL;
+
+-- name: CountActivePlacementsForSite :one
+SELECT count(*)::int FROM placements
+WHERE site_id = sqlc.arg(site_id)
+  AND lifecycle_status IN ('ACTIVE', 'EXPIRING', 'PENDING_START')
+  AND deleted_at IS NULL;

@@ -194,3 +194,29 @@ func TestReserve_Lifetime_OnceExhausts(t *testing.T) {
 }
 
 func iptr(i int) *int { return &i }
+
+// --- proRateAnnualPool ---
+
+func TestProRate_MidYearJoiner_July(t *testing.T) {
+	joinAt := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	got := proRateAnnualPool(12, joinAt)
+	if got != 6 {
+		t.Errorf("proRateAnnualPool(12, July) = %d, want 6", got)
+	}
+}
+
+func TestProRate_NovemberJoin(t *testing.T) {
+	joinAt := time.Date(2026, time.November, 1, 0, 0, 0, 0, time.UTC)
+	got := proRateAnnualPool(12, joinAt)
+	if got != 2 {
+		t.Errorf("proRateAnnualPool(12, November) = %d, want 2", got)
+	}
+}
+
+func TestProRate_JanuaryJoiner(t *testing.T) {
+	joinAt := time.Date(2026, time.January, 15, 0, 0, 0, 0, time.UTC)
+	got := proRateAnnualPool(12, joinAt)
+	if got != 12 {
+		t.Errorf("proRateAnnualPool(12, January) = %d, want 12", got)
+	}
+}

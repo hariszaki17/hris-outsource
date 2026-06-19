@@ -52,6 +52,36 @@ func (h *Handler) ListSchedule(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, toScheduleListResponse(rows))
 }
 
+// AggregateSchedule handles GET /schedule:aggregate.
+func (h *Handler) AggregateSchedule(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	companyID := q.Get("company_id")
+	if companyID == "" {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"company_id": "Wajib diisi."}))
+		return
+	}
+	weekStart, err := parseDate(q.Get("week_start"))
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid(map[string]string{"week_start": "Format tanggal tidak valid (YYYY-MM-DD)."}))
+		return
+	}
+	groupBy := q.Get("group_by")
+	if groupBy != "day" && groupBy != "week" {
+		groupBy = "day"
+	}
+
+	result, serr := h.schedule.AggregateSchedule(r.Context(), svc.AggregateScheduleParams{
+		CompanyID: companyID,
+		WeekStart: weekStart,
+		GroupBy:   groupBy,
+	})
+	if serr != nil {
+		httpx.WriteError(w, r, serr)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
 // --- agent self-schedule (F4.3 "Jadwal Saya") ---
 
 // GetScheduleByAgent handles GET /schedule/by-agent/{employee_id} (required

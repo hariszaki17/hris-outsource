@@ -62,6 +62,11 @@ type ScheduleEntry struct {
 
 	ReplacedEntryID *string
 
+	SiteID     *string
+	SiteName   *string
+	SiteGeoLat *float64
+	SiteGeoLng *float64
+
 	CreatedBy *string
 	CreatedAt time.Time
 	UpdatedAt time.Time
