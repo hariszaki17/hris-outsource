@@ -593,9 +593,9 @@ func New(d Deps) http.Handler {
 				r.Get("/overtime:aggregate", d.Overtime.AggregateOvertime)
 			})
 
-			// Holiday reads: super_admin, hr_admin, shift_leader.
+			// Holiday reads: all roles (agent calendar needs holidays).
 			r.Group(func(r chi.Router) {
-				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleLead))
+				r.Use(rbac.RequireRole(auth.RoleSuperAdmin, auth.RoleHRAdmin, auth.RoleShiftLeader, auth.RoleAgent, auth.RoleLead))
 				r.Get("/holidays", d.Overtime.ListHolidays)
 			})
 
