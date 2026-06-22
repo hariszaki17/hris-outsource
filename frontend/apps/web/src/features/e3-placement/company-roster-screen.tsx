@@ -189,6 +189,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
     {
       id: 'agen',
       header: t('rosterColAgen'),
+      priority: 'primary',
       width: 330,
       cell: (pl) => {
         const isLeader = shiftLeader?.employee_id === pl.employee_id;
@@ -215,6 +216,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
     {
       id: 'periode',
       header: t('rosterColPeriode'),
+      priority: 'secondary',
       width: 230,
       cell: (pl) => (
         <span className="text-[13px] text-text-2 tabular-nums">
@@ -231,6 +233,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
     {
       id: 'status',
       header: t('rosterColStatus'),
+      priority: 'secondary',
       width: 180,
       cell: (pl) => (
         <div className="flex flex-wrap items-center gap-[6px]">
@@ -420,7 +423,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
             <SearchField
               placeholder={t('rosterSearchPlaceholder')}
               defaultValue={search.q ?? ''}
-              containerClassName="w-[220px]"
+              containerClassName="w-full lg:w-[220px]"
               onChange={(e) => setSearch({ q: e.target.value || undefined })}
             />
             {/* Status filter */}
@@ -477,6 +480,7 @@ export function CompanyRosterScreen({ clientCompanyId }: CompanyRosterScreenProp
 
         {/* Data table */}
         <DataTable
+          responsive
           aria-label={t('rosterTitle')}
           columns={columns}
           data={rows}

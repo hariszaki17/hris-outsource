@@ -17,10 +17,12 @@ export { IdChip, type IdChipProps } from './molecules/id-chip.tsx';
 export { DateText, type DateTextProps } from './molecules/date-text.tsx';
 export { Avatar, type AvatarProps } from './molecules/avatar.tsx';
 export { StatCard, type StatCardProps, type StatTone } from './molecules/stat-card.tsx';
+export { StatCardGrid } from './molecules/stat-card-grid.tsx';
 export { MapPicker, type MapPickerProps, type LatLng } from './molecules/map-picker.tsx';
 
 // Molecules — forms
 export { FormField, FormSection, type FormFieldProps } from './molecules/form-field.tsx';
+export { DetailGrid } from './molecules/detail-grid.tsx';
 
 // Molecules — async / feedback states (no dead-flow: ENGINEERING.md B2 / G4)
 export { StateView, type StateViewProps } from './molecules/state-view.tsx';
@@ -95,12 +97,16 @@ export {
 // Molecules — combobox / async FK picker primitive
 export { Combobox, type ComboboxProps, type ComboboxOption } from './molecules/combobox.tsx';
 
+// Molecules — list layout helpers
+export { FilterRow } from './molecules/filter-row.tsx';
+
 // Molecules — data tables & pagination
 export {
   DataTable,
   type Column,
   type DataTableProps,
 } from './molecules/data-table.tsx';
+export { DataTableCardView, type DataTableCardViewProps } from './molecules/data-table-card.tsx';
 export {
   CursorPagination,
   type CursorPaginationProps,
@@ -121,6 +127,10 @@ export {
   type SidebarSpacerProps,
   type SidebarFooterProps,
 } from './molecules/sidebar.tsx';
+export {
+  MobileSidebarDrawer,
+  type MobileSidebarDrawerProps,
+} from './molecules/mobile-sidebar-drawer.tsx';
 export {
   Topbar,
   Breadcrumb,

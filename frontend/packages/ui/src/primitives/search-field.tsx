@@ -16,7 +16,7 @@ export function SearchField({ containerClassName, className, ...props }: SearchF
   return (
     <div
       className={cn(
-        'flex w-60 items-center gap-2 rounded-md border border-border bg-surface px-3 py-2',
+        'flex w-full items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 sm:w-60',
         containerClassName,
       )}
     >

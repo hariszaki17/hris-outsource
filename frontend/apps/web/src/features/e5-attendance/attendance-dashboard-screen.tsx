@@ -32,6 +32,7 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  FilterRow,
   FilterSelect,
   Input,
   SearchField,
@@ -267,6 +268,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'employee',
       header: t('colEmployee'),
+      priority: 'primary',
       cell: (row) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[13px] font-medium text-text">
@@ -279,6 +281,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'company',
       header: t('colCompany'),
+      priority: 'secondary',
       width: 180,
       cell: (row) => (
         <span className="text-[13px] text-text">{row.company_name ?? row.company_id}</span>
@@ -287,6 +290,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'date',
       header: t('colDate'),
+      priority: 'secondary',
       width: 110,
       cell: (row) => {
         const date = row.check_in_at ?? row.created_at;
@@ -300,6 +304,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'check_in_at',
       header: t('colCheckIn'),
+      priority: 'secondary',
       width: 130,
       cell: (row) => (
         <span className="text-[13px] text-text">
@@ -316,6 +321,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'check_out_at',
       header: t('colCheckOut'),
+      priority: 'hidden-mobile',
       width: 130,
       cell: (row) => (
         <span className="text-[13px] text-text">
@@ -332,6 +338,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'status',
       header: t('colStatus'),
+      priority: 'secondary',
       width: 120,
       cell: (row) => (
         <StatusBadge dot tone={attendanceStatusTone(row.status)}>
@@ -342,6 +349,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'verification_status',
       header: t('colVerification'),
+      priority: 'hidden-mobile',
       width: 140,
       cell: (row) => (
         <StatusBadge dot tone={verificationStatusTone(row.verification_status)}>
@@ -352,6 +360,7 @@ export function AttendanceDashboardScreen() {
     {
       id: 'detail',
       header: '',
+      priority: 'hidden-mobile',
       width: 96,
       align: 'right',
       cell: (row) => (
@@ -431,9 +440,9 @@ export function AttendanceDashboardScreen() {
       )}
 
       {/* Title band */}
-      <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-5 py-[18px]">
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface px-5 py-[18px] lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-bold text-text">{t('dashTitle')}</h1>
+          <h1 className="text-2xl font-bold text-text lg:text-3xl">{t('dashTitle')}</h1>
           <p className="text-[13px] text-text-2">{t('dashSubtitle')}</p>
         </div>
         {/* F5.6 — Manual attendance entry (admin/super, not shift_leader) */}
@@ -449,7 +458,7 @@ export function AttendanceDashboardScreen() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t('statTotalAgents')}
           value={query.isLoading ? '—' : String(rows.length)}
@@ -485,11 +494,11 @@ export function AttendanceDashboardScreen() {
         <StatusTabs tabs={tabs} />
 
         {/* Filter row */}
-        <div className="flex flex-wrap items-center gap-[10px] border-b border-border-soft px-[18px] py-[14px]">
+        <FilterRow className="border-b border-border-soft px-[18px] py-[14px]">
           <SearchField
             placeholder={t('searchPlaceholder')}
             defaultValue={search.q ?? ''}
-            containerClassName="w-[220px]"
+            containerClassName="w-full lg:w-[220px]"
             onChange={(e) => setSearch({ q: e.target.value || undefined })}
           />
 
@@ -532,7 +541,7 @@ export function AttendanceDashboardScreen() {
             placeholder={t('filterPosition')}
             value={search.position ?? ''}
             onChange={(e) => setSearch({ position: e.target.value || undefined })}
-            className="w-[180px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+            className="w-full lg:w-[180px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
           />
 
           {/* Date range filters */}
@@ -542,7 +551,7 @@ export function AttendanceDashboardScreen() {
             placeholder={t('filterDateFrom')}
             value={search.date_from ?? ''}
             onChange={(e) => setSearch({ date_from: e.target.value || undefined })}
-            className="w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+            className="w-full lg:w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
           />
           <Input
             aria-label={t('filterDateTo')}
@@ -551,10 +560,10 @@ export function AttendanceDashboardScreen() {
             value={search.date_to ?? ''}
             min={search.date_from ?? undefined}
             onChange={(e) => setSearch({ date_to: e.target.value || undefined })}
-            className="w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
+            className="w-full lg:w-[160px] h-10 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-text"
           />
 
-          <div className="flex-1" />
+          <div className="hidden lg:block lg:flex-1" />
           {hasFilters && (
             <button
               type="button"
@@ -573,10 +582,11 @@ export function AttendanceDashboardScreen() {
               {t('resetFilters')}
             </button>
           )}
-        </div>
+        </FilterRow>
 
         {/* Data table */}
         <DataTable
+          responsive
           aria-label={t('dashTitle')}
           columns={columns}
           data={rows}

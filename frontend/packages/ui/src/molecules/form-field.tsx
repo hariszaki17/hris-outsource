@@ -44,10 +44,11 @@ export function FormField({
   );
 }
 
-/** The 2-column form section wrapper enforcing the DESIGN-SYSTEM §6 grid. */
+/** The 2-column form section wrapper enforcing the DESIGN-SYSTEM §6 grid.
+ *  Mobile: 1 column. Desktop (lg+): 2 columns. */
 export function FormSection({
   className,
   children,
 }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn('grid grid-cols-2 gap-4', className)}>{children}</div>;
+  return <div className={cn('grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5', className)}>{children}</div>;
 }

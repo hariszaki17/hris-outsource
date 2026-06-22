@@ -464,7 +464,7 @@ function BlockAndLinkTab({
   const descKey = isLembur ? 'periodClose.lemburBlockDesc' : 'periodClose.cutiBlockDesc';
 
   return (
-    <div className="flex flex-col items-center gap-6 py-16 px-8 text-center">
+    <div className="flex flex-col items-center gap-4 lg:p-6 py-16 px-8 text-center">
       {/* frame uPAkt — block-and-link state */}
       {blockerCount > 0 ? (
         <>

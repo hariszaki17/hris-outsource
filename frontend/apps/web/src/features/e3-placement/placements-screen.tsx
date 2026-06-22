@@ -171,6 +171,7 @@ export function PlacementsScreen() {
     {
       id: 'agen',
       header: t('colAgen'),
+      priority: 'primary',
       flex: 2.2,
       cell: (pl) => (
         <div className="flex items-center gap-[8px]">
@@ -185,6 +186,7 @@ export function PlacementsScreen() {
     {
       id: 'perusahaan',
       header: t('colPerusahaan'),
+      priority: 'secondary',
       flex: 2,
       cell: (pl) => (
         <span className="text-[13px] text-text-2">{pl.client_company_name ?? '—'}</span>
@@ -193,6 +195,7 @@ export function PlacementsScreen() {
     {
       id: 'mulai',
       header: t('colMulai'),
+      priority: 'secondary',
       flex: 1.3,
       cell: (pl) => (
         <span className="text-[13px] text-text-2 tabular-nums">
@@ -203,6 +206,7 @@ export function PlacementsScreen() {
     {
       id: 'status',
       header: t('colStatus'),
+      priority: 'secondary',
       flex: 1.6,
       cell: (pl) => (
         <div className="flex flex-wrap items-center gap-[6px]">
@@ -220,6 +224,7 @@ export function PlacementsScreen() {
     {
       id: 'detail',
       header: '',
+      priority: 'hidden-mobile',
       width: 96,
       align: 'right',
       cell: (pl) => (
@@ -296,7 +301,7 @@ export function PlacementsScreen() {
       </div>
 
       {/* Stat cards — from .pen C2SSLA Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t('statPerusahaanKlien')}
           value={statsQuery.isLoading || !stats ? '—' : String(stats.client_company_count)}
@@ -335,7 +340,7 @@ export function PlacementsScreen() {
             <SearchField
               placeholder={t('searchPlaceholder')}
               defaultValue={search.q ?? ''}
-              containerClassName="w-[220px]"
+              containerClassName="w-full lg:w-[220px]"
               onChange={(e) => setSearch({ q: e.target.value || undefined })}
             />
             {/* Company filter — locked (disabled) for shift_leader, pinned to their
@@ -358,7 +363,7 @@ export function PlacementsScreen() {
                 {currentUser?.companyName ?? currentUser?.companyId ?? t('filterCompany')}
               </span>
             ) : (
-              <div className="w-[200px]">
+              <div className="w-full lg:w-[200px]">
                 <ClientCompanyPicker
                   value={search.company_id ?? null}
                   onChange={(v) => setSearch({ company_id: v ?? undefined })}
@@ -368,7 +373,7 @@ export function PlacementsScreen() {
             )}
             {/* Position filter — free-text typeahead over DISTINCT existing
                 values (no master, no service-line gating). */}
-            <div className="w-[240px]">
+            <div className="w-full lg:w-[240px]">
               <PositionPicker
                 value={search.position ?? null}
                 onChange={(v) => setSearch({ position: v ?? undefined })}
@@ -407,6 +412,7 @@ export function PlacementsScreen() {
 
         {/* Data table */}
         <DataTable
+          responsive
           aria-label={t('title')}
           columns={columns}
           data={rows}

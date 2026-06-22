@@ -1,4 +1,5 @@
 import { Slot, Slottable } from '@radix-ui/react-slot';
+import { X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type * as React from 'react';
 import { cn } from '../lib/cn.ts';
@@ -18,18 +19,36 @@ import { cn } from '../lib/cn.ts';
 export interface SidebarProps {
   className?: string;
   children?: React.ReactNode;
+  /** Render variant. 'inline' = fixed 240px (desktop). 'drawer' = full-width + close button (mobile). */
+  variant?: 'inline' | 'drawer';
+  /** Called when a nav item is clicked in drawer mode — typically closes the drawer. */
+  onNavigate?: () => void;
 }
 
-/** Dark 240 px nav container. Use `h-screen` or `h-full` from the parent layout. */
-export function Sidebar({ className, children }: SidebarProps) {
+/** Dark 240 px nav container. Use `h-screen` or `h-full` from the parent layout.
+ *  In drawer variant, renders full-width with a close button at the top. */
+export function Sidebar({ className, children, variant = 'inline', onNavigate }: SidebarProps) {
   return (
     <aside
       className={cn(
-        // w-60 = 240 px; bg-sidebar = #18181B token; overflow-hidden clips the active border
-        'flex h-full w-60 flex-col overflow-hidden bg-sidebar',
+        'flex h-full flex-col overflow-hidden bg-sidebar',
+        variant === 'inline' && 'w-60',
+        variant === 'drawer' && 'w-full',
         className,
       )}
     >
+      {variant === 'drawer' && (
+        <div className="flex items-center justify-end px-3 pt-3">
+          <button
+            type="button"
+            aria-label="Tutup menu"
+            onClick={onNavigate}
+            className="inline-flex size-8 items-center justify-center rounded-md text-sidebar-text transition-colors hover:bg-sidebar-hover hover:text-white"
+          >
+            <X className="size-[18px]" />
+          </button>
+        </div>
+      )}
       {children}
     </aside>
   );

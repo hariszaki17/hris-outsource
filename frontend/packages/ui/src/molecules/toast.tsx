@@ -100,8 +100,8 @@ export function Toast({
   return (
     <div
       role={role}
-      className={cn(
-        'flex w-[340px] items-start gap-3 rounded-lg border bg-surface px-3.5 py-3 shadow-overlay',
+        className={cn(
+        'flex w-full max-w-[340px] items-start gap-3 rounded-lg border bg-surface px-3.5 py-3 shadow-overlay',
         border,
         className,
       )}
@@ -259,7 +259,7 @@ export function Toaster() {
   const { items, dismiss } = ctx;
 
   return (
-    <div className="fixed right-4 top-4 z-50 flex flex-col gap-2">
+    <div className="fixed inset-x-4 bottom-4 z-50 flex flex-col gap-2 sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-4">
       {items.map((item) => (
         <ToastTimer key={item.id} item={item} onDismiss={dismiss} />
       ))}

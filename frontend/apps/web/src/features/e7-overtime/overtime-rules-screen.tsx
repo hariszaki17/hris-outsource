@@ -88,7 +88,7 @@ export function OvertimeRulesScreen() {
 
   if (!canManage) {
     return (
-      <div className="p-6">
+      <div className="p-4 lg:p-6">
         <EmptyState
           variant="no-permission"
           title={t('rules.noPermissionTitle')}
@@ -108,7 +108,7 @@ export function OvertimeRulesScreen() {
   };
 
   return (
-    <div className="flex flex-col gap-[18px] bg-app-bg p-6">
+    <div className="flex flex-col gap-[18px] bg-app-bg p-4 lg:p-6">
       {/* Title band */}
       <div>
         <h1 className="text-[30px] font-bold text-text">{t('rules.title')}</h1>

@@ -36,6 +36,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FormField,
   IdChip,
   Modal,
@@ -698,6 +699,7 @@ export function LeaveQuotasScreen() {
     {
       id: 'karyawan',
       header: t('table.employee'),
+      priority: 'primary',
       width: 320,
       cell: (e) => (
         <div className="flex items-center gap-[8px]">
@@ -712,6 +714,7 @@ export function LeaveQuotasScreen() {
     {
       id: 'hak-cuti',
       header: t('table.leaveRights'),
+      priority: 'secondary',
       align: 'right',
       cell: (e) => (
         <LeaveRightsCell
@@ -743,13 +746,13 @@ export function LeaveQuotasScreen() {
         </div>
       </div>
 
-      <div className="flex items-center gap-[10px] w-full">
+      <FilterRow>
         <SearchField
           value={search.q ?? ''}
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
           placeholder={t('filters.searchPlaceholder')}
         />
-      </div>
+      </FilterRow>
 
       {isForbidden ? (
         <EmptyState
@@ -767,6 +770,7 @@ export function LeaveQuotasScreen() {
         />
       ) : (
         <DataTable
+          responsive
           aria-label={t('title')}
           columns={columns}
           data={employees}

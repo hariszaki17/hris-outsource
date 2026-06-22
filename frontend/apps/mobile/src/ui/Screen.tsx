@@ -15,7 +15,7 @@ export function Screen({
 }) {
   return (
     <SafeAreaView edges={edges} className="flex-1 bg-app-bg">
-      <View className="flex-1 px-6 py-8">{children}</View>
+      <View className="flex-1 px-4 py-6">{children}</View>
     </SafeAreaView>
   );
 }

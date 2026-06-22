@@ -70,7 +70,7 @@ function HariIniCard({ today }: { today: LeaderDashboardToday }) {
         </Text>
       </View>
 
-      <View className="flex-row gap-2">
+      <View className="flex-row flex-wrap gap-2">
         <StatTile
           value={today.shifts_total}
           label={t('m:leaderBeranda.statShifts')}

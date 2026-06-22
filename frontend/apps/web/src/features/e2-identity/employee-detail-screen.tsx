@@ -124,14 +124,14 @@ function DetailTabs({
   ];
 
   return (
-    <div className="flex items-center gap-[28px] border-b border-border">
+    <div className="flex items-center gap-[28px] overflow-x-auto border-b border-border">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
           className={[
-            'flex items-center gap-[6px] pb-[12px] pt-[12px] text-[14px]',
+            'flex shrink-0 items-center gap-[6px] pb-[12px] pt-[12px] text-[14px]',
             active === tab.id
               ? 'border-b-2 border-primary font-semibold text-primary'
               : 'border-b-2 border-transparent font-medium text-text-2',

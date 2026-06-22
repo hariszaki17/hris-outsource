@@ -51,6 +51,7 @@ import {
   EmptyState,
   ExportModal,
   type ExportStep,
+  FilterRow,
   FilterSelect,
   StatCard,
   StateView,
@@ -370,7 +371,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
       <TitleBand onExport={openExport} />
 
       {/* Filters — EF8AZ Filters strip */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         {/* Period start */}
         <div className="flex items-center gap-1.5">
           <input
@@ -442,7 +443,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Pending-records callout — EF8AZ PendingCallout (warn, INV-4 / BR-6 / C-1) */}
       {/* Always render when pending_summary has data; hide only while loading with no report yet */}
@@ -459,7 +460,7 @@ function BillableReportScreenInner({ filters, onFilters }: BillableReportScreenI
       )}
 
       {/* Stat cards — EF8AZ Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t('report.statBillable')}
           value={summary ? formatHours(summary.total_billable_hours) : '—'}

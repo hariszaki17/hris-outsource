@@ -19,6 +19,7 @@
 import type * as React from 'react';
 import { cn } from '../lib/cn.ts';
 import { Checkbox } from '../primitives/checkbox.tsx';
+import { DataTableCardView } from './data-table-card.tsx';
 import { SkeletonTableRow } from './skeleton.tsx';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,14 @@ export interface Column<T> {
   id: string;
   /** Rendered in the table header. */
   header: React.ReactNode;
+  /**
+   * Controls visibility in the responsive card view (mobile).
+   * - `'primary'`: shown as the card TITLE (one per card).
+   * - `'secondary'`: shown as a label:value pair below the title.
+   * - `'hidden-mobile'`: hidden in card view, visible only in table.
+   * - undefined: treated as `'secondary'` (shown in card view).
+   */
+  priority?: 'primary' | 'secondary' | 'hidden-mobile';
   /**
    * Fixed pixel width. Omit to let the column grow with `flex-1`.
    * Fixed-width columns use `flex-shrink-0`; flex columns share remaining space.
@@ -88,6 +97,12 @@ export interface DataTableProps<T> {
    * Consumer passes `<CursorPagination … />`.
    */
   footer?: React.ReactNode;
+  /**
+   * When true, renders a mobile card view below the `sm` breakpoint (640px)
+   * and the full table at `sm` and above. Requires columns to have `priority`
+   * set for optimal card layout. When false (default), only the table is rendered.
+   */
+  responsive?: boolean;
   className?: string;
   'aria-label'?: string;
 }
@@ -129,6 +144,7 @@ export function DataTable<T>({
   selectedIds = [],
   onSelectionChange,
   footer,
+  responsive = false,
   className,
   'aria-label': ariaLabel,
 }: DataTableProps<T>): React.ReactElement {
@@ -280,11 +296,15 @@ export function DataTable<T>({
   // Markup is presentational (styled flex grid). Full ARIA-grid semantics (role="grid" with
   // complete row/cell roles) or a native <table> is a deferred a11y follow-up; the column/data
   // abstraction makes either layerable without an API change.
-  return (
+  //
+  // When `responsive` is true, renders a mobile card stack below the `sm` breakpoint
+  // and the full table at `sm` and above. Both views share the same data/state.
+  const tableMarkup = (
     <section
       aria-label={ariaLabel}
       className={cn(
         'flex flex-col overflow-hidden rounded-lg border border-border bg-surface',
+        responsive && 'hidden sm:flex',
         className,
       )}
     >
@@ -317,5 +337,27 @@ export function DataTable<T>({
       {/* Footer slot (e.g. <CursorPagination>) — outside the scroll region */}
       {footer && <div>{footer}</div>}
     </section>
+  );
+
+  if (!responsive) return tableMarkup;
+
+  return (
+    <>
+      {/* Mobile card view */}
+      <DataTableCardView
+        columns={columns}
+        data={data}
+        getRowId={getRowId}
+        onRowClick={onRowClick}
+        rowActions={rowActions}
+        empty={empty}
+        isLoading={isLoading}
+        skeletonRows={skeletonRows}
+        className="sm:hidden"
+        aria-label={ariaLabel}
+      />
+      {/* Desktop table */}
+      {tableMarkup}
+    </>
   );
 }

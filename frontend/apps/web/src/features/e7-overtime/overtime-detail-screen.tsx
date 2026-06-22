@@ -205,7 +205,7 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
 
   if (query.isLoading) {
     return (
-      <div className="flex flex-col gap-4 p-6 animate-pulse">
+      <div className="flex flex-col gap-4 p-4 lg:p-6 animate-pulse">
         <div className="h-8 w-64 rounded-lg bg-surface-2" />
         <div className="h-52 w-full rounded-xl bg-surface-2" />
         <div className="flex gap-5">
@@ -349,9 +349,9 @@ export function OvertimeDetailScreen({ overtimeId }: OvertimeDetailScreenProps) 
       </div>
 
       {/* ── Header card ── */}
-      <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-6">
+      <div className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4 lg:p-6">
         {/* Top row: employee + status */}
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex items-start justify-between gap-4 lg:p-6">
           {/* Left: employee info */}
           <div className="flex flex-col gap-2.5">
             <div className="flex items-center gap-3.5">

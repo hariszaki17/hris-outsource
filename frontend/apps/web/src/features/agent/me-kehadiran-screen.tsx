@@ -450,7 +450,7 @@ export function AgentKehadiranScreen() {
       }
     >
       {/* 1 · Clock hero — live clock | today's shift (side by side) */}
-      <div className="flex items-center justify-between gap-6 rounded-xl border border-border bg-surface p-6">
+      <div className="flex items-center justify-between gap-4 lg:p-6 rounded-xl border border-border bg-surface p-4 lg:p-6">
         <div className="flex flex-col gap-1">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-text-3">
             {t('nowLabel')}
@@ -474,7 +474,7 @@ export function AgentKehadiranScreen() {
 
       {/* 2 · KPI cards */}
       {dash && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
             label={t('statusTodayLabel')}
             value={open ? timeOf(open.check_in_at) : t('notClockedInShort')}
@@ -514,11 +514,11 @@ export function AgentKehadiranScreen() {
             {weekNav}
           </header>
           {scheduleQ.isLoading ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <StateView kind="loading" title={t('loading')} />
             </div>
           ) : scheduleQ.isError ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <StateView
                 kind="error"
                 title={t('errorGeneric')}
@@ -526,7 +526,7 @@ export function AgentKehadiranScreen() {
               />
             </div>
           ) : entries.length === 0 ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <StateView kind="empty" title={t('scheduleEmpty')} />
             </div>
           ) : (
@@ -544,11 +544,11 @@ export function AgentKehadiranScreen() {
             <h2 className="text-[15px] font-bold text-text">{t('historyTitle')}</h2>
           </header>
           {list.isLoading ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <StateView kind="loading" title={t('loading')} />
             </div>
           ) : list.isError ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <StateView
                 kind="error"
                 title={t('errorGeneric')}
@@ -556,7 +556,7 @@ export function AgentKehadiranScreen() {
               />
             </div>
           ) : items.length === 0 ? (
-            <div className="p-6">
+            <div className="p-4 lg:p-6">
               <EmptyState variant="fresh" title={t('historyEmpty')} />
             </div>
           ) : (
@@ -900,15 +900,15 @@ function ActivityPanel({
 
       {/* List / states */}
       {isLoading ? (
-        <div className="p-6">
+        <div className="p-4 lg:p-6">
           <StateView kind="loading" title={t('loading')} />
         </div>
       ) : isError ? (
-        <div className="p-6">
+        <div className="p-4 lg:p-6">
           <StateView kind="error" title={t('errorGeneric')} onRetry={onRetry} />
         </div>
       ) : activities.length === 0 ? (
-        <div className="p-6">
+        <div className="p-4 lg:p-6">
           <StateView kind="empty" title={t('activity.empty')} />
         </div>
       ) : (

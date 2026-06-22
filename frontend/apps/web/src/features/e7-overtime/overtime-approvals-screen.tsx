@@ -30,6 +30,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StateView,
@@ -165,6 +166,7 @@ function OvertimeApprovalsScreenInner({
     {
       id: 'agent',
       header: t('approvals.colAgent'),
+      priority: 'primary',
       width: 260,
       cell: (r) => (
         <div className="flex items-center gap-2.5">
@@ -190,6 +192,7 @@ function OvertimeApprovalsScreenInner({
     {
       id: 'overtime',
       header: t('approvals.colOvertime'),
+      priority: 'secondary',
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-1.5">
@@ -215,6 +218,7 @@ function OvertimeApprovalsScreenInner({
     {
       id: 'source',
       header: t('approvals.colSource'),
+      priority: 'secondary',
       width: 160,
       cell: (r) => (
         <StatusBadge dot tone={overtimeSourceTone(r.source)}>
@@ -225,6 +229,7 @@ function OvertimeApprovalsScreenInner({
     {
       id: 'actions',
       header: '',
+      priority: 'hidden-mobile',
       width: 160,
       cell: (r) => (
         <div className="flex items-center justify-end">
@@ -250,11 +255,11 @@ function OvertimeApprovalsScreenInner({
       <ApprovalsTitle isHR={isHR} />
 
       {/* Filters — frame: Search · Semua perusahaan (HR only) · Semua sumber */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         <SearchField
           placeholder={t('approvals.searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
 
@@ -301,10 +306,11 @@ function OvertimeApprovalsScreenInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('approvals.tableAriaLabel')}
         columns={columns}
         data={rows}

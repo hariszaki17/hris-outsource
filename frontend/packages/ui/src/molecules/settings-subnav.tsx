@@ -34,7 +34,7 @@ export function SettingsSubnav({ label, children, className }: SettingsSubnavPro
   return (
     <div
       className={cn(
-        'flex w-[220px] flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-4',
+        'flex w-full flex-col gap-1 overflow-x-auto rounded-lg border border-border bg-surface px-3 py-4 lg:w-[220px] [&::-webkit-scrollbar]:hidden',
         className,
       )}
     >

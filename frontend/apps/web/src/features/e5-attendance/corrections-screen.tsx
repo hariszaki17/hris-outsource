@@ -32,6 +32,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StateView,
@@ -178,6 +179,7 @@ function CorrectionsScreenInner({
     {
       id: 'requester',
       header: t('corrections.colRequester'),
+      priority: 'primary',
       width: 200,
       cell: (c) => (
         <div className="flex flex-col">
@@ -189,12 +191,14 @@ function CorrectionsScreenInner({
     {
       id: 'type',
       header: t('corrections.colType'),
+      priority: 'secondary',
       width: 140,
       cell: (c) => <span className="text-sm text-text-2">{correctionTypeLabel(c.type, t)}</span>,
     },
     {
       id: 'summary',
       header: t('corrections.colSummary'),
+      priority: 'secondary',
       cell: (c) => (
         <p className="max-w-[260px] truncate text-sm text-text-2" title={c.reason}>
           {c.reason}
@@ -204,12 +208,14 @@ function CorrectionsScreenInner({
     {
       id: 'submitted',
       header: t('corrections.colSubmitted'),
+      priority: 'hidden-mobile',
       width: 170,
       cell: (c) => <DateText kind="instant" value={c.created_at} className="text-sm text-text-2" />,
     },
     {
       id: 'status',
       header: t('corrections.colStatus'),
+      priority: 'secondary',
       width: 130,
       cell: (c) => (
         <StatusBadge dot tone={correctionStatusTone(c.status)}>
@@ -220,6 +226,7 @@ function CorrectionsScreenInner({
     {
       id: 'detail',
       header: '',
+      priority: 'hidden-mobile',
       width: 96,
       align: 'right',
       cell: (c) => (
@@ -265,11 +272,11 @@ function CorrectionsScreenInner({
       <TitleBand />
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         <SearchField
           placeholder={t('corrections.searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
         <FilterSelect
@@ -312,14 +319,15 @@ function CorrectionsScreenInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('corrections.tableAriaLabel')}
         columns={columns}
         data={rows}
-        getRowId={(c) => c.id}
+        getRowId={(r) => r.id}
         isLoading={query.isLoading}
         skeletonRows={8}
         empty={

@@ -35,7 +35,7 @@ import {
 } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ActivityIndicator, Alert, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, TextInput, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError } from '@swp/api-client';
@@ -646,6 +646,12 @@ export default function AttendanceScreen() {
   const masukTime = summaryRec?.check_in_at ? timeOf(summaryRec.check_in_at) : '—:—';
   const keluarTime = summaryRec?.check_out_at ? timeOf(summaryRec.check_out_at) : '—:—';
 
+  // ── Responsive clock size ───────────────────────────────────────────────────
+  // Scale monoHero (46px) down on narrow screens for proportional balance.
+  // 360px → 38px, 390px → 46px (design baseline), 430px → 46px (capped)
+  const { width: windowWidth } = useWindowDimensions();
+  const clockFontSize = Math.min(46, Math.round(38 + (8 * (windowWidth - 360)) / 30));
+
   // ── Render ──────────────────────────────────────────────────────────────────
   // JSX requires component identifiers to be capitalized.
   const LocPillIcon = locPillIcon;
@@ -691,7 +697,7 @@ export default function AttendanceScreen() {
 
         {/* ── Clock card (.pen: r16, padding 24/20, mono time + date + GPS pill) ── */}
         <View className="items-center gap-1.5 rounded-[16px] border border-border bg-surface px-5 py-6">
-          <Text variant="monoHero" style={{ letterSpacing: -1 }}>
+          <Text variant="monoHero" style={{ fontSize: clockFontSize, letterSpacing: -1 }}>
             {clockStr(now)}
           </Text>
           <Text variant="secondary" className="text-text-3">

@@ -40,6 +40,7 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StatCard,
@@ -212,6 +213,7 @@ function OvertimeRecordsScreenInner({
     {
       id: 'agent',
       header: t('rekap.colAgent'),
+      priority: 'primary',
       cell: (r) => (
         <div className="flex items-center gap-2.5">
           <Avatar
@@ -236,12 +238,14 @@ function OvertimeRecordsScreenInner({
     {
       id: 'company',
       header: t('rekap.colCompany'),
+      priority: 'secondary',
       width: 210,
       cell: (r) => <span className="text-sm text-text-2">{r.company.name ?? r.company.id}</span>,
     },
     {
       id: 'workday',
       header: t('rekap.colWorkday'),
+      priority: 'hidden-mobile',
       width: 150,
       cell: (r) =>
         r.tier_indicator === OvertimeTier.WORKDAY ? (
@@ -255,6 +259,7 @@ function OvertimeRecordsScreenInner({
     {
       id: 'restday',
       header: t('rekap.colRestday'),
+      priority: 'hidden-mobile',
       width: 150,
       cell: (r) =>
         r.tier_indicator === OvertimeTier.RESTDAY ? (
@@ -268,6 +273,7 @@ function OvertimeRecordsScreenInner({
     {
       id: 'holiday',
       header: t('rekap.colHoliday'),
+      priority: 'hidden-mobile',
       width: 150,
       cell: (r) =>
         r.tier_indicator === OvertimeTier.HOLIDAY ? (
@@ -281,6 +287,7 @@ function OvertimeRecordsScreenInner({
     {
       id: 'total',
       header: t('rekap.colTotal'),
+      priority: 'secondary',
       width: 156,
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
@@ -343,11 +350,11 @@ function OvertimeRecordsScreenInner({
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         <SearchField
           placeholder={t('rekap.searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
 
@@ -456,10 +463,11 @@ function OvertimeRecordsScreenInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('rekap.tableAriaLabel')}
         columns={columns}
         data={rows}

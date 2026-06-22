@@ -260,7 +260,7 @@ export function AgentKalenderScreen() {
     work_date__lte: range.to,
     limit: 200,
   });
-  const holidaysQ = useListHolidays({ year }, { query: { enabled: true } });
+  const holidaysQ = useListHolidays({ year }, { query: { enabled: true, retry: false } });
 
   const schedule = (scheduleQ.data?.data as { data?: ScheduleEntry[] } | undefined)?.data ?? [];
   const attendance = (attendanceQ.data?.data as { data?: Attendance[] } | undefined)?.data ?? [];
@@ -285,19 +285,24 @@ export function AgentKalenderScreen() {
     leaveQ.isLoading &&
     overtimeQ.isLoading &&
     holidaysQ.isLoading;
+  const isHolidayForbidden =
+    holidaysQ.isError &&
+    (holidaysQ.error as { status?: number })?.status === 403;
+
   const allError =
     scheduleQ.isError &&
     attendanceQ.isError &&
     leaveQ.isError &&
     overtimeQ.isError &&
-    holidaysQ.isError;
+    holidaysQ.isError &&
+    !isHolidayForbidden;
 
   const failedSources = [
     scheduleQ.isError && t('calendar.kind.shift'),
     attendanceQ.isError && t('calendar.kind.attendance'),
     leaveQ.isError && t('calendar.kind.leave'),
     overtimeQ.isError && t('calendar.kind.overtime'),
-    holidaysQ.isError && t('calendar.kind.holiday'),
+    holidaysQ.isError && !isHolidayForbidden && t('calendar.kind.holiday'),
   ].filter((s): s is string => Boolean(s));
 
   const refetchAll = () => {

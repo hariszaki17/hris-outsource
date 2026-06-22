@@ -197,7 +197,7 @@ export default function ApprovalDetailScreen({ instanceId }: ApprovalDetailScree
 
   if (query.isLoading) {
     return (
-      <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 p-4 lg:p-6">
         <div className="h-8 w-72 animate-pulse rounded-lg bg-surface-2" />
         <div className="flex gap-5">
           <div className="h-80 w-[440px] animate-pulse rounded-xl bg-surface-2" />

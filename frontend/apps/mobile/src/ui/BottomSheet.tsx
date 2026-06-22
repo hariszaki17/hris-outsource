@@ -50,6 +50,7 @@ export function BottomSheet({
               paddingTop: 12,
               paddingHorizontal: 16,
               paddingBottom: 24 + insets.bottom,
+              maxHeight: '80%',
               ...style,
             }}
           >

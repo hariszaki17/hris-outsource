@@ -181,7 +181,7 @@ function ProfilePanel({
   return (
     <div className="flex flex-col gap-4">
       {/* Header card */}
-      <div className="rounded-xl border border-border bg-surface p-6">
+      <div className="rounded-xl border border-border bg-surface p-4 lg:p-6">
         <div className="flex items-center gap-4">
           <Avatar
             size={64}
@@ -289,7 +289,7 @@ function ProfilePanel({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-surface p-6">
+    <section className="rounded-xl border border-border bg-surface p-4 lg:p-6">
       <h2 className="mb-4 text-[15px] font-bold text-text">{title}</h2>
       {children}
     </section>

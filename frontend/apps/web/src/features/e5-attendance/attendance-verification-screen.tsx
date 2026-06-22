@@ -38,6 +38,7 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  FilterRow,
   FilterSelect,
   Input,
   SearchField,
@@ -292,6 +293,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'employee',
       header: t('colEmployee'),
+      priority: 'primary',
       cell: (row) => (
         <div className="flex flex-col gap-[2px]">
           <span className="text-[13px] font-medium text-text">
@@ -304,6 +306,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'company',
       header: t('colCompany'),
+      priority: 'secondary',
       width: 170,
       cell: (row) => (
         <span className="text-[13px] text-text">{row.company_name ?? row.company_id}</span>
@@ -312,6 +315,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'check_in_at',
       header: t('colCheckIn'),
+      priority: 'secondary',
       width: 130,
       cell: (row) => (
         <span className="text-[13px] text-text">
@@ -328,6 +332,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'status',
       header: t('colStatus'),
+      priority: 'secondary',
       width: 110,
       cell: (row) => (
         <StatusBadge dot tone={attendanceStatusTone(row.status)}>
@@ -338,6 +343,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'verification_status',
       header: t('colVerification'),
+      priority: 'secondary',
       width: 150,
       cell: (row) => (
         <div className="flex items-center gap-2">
@@ -355,6 +361,7 @@ export function AttendanceVerificationScreen() {
     {
       id: 'actions',
       header: '',
+      priority: 'hidden-mobile',
       width: 160,
       cell: (row) => (
         <div className="flex items-center gap-2">
@@ -472,7 +479,7 @@ export function AttendanceVerificationScreen() {
       </div>
 
       {/* Mini-stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: t('miniPending'), value: pendingCount, icon: TriangleAlert },
           { label: t('miniLate'), value: lateCount, icon: ClockAlert },
@@ -497,7 +504,7 @@ export function AttendanceVerificationScreen() {
       </div>
 
       {/* Filter row */}
-      <div className="flex items-center gap-[10px]">
+      <FilterRow>
         {!isShiftLeader && (
           <FilterSelect
             aria-label={t('filterCompany')}
@@ -539,14 +546,13 @@ export function AttendanceVerificationScreen() {
             {t('filterEscalated')}
           </button>
         )}
-        <div className="flex-1" />
         <SearchField
           placeholder={t('searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-[260px]"
+          containerClassName="w-full lg:w-[260px]"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
-      </div>
+      </FilterRow>
 
       {/* Queue card */}
       <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-surface">
@@ -581,6 +587,7 @@ export function AttendanceVerificationScreen() {
         )}
 
         <DataTable
+          responsive
           aria-label={t('verifyTitle')}
           columns={columns}
           data={rows}

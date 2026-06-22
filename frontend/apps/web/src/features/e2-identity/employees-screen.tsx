@@ -32,6 +32,7 @@ import {
   CursorPagination,
   DataTable,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StatCard,
@@ -202,6 +203,7 @@ export function EmployeesScreen() {
     {
       id: 'karyawan',
       header: t('colKaryawan'),
+      priority: 'primary',
       flex: 2,
       cell: (emp) => (
         <div className="flex items-center gap-[11px]">
@@ -218,6 +220,7 @@ export function EmployeesScreen() {
     {
       id: 'posisi',
       header: t('colPosisi'),
+      priority: 'secondary',
       flex: 1.5,
       cell: (emp) => (
         <div className="flex flex-col gap-[2px]">
@@ -233,6 +236,7 @@ export function EmployeesScreen() {
     {
       id: 'penempatan',
       header: t('colPenempatan'),
+      priority: 'secondary',
       flex: 1.5,
       cell: (emp) => (
         <span className="text-[13px] text-text">{emp.current_client_company?.name ?? '—'}</span>
@@ -241,6 +245,7 @@ export function EmployeesScreen() {
     {
       id: 'status',
       header: t('colStatus'),
+      priority: 'secondary',
       flex: 0.6,
       cell: (emp) => (
         <StatusBadge dot tone={statusTone[emp.status]}>
@@ -254,6 +259,7 @@ export function EmployeesScreen() {
     {
       id: 'actions',
       header: '',
+      priority: 'hidden-mobile',
       width: isShiftLeader ? 96 : 240,
       align: 'right',
       cell: (emp) => {
@@ -384,7 +390,7 @@ export function EmployeesScreen() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         {/* Counts are derived from the current cursor page only (no server total field on the
             page envelope) — labelled "on this page" so they are never read as org-wide totals. */}
         <StatCard
@@ -438,11 +444,11 @@ export function EmployeesScreen() {
         <StatusTabs tabs={tabs} />
 
         {/* Filter row */}
-        <div className="flex items-center gap-[10px] border-b border-border-soft px-[18px] py-[14px]">
+        <FilterRow className="border-b border-border-soft px-[18px] py-[14px]">
           <SearchField
             placeholder={t('searchPlaceholder')}
             defaultValue={search.q ?? ''}
-            containerClassName="w-[300px]"
+            containerClassName="w-full lg:w-[300px]"
             onChange={(e) => {
               const v = e.target.value;
               if (searchDebounce.current) clearTimeout(searchDebounce.current);
@@ -501,10 +507,11 @@ export function EmployeesScreen() {
             </option>
           </FilterSelect>
           {/* Status filtering is the tabs above (Semua / Aktif / Nonaktif) — no separate dropdown. */}
-        </div>
+        </FilterRow>
 
         {/* Data table */}
         <DataTable
+          responsive
           aria-label={t('title')}
           columns={columns}
           data={rows}

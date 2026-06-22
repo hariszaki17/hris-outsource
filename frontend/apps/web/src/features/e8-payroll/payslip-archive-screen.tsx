@@ -37,6 +37,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StateView,
@@ -197,6 +198,7 @@ function PayslipArchiveInner({
     {
       id: 'employee',
       header: t('archive.colEmployee'),
+      priority: 'primary',
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-text">{r.employee_name ?? r.employee_id}</span>
@@ -207,12 +209,14 @@ function PayslipArchiveInner({
     {
       id: 'period',
       header: t('archive.colPeriod'),
+      priority: 'secondary',
       width: 120,
       cell: (r) => <span className="text-sm text-text-2">{formatPeriod(r.period)}</span>,
     },
     {
       id: 'paidOn',
       header: t('archive.colPaidOn'),
+      priority: 'hidden-mobile',
       width: 120,
       cell: (r) =>
         r.paid_on ? (
@@ -224,6 +228,7 @@ function PayslipArchiveInner({
     {
       id: 'workingDays',
       header: t('archive.colWorkingDays'),
+      priority: 'hidden-mobile',
       width: 100,
       cell: (r) => (
         <span className="text-sm text-text-2">{r.working_days != null ? r.working_days : '—'}</span>
@@ -232,6 +237,7 @@ function PayslipArchiveInner({
     {
       id: 'grossEarnings',
       header: t('archive.colGrossEarnings'),
+      priority: 'secondary',
       width: 160,
       cell: (r) => (
         <span className="text-sm text-text tabular-nums">{formatMoney(r.gross_earnings)}</span>
@@ -240,6 +246,7 @@ function PayslipArchiveInner({
     {
       id: 'takeHome',
       header: t('archive.colTakeHome'),
+      priority: 'secondary',
       width: 150,
       cell: (r) => (
         <span className="text-sm font-medium text-text tabular-nums">
@@ -250,6 +257,7 @@ function PayslipArchiveInner({
     {
       id: 'status',
       header: t('archive.colStatus'),
+      priority: 'secondary',
       width: 160,
       cell: (r) => (
         <StatusBadge dot tone={payslipStatusTone(r.status)}>
@@ -291,7 +299,7 @@ function PayslipArchiveInner({
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         {/*
           DEVIATION: API has no free-text search param. The design SearchField
           ("Cari karyawan / NIK") is wired to `employee_id` (exact-match).
@@ -301,7 +309,7 @@ function PayslipArchiveInner({
           aria-label={t('archive.searchExactAriaLabel')}
           placeholder={t('archive.searchExactPlaceholder')}
           defaultValue={filters.employeeSearch}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => patchFilters({ employeeSearch: e.target.value })}
         />
         <FilterSelect
@@ -362,10 +370,11 @@ function PayslipArchiveInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('archive.tableAriaLabel')}
         columns={columns}
         data={rows}

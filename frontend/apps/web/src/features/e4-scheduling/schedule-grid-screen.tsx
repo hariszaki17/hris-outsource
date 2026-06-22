@@ -42,7 +42,7 @@ import { LOCALE_ID } from '@swp/shared';
 import { Button, EmptyState, SkeletonTableRow, StateView } from '@swp/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { ChevronLeft, ChevronRight, Copy, Radio, Star, TriangleAlert } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, Radio, Star, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -255,15 +255,41 @@ export function ScheduleGridScreen() {
     [navigate],
   );
 
+  // ---- Mobile single-day view state ----
+  const [selectedDay, setSelectedDay] = React.useState<string>(todayIso);
+
+  // When the week changes, snap the selected day to a day within the new week.
+  React.useEffect(() => {
+    const inWeek = days.includes(selectedDay) ? selectedDay : todayIso;
+    if (inWeek !== selectedDay) setSelectedDay(inWeek);
+  }, [days, todayIso, selectedDay]);
+
+  const goPrevDay = () => {
+    const prev = addDays(selectedDay, -1);
+    setSelectedDay(prev);
+  };
+  const goNextDay = () => {
+    const next = addDays(selectedDay, 1);
+    setSelectedDay(next);
+  };
+  const goToday = () => {
+    const mon = getMondayOfWeek(todayIso);
+    setMonday(mon);
+    setSelectedDay(todayIso);
+    syncSearch(companyId, mon);
+  };
+
   // ---- Week navigation ----
   const goPrevWeek = () => {
     const prev = addDays(monday, -7);
     setMonday(prev);
+    setSelectedDay(addDays(prev, 0));
     syncSearch(companyId, prev);
   };
   const goNextWeek = () => {
     const next = addDays(monday, 7);
     setMonday(next);
+    setSelectedDay(addDays(next, 0));
     syncSearch(companyId, next);
   };
 
@@ -354,22 +380,189 @@ export function ScheduleGridScreen() {
   };
 
   // ---------------------------------------------------------------------------
+  // ScheduleGrid — extracted grid component for mobile (single-day) / desktop (full week)
+  // ---------------------------------------------------------------------------
+
+  const ScheduleGrid = ({
+    days: gridDays,
+    minWidth,
+    className,
+  }: {
+    days: string[];
+    minWidth: number;
+    className: string;
+  }) => (
+    <div className={className}>
+      {/* Header row */}
+      <div
+        className="flex border-b border-border bg-surface-2"
+        style={{ minWidth: `${minWidth}px` }}
+      >
+        {/* AGEN column header */}
+        <div
+          className="shrink-0 border-r border-border-soft px-4 py-2.5"
+          style={{ width: `${AGENT_COL_W}px` }}
+        >
+          <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-3">
+            {t('grid.agentCol')}
+          </span>
+        </div>
+        {/* Day headers */}
+        {gridDays.map((d, i) => {
+          const isToday = d === todayIso;
+          const holidayName = holidayNameByDate.get(d);
+          const isHoliday = !!holidayName;
+          return (
+            <div
+              key={d}
+              title={holidayName}
+              className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft px-1 py-2 last:border-r-0 ${
+                isToday ? 'bg-primary-soft' : isHoliday ? 'bg-bad-bg/40' : ''
+              }`}
+            >
+              <span
+                className={`text-[10px] font-semibold tracking-[0.3px] ${
+                  isToday ? 'text-primary' : isHoliday ? 'text-bad-tx' : 'text-text-3'
+                }`}
+              >
+                {(() => {
+                const dayIdx = i < DAY_ABBR_ID.length
+                  ? i
+                  : new Date(`${d}T00:00:00`).getUTCDay() === 0
+                    ? 6
+                    : new Date(`${d}T00:00:00`).getUTCDay() - 1;
+                return DAY_ABBR_ID[dayIdx];
+              })()}
+              </span>
+              <span
+                className={`text-[13px] font-bold ${
+                  isToday ? 'text-primary-strong' : isHoliday ? 'text-bad-tx' : 'text-text'
+                }`}
+              >
+                {formatDayMonthId(d)}
+              </span>
+              {isHoliday && (
+                <span className="mt-0.5 max-w-full truncate text-[9px] font-medium text-bad-tx">
+                  {holidayName}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Agent rows */}
+      {agentRows.map((row, rowIdx) => (
+        <div
+          key={`${row.employeeId}::${row.placementId}`}
+          className={`flex border-b border-border-soft last:border-b-0 ${
+            rowIdx % 2 === 1 ? 'bg-surface' : 'bg-surface'
+          }`}
+          style={{ minWidth: `${minWidth}px` }}
+        >
+          {/* Agent name column */}
+          {(() => {
+            const c = complianceByRow.get(`${row.employeeId}::${row.placementId}`);
+            return (
+              <div
+                className="shrink-0 border-r border-border-soft px-4 py-2.5"
+                style={{ width: `${AGENT_COL_W}px` }}
+              >
+                <p className="text-[13px] font-semibold text-text leading-tight">
+                  {row.employeeName}
+                </p>
+                {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    {c.noRest ? (
+                      <span
+                        title={t('compliance.noRestTip')}
+                        className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                      >
+                        <TriangleAlert aria-hidden className="size-2.5" />
+                        {t('compliance.noRest')}
+                      </span>
+                    ) : (
+                      c.longRun && (
+                        <span
+                          title={t('compliance.longRunTip', { count: c.longestRun })}
+                          className="inline-flex items-center gap-0.5 rounded bg-warn-bg px-1 py-0.5 text-[9px] font-semibold text-warn-tx"
+                        >
+                          <TriangleAlert aria-hidden className="size-2.5" />
+                          {t('compliance.longRun', { count: c.longestRun })}
+                        </span>
+                      )
+                    )}
+                    {c.holidayShiftCount > 0 && (
+                      <span
+                        title={t('compliance.holidayShiftTip')}
+                        className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
+                      >
+                        <Star aria-hidden className="size-2.5 fill-current" />
+                        {t('compliance.holidayShift', { count: c.holidayShiftCount })}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Day cells */}
+          {gridDays.map((d) => {
+            const entry = row.cells[d];
+            const isToday = d === todayIso;
+            const isCancelled = entry?.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE;
+            const isHoliday = holidaySet.has(d);
+
+            return (
+              <button
+                key={d}
+                type="button"
+                aria-label={t('cell.ariaLabel', {
+                  agent: row.employeeName,
+                  date: formatDayMonthId(d),
+                })}
+                onClick={(e) => handleCellClick(row, d, e.currentTarget)}
+                className={[
+                  'group relative flex flex-1 cursor-pointer items-center justify-center border-r border-border-soft p-1.5 text-left transition-colors last:border-r-0',
+                  isToday && !isCancelled
+                    ? 'bg-primary-soft/40'
+                    : isHoliday && !isCancelled
+                      ? 'bg-bad-bg/20'
+                      : '',
+                  isCancelled ? 'opacity-50' : '',
+                  'hover:bg-surface-2',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{ minHeight: '64px' }}
+              >
+                {renderCellContent(row, d)}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+
+  // ---------------------------------------------------------------------------
   // JSX
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="flex min-h-full flex-col gap-4 p-6">
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-3">
+    <div className="flex min-h-full flex-col gap-4 p-4 lg:p-6">
+      {/* Page header — stacks on mobile, side-by-side on desktop */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-text">
+          <h1 className="text-xl font-bold text-text lg:text-2xl">
             {t('screen.title', {
               company: selectedCompanyName || t('screen.titleNoCompany'),
             })}
           </h1>
-          <p className="text-sm text-text-3">{t('screen.subtitle', { count: agentRows.length })}</p>
+          <p className="text-[13px] text-text-3">{t('screen.subtitle', { count: agentRows.length })}</p>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {/* Week picker */}
           <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
             <button
@@ -407,7 +600,7 @@ export function ScheduleGridScreen() {
 
       {/* Company selector — hidden for shift leaders (pinned to their own company) */}
       {!isShiftLeader && (
-        <div className="w-72">
+        <div className="w-full lg:w-72">
           <ClientCompanyPicker
             value={companyId}
             onChange={(id) => {
@@ -515,6 +708,44 @@ export function ScheduleGridScreen() {
           </div>
         )}
 
+      {/* Mobile day navigation — visible only below sm breakpoint */}
+      {companyId &&
+        !scheduleQuery.isLoading &&
+        !rosterQuery.isLoading &&
+        !scheduleQuery.isError &&
+        !rosterQuery.isError &&
+        agentRows.length > 0 && (
+          <div className="flex items-center justify-between gap-2 sm:hidden">
+            <button
+              type="button"
+              onClick={goPrevDay}
+              className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-surface text-text-2 hover:bg-surface-2"
+              aria-label={t('dayNav.prev')}
+            >
+              <ChevronLeft aria-hidden className="size-4" />
+            </button>
+            <span className="text-sm font-semibold text-text">
+              {formatDayMonthId(selectedDay)}
+            </span>
+            <button
+              type="button"
+              onClick={goToday}
+              className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-surface text-text-2 hover:bg-surface-2"
+              aria-label={t('dayNav.today')}
+            >
+              <CalendarDays aria-hidden className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={goNextDay}
+              className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-surface text-text-2 hover:bg-surface-2"
+              aria-label={t('dayNav.next')}
+            >
+              <ChevronRight aria-hidden className="size-4" />
+            </button>
+          </div>
+        )}
+
       {/* Grid */}
       {companyId &&
         !scheduleQuery.isLoading &&
@@ -522,170 +753,45 @@ export function ScheduleGridScreen() {
         !scheduleQuery.isError &&
         !rosterQuery.isError &&
         agentRows.length > 0 && (
-          <div
-            ref={popoverContainerRef}
-            className="relative overflow-hidden rounded-xl border border-border bg-surface"
-          >
-            {/* Grid table — flex-based to match .pen grid layout */}
-            <div className="w-full overflow-x-auto">
-              {/* Header row */}
-              <div
-                className="flex border-b border-border bg-surface-2"
-                style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
-              >
-                {/* AGEN column header */}
-                <div
-                  className="shrink-0 border-r border-border-soft px-4 py-2.5"
-                  style={{ width: `${AGENT_COL_W}px` }}
-                >
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.5px] text-text-3">
-                    {t('grid.agentCol')}
-                  </span>
-                </div>
-                {/* Day headers */}
-                {days.map((d, i) => {
-                  const isToday = d === todayIso;
-                  const holidayName = holidayNameByDate.get(d);
-                  const isHoliday = !!holidayName;
-                  return (
-                    <div
-                      key={d}
-                      title={holidayName}
-                      className={`flex flex-1 flex-col items-center justify-center border-r border-border-soft px-1 py-2 last:border-r-0 ${
-                        isToday ? 'bg-primary-soft' : isHoliday ? 'bg-bad-bg/40' : ''
-                      }`}
-                    >
-                      <span
-                        className={`text-[10px] font-semibold tracking-[0.3px] ${
-                          isToday ? 'text-primary' : isHoliday ? 'text-bad-tx' : 'text-text-3'
-                        }`}
-                      >
-                        {DAY_ABBR_ID[i]}
-                      </span>
-                      <span
-                        className={`text-[13px] font-bold ${
-                          isToday ? 'text-primary-strong' : isHoliday ? 'text-bad-tx' : 'text-text'
-                        }`}
-                      >
-                        {formatDayMonthId(d)}
-                      </span>
-                      {isHoliday && (
-                        <span className="mt-0.5 max-w-full truncate text-[9px] font-medium text-bad-tx">
-                          {holidayName}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+          <>
+            {/* Mobile: single-day grid */}
+            <div
+              ref={popoverContainerRef}
+              className="relative overflow-hidden rounded-xl border border-border bg-surface sm:hidden"
+            >
+              <div className="w-full overflow-x-auto">
+                <ScheduleGrid days={[selectedDay]} minWidth={AGENT_COL_W + 120} className="" />
               </div>
-
-              {/* Agent rows */}
-              {agentRows.map((row, rowIdx) => (
-                <div
-                  key={`${row.employeeId}::${row.placementId}`}
-                  className={`flex border-b border-border-soft last:border-b-0 ${
-                    rowIdx % 2 === 1 ? 'bg-surface' : 'bg-surface'
-                  }`}
-                  style={{ minWidth: `${AGENT_COL_W + 7 * 120}px` }}
-                >
-                  {/* Agent name column */}
-                  {(() => {
-                    const c = complianceByRow.get(`${row.employeeId}::${row.placementId}`);
-                    return (
-                      <div
-                        className="shrink-0 border-r border-border-soft px-4 py-2.5"
-                        style={{ width: `${AGENT_COL_W}px` }}
-                      >
-                        <p className="text-[13px] font-semibold text-text leading-tight">
-                          {row.employeeName}
-                        </p>
-                        {c && (c.noRest || c.longRun || c.holidayShiftCount > 0) && (
-                          <div className="mt-1 flex flex-wrap items-center gap-1">
-                            {c.noRest ? (
-                              <span
-                                title={t('compliance.noRestTip')}
-                                className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
-                              >
-                                <TriangleAlert aria-hidden className="size-2.5" />
-                                {t('compliance.noRest')}
-                              </span>
-                            ) : (
-                              c.longRun && (
-                                <span
-                                  title={t('compliance.longRunTip', { count: c.longestRun })}
-                                  className="inline-flex items-center gap-0.5 rounded bg-warn-bg px-1 py-0.5 text-[9px] font-semibold text-warn-tx"
-                                >
-                                  <TriangleAlert aria-hidden className="size-2.5" />
-                                  {t('compliance.longRun', { count: c.longestRun })}
-                                </span>
-                              )
-                            )}
-                            {c.holidayShiftCount > 0 && (
-                              <span
-                                title={t('compliance.holidayShiftTip')}
-                                className="inline-flex items-center gap-0.5 rounded bg-bad-bg px-1 py-0.5 text-[9px] font-semibold text-bad-tx"
-                              >
-                                <Star aria-hidden className="size-2.5 fill-current" />
-                                {t('compliance.holidayShift', { count: c.holidayShiftCount })}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Day cells */}
-                  {days.map((d) => {
-                    const entry = row.cells[d];
-                    const isToday = d === todayIso;
-                    const isCancelled = entry?.status === ScheduleEntryStatus.CANCELLED_BY_LEAVE;
-                    const isHoliday = holidaySet.has(d);
-
-                    return (
-                      <button
-                        key={d}
-                        type="button"
-                        aria-label={t('cell.ariaLabel', {
-                          agent: row.employeeName,
-                          date: formatDayMonthId(d),
-                        })}
-                        onClick={(e) => handleCellClick(row, d, e.currentTarget)}
-                        className={[
-                          'group relative flex flex-1 cursor-pointer items-center justify-center border-r border-border-soft p-1.5 text-left transition-colors last:border-r-0',
-                          isToday && !isCancelled
-                            ? 'bg-primary-soft/40'
-                            : isHoliday && !isCancelled
-                              ? 'bg-bad-bg/20'
-                              : '',
-                          isCancelled ? 'opacity-50' : '',
-                          'hover:bg-surface-2',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        style={{ minHeight: '64px' }}
-                      >
-                        {renderCellContent(row, d)}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+              {popoverTarget && (
+                <ShiftPickerPopover
+                  target={popoverTarget}
+                  anchorRef={popoverAnchor}
+                  onClose={() => setPopoverTarget(null)}
+                  onMutated={() => {}}
+                  scheduleQueryKey={scheduleQueryKey}
+                />
+              )}
             </div>
 
-            {/* Shift picker popover — absolutely positioned relative to grid container */}
-            {popoverTarget && (
-              <ShiftPickerPopover
-                target={popoverTarget}
-                anchorRef={popoverAnchor}
-                onClose={() => setPopoverTarget(null)}
-                onMutated={() => {
-                  /* grid refetched via invalidate inside popover */
-                }}
-                scheduleQueryKey={scheduleQueryKey}
-              />
-            )}
-          </div>
+            {/* Desktop: full week grid */}
+            <div
+              ref={popoverContainerRef}
+              className="relative hidden overflow-hidden rounded-xl border border-border bg-surface sm:block"
+            >
+              <div className="w-full overflow-x-auto">
+                <ScheduleGrid days={days} minWidth={AGENT_COL_W + 7 * 120} className="" />
+              </div>
+              {popoverTarget && (
+                <ShiftPickerPopover
+                  target={popoverTarget}
+                  anchorRef={popoverAnchor}
+                  onClose={() => setPopoverTarget(null)}
+                  onMutated={() => {}}
+                  scheduleQueryKey={scheduleQueryKey}
+                />
+              )}
+            </div>
+          </>
         )}
 
       {/* Bulk apply modal */}

@@ -120,7 +120,7 @@ export function AgentPengajuanScreen() {
       <TabBar tab={tab} onTab={setTab} />
 
       {tab === 'cuti' ? (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 lg:p-6">
           <section className="flex flex-col gap-3">
             <h2 className="text-[15px] font-bold text-text">{t('balSectionTitle')}</h2>
             <LeaveBalancesTable query={balancesQ} items={eligible} />
@@ -215,6 +215,7 @@ function LeaveBalancesTable({ query, items }: { query: BalancesQuery; items: Lea
     {
       id: 'type',
       header: t('balColType'),
+      priority: 'primary',
       width: 240,
       cell: (b) => (
         <div className="flex items-center gap-2">
@@ -231,6 +232,7 @@ function LeaveBalancesTable({ query, items }: { query: BalancesQuery; items: Lea
     {
       id: 'remaining',
       header: t('balColRemaining'),
+      priority: 'secondary',
       width: 140,
       cell: (b) =>
         isUncappedBalance(b) ? (
@@ -244,12 +246,14 @@ function LeaveBalancesTable({ query, items }: { query: BalancesQuery; items: Lea
     {
       id: 'used',
       header: t('balColUsed'),
+      priority: 'hidden-mobile',
       width: 110,
       cell: (b) => <span className="text-text-2 tabular-nums">{unit(b, b.used_days)}</span>,
     },
     {
       id: 'pending',
       header: t('balColPending'),
+      priority: 'hidden-mobile',
       width: 110,
       cell: (b) =>
         b.pending_days > 0 ? (
@@ -261,6 +265,7 @@ function LeaveBalancesTable({ query, items }: { query: BalancesQuery; items: Lea
     {
       id: 'quota',
       header: t('balColQuota'),
+      priority: 'secondary',
       width: 110,
       cell: (b) =>
         b.entitled_days == null ? (
@@ -284,6 +289,7 @@ function LeaveBalancesTable({ query, items }: { query: BalancesQuery; items: Lea
 
   return (
     <DataTable
+      responsive
       aria-label={t('balSectionTitle')}
       columns={columns}
       data={items}
@@ -337,6 +343,7 @@ function LeavePanel({
     {
       id: 'type',
       header: t('leaveType'),
+      priority: 'primary',
       width: 220,
       cell: (r) => (
         <span className="font-medium text-text">{r.leave_type_name ?? r.leave_type_id}</span>
@@ -345,6 +352,7 @@ function LeavePanel({
     {
       id: 'dateRange',
       header: t('leaveDateRange'),
+      priority: 'secondary',
       width: 220,
       cell: (r) => (
         <span className="text-sm text-text-2 tabular-nums">
@@ -355,6 +363,7 @@ function LeavePanel({
     {
       id: 'reason',
       header: t('leaveReason'),
+      priority: 'secondary',
       cell: (r) =>
         r.reason ? (
           <span className="line-clamp-1 text-sm text-text-2">{r.reason}</span>
@@ -365,6 +374,7 @@ function LeavePanel({
     {
       id: 'status',
       header: t('leaveStatus'),
+      priority: 'secondary',
       width: 200,
       cell: (r) => (
         <StatusBadge dot tone={leaveStatusTone(r.status as LeaveStatus)}>
@@ -375,6 +385,7 @@ function LeavePanel({
     {
       id: 'detail',
       header: '',
+      priority: 'hidden-mobile',
       width: 96,
       align: 'right',
       cell: (row) => (
@@ -397,6 +408,7 @@ function LeavePanel({
         <StateView kind="error" title={t('errorGeneric')} onRetry={() => void query.refetch()} />
       ) : (
         <DataTable
+          responsive
           aria-label={t('leaveTitle')}
           columns={columns}
           data={items}
@@ -474,12 +486,14 @@ function OvertimePanel({
     {
       id: 'date',
       header: t('otWorkDate'),
+      priority: 'primary',
       width: 140,
       cell: (r) => <span className="font-medium text-text">{formatDate(r.work_date)}</span>,
     },
     {
       id: 'time',
       header: t('otTimeRange'),
+      priority: 'secondary',
       width: 160,
       cell: (r) => (
         <span className="text-sm text-text-2 tabular-nums">
@@ -490,6 +504,7 @@ function OvertimePanel({
     {
       id: 'reason',
       header: t('otReason'),
+      priority: 'secondary',
       cell: (r) =>
         r.reason ? (
           <span className="line-clamp-2 text-sm text-text-2">{r.reason}</span>
@@ -500,6 +515,7 @@ function OvertimePanel({
     {
       id: 'status',
       header: t('otStatus'),
+      priority: 'secondary',
       width: 200,
       cell: (r) => (
         <StatusBadge dot tone={overtimeStatusTone(r.status)}>
@@ -510,6 +526,7 @@ function OvertimePanel({
     {
       id: 'actions',
       header: '',
+      priority: 'hidden-mobile',
       width: 200,
       align: 'right',
       cell: (r) => {
@@ -547,6 +564,7 @@ function OvertimePanel({
         <StateView kind="error" title={t('errorGeneric')} onRetry={() => void query.refetch()} />
       ) : (
         <DataTable
+          responsive
           aria-label={t('otTitle')}
           columns={columns}
           data={items}

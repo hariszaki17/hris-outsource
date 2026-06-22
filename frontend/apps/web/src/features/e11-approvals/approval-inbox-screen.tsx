@@ -267,6 +267,7 @@ function ApprovalInboxScreenInner({
     {
       id: 'requester',
       header: t('inbox.colRequester'),
+      priority: 'primary',
       width: 240,
       cell: (r) => {
         // No requester display-name field on the instance — show id (mono) + entity prefix.
@@ -284,6 +285,7 @@ function ApprovalInboxScreenInner({
     {
       id: 'type',
       header: t('inbox.colType'),
+      priority: 'secondary',
       width: 90,
       cell: (r) => (
         <StatusBadge tone={requestTypeTone(r.request_type)}>
@@ -294,6 +296,7 @@ function ApprovalInboxScreenInner({
     {
       id: 'summary',
       header: t('inbox.colSummary'),
+      priority: 'secondary',
       width: undefined,
       cell: (r) => (
         <span className="text-sm text-text">
@@ -305,12 +308,14 @@ function ApprovalInboxScreenInner({
     {
       id: 'company',
       header: t('inbox.colCompany'),
+      priority: 'hidden-mobile',
       width: 150,
       cell: (r) => <span className="text-sm text-text-2">{r.company_id}</span>,
     },
     {
       id: 'line',
       header: t('inbox.colLine'),
+      priority: 'secondary',
       width: 120,
       cell: (r) => {
         const b = baris(r);
@@ -324,6 +329,7 @@ function ApprovalInboxScreenInner({
     {
       id: 'submitted',
       header: t('inbox.colSubmitted'),
+      priority: 'hidden-mobile',
       width: 110,
       cell: (r) =>
         r.created_at ? (
@@ -335,6 +341,7 @@ function ApprovalInboxScreenInner({
     {
       id: 'actions',
       header: t('inbox.colActions'),
+      priority: 'hidden-mobile',
       width: 180,
       cell: (r) => {
         const isApproving = approve.isPending && approve.variables?.id === r.id;
@@ -416,7 +423,7 @@ function ApprovalInboxScreenInner({
           <SearchField
             placeholder={t('inbox.searchPlaceholder')}
             defaultValue={search.q ?? ''}
-            containerClassName="w-72"
+            containerClassName="w-full lg:w-72"
             onChange={(e) => setSearch({ q: e.target.value || undefined })}
           />
         }
@@ -451,6 +458,7 @@ function ApprovalInboxScreenInner({
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('inbox.tableAria')}
         columns={columns}
         data={rows}

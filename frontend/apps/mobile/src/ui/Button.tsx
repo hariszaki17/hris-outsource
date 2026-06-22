@@ -43,7 +43,7 @@ export function Button({
     <Pressable
       disabled={isDisabled}
       accessibilityRole="button"
-      className={`flex-row items-center justify-center gap-[7px] rounded-input px-4 py-2.5 ${containerClass[variant]} ${isDisabled ? 'opacity-60' : ''} ${className ?? ''}`}
+      className={`min-h-[44px] flex-row items-center justify-center gap-[7px] rounded-input px-4 py-2.5 ${containerClass[variant]} ${isDisabled ? 'opacity-60' : ''} ${className ?? ''}`}
       {...props}
     >
       {loading ? (

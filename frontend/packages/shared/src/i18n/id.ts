@@ -3176,7 +3176,7 @@ export const id = {
     // Dashboard (/me)
     dashGreeting: 'Halo, {{name}}',
     dashTodayShift: 'Shift Hari Ini',
-    dashOffToday: 'Libur hari ini',
+    dashOffToday: 'Libur',
     dashNoShift: 'Tidak ada shift',
     dashOtMonth: 'Lembur bulan ini',
     dashHours: '{{count}} jam',

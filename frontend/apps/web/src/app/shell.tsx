@@ -12,6 +12,7 @@ import { useCurrentUser } from '@/lib/use-auth.ts';
 import { useAuthLogout } from '@swp/api-client/e1';
 import {
   Breadcrumb,
+  MobileSidebarDrawer,
   Sidebar,
   SidebarBrand,
   SidebarFooter,
@@ -23,6 +24,7 @@ import {
 } from '@swp/ui';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { Bell } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -31,6 +33,9 @@ import { useTranslation } from 'react-i18next';
  * and comp/Topbar `caFkE` (packages/ui). The sidebar holds the 8 primary modules only; a section
  * sub-nav strip surfaces a section's sub-pages under the topbar (nav.ts SECTION_SUBNAV). Nav is
  * filtered by role via the interim x-rbac map (ENGINEERING.md A2/C1 — defense-in-depth, not the gate).
+ *
+ * Responsive: mobile (&lt;lg) — hamburger opens sidebar as left slide-over drawer; desktop (≥lg) —
+ * sidebar is inline. Topbar height adapts: h-14 mobile, h-16 desktop.
  */
 export function AppShell() {
   const { t } = useTranslation();
@@ -38,6 +43,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const logoutMut = useAuthLogout();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   async function handleLogout() {
     try {
@@ -73,32 +79,77 @@ export function AppShell() {
   const activePrimary = [...items, SETTINGS_ITEM].find((i) => i.to === section);
   const crumbs = activePrimary ? [{ label: t(activePrimary.labelKey), current: true }] : [];
 
+  function handleNavClick() {
+    setMobileSidebarOpen(false);
+  }
+
+  /** Shared sidebar content — reused by both inline (desktop) and drawer (mobile). */
+  const sidebarContent = (
+    <Sidebar variant="drawer" onNavigate={handleNavClick}>
+      <SidebarBrand
+        logo={<img src="/swp-logo.png" alt="SWP" className="size-full object-contain" />}
+        title={t('shell.brandTitle')}
+        subtitle={t('shell.brandSubtitle')}
+      />
+      <SidebarSectionLabel>{t('shell.menu')}</SidebarSectionLabel>
+      {items.map((item) => (
+        <SidebarNavItem key={item.to} icon={item.icon} active={item.to === section} asChild>
+          <Link to={item.to} onClick={handleNavClick}>
+            {t(item.labelKey)}
+          </Link>
+        </SidebarNavItem>
+      ))}
+      <SidebarSpacer />
+      {showSettings && (
+        <SidebarFooter>
+          <SidebarNavItem icon={SETTINGS_ITEM.icon} active={inSettings} asChild>
+            <Link to={SETTINGS_ITEM.to} onClick={handleNavClick}>
+              {t(SETTINGS_ITEM.labelKey)}
+            </Link>
+          </SidebarNavItem>
+        </SidebarFooter>
+      )}
+    </Sidebar>
+  );
+
   return (
     <div className="flex h-full">
-      <Sidebar>
-        <SidebarBrand
-          logo={<img src="/swp-logo.png" alt="SWP" className="size-full object-contain" />}
-          title={t('shell.brandTitle')}
-          subtitle={t('shell.brandSubtitle')}
-        />
-        <SidebarSectionLabel>{t('shell.menu')}</SidebarSectionLabel>
-        {items.map((item) => (
-          <SidebarNavItem key={item.to} icon={item.icon} active={item.to === section} asChild>
-            <Link to={item.to}>{t(item.labelKey)}</Link>
-          </SidebarNavItem>
-        ))}
-        <SidebarSpacer />
-        {showSettings && (
-          <SidebarFooter>
-            <SidebarNavItem icon={SETTINGS_ITEM.icon} active={inSettings} asChild>
-              <Link to={SETTINGS_ITEM.to}>{t(SETTINGS_ITEM.labelKey)}</Link>
+      {/* Desktop sidebar — hidden on mobile, inline from lg breakpoint */}
+      <div className="hidden lg:flex">
+        <Sidebar variant="inline">
+          <SidebarBrand
+            logo={<img src="/swp-logo.png" alt="SWP" className="size-full object-contain" />}
+            title={t('shell.brandTitle')}
+            subtitle={t('shell.brandSubtitle')}
+          />
+          <SidebarSectionLabel>{t('shell.menu')}</SidebarSectionLabel>
+          {items.map((item) => (
+            <SidebarNavItem key={item.to} icon={item.icon} active={item.to === section} asChild>
+              <Link to={item.to}>{t(item.labelKey)}</Link>
             </SidebarNavItem>
-          </SidebarFooter>
-        )}
-      </Sidebar>
+          ))}
+          <SidebarSpacer />
+          {showSettings && (
+            <SidebarFooter>
+              <SidebarNavItem icon={SETTINGS_ITEM.icon} active={inSettings} asChild>
+                <Link to={SETTINGS_ITEM.to}>{t(SETTINGS_ITEM.labelKey)}</Link>
+              </SidebarNavItem>
+            </SidebarFooter>
+          )}
+        </Sidebar>
+      </div>
+
+      {/* Mobile sidebar — slide-over drawer, hidden on desktop */}
+      <div className="lg:hidden">
+        <MobileSidebarDrawer open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+          {sidebarContent}
+        </MobileSidebarDrawer>
+      </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
+          showMenuButton
+          onMenuClick={() => setMobileSidebarOpen(true)}
           left={<Breadcrumb items={crumbs} />}
           right={
             <div className="flex items-center gap-2">
@@ -114,7 +165,7 @@ export function AppShell() {
         {subnav.length > 0 && (
           <nav
             aria-label={activePrimary ? t(activePrimary.labelKey) : undefined}
-            className="flex items-center gap-1 border-b border-border bg-surface px-6"
+            className="flex items-center gap-1 overflow-x-auto border-b border-border bg-surface px-3 lg:px-6 [&::-webkit-scrollbar]:hidden"
           >
             {subnav.map((s) => {
               const isActive = s.to === activeSub;
@@ -123,7 +174,7 @@ export function AppShell() {
                   key={s.to}
                   to={s.to}
                   className={[
-                    '-mb-px border-b-2 px-3 py-3 text-[13px] font-medium transition-colors',
+                    '-mb-px shrink-0 border-b-2 px-3 py-3 text-[13px] font-medium transition-colors',
                     isActive
                       ? 'border-primary text-primary'
                       : 'border-transparent text-text-2 hover:text-text',
@@ -135,7 +186,7 @@ export function AppShell() {
             })}
           </nav>
         )}
-        <main className="flex-1 overflow-auto bg-app p-6">
+        <main className="flex-1 overflow-auto bg-app p-4 lg:p-6">
           <Outlet />
         </main>
       </div>

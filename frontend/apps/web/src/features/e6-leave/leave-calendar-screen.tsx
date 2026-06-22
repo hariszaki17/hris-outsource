@@ -382,7 +382,7 @@ export function LeaveCalendarScreen() {
   // No permission — neither role can see this
   if (!isShiftLeader && !isHrAdmin) {
     return (
-      <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex flex-1 items-center justify-center p-4 lg:p-6">
         <EmptyState
           icon={Lock}
           title={t('noPermission.title')}
@@ -405,7 +405,7 @@ export function LeaveCalendarScreen() {
   const subtitleKey = isShiftLeader ? 'subtitleSL' : 'subtitle';
 
   return (
-    <div className="flex flex-col flex-1 gap-4 p-6 bg-app-bg w-full">
+    <div className="flex flex-col flex-1 gap-4 p-4 lg:p-6 bg-app-bg w-full">
       {/* Header band */}
       <div className="flex items-center justify-between w-full">
         <div className="flex flex-col gap-1">

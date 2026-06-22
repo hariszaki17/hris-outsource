@@ -33,6 +33,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StateView,
@@ -202,6 +203,7 @@ function LeaveApprovalsScreenInner({
     {
       id: 'agent',
       header: t('approvals.colAgent'),
+      priority: 'primary',
       cell: (r) => (
         <div className="flex flex-col">
           <span className="font-medium text-text">{r.employee_name ?? r.employee_id}</span>
@@ -214,6 +216,7 @@ function LeaveApprovalsScreenInner({
     {
       id: 'leaveType',
       header: t('approvals.colType'),
+      priority: 'secondary',
       width: 160,
       cell: (r) => (
         <span className="text-sm text-text-2">{r.leave_type_name ?? r.leave_type_id}</span>
@@ -222,6 +225,7 @@ function LeaveApprovalsScreenInner({
     {
       id: 'dates',
       header: t('approvals.colDates'),
+      priority: 'secondary',
       width: 200,
       cell: (r) => (
         <div className="flex flex-col text-sm text-text-2">
@@ -238,12 +242,14 @@ function LeaveApprovalsScreenInner({
     {
       id: 'submitted',
       header: t('approvals.colSubmitted'),
+      priority: 'hidden-mobile',
       width: 170,
       cell: (r) => <DateText kind="instant" value={r.created_at} className="text-sm text-text-2" />,
     },
     {
       id: 'status',
       header: t('approvals.colStatus'),
+      priority: 'secondary',
       width: 200,
       cell: (r) => (
         <StatusBadge dot tone={leaveStatusTone(r.status)}>
@@ -254,6 +260,7 @@ function LeaveApprovalsScreenInner({
     {
       id: 'action',
       header: '',
+      priority: 'hidden-mobile',
       width: 110,
       align: 'right',
       cell: (r) => (
@@ -282,11 +289,11 @@ function LeaveApprovalsScreenInner({
       <TitleBand isHR={isHR} />
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         <SearchField
           placeholder={t('approvals.searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
         <FilterSelect
@@ -349,10 +356,11 @@ function LeaveApprovalsScreenInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Table */}
       <DataTable
+        responsive
         aria-label={t('approvals.tableAriaLabel')}
         columns={columns}
         data={rows}

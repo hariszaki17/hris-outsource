@@ -33,6 +33,7 @@ import {
   Button,
   CursorPagination,
   EmptyState,
+  FilterRow,
   FilterSelect,
   NotifCard,
   Skeleton,
@@ -308,7 +309,7 @@ function NotificationsScreenInner({
       />
 
       {/* Filters — segmented read-state pills + kind select (from .pen `y7TVBK` Seg row) */}
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         {/* Read-state segmented control (pill style from .pen) */}
         <div className="flex items-center gap-2">
           {(
@@ -406,7 +407,7 @@ function NotificationsScreenInner({
             </Button>
           </>
         )}
-      </div>
+      </FilterRow>
 
       {/* Loading skeleton */}
       {query.isLoading && (
@@ -434,7 +435,7 @@ function NotificationsScreenInner({
 
       {/* Notification list — grouped by date (HARI INI / KEMARIN / ...) */}
       {!query.isLoading && rows.length > 0 && (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 lg:p-6">
           {groups.map((group) => (
             <section key={group.label} aria-label={group.label}>
               {/* Date label — matches .pen `cM3U8` text style */}

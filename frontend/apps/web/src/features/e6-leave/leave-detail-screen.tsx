@@ -163,7 +163,7 @@ export function LeaveDetailScreen({ leaveRequestId }: LeaveDetailScreenProps) {
 
   if (query.isLoading) {
     return (
-      <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-col gap-4 p-4 lg:p-6">
         <div className="h-8 w-64 animate-pulse rounded-lg bg-surface-2" />
         <div className="h-48 w-full animate-pulse rounded-xl bg-surface-2" />
         <div className="h-64 w-full animate-pulse rounded-xl bg-surface-2" />

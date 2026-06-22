@@ -25,17 +25,33 @@ export interface TopbarProps {
   left?: React.ReactNode;
   right?: React.ReactNode;
   className?: string;
+  /** Show a hamburger menu button before the left slot. Desktop hides it via lg:hidden. */
+  showMenuButton?: boolean;
+  /** Called when the hamburger button is clicked. */
+  onMenuClick?: () => void;
 }
 
-export function Topbar({ left, right, className }: TopbarProps) {
+export function Topbar({ left, right, className, showMenuButton, onMenuClick }: TopbarProps) {
   return (
     <header
       className={cn(
-        'flex h-16 items-center justify-between border-b border-border bg-surface px-6',
+        'flex h-14 items-center justify-between border-b border-border bg-surface px-4 lg:h-16 lg:px-6',
         className,
       )}
     >
-      {left}
+      <div className="flex items-center gap-2">
+        {showMenuButton && (
+          <button
+            type="button"
+            aria-label="Menu"
+            onClick={onMenuClick}
+            className="inline-flex size-9 items-center justify-center rounded-md text-text-2 hover:bg-app lg:hidden"
+          >
+            <Menu className="size-5" />
+          </button>
+        )}
+        {left}
+      </div>
       {right}
     </header>
   );

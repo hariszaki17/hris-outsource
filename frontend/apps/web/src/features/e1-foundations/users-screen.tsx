@@ -16,6 +16,7 @@ import {
   DataTable,
   DateText,
   EmptyState,
+  FilterRow,
   FilterSelect,
   SearchField,
   StateView,
@@ -138,6 +139,7 @@ export function UsersScreen() {
     {
       id: 'user',
       header: t('users.colUser'),
+      priority: 'primary',
       cell: (u) => (
         <div className="flex items-center gap-2.5">
           <Avatar initials={initials(u.full_name)} size={34} />
@@ -151,6 +153,7 @@ export function UsersScreen() {
     {
       id: 'role',
       header: t('users.colRole'),
+      priority: 'secondary',
       width: 170,
       cell: (u) => (
         <StatusBadge dot tone={roleTone[u.role] ?? 'neutral'}>
@@ -161,12 +164,14 @@ export function UsersScreen() {
     {
       id: 'company',
       header: t('users.colCompany'),
+      priority: 'secondary',
       width: 220,
       cell: (u) => u.company_name ?? '—',
     },
     {
       id: 'status',
       header: t('users.colStatus'),
+      priority: 'secondary',
       width: 120,
       cell: (u) => (
         <StatusBadge dot tone={u.status === UserStatus.ACTIVE ? 'ok' : 'bad'}>
@@ -177,6 +182,7 @@ export function UsersScreen() {
     {
       id: 'lastLogin',
       header: t('users.colLastLogin'),
+      priority: 'hidden-mobile',
       width: 180,
       cell: (u) =>
         u.last_login_at ? (
@@ -235,11 +241,11 @@ export function UsersScreen() {
     <div className="flex flex-col gap-[18px]">
       {titleBand}
 
-      <div className="flex flex-wrap items-center gap-2.5">
+      <FilterRow>
         <SearchField
           placeholder={t('users.searchPlaceholder')}
           defaultValue={search.q ?? ''}
-          containerClassName="w-64"
+          containerClassName="w-full lg:w-64"
           onChange={(e) => setSearch({ q: e.target.value || undefined })}
         />
         <FilterSelect
@@ -265,9 +271,10 @@ export function UsersScreen() {
           <option value={UserStatus.ACTIVE}>{t('users.statusActive')}</option>
           <option value={UserStatus.DISABLED}>{t('users.statusDisabled')}</option>
         </FilterSelect>
-      </div>
+      </FilterRow>
 
       <DataTable
+        responsive
         aria-label={t('users.title')}
         columns={columns}
         data={rows}
